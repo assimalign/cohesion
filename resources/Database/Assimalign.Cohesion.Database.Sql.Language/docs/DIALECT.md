@@ -62,7 +62,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions, each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
@@ -184,7 +184,9 @@ column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
 after `ALTER TABLE` is a missing table name. `TABLE` is required: `ALTER INDEX`,
 `ALTER VIEW` and other `ALTER <object>` forms report `SQL0003` naming the object.
 
-**Unknown functions.** A call to a name outside the profile's function list fails
+**Unknown functions.** A call to a name outside the engine's function catalog (the
+standard library and the functions the application registered on the engine, see
+[Builtin functions](#builtin-functions)) and outside the profile's function list fails
 at plan time with `Unknown function '<name>'.`, a `DatabaseException`
 (`ExecutionFailure` on the wire). The planner checks every expression position
 before it binds the statement or reads a row: projections, predicates, joins,
@@ -218,6 +220,21 @@ COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with
 A call passes `'*'` only when `*` is its sole argument; the parser also accepts `*`
 after other arguments (`COUNT(id, *)`, `COALESCE(a, *)`), and such a call is reported
 by its full count.
+
+**Overloads (E2).** A function name can carry several overloads, distinguished by their
+parameter types. Among the overloads whose count matches, the planner chooses the one
+the arguments' types fit best: an exact type, then an implicit widening along INT8 →
+INT16 → INT32 → INT64 → DECIMAL → DOUBLE (nothing converts to or from text, and REAL does
+not widen), then a polymorphic overload. An integer literal has the smallest of INTEGER
+and BIGINT that holds it; a NULL literal, a NULL parameter and a grouped value match any
+type. A call no overload's types accept also reports `COHSQLE006`, and one that several
+accept equally well reports `COHSQLE008` (SQLSTATE 42725); a `CAST` on an argument
+chooses. Both are raised while planning:
+
+```text
+COHSQLE006: Function 'SUM' has no overload that accepts argument types (TEXT). Accepted: SUM(numeric).
+COHSQLE008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well. Cast an argument to choose one.
+```
 
 The engine resolves a call's arguments before the call itself, as PostgreSQL's parse
 analysis does, so `COALESCE(name, UPPER())` reports `UPPER`, and `FOO(ABS())` reports
@@ -278,9 +295,13 @@ For example, `CHECK (QTY>0   and /* upper */ qty<100)` is stored, and reported i
 and `DEFAULT +5` as `5`. The renderer's corpus and a randomized round-trip test
 (`SqlExpressionRendererTests`) pin both the canonical spelling of every form a
 CHECK accepts and the invariant that parsing the rendered text yields the same
-tree. A CHECK supplied by a compiled schema keeps its author's spelling in the
-schema document; the engine compares it with the catalog by canonical form, so
-reapplying an unchanged schema stays a no-op.
+tree. A CHECK supplied by a compiled schema (`table.Check(name, sql)`) keeps its
+author's spelling in the schema document; the engine compares it with the catalog by
+canonical form, so reapplying an unchanged schema stays a no-op. Before the engine's
+build touches any file it parses that text as exactly one expression and binds it to
+the engine's functions and the table's declared columns, applying the same rules
+`CREATE TABLE` applies (only `IMMUTABLE` functions among them), and refuses the
+declaration with `COHSQLP001` when it does not bind.
 
 **Size.** A table's whole definition, the canonical text of its CHECKs and DEFAULTs
 included, is one catalog record of at most 8,092 bytes. That bounds a stored CHECK
@@ -302,7 +323,10 @@ means the catalog is damaged or came from an incompatible engine build. Opening
 the database then fails with `Database '<name>' cannot be opened.`, naming the
 table and the constraint or column (`CHECK constraint 'ck_qty' on table
 'dbo.orders' cannot be loaded: ...`). It never surfaces later as a failure of
-every write to that table. Canonical storage is part of data-storage format 4;
+every write to that table. A CHECK whose call names an application function the
+opening engine no longer registers is not damage and does not fail the open: its
+writes fail with `COHSQLE009` instead (see Builtin functions, "A stored CHECK whose
+function is gone"). Canonical storage is part of data-storage format 4;
 text from earlier formats is not migrated, and a database on an earlier format
 whose catalog holds a CHECK or DEFAULT fails the open with a format error that
 says so.
@@ -324,8 +348,14 @@ error and the constraint's name, and sends the operator to the build that stored
 rather than to a backup, which holds the same definition:
 
 ```text
-Database 'shop' cannot be opened. CHECK constraint 'ck1' on table 'dbo.t' cannot be loaded: its persisted definition 'ABS(c, 1) > 0' calls a function with arguments the function does not accept (COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).). An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.
+Database 'shop' cannot be opened. CHECK constraint 'ck1' on table 'dbo.t' cannot be loaded: its persisted definition 'COALESCE() IS NULL' calls a function with arguments the function does not accept (COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).). An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.
 ```
+
+That holds for the special form `COALESCE`. A stored call of a function name with an
+argument count no built-in takes, `ABS(c, 1)`, can only come from an application's
+overload of the name since E2 lets an application add one for another arity, so it is a
+function the engine no longer registers: the database opens and writes fail with
+`COHSQLE009` (see [Builtin functions](#builtin-functions)).
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -880,10 +910,13 @@ queries under the ordering contract above. Aliases in `GROUP BY` or `HAVING`
 remain outside this subset; use the source/grouping expression or repeat the
 aggregate. GROUP BY ordinals report `COHDBL001`.
 
-`DISTINCT` and explicit `ALL` inside aggregates, aggregate `FILTER`, in-aggregate
-`ORDER BY`, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
+`DISTINCT` and explicit `ALL` inside a call, aggregate `FILTER`, `ORDER BY` inside a
+call, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
 functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
-and report `COHDBL001`. Top-level `SELECT DISTINCT` remains available. These
+and report `COHDBL001`. Which names are aggregates is the engine's function catalog to
+say, so the parser reports `DISTINCT`, `ALL` and `ORDER BY` inside any call, an
+application's aggregate included; PostgreSQL refuses them on a function that is not an
+aggregate. Top-level `SELECT DISTINCT` remains available. These
 boundaries do not add named clauses to the 49-clause denominator.
 
 ## Subqueries and query-source inserts (#1021)
@@ -1102,6 +1135,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
+| `COHESION_SCHEMA.FUNCTIONS` | `FUNCTION_NAME`, `FUNCTION_KIND`, `PARAMETER_TYPES`, `PARAMETER_COUNT`, `RETURN_TYPE`, `VOLATILITY`, `NULL_BEHAVIOR`, `IS_BUILT_IN` | Cohesion extension (E2): one row per function overload of the engine's catalog, built-ins first in registration order, then one row per special form. `FUNCTION_KIND` is `SCALAR`, `AGGREGATE` or `SPECIAL FORM`; `PARAMETER_TYPES` lists the parameter types (`TEXT ...` for a variadic tail, `*` for an aggregate called as `name(*)`, empty for none); `VOLATILITY` is `IMMUTABLE`, `STABLE` or `VOLATILE` for a scalar and NULL for an aggregate, which is never folded or admitted in a CHECK; `NULL_BEHAVIOR` is `RETURNS NULL ON NULL INPUT` or `CALLED ON NULL INPUT`. A special form's type, count, volatility and NULL-behavior columns are NULL. The rows are the engine's, the same in every database of it |
 
 Identifier, descriptive, expression, and `YES`/`NO` columns have shared type
 `String`. Ordinals, lengths, precision, radix, and scale have shared type `Int64`;
@@ -1298,12 +1332,15 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 ## Builtin functions
 
 The profile's function list is lexical vocabulary, not an execution claim and
-not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
-`UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
-`AVG`, `MIN`, and `MAX`, under the contract below. Each has one signature, which the
-planner checks every call against before it reads a row, the evaluator checks again
-before it computes one, and opening a database checks in every stored CHECK (#1189).
-A call outside it reports `COHSQLE006` (see Function arguments under
+not part of the 49-clause denominator. What executes is the engine's function catalog
+(E2): the standard library below, and the functions the application registered on the
+engine builder (`SqlDatabaseEngineBuilder.Functions`), which every database of the engine
+calls exactly as it calls the built-ins. Executable built-in scalars are `UPPER`, `LOWER`,
+`LENGTH` and `ABS`, beside the special form `COALESCE`; built-in aggregates are `COUNT`,
+`SUM`, `AVG`, `MIN` and `MAX`, under the contract below. The planner checks every call
+against its function's overloads before it reads a row, the evaluator checks again before
+it computes one, and opening a database checks every stored CHECK (#1189). A call outside
+them reports `COHSQLE006` (see Function arguments under
 [Statement completeness](#statement-completeness-1068)):
 
 | Function | Kind | Arguments | Accepted call forms |
@@ -1326,7 +1363,57 @@ same signatures. `ABS` accepts every numeric
 storage type: integer arguments return BIGINT (so `ABS` of the INT minimum is
 exact), REAL returns REAL, DOUBLE returns DOUBLE, and DECIMAL returns DECIMAL.
 `ABS` of the BIGINT minimum reports `COHSQLE002`.
-A call to a name outside the recognized list fails at plan time with
+`COALESCE`, `NULLIF`, `CASE`, `CAST` and `EXTRACT` are grammar, not catalog functions:
+`COALESCE` evaluates its operands lazily, so one after the first non-NULL operand never
+runs, and an application cannot register a function under any of those names or under a
+keyword.
+
+**Registered functions.** An application function has a name (an identifier), parameter
+types, a result type, a volatility and a NULL rule. A name and parameter-type list is
+registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
+overload of a built-in's name is accepted only for a number of arguments the built-in does
+not take (`upper(TEXT, BIGINT)` beside `UPPER(value)`). A name the profile lists above but
+that does not execute yet (`TRIM`, `NOW`, `ROUND`, ...), a type name (`INT`, `DATE`), `ANY`,
+`SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
+parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
+nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
+its type, not a string literal. Inside a grouping, a grouping key or an aggregate result
+has its type for that choice (`describe(COUNT(*))` calls `describe(BIGINT)`). A strict
+function (the default) returns NULL over a NULL argument without being called, and a strict
+aggregate skips the row. An `IMMUTABLE` call whose arguments are constants or parameters is
+computed once, while the statement is planned. A `CHECK` admits only `IMMUTABLE` functions,
+so a function registered with the default `VOLATILE` volatility is refused there, naming its
+volatility; one returning BOOLEAN is a predicate by itself, and DDL refuses a CHECK that
+compares an application function's result with a value of a type it does not compare with,
+or uses one that is not a number in arithmetic. What a function throws fails the statement
+as `COHSQLE007`, which names it, and so does a result of another type than the function
+declares (a type that widens to the declared one is converted); the statement writes
+nothing and an explicit transaction stays usable, as for every coded failure. A sign over a
+constant is itself a constant, so `ABS(-5)` is computed once too.
+
+**A stored CHECK whose function is gone.** A CHECK stores its SQL text, not the identity of
+the functions it calls, so a later engine build may no longer register one, register it
+with parameter types that no longer accept the stored call, or with a result type that no
+longer fits where the CHECK uses it (a BOOLEAN predicate, a comparison). The database still opens and
+its reads proceed; every write that would evaluate the CHECK (an `INSERT`, an `UPDATE`, or a
+DDL backfill over existing rows) fails with `COHSQLE009`, naming the constraint, the table and
+the call as the CHECK makes it, on a session or connection that stays usable. A `DELETE`, an
+unrelated `DROP COLUMN` and `ALTER TABLE ... DROP CONSTRAINT` still run, and dropping the
+constraint lets the table's writes through again. An engine that declares the database (its
+builder's `AddDatabase`) fails its build with the same code instead, before it accepts work:
+
+```text
+COHSQLE009: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', which this engine does not register, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.
+```
+
+A call a built-in takes always resolves to it. A stored call of a built-in's name that no
+built-in takes (`upper(email, 2)`) can only have called an application's overload of the
+name, so it is a function the engine no longer registers, as above; only `COALESCE`'s wrong
+arity is the #1189 case under
+[Persisted definitions are canonical](#persisted-definitions-are-canonical), which still
+fails the open.
+
+A call to a name outside the catalog and the recognized list fails at plan time with
 `Unknown function '<name>'.`, before any row is read (#1068). A recognized name
 outside the executable set still parses and plans, then fails during evaluation,
 so it fails only when a row reaches it; #1103 rejects those names at parse time.
@@ -1355,7 +1442,10 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
-| `COHSQLE006` | Error | Function call whose arguments no signature of its function accepts: a count outside the signature's bounds (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`) or `*` for a function other than `COUNT`. Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding one (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
+| `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
+| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, a cancellation or an exhausted stack or memory, which is the inner exception; or it returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
+| `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
+| `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1387,8 +1477,9 @@ Plan-time rejections, such as `Unknown column '<name>'.` and
 (`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.
 While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
 is not a number, `COHSQLE005` for a column reference where no columns are in
-scope, and `COHSQLE006` for a function call whose arguments its function does not
-accept; a `LIMIT`/`OFFSET` count is evaluated while planning, so its arithmetic
+scope, `COHSQLE006` for a function call whose arguments no overload of its function
+accepts, and `COHSQLE008` for one several accept equally well; a `LIMIT`/`OFFSET` count
+is evaluated while planning, so its arithmetic
 faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
 from any planner walk.
 
@@ -1397,7 +1488,8 @@ carry no position. They lead the `DatabaseException` message in process and the
 `ExecutionFailure` message on the wire; the arithmetic fault contract above
 defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
-counts when `COHSQLE005` is, and the function-argument rule under Statement
-completeness when `COHSQLE006` is. The engine's transaction-state codes,
+counts when `COHSQLE005` is, the function-argument and overload rules under Statement
+completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function rules
+under Builtin functions when `COHSQLE007` and `COHSQLE009` are. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
 code, `COHSQLT005`, are documented in the SQL engine design.

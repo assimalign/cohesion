@@ -23,6 +23,7 @@ public sealed class SqlTableBuilder<TRow>
     private readonly List<SqlSchemaColumn> _columnDefinitions = [];
     private readonly List<string> _indexes = [];
     private readonly List<SqlSchemaReference> _references = [];
+    private readonly List<SqlSchemaCheck> _checks = [];
     private readonly string _name;
     private string? _primaryKey;
 
@@ -72,6 +73,39 @@ public sealed class SqlTableBuilder<TRow>
         => _references.Add(new SqlSchemaReference(AddColumn(selector), typeof(TTarget)));
 
     /// <summary>
+    /// Declares a CHECK constraint: a SQL predicate over the table's columns that no row may make
+    /// FALSE (NULL, SQL's unknown, passes).
+    /// </summary>
+    /// <param name="name">The constraint's name, unique among the table's constraints.</param>
+    /// <param name="sql">
+    /// The predicate as SQL text, for example <c>LENGTH(Name) &gt; 0 AND Total &gt;= 0</c>. It names the
+    /// table's columns (their CLR member names) and may call the engine's functions.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="sql"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> or <paramref name="sql"/> is empty or white space.</exception>
+    /// <remarks>
+    /// <para>
+    /// This package does not parse SQL: the text is kept as written, in the compiled schema's document
+    /// and hash (a <see cref="CompiledSchemaConstraintKind.Check"/> constraint), and the SQL engine
+    /// that applies the schema parses it. Pass constant strings, so the <c>Sdk.Database</c> build task
+    /// can read the declaration without running the program.
+    /// </para>
+    /// <para>
+    /// A SQL engine's build binds every declared CHECK to its function catalog before it touches any
+    /// file, and refuses one that does not parse as exactly one predicate, names an unknown column or
+    /// function, calls a function with arguments no overload accepts, or calls a function that is not
+    /// registered as immutable (owner decision 64 of 2026-10-09). A function the application registers
+    /// on the engine builder is valid here; the schema package and the SDK never see it.
+    /// </para>
+    /// </remarks>
+    public void Check(string name, string sql)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sql);
+        _checks.Add(new SqlSchemaCheck(name, sql));
+    }
+
+    /// <summary>
     /// Snapshots what the builder recorded into the immutable declaration.
     /// </summary>
     /// <returns>The table declaration; later calls on this builder do not change it.</returns>
@@ -83,7 +117,8 @@ public sealed class SqlTableBuilder<TRow>
             Array.AsReadOnly(_columnDefinitions.ToArray()),
             _primaryKey,
             Array.AsReadOnly(_indexes.ToArray()),
-            Array.AsReadOnly(_references.ToArray()));
+            Array.AsReadOnly(_references.ToArray()),
+            Array.AsReadOnly(_checks.ToArray()));
 
     private string AddColumn(Expression<Func<TRow, object?>> selector)
     {

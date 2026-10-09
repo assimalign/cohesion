@@ -14,7 +14,7 @@ internal sealed partial class SqlPlanner
     /// slots. Shared by stored, joined, virtual and grouped relations. Compound
     /// numeric expressions remain expressions: ORDER BY 1 + 1 is not ordinal 2.
     /// </summary>
-    private static Dictionary<SqlExpression, int> BindOrderByProjections(
+    private Dictionary<SqlExpression, int> BindOrderByProjections(
         SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int sourceColumnCount)
     {
         var aliases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);

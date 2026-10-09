@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -205,6 +206,53 @@ internal sealed class SqlSchemaProvisioner
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Binds every CHECK a compiled schema declares to the engine's function catalog and its table's
+    /// declared columns, as the DDL that applies it will, without touching a database: the text must
+    /// be exactly one predicate, every column and function must resolve, every call must match an
+    /// overload, and every function must be <see cref="SqlFunctionVolatility.Immutable"/> (owner
+    /// decision 64 of 2026-10-09). Phase 3 of the engine builder's build runs it before any file is
+    /// touched, and an imperative apply before any step runs.
+    /// </summary>
+    /// <param name="schema">The schema.</param>
+    /// <param name="defaultCollation">The collation of the database the schema is for.</param>
+    /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <param name="parserOptions">The engine's parser options.</param>
+    /// <exception cref="DatabaseException">A declared CHECK does not bind; the message names its table and constraint.</exception>
+    internal static void BindDeclaredChecks(SqlCompiledSchema schema, Collation defaultCollation, SqlFunctionEnvironment functions,
+        SqlQueryParserOptions parserOptions)
+    {
+        foreach (CompiledSchemaTable table in schema.Tables)
+        {
+            SqlCatalogTable? shape = null;
+            foreach (CompiledSchemaConstraint constraint in table.Constraints)
+            {
+                if (constraint.Kind != CompiledSchemaConstraintKind.Check)
+                {
+                    continue;
+                }
+
+                // The table as its CREATE TABLE will publish it: its declared columns and types, no
+                // column collation (the database default), and no data.
+                shape ??= new SqlCatalogTable(0, "dbo", table.Name, table.Columns
+                    .Select(static column => new SqlCatalogColumn(column.Name,
+                        new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale), column.IsNullable))
+                    .ToArray());
+                try
+                {
+                    var predicate = SqlPersistedExpression.ParseDeclaration(constraint.Expression?.CanonicalText ?? string.Empty, parserOptions);
+                    SqlPlanner.ValidateDeclaredCalls(predicate, functions.Catalog);
+                    SqlPlanExecutor.ValidateCheck(predicate, shape, defaultCollation, functions);
+                }
+                catch (DatabaseException exception)
+                {
+                    string reason = exception.Message.EndsWith('.') ? exception.Message : exception.Message + ".";
+                    throw new DatabaseException($"CHECK constraint '{constraint.Name}' on table '{table.Name}' does not bind: {reason}", exception);
+                }
+            }
+        }
     }
 
     // The recorded hash, the recorded canonical document and the live catalog all agree with the schema.
@@ -606,6 +654,28 @@ internal sealed class SqlSchemaProvisioner
         {
             throw new SqlSchemaMigrationException(
                 $"{Describe()}: SQL schema '{schema.Name}' declares {unsupported}.");
+        }
+
+        // The checks the engine's build makes before any file is touched, for an apply that did not
+        // come through a build: a declared CHECK must bind before any step runs. The schema the
+        // engine declares for this database was bound by the build's phase 3, against the same
+        // frozen catalog and parser options, and the build refused a database whose collation
+        // differs from the declared one, so an equal hash has nothing left to bind.
+        if (_database.Engine.FindDeclaration(_database.Name) is { Schema: { } declared } &&
+            string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions);
+        }
+        catch (DatabaseException invalid)
+        {
+            throw new SqlSchemaMigrationException(
+                $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: SQL schema '{schema.Name}': {invalid.Message} Nothing was changed.",
+                invalid);
         }
     }
 

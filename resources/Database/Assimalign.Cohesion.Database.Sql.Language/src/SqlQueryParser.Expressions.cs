@@ -813,11 +813,15 @@ public sealed partial class SqlQueryParser
 
         var args = new List<SqlExpression>();
 
-        if (IsAggregateFunction(name) && (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL")))
+        // Which names are aggregates is the engine's catalog to say (an application registers its
+        // own), so the parser recognizes DISTINCT, ALL and ORDER BY inside any call. No aggregate
+        // executes them yet, and PostgreSQL refuses them on a function that is not an aggregate
+        // (parse_func.c), so every call reports them here.
+        if (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL"))
         {
             string modifier = CurrentText(ref lexer).ToUpperInvariant();
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + modifier.Length,
-                $"The {modifier} modifier inside SQL aggregate functions is not supported.");
+                $"The {modifier} modifier inside SQL function calls is not supported.");
             Advance(ref lexer);
         }
 
@@ -839,10 +843,10 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        if (IsAggregateFunction(name) && IsKeyword(ref lexer, "ORDER"))
+        if (IsKeyword(ref lexer, "ORDER"))
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
-                "ORDER BY inside SQL aggregate functions is not supported.");
+                "ORDER BY inside SQL function calls is not supported.");
         }
 
         Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");

@@ -1,8 +1,10 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -63,13 +65,29 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     private readonly SqlSubqueryValues? _subqueryValues;
 
+    /// <summary>The engine's function catalog and the database, which calls bind against.</summary>
+    private readonly SqlFunctionEnvironment _functions;
+
+    /// <summary>The executing statement's cancellation token, which a called function's context carries.</summary>
+    private readonly CancellationToken _cancellationToken;
+
+    /// <summary>
+    /// What this scope's static typing keeps beyond its binding inputs, created only when a scope
+    /// needs it: a grouping's slot scope, and the calls it typed. One field, so a scope that needs
+    /// neither, as most do, is no larger for them.
+    /// </summary>
+    private SqlTypingMemory? _typing;
+
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
         IReadOnlyList<SqlTableBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
         Collation? defaultCollation = null,
         IReadOnlyDictionary<SqlExpression, SqlProjection>? projectionSources = null,
         IReadOnlyDictionary<SqlExpression, SqlSubquerySlot>? subquerySlots = null,
-        SqlSubqueryValues? subqueryValues = null)
+        SqlSubqueryValues? subqueryValues = null,
+        SqlFunctionEnvironment? functions = null,
+        CancellationToken cancellationToken = default,
+        SqlExpressionEvaluator? slotScope = null)
     {
         _columns = columns;
         _parameters = parameters;
@@ -79,20 +97,33 @@ internal sealed partial class SqlExpressionEvaluator
         _projectionSources = projectionSources;
         _subquerySlots = subquerySlots;
         _subqueryValues = subqueryValues;
+        _functions = functions ?? SqlFunctionEnvironment.Standard;
+        _cancellationToken = cancellationToken;
+        _typing = slotScope is null ? null : new SqlTypingMemory(slotScope);
     }
 
     /// <summary>
     /// Gets the evaluator an executing plan evaluates its bound expressions with. Bound nodes carry
-    /// their ordinals, values and collations, so it needs no scope: only the statement's materialized
-    /// subquery values, which bound subquery nodes read.
+    /// their ordinals, values, collations and functions, so it needs no scope: only the statement's
+    /// materialized subquery values, which bound subquery nodes read, and the statement's
+    /// cancellation token, which a called function's context carries.
     /// </summary>
     /// <param name="subqueryValues">The statement's materialized subquery values, or null when it has none.</param>
-    /// <returns>The evaluator; a shared instance when there are no subquery values.</returns>
-    internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues)
-        => subqueryValues is null ? RowEvaluator : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues);
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <returns>
+    /// The evaluator; a shared instance when there are no subquery values and the token cannot be
+    /// canceled, so such a statement allocates none.
+    /// </returns>
+    internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default)
+        => subqueryValues is null && !cancellationToken.CanBeCanceled
+            ? RowEvaluator
+            : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues, cancellationToken: cancellationToken);
 
     /// <summary>Gets the statement's materialized subquery values, which a deferred collation reads.</summary>
     internal SqlSubqueryValues? SubqueryValues => _subqueryValues;
+
+    /// <summary>Gets the engine's function catalog and the database that calls in this scope bind against.</summary>
+    internal SqlFunctionEnvironment Functions => _functions;
 
     /// <summary>
     /// Creates the scope ordering keys bind in: references to ordering aliases and ordinals resolve
@@ -119,7 +150,7 @@ internal sealed partial class SqlExpressionEvaluator
             sources[expression] = projections[index];
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
-            _defaultCollation, sources, _subquerySlots, _subqueryValues);
+            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope);
     }
 
     /// <summary>
@@ -796,22 +827,141 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Computes a scalar function call. The binder matched the call against its signature
-    /// (<see cref="SqlFunctionSignatures"/>) once, before any row was read, and a call whose arguments
-    /// the signature refuses bound as a <see cref="SqlBoundFailure"/> raising <c>COHSQLE006</c>; so
-    /// the call evaluates exactly the arguments its function's signature admits, and no more.
+    /// Computes a scalar function call. The binder resolved the call to its function once, before
+    /// any row was read (a call no overload accepts bound as a <see cref="SqlBoundFailure"/>), so each
+    /// row evaluates the arguments, then makes one call through the function's
+    /// <see cref="SqlScalarFunction.Invoke"/>, which returns NULL without calling a strict function
+    /// over a NULL argument and codes what the function throws as <c>COHSQLE007</c>.
     /// </summary>
-    /// <exception cref="SqlEvaluationException"><c>ABS</c> of the BIGINT minimum overflows (<c>COHSQLE002</c>).</exception>
-    /// <exception cref="DatabaseException"><c>ABS</c> receives a non-number.</exception>
-    private object? EvaluateCall(SqlBoundCall call, object?[] row) => call.Function switch
+    /// <remarks>
+    /// Every argument is evaluated before the call, as PostgreSQL's executor does. Only the values
+    /// stay in this frame while the arguments recurse, never the call's buffer: the frame of a
+    /// one-argument call, the shape every standard-library scalar has, holds no buffer at all, so a
+    /// deep nest of calls costs this walk no more stack per level than before. It is kept out
+    /// of line, so its locals never join the frame of <see cref="EvaluateCore"/>, which every
+    /// node of every tree recurses through.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? EvaluateCall(SqlBoundCall call, object?[] row)
     {
-        SqlBuiltinFunction.Upper => Upper(EvaluateCore(call.Arguments[0], row)),
-        SqlBuiltinFunction.Lower => Lower(EvaluateCore(call.Arguments[0], row)),
-        SqlBuiltinFunction.Length => Length(EvaluateCore(call.Arguments[0], row)),
-        SqlBuiltinFunction.Abs => Abs(EvaluateCore(call.Arguments[0], row)),
-        // The binder builds a call only for the functions above.
-        _ => throw new DatabaseException($"Function '{call.Function}' is not supported by the executor yet."),
-    };
+        var arguments = call.Arguments;
+        switch (arguments.Length)
+        {
+            case 0:
+                return InvokeScalar(call, []);
+            case 1:
+                object? value = EvaluateCore(arguments[0], row);
+                return InvokeScalar(call, new ReadOnlySpan<object?>(in value));
+            default:
+                return EvaluateCallArguments(call, row);
+        }
+    }
+
+    /// <summary>Evaluates the arguments of a call with more than one, then calls it.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? EvaluateCallArguments(SqlBoundCall call, object?[] row)
+    {
+        var arguments = call.Arguments;
+        if (arguments.Length <= SqlObjectBuffer.Length)
+        {
+            SqlObjectBuffer buffer = default;
+            Span<object?> values = buffer[..arguments.Length];
+            for (int index = 0; index < values.Length; index++)
+            {
+                values[index] = EvaluateCore(arguments[index], row);
+            }
+
+            return InvokeScalar(call, values);
+        }
+
+        object?[] rented = ArrayPool<object?>.Shared.Rent(arguments.Length);
+        try
+        {
+            for (int index = 0; index < arguments.Length; index++)
+            {
+                rented[index] = EvaluateCore(arguments[index], row);
+            }
+
+            return InvokeScalar(call, rented.AsSpan(0, arguments.Length));
+        }
+        finally
+        {
+            Array.Clear(rented, 0, arguments.Length);
+            ArrayPool<object?>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>
+    /// Calls a function over its evaluated arguments: NULL without a call when the function is
+    /// strict and an argument is NULL (PostgreSQL's <c>EEOP_FUNCEXPR_STRICT</c>), otherwise the
+    /// arguments converted to the value ABI, in an inline buffer of four (a pooled one past four),
+    /// each to its parameter's type, and one call of the function's core.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? InvokeScalar(SqlBoundCall call, ReadOnlySpan<object?> values)
+    {
+        var function = call.Function;
+        if (function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput)
+        {
+            foreach (object? candidate in values)
+            {
+                if (candidate is null)
+                {
+                    return null;
+                }
+            }
+        }
+
+        var context = new SqlFunctionContext(call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
+        if (values.Length == 1)
+        {
+            // The shape of every standard-library scalar: one value, no buffer to clear.
+            var value = SqlValue.FromObject(values[0]);
+            if (call.Targets is { } targets && targets[0] != DatabaseType.Null)
+            {
+                value = SqlFunctionResolver.Coerce(value, targets[0], function, 0);
+            }
+
+            return function.InvokeResolved(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context)).ToObject();
+        }
+        if (values.Length > SqlValueBuffer.Length)
+        {
+            return InvokeScalarPooled(call, values, context);
+        }
+
+        SqlValueBuffer buffer = default;
+        Span<SqlValue> arguments = buffer[..values.Length];
+        ConvertArguments(call, values, arguments);
+        return function.InvokeResolved(new SqlArguments(arguments, context)).ToObject();
+    }
+
+    private static object? InvokeScalarPooled(SqlBoundCall call, ReadOnlySpan<object?> values, scoped in SqlFunctionContext context)
+    {
+        SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(values.Length);
+        try
+        {
+            Span<SqlValue> arguments = rented.AsSpan(0, values.Length);
+            ConvertArguments(call, values, arguments);
+            return call.Function.InvokeResolved(new SqlArguments(arguments, context)).ToObject();
+        }
+        finally
+        {
+            ArrayPool<SqlValue>.Shared.Return(rented, clearArray: true);
+        }
+    }
+
+    /// <summary>Converts evaluated arguments to SQL values of their parameters' types.</summary>
+    private static void ConvertArguments(SqlBoundCall call, ReadOnlySpan<object?> values, Span<SqlValue> arguments)
+    {
+        var targets = call.Targets;
+        for (int index = 0; index < values.Length; index++)
+        {
+            var value = SqlValue.FromObject(values[index]);
+            arguments[index] = targets is null || targets[index] == DatabaseType.Null
+                ? value
+                : SqlFunctionResolver.Coerce(value, targets[index], call.Function, index);
+        }
+    }
 
     /// <summary>The first non-NULL argument, evaluated left to right and no further.</summary>
     private object? Coalesce(SqlBoundExpression[] arguments, object?[] row)
@@ -828,34 +978,6 @@ internal sealed partial class SqlExpressionEvaluator
 
         return null;
     }
-
-    private static object? Upper(object? value) => (value as string)?.ToUpperInvariant() ?? value;
-
-    private static object? Lower(object? value) => (value as string)?.ToLowerInvariant() ?? value;
-
-    private static object? Length(object? value)
-        => value is null ? null : (long)(Convert.ToString(value, CultureInfo.InvariantCulture)?.Length ?? 0);
-
-    /// <summary>
-    /// Every numeric storage type: exact integers widen to BIGINT before the magnitude is taken
-    /// (so INT's minimum is representable), approximate and decimal values keep their own type.
-    /// </summary>
-    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>COHSQLE002</c>).</exception>
-    /// <exception cref="DatabaseException">The value is not a number.</exception>
-    private static object? Abs(object? value) => value switch
-    {
-        null => null,
-        sbyte number => Math.Abs((long)number),
-        short number => Math.Abs((long)number),
-        int number => Math.Abs((long)number),
-        long number => number == long.MinValue
-            ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {number.ToString(CultureInfo.InvariantCulture)} overflowed.")
-            : Math.Abs(number),
-        float number => Math.Abs(number),
-        double number => Math.Abs(number),
-        decimal number => Math.Abs(number),
-        _ => throw new DatabaseException("ABS requires a numeric argument."),
-    };
 
     /// <summary>
     /// Uses the same non-null value order as grouping, sorting and extrema.

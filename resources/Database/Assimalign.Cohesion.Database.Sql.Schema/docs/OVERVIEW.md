@@ -10,4 +10,8 @@ SQL engine consume it; the Database area root holds no schema type.
 Compiled tables, indexes, and constraints are schema-owned. The SQL catalog
 persists that ownership and the engine protects those objects from session DDL.
 
+A table declares a CHECK with `table.Check(name, sql)`: the SQL text is kept as written in
+the document and hash, and the SQL engine's build binds it to its registered functions
+before it touches a file. Pass constant strings, so the SDK can extract it.
+
 See [DESIGN.md](DESIGN.md) for boundaries, canonicalization, and AOT decisions.

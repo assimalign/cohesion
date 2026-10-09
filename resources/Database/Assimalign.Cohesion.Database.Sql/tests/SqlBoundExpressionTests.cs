@@ -47,7 +47,7 @@ public sealed class SqlBoundExpressionTests
         chain.IsOr.ShouldBeFalse();
         var equality = chain.Operands[0].ShouldBeOfType<SqlBoundBinary>();
         var upper = equality.Left.ShouldBeOfType<SqlBoundCall>();
-        upper.Function.ShouldBe(SqlBuiltinFunction.Upper);
+        upper.Function.ShouldBeSameAs(SqlFunctionCatalog.Standard.GetOverloads("UPPER").ShouldHaveSingleItem());
         upper.Arguments.ShouldHaveSingleItem().ShouldBeOfType<SqlBoundColumn>().Ordinal.ShouldBe(1);
         equality.Right.ShouldBeOfType<SqlBoundConstant>().Value.ShouldBe("ANN");
         equality.Collation.IsFixed.ShouldBeTrue();

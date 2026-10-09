@@ -98,10 +98,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // The engine name used when the options name none.
     private const string defaultName = "sql-engine";
 
-    private SqlDatabaseEngine(SqlDatabaseEngineOptions options)
+    private SqlDatabaseEngine(SqlDatabaseEngineOptions options, SqlFunctionCatalog functions)
         : base(options.EngineName ?? defaultName, EngineModel.Sql, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
+        Functions = functions;
         _signalCommitPending = _commitPendingSignal.Set;
         _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
@@ -151,6 +152,14 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             return offline is null ? [] : offline.AsReadOnly();
         }
     }
+
+    /// <summary>
+    /// Gets the functions the engine executes, frozen when it was built: the standard library and
+    /// what the builder's <see cref="SqlDatabaseEngineBuilder.Functions"/> registered, visible in
+    /// every database of the engine (owner decision 61 of 2026-10-09). An engine created by
+    /// <see cref="Create"/> executes the standard library alone.
+    /// </summary>
+    public SqlFunctionCatalog Functions { get; }
 
     /// <summary>
     /// Gets the engine options, for the engine's background workers.
@@ -270,11 +279,12 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Engine creation options, already a copy the caller does not change again
     /// (<see cref="SqlDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
+    /// <param name="functions">The functions the engine executes, frozen; the standard library alone when null.</param>
     /// <returns>A new engine instance.</returns>
-    internal static SqlDatabaseEngine CreateUncomposed(SqlDatabaseEngineOptions options)
+    internal static SqlDatabaseEngine CreateUncomposed(SqlDatabaseEngineOptions options, SqlFunctionCatalog? functions = null)
     {
         ValidateOptions(options);
-        return new SqlDatabaseEngine(options);
+        return new SqlDatabaseEngine(options, functions ?? SqlFunctionCatalog.Standard);
     }
 
     /// <summary>

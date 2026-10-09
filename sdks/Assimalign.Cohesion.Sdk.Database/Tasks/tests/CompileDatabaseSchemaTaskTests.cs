@@ -257,6 +257,118 @@ public class CompileDatabaseSchemaTaskTests
         error.Message.ShouldNotContain("Type<", Case.Sensitive);
     }
 
+    /// <summary>
+    /// <c>table.Check(name, sql)</c> extracts as constant strings into the same document and hash the
+    /// runtime compiler writes, a CHECK that calls a function the engine registers included: native
+    /// functions are invisible to the SDK, and the engine's build validates the predicate.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a CHECK extracts as constant text in parity with the runtime, native functions included")]
+    public void Execute_WithTableChecks_ShouldMatchRuntimeCompilerDocumentAndHash()
+    {
+        SqlCompiledSchema runtimeSchema = SqlSchema.Compile("checked", schema =>
+            schema.Table<SalesOrder>("orders", table =>
+            {
+                table.Key(order => order.Id);
+                table.Column(order => order.Item);
+                table.Check("ck_item", "LENGTH(Item) > 0 AND slugify(Item) <> ''");
+                table.Check("ck_id", "Id >= 0");
+            }));
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, """
+            using System;
+            using Assimalign.Cohesion.Database.Sql;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+
+            namespace Assimalign.Cohesion.Sdk.Database.Tests
+            {
+                public sealed record SalesOrder(long Id, string Item);
+
+                public static class CheckedProgram
+                {
+                    private const string ItemCheck = "LENGTH(Item) > 0 AND " + "slugify(Item) <> ''";
+
+                    public static SqlDatabaseEngineBuilder Configure()
+                    {
+                        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("checked-sql");
+                        sql.Functions.Add(SqlScalarFunction.Create("slugify",
+                            static (string text) => text.ToLowerInvariant(), SqlFunctionVolatility.Immutable));
+                        sql.AddDatabase("checked", database => database.Schema(schema =>
+                            schema.Table<SalesOrder>("orders", table =>
+                            {
+                                table.Key(order => order.Id);
+                                table.Column(order => order.Item);
+                                table.Check("ck_item", ItemCheck);
+                                table.Check(sql: "Id >= 0", name: "ck_id");
+                            })));
+                        return sql;
+                    }
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeTrue(Errors(engine));
+
+        File.ReadAllText(SchemaPath(task, "checked")).ShouldBe(runtimeSchema.CanonicalDocument);
+        task.Schemas.ShouldHaveSingleItem().GetMetadata("Hash").ShouldBe(runtimeSchema.Hash);
+        File.ReadAllText(HashPath(task, "checked")).ShouldBe(runtimeSchema.Hash + "\n");
+        SqlCompiledSchemaSerializer.Read(SchemaPath(task, "checked")).Tables.ShouldHaveSingleItem().Constraints
+            .Select(static constraint => (constraint.Name, constraint.Kind, constraint.Expression?.CanonicalText))
+            .ShouldBe([
+                ("ck_id", CompiledSchemaConstraintKind.Check, "Id >= 0"),
+                ("ck_item", CompiledSchemaConstraintKind.Check, "LENGTH(Item) > 0 AND slugify(Item) <> ''"),
+            ]);
+    }
+
+    /// <summary>A CHECK whose name or text the build cannot read as a constant, or whose name is taken, fails the build.</summary>
+    /// <param name="declaration">The CHECK declaration.</param>
+    /// <param name="code">The diagnostic code.</param>
+    /// <param name="message">A fragment of its message.</param>
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a CHECK needs constant text and a name of its own")]
+    [InlineData("""table.Check("ck_item", Names.Predicate);""", "COHDBSDK104", "CHECK 'ck_item' on table 'orders' needs its SQL predicate as a non-empty compile-time string constant")]
+    [InlineData("""table.Check(Names.Check, "Id > 0");""", "COHDBSDK102", "A CHECK on table 'orders' needs a non-empty compile-time string constant for its name.")]
+    [InlineData("""table.Check("ck", "Id > 0"); table.Check("CK", "Id < 9");""", "COHDBSDK105", "Table 'orders' declares CHECK 'CK', a name another of its constraints")]
+    [InlineData("""table.Check("PK_orders", "Id > 0");""", "COHDBSDK105", "Table 'orders' declares CHECK 'PK_orders'")]
+    public void Execute_WithUnreadableOrDuplicateCheck_ShouldFail(string declaration, string code, string message)
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, $$"""
+            using System;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+
+            public sealed record SalesOrder(long Id, string Item);
+
+            public static class Names
+            {
+                public static readonly string Predicate = "Id > 0";
+                public static readonly string Check = "ck";
+            }
+
+            public static class Program
+            {
+                public static void Configure()
+                {
+                    SqlSchema.Create("sales", schema => schema.Table<SalesOrder>("orders", table =>
+                    {
+                        table.Key(order => order.Id);
+                        {{declaration}}
+                    }));
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeFalse();
+
+        engine.Errors.ShouldContain(error => error.Code == code && error.Message != null && error.Message.Contains(message, StringComparison.Ordinal),
+            Errors(engine));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: the hosted AddSql shape declares its databases")]
     public void Execute_WithHostedEngineVerb_ShouldReadTheEnclosingDatabaseName()
     {

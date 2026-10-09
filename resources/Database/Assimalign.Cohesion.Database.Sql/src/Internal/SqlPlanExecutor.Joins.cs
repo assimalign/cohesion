@@ -26,7 +26,7 @@ internal sealed partial class SqlPlanExecutor
             EnsureCurrentDefinition(binding.Table);
         }
 
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
         foreach (var row in EnumerateJoinRows(plan, statement, cancellationToken))
         {

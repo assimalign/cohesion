@@ -336,9 +336,17 @@ internal sealed partial class SqlPlanExecutor
                 throw UsedByConstraint(check.Constraint);
             }
 
+            // A predicate bound as unresolved (a function the engine does not register) cannot bind
+            // again either; its columns, all it needs here, are its ordinals above.
+            if (check.Unresolved is not null)
+            {
+                continue;
+            }
+
             try
             {
-                SqlPersistedExpression.Bind(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
+                SqlPersistedExpression.Bind(check.Predicate,
+                    new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions));
             }
             catch (DatabaseException exception)
             {

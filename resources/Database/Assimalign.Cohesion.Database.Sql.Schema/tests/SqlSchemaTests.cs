@@ -193,6 +193,76 @@ public class SqlSchemaTests
         compiled.Hash.ShouldBe(SqlSchema.Compile("orders", Configure).Hash);
     }
 
+    /// <summary>
+    /// <c>table.Check(name, sql)</c> compiles to a CHECK constraint whose text is the author's, in the
+    /// v2 document and its hash, with no advisory columns; the package never parses the SQL.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declared CHECK compiles its SQL text as written into the v2 document")]
+    public void Compile_WithTableCheck_ShouldRecordTheSqlTextAsAConstraint()
+    {
+        // Arrange
+        static void Configure(SqlSchemaBuilder database)
+            => database.Table<OrderLine>("lines", table =>
+            {
+                table.Key(line => line.Id);
+                table.Column(line => line.Quantity);
+                table.Check("ck_quantity", "Quantity > 0 AND slugify('x') <> ''");
+                table.Check("ck_id", "Id >= 0");
+            });
+
+        // Act
+        SqlCompiledSchema schema = SqlSchema.Compile("orders", Configure);
+        SqlCompiledSchema reread = SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument);
+
+        // Assert
+        schema.Format.ShouldBe("cohesion/database-schema/v2");
+        CompiledSchemaTable lines = schema.Tables.ShouldHaveSingleItem();
+        lines.Constraints.Select(constraint => (constraint.Name, constraint.Kind, constraint.Expression?.CanonicalText, constraint.Columns.Count))
+            .ShouldBe([
+                ("ck_id", CompiledSchemaConstraintKind.Check, "Id >= 0", 0),
+                ("ck_quantity", CompiledSchemaConstraintKind.Check, "Quantity > 0 AND slugify('x') <> ''", 0),
+            ]);
+        schema.CanonicalDocument.ShouldContain("\"kind\":1");
+        reread.Hash.ShouldBe(schema.Hash);
+        reread.Tables[0].Constraints[1].Expression!.CanonicalText.ShouldBe("Quantity > 0 AND slugify('x') <> ''");
+        SqlSchema.Compile("orders", database => database.Table<OrderLine>("lines", table =>
+        {
+            table.Key(line => line.Id);
+            table.Column(line => line.Quantity);
+            table.Check("ck_quantity", "quantity > 0 AND slugify('x') <> ''");
+            table.Check("ck_id", "Id >= 0");
+        })).Hash.ShouldNotBe(schema.Hash, "the text is the author's spelling, not a canonical SQL rendering");
+    }
+
+    /// <summary>A CHECK name shares the table's constraint and index namespace, and blank arguments fail at the call.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a CHECK needs a name of its own and non-blank text")]
+    public void Check_WithDuplicateNameOrBlankArguments_ShouldBeRefused()
+    {
+        // Act
+        SqlSchemaValidationException duplicate = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("orders", database =>
+            database.Table<OrderLine>("lines", table =>
+            {
+                table.Key(line => line.Id);
+                table.Index(line => line.OrderId);
+                table.Check("ck", "Id > 0");
+                table.Check("CK", "Id < 10");
+                table.Check("IX_lines_OrderId", "Id <> 5");
+            })));
+
+        // Assert
+        duplicate.Errors.Select(error => (error.Code, error.Declaration)).ShouldBe([
+            (SqlSchemaValidationErrorCode.DuplicateDeclaration, "lines.CK"),
+            (SqlSchemaValidationErrorCode.DuplicateDeclaration, "lines.IX_lines_OrderId"),
+        ]);
+        SqlSchema.Create("orders", database => database.Table<OrderLine>("lines", table =>
+        {
+            Should.Throw<ArgumentException>(() => table.Check(" ", "Id > 0")).ParamName.ShouldBe("name");
+            Should.Throw<ArgumentNullException>(() => table.Check("ck", null!)).ParamName.ShouldBe("sql");
+            Should.Throw<ArgumentException>(() => table.Check("ck", "")).ParamName.ShouldBe("sql");
+            table.Key(line => line.Id);
+        }));
+    }
+
     private static long StaticId => 42;
 
     private readonly record struct Money(decimal Amount);

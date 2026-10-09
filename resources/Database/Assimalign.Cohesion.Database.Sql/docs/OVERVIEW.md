@@ -47,6 +47,29 @@ shared storage, with DDL flowing through the relational catalog
   executing thread's stack fails with `COHSQLE004` instead of ending the process
   (#1151). Typed requests for an engine with another limit parse with it through
   `SqlQueryRequest.FromSql(sql, parameters, parserOptions)`.
+- **Functions** — `SqlDatabaseEngineBuilder.Functions` holds the standard library (`UPPER`,
+  `LOWER`, `LENGTH`, `ABS`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) and an application's own,
+  registered the same way: a `SqlScalarFunction` or `SqlAggregateFunction` leaf, or the typed
+  shorthands `SqlScalarFunction.Create<T1, TResult>(...)` (up to four arguments) and
+  `SqlAggregateFunction.Create<TState, T1, TResult>(...)`, over the allocation-free value ABI
+  (`SqlValue`, `SqlArguments`, `SqlFunctionContext`). The build freezes them into
+  `SqlDatabaseEngine.Functions`, visible in every database of the engine. A built-in cannot be
+  replaced or shadowed (an overload of its name must take another number of arguments), and a
+  reserved, type or quantifier name cannot be registered. Calls resolve by name,
+  argument count and type once per statement (an ambiguous call is `COHSQLE008`); an `Immutable`
+  call over constants is folded; a strict function (the default; a typed one can be created
+  `CalledOnNullInput`) is not called over NULL; a CHECK admits only `Immutable` functions; and
+  what a function throws, or a result of another type than it declares, fails the statement as
+  `COHSQLE007`. One function instance serves every session, so it must be thread-safe. A
+  `SELECT` needs a `FROM` in this dialect, so try a function as `SELECT f(x) FROM t`. A compiled schema's
+  `table.Check(name, sql)` binds to the frozen catalog before the build touches any file
+  (`COHSQLP001` when it does not). A stored CHECK whose function a later build no longer
+  registers, or registers with a result that no longer fits, does not stop its database from
+  opening: its reads proceed, each write that would
+  evaluate it fails with `COHSQLE009`, and an engine that declares the database fails its build
+  with that code. `COHESION_SCHEMA.FUNCTIONS` lists the catalog and the special forms.
+  `samples/Assimalign.Cohesion.Database.Sql.AotSample` is the NativeAOT guard for all of it, in
+  process and over the wire. See DESIGN.md, "Functions (E2)".
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).
@@ -114,7 +137,11 @@ Without a host, the same builder provisions while it builds:
 ```csharp
 SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("local");
 sql.Options.RootPath = dataDirectory;
-sql.AddDatabase(SalesSchema.Declaration);                        // a reusable SqlSchema value
+sql.Functions.Add(SqlScalarFunction.Create("slugify",
+    static (string text) => text.ToLowerInvariant().Replace(' ', '-'), SqlFunctionVolatility.Immutable));
+sql.AddDatabase(SalesSchema.Declaration);                        // a reusable SqlSchema value whose
+                                                                 // table.Check("ck_sku", "slugify(Sku) <> ''")
+                                                                 // binds to slugify before any file
 await using SqlDatabaseEngine engine = await sql.BuildAsync(cancellationToken);
 SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken);
 ```

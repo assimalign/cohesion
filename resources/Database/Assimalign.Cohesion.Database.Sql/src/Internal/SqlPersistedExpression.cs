@@ -203,7 +203,7 @@ internal static class SqlPersistedExpression
                 throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
             case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
                 throw new DatabaseException("Parameters, subqueries and * have no value in a persisted row expression.");
-            case SqlFunctionCallExpression call when SqlFunctionSignatures.IsAggregate(call.FunctionName):
+            case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
                 throw new DatabaseException($"Aggregate function '{call.FunctionName}' has no value in a persisted row expression.");
         }
 
@@ -215,19 +215,69 @@ internal static class SqlPersistedExpression
         // After the arguments, as the planner resolves a call (SqlPlanner.ValidateFunctionCalls).
         if (expression is SqlFunctionCallExpression function)
         {
-            SqlFunctionSignatures.Resolve(function);
+            ResolveCall(function, evaluator);
         }
     }
 
+    /// <summary>
+    /// Resolves a persisted call to its overload in the engine's function catalog: <c>COALESCE</c>'s
+    /// operands, or the overload its argument count and types match. A name outside the catalog is
+    /// left to the CHECK rules, which refuse it.
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">No overload accepts the call (<c>COHSQLE006</c>), or several do (<c>COHSQLE008</c>).</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
+    {
+        if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        {
+            SqlExpressionEvaluator.CheckCoalesce(call);
+        }
+        else
+        {
+            evaluator.ResolveFunction(call);
+        }
+    }
+
+    /// <summary>
+    /// Parses the SQL text of a declared, not yet stored, definition (a compiled schema's
+    /// <c>table.Check(name, sql)</c>) under the engine's own nesting limit, as the DDL that applies it
+    /// will: it must be exactly one scalar expression, so no text can close the constraint's
+    /// parentheses and declare more than the schema shows, and it must also be one inside the
+    /// parentheses the DDL embeds it in, so no text can swallow the closing one either (a trailing
+    /// <c>-- comment</c>, or an unterminated <c>/*</c>).
+    /// </summary>
+    /// <param name="text">The declared text, as its author wrote it.</param>
+    /// <param name="parserOptions">The engine's parser options.</param>
+    /// <returns>The expression tree.</returns>
+    /// <exception cref="DatabaseException">The text is not exactly one SQL expression.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The calling thread has too little stack left to parse the text.</exception>
+    internal static SqlExpression ParseDeclaration(string text, SqlQueryParserOptions parserOptions)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (!TryParse(text, out var expression, out string? problem, out bool outOfStack, parserOptions) ||
+            !TryParse($"({text})", out _, out problem, out outOfStack)) // the parentheses add no nesting the DDL counts
+        {
+            if (outOfStack)
+            {
+                throw new InsufficientExecutionStackException("Reading the declared SQL text needs more stack than the thread has left.");
+            }
+
+            throw new DatabaseException($"its SQL text '{text}' is not exactly one SQL expression ({problem}).");
+        }
+
+        return expression;
+    }
+
     private static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression,
-        out string? problem, out bool outOfStack)
+        out string? problem, out bool outOfStack, SqlQueryParserOptions? parserOptions = null)
     {
         expression = null;
         // Read at the highest nesting limit any engine can be configured with (#1151). The limit
         // decides which statements an engine accepts, not which databases it can open: a
         // definition a DDL stored under one engine's limit opens under every other, and canonical
-        // text never nests deeper than the declaration the DDL accepted.
-        var statement = new SqlQueryParser(SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
+        // text never nests deeper than the declaration the DDL accepted. A declaration not yet
+        // stored is read under the engine's own limit instead, as its DDL will be.
+        var statement = new SqlQueryParser(parserOptions ?? SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         outOfStack = error?.Code == ParserOutOfStackCode;
         if (error is not null)

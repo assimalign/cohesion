@@ -95,17 +95,26 @@ alone, so a database name is unique across every engine of the project, although
 each own a database of one name at run time. A schema principal or custom type fails the build
 (`COHDBSDK108`): every SQL engine build refuses it before touching a file (`COHSQLP001`, owner
 decision 58), so an artifact for it would only move the failure to the first start. Every
-declaration is compiled before any artifact is written, so a failure replaces none. The
-diagnostics:
+declaration is compiled before any artifact is written, so a failure replaces none.
+
+`table.Check(name, sql)` (E2, design §5.7) extracts as two compile-time string constants into
+a CHECK constraint with the text as written and no columns, the record the runtime compiler
+writes, so the artifact's document and hash equal the runtime's (`CompileDatabaseSchemaTaskTests`).
+The task does not parse the SQL: it references only `Database.Sql.Schema`, never a SQL parser, and
+**native functions are invisible to it**. A CHECK that calls a function the application registers
+on its engine builder compiles into the artifact like any other; the engine's build binds it to its
+function catalog before it touches a file (`COHSQLP001` when it does not bind). A CHECK's name
+shares the table's constraint, primary-key and index name space (`COHDBSDK105`, as the runtime
+compiler's `DuplicateDeclaration`). The diagnostics:
 
 | Code | Meaning |
 | --- | --- |
 | `COHDBSDK100` | A source or reference could not be read, or the language version is unknown. |
 | `COHDBSDK101` | No schema declaration was found, or a database name (compared ignoring case, across every engine of the project) has more than one. |
-| `COHDBSDK102` | A name is not a non-empty constant; a `database.Schema(...)` call has no constant enclosing `AddDatabase` name; or a database name cannot name a file. |
+| `COHDBSDK102` | A name is not a non-empty constant (a CHECK's included); a `database.Schema(...)` call has no constant enclosing `AddDatabase` name; or a database name cannot name a file. |
 | `COHDBSDK103` | A schema, table, type or principal callback is not an inline lambda. |
-| `COHDBSDK104` | An operation the DSL does not support. |
-| `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key. |
+| `COHDBSDK104` | An operation the DSL does not support, or a CHECK whose SQL text is not a non-empty constant. |
+| `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
 | `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
 | `COHDBSDK108` | `SqlSchemaBuilder.Principal` or `SqlSchemaBuilder.Type<T>`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal, grant and custom-type DDL exists. |
 

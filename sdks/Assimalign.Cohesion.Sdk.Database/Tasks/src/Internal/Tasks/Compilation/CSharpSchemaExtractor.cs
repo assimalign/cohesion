@@ -453,18 +453,29 @@ internal sealed class CSharpSchemaExtractor
         if (configure is null)
         {
             Error("COHDBSDK103", "Table configuration must be an inline lambda.", configureExpression?.GetLocation() ?? invocation.GetLocation());
-            return new SchemaTableSource(tableName, TypeName(rowType), [], null, [], []);
+            return new SchemaTableSource(tableName, TypeName(rowType), [], null, [], [], []);
         }
 
         var columns = new List<SchemaColumnSource>();
         string? primaryKey = null;
         var indexes = new List<string>();
         var references = new List<SchemaReferenceSource>();
+        var checks = new List<SchemaCheckSource>();
         foreach (InvocationExpressionSyntax operation in configure.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
             IMethodSymbol? operationMethod = ResolveMethod(model, operation);
             if (operationMethod is null || !IsOnOriginalGenericType(operationMethod, tableBuilderType))
             {
+                continue;
+            }
+
+            if (operationMethod.Name == "Check")
+            {
+                if (ExtractCheck(model, operation, operationMethod, tableName) is { } check)
+                {
+                    checks.Add(check);
+                }
+
                 continue;
             }
 
@@ -511,7 +522,36 @@ internal sealed class CSharpSchemaExtractor
             columns,
             primaryKey,
             indexes.OrderBy(static item => item, StringComparer.Ordinal).ToArray(),
-            references.OrderBy(static item => item.Member, StringComparer.Ordinal).ThenBy(static item => item.TargetType, StringComparer.Ordinal).ToArray());
+            references.OrderBy(static item => item.Member, StringComparer.Ordinal).ThenBy(static item => item.TargetType, StringComparer.Ordinal).ToArray(),
+            checks);
+    }
+
+    // table.Check(name, sql): both arguments compile-time string constants, read as written. The SQL
+    // is not parsed here: the task references no SQL parser, and a function the predicate calls is
+    // registered on the engine builder, which the SDK never sees. The engine's build binds the
+    // predicate before it touches a file (owner decision 64; COHSQLP001).
+    private SchemaCheckSource? ExtractCheck(SemanticModel model, InvocationExpressionSyntax operation, IMethodSymbol method, string tableName)
+    {
+        ExpressionSyntax? nameExpression = GetArgument(operation, method, "name", 0);
+        ExpressionSyntax? sqlExpression = GetArgument(operation, method, "sql", 1);
+        string? name = nameExpression is null ? null : ConstantString(model, nameExpression);
+        string? sql = sqlExpression is null ? null : ConstantString(model, sqlExpression);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            Error("COHDBSDK102", $"A CHECK on table '{tableName}' needs a non-empty compile-time string constant for its name.",
+                nameExpression?.GetLocation() ?? operation.GetLocation());
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            Error("COHDBSDK104", $"CHECK '{name}' on table '{tableName}' needs its SQL predicate as a non-empty compile-time string " +
+                "constant, so the build can read it without executing Program.Main.",
+                sqlExpression?.GetLocation() ?? operation.GetLocation());
+            return null;
+        }
+
+        return new SchemaCheckSource(name, sql);
     }
 
     private SchemaPrincipalSource ExtractPrincipal(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
@@ -625,6 +665,33 @@ internal sealed class CSharpSchemaExtractor
                     }
                 }
             }
+            // A table's constraints, its primary key and its indexes share one name space in the
+            // SQL catalog, as the runtime compiler checks.
+            var constraintNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (table.PrimaryKey is not null)
+            {
+                constraintNames.Add($"PK_{table.Name}");
+            }
+            foreach (string index in table.Indexes)
+            {
+                constraintNames.Add($"IX_{table.Name}_{index}");
+            }
+            foreach (SchemaReferenceSource reference in table.References)
+            {
+                if (tables.FirstOrDefault(candidate => string.Equals(candidate.RowType, reference.TargetType, StringComparison.Ordinal)) is { } target)
+                {
+                    constraintNames.Add($"FK_{table.Name}_{target.Name}_{reference.Member}");
+                }
+            }
+            foreach (SchemaCheckSource check in table.Checks)
+            {
+                if (!constraintNames.Add(check.Name))
+                {
+                    Error("COHDBSDK105", $"Table '{table.Name}' declares CHECK '{check.Name}', a name another of its constraints, " +
+                        "its primary key or one of its indexes already has.", location);
+                }
+            }
+
             foreach (SchemaColumnSource column in table.Columns)
             {
                 if (!IsBuiltInType(column.TypeName) && !declaredTypes.Contains(column.TypeName))

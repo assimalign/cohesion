@@ -57,6 +57,14 @@ internal static class CompiledSchemaSourceWriter
                         target.Name,
                         Array.AsReadOnly([target.PrimaryKey!]));
                 })
+                // A CHECK keeps its author's SQL text, as the runtime compiler records it.
+                .Concat(table.Checks.Select(static check => new CompiledSchemaConstraint(
+                    check.Name,
+                    CompiledSchemaConstraintKind.Check,
+                    Array.Empty<string>(),
+                    null,
+                    Array.Empty<string>(),
+                    new CompiledSchemaExpression(check.Sql))))
                 .ToArray();
             tables.Add(new CompiledSchemaTable(
                 table.Name,

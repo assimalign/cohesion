@@ -60,6 +60,17 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
+    /// The evaluator a plan's bound expressions run with: the statement's subquery values, and its
+    /// cancellation token only when the engine registers an application function, the only kind of
+    /// function that reads the token from its context. A statement of an engine with the standard
+    /// library alone therefore shares the evaluator without subquery values and allocates none,
+    /// whatever its token, as before functions carried a context.
+    /// </summary>
+    private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken)
+        => SqlExpressionEvaluator.ForExecution(subqueryValues,
+            _definitions.Functions.Catalog.HasApplicationFunctions ? cancellationToken : default);
+
+    /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
     /// what one statement's maintenance loop works with.
     /// </summary>
@@ -115,7 +126,7 @@ internal sealed partial class SqlPlanExecutor
 
     private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
 
         // The access path narrows the candidate set; the full WHERE stays the
@@ -316,7 +327,7 @@ internal sealed partial class SqlPlanExecutor
         // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
         // binds the values with no columns in scope, so no reference can resolve to an ordinal the
         // empty row they are evaluated against does not have.
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var values = new List<object?[]>(plan.Rows.Count);
         foreach (var valueRow in plan.Rows)
         {
@@ -338,7 +349,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
@@ -445,7 +456,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
 
         // Lock the directly targeted rows as one sorted batch before the cascade

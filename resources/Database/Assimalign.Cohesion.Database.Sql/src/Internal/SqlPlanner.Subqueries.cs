@@ -83,7 +83,7 @@ internal sealed partial class SqlPlanner
             }
             var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
             var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
-            var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation);
+            var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation, type);
             _subqueryTypes[source] = type;
             _subquerySlots[source] = slot;
             queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated));
@@ -190,7 +190,7 @@ internal sealed partial class SqlPlanner
         };
         var bindings = plan switch { SqlJoinPlan join => join.Bindings, SqlGroupPlan group => group.Bindings, _ => null };
         var projection = SubqueryProjections(plan)[0];
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation, functions: _functions);
         return projection.ColumnOrdinal is int ordinal ? evaluator.ResolveColumnCollation(ordinal)
             : evaluator.ResolveCollation(projection.Expression);
     }

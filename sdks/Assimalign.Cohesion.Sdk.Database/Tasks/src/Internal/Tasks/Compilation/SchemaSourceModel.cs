@@ -23,11 +23,17 @@ internal sealed record SchemaTableSource(
     IReadOnlyList<SchemaColumnSource> Columns,
     string? PrimaryKey,
     IReadOnlyList<string> Indexes,
-    IReadOnlyList<SchemaReferenceSource> References);
+    IReadOnlyList<SchemaReferenceSource> References,
+    IReadOnlyList<SchemaCheckSource> Checks);
 
 internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable);
 
 internal sealed record SchemaReferenceSource(string Member, string TargetType);
+
+/// <summary>A <c>table.Check(name, sql)</c> declaration, its SQL text as written.</summary>
+/// <param name="Name">The constraint name.</param>
+/// <param name="Sql">The predicate's SQL text.</param>
+internal sealed record SchemaCheckSource(string Name, string Sql);
 
 internal sealed record SchemaPrincipalSource(string Name, IReadOnlyList<SchemaGrantSource> Grants);
 
