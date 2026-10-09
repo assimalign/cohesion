@@ -1295,8 +1295,10 @@ never afterwards: HTTP/2 forbids post-handshake authentication and renegotiation
 §9.2.3), so there is no deferred mode. A configured endpoint sets the policy with
 `ClientCertificateMode` (see "Configuration-bound server limits and endpoints"). A handler reads
 the result as `context.TlsConnection` — the client certificate, TLS protocol, cipher suite, and
-negotiated application protocol on HTTP/1.1, HTTP/2, and HTTP/3 alike (`Http.Connections` DESIGN,
-"The TLS session on every exchange").
+negotiated application protocol on HTTP/1.1, HTTP/2, and HTTP/3 alike. The accessor ships in
+`Assimalign.Cohesion.Http.Tls`, an `App.Web` member, and builds its feature from the handshake facet
+the transport publishes on each exchange's connection info (`Http.Connections` DESIGN, "The TLS
+session on every exchange"). This module does not reference `Http.Tls`; the framework delivers it.
 
 This module stops at exposing the certificate. Authenticating a request from it — mapping a
 certificate to a `ClaimsPrincipal` under an authentication scheme — is a handler for

@@ -604,55 +604,6 @@ case-sensitively per the RFC.
 No reflection or dynamic serialization; the format path uses a small `StringBuilder` and the parse
 path is span-based. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
 
-## The TLS connection feature (`IHttpTlsConnectionFeature`)
-
-### What it is
-
-`IHttpTlsConnectionFeature` tells a handler how the connection its exchange arrived on is
-secured: the client certificate (`null` when the client presented none), the TLS protocol version,
-the cipher suite, and the application protocol ALPN selected (RFC 7301). The server transport
-(`Assimalign.Cohesion.Http.Connections`) attaches it to every exchange that arrived over TLS —
-HTTP/1.1 and HTTP/2 over the TLS layer, HTTP/3 over QUIC, which carries TLS 1.3 itself (RFC 9001) —
-and attaches none to a cleartext exchange. Code reads it as `context.TlsConnection`
-(`HttpTlsConnectionExtensions`), the same accessor shape as the other features.
-
-The values belong to the connection: the transport copies them from the connection's handshake
-once, and every exchange on the connection carries the same instance. A client certificate exists
-only when the server's TLS options requested one in the handshake (RFC 8446 §4.3.2); HTTP/2 rules
-out asking later (RFC 9113 §9.2.3), so there is no "renegotiate for a certificate" member.
-
-### Why the contract lives in the core
-
-The rule above, "seams live in core, features live in packages", places a feature contract in the
-package that produces the capability. Here the producer is the transport itself, which references
-no feature package, so the contract has to be visible to the transport and to applications alike:
-the core. `IHttpConnectionInfo`, the endpoints of the same connection, sits here for the same
-reason. The implementation stays in the transport.
-
-Alternatives rejected:
-
-- **An `Items`-key bridge with a feature package**, as extended CONNECT used until it gained its
-  tunnel (next section). That fits a single string published one way; a session of four typed
-  values, one of them a certificate with an owner, would travel as an untyped object, and a new
-  package would exist only to cast it back.
-- **New members on `IHttpConnectionInfo`.** Adding members to the interface breaks every
-  implementation, test doubles included, while a feature is optional by construction: an exchange
-  without TLS simply has none, and a host other than the transport can attach its own.
-
-### Ownership and lifetime
-
-The certificate belongs to the connection, which disposes it when the connection closes. The
-feature is therefore not disposable: an exchange's disposal walk disposes the disposable features
-it carries, and this one must survive the exchange. Code that keeps the certificate beyond the
-exchange copies it.
-
-### What it does not do
-
-It reports; it does not decide. Requesting, requiring, and validating client certificates is the
-server's TLS configuration (`Assimalign.Cohesion.Connections.Security`'s `TlsServerOptions`, exposed
-on `Web.Hosting`'s endpoints), and authenticating a request from the certificate belongs to an
-authentication handler, which does not exist yet.
-
 ## The extended CONNECT feature (`IHttpExtendedConnectFeature`)
 
 ### What it is
@@ -670,15 +621,20 @@ wire behavior; `docs/libraries/Http/DECISIONS.md` (ADR 1) records why the tunnel
 
 ### Why the contract lives in the core
 
-The same rule as the TLS feature above: the producer of the capability is the transport. Accepting
-writes a HEADERS block without `END_STREAM` and frames `DATA` under the stream's flow-control windows,
-which only the transport can do, and the transport references no feature package. The contract
-therefore sits here and the implementation stays internal to the transport.
+The producer of the capability is the transport. Accepting writes a HEADERS block without
+`END_STREAM` and frames `DATA` under the stream's flow-control windows, which only the transport can
+do, and the transport references no feature package. The contract therefore sits here and the
+implementation stays internal to the transport.
+
+This is the one feature contract left in the core, and it is an exception to the rule in "Why the
+seam is core and the features are not" below. Owner decision 20 (2026-10-09) returns it to `Http.ExtendedConnect`, installed
+by an interceptor over generic seam members on `IHttpExchangeControl` (#1368). The TLS session
+feature that used to sit beside it has already moved to `Assimalign.Cohesion.Http.Tls` (#1367).
 
 The application-facing accessors stay in their package, which is what the WebSocket package builds
 on. Until the tunnel existed the feature only reported `:protocol`, and the transport published
-that string under an `IHttpContext.Items` key for the package to wrap — the one-way bridge the TLS
-section rejects for a richer surface. An accept call cannot travel as a string, so the bridge is
+that string under an `IHttpContext.Items` key for the package to wrap — a one-way bridge that suits
+a single string and nothing richer. An accept call cannot travel as a string, so the bridge is
 gone and the contract moved here. It used to live in the `Http.ExtendedConnect` assembly; the
 namespace is unchanged, so source that referenced the package compiles as before, but a binary built
 against the old assembly has to be rebuilt.
@@ -752,7 +708,7 @@ The seam sits inside a deliberate layering model, stated once here because every
 | Level | Owns | Extension surface |
 |---|---|---|
 | Connections | bytes, pipes, TLS | connection layers (`UseTls`) |
-| Http.Connections | wire framing, protocol conformance, limits, flow control | this interceptor seam (+ the control's wire mechanisms) |
+| Http.Connections | wire framing, protocol conformance, limits, flow control | this interceptor seam (+ the control's wire mechanisms, and connection facts as facets on `ConnectionInfo`) |
 | Http.* feature packages | one capability each; the bridge from transport tap to app-facing `IHttpFeature` | implement `IHttpExchangeInterceptor`; install features |
 | Web (application) | the pipeline and **all decisions** — cancel/abort, error responses, policies | middleware + `IHttpContext` |
 
@@ -805,9 +761,19 @@ extended CONNECT used before its tunnel), this seam is a compile-time contract �
 justified specifically by mutation the transport must enforce mid-parse,
 pre-dispatch feature attachment, and stream replacement, none of which a
 loosely-typed key can express. A capability that only needs one-way post-parse
-publication can still use an `Items` key; one the transport itself must
-implement puts its contract in this core (see the TLS and extended CONNECT
-features above).
+publication can still use an `Items` key.
+
+A transport never puts a feature contract in this core. It publishes what it
+knows about a connection as a *facet* on the exchange's connection info: an
+extra interface the `HttpConnectionInfo` it hands out also implements, found
+with a type test (the TLS handshake is the Connections library's
+`ITlsConnectionInfo`, which `Assimalign.Cohesion.Http.Tls` turns into
+`context.TlsConnection`). A wire mechanism only the transport can perform is
+offered through `IHttpExchangeControl`, which a feature package wraps
+(`context.Upgrade` over `TakeOver`). Either way the feature package owns the
+application-facing contract, and the transport references no feature package.
+Extended CONNECT is the one exception still in the core, pending #1368 (see its
+section above).
 
 ### Contract details that are load-bearing
 

@@ -46,7 +46,10 @@ public sealed class HttpExchangeInterceptorResponseContext
     public required IHttpFeatureCollection Features { get; init; }
 
     /// <summary>
-    /// Gets the transport connection metadata for the exchange (local/remote endpoints).
+    /// Gets the transport connection metadata for the exchange: the local and remote endpoints, plus
+    /// any facet the transport publishes on it, such as the TLS handshake facts (see
+    /// <see cref="IHttpConnectionInfo"/>). The server transport passes the instance the exchange's
+    /// <see cref="IHttpContext.ConnectionInfo"/> returns.
     /// </summary>
     public required HttpConnectionInfo ConnectionInfo { get; init; }
 

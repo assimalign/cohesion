@@ -69,8 +69,6 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 yield break;
             }
 
-            AttachTlsConnection(context);
-
             // Expose the raw chunked response body sink and the exchange control to registered
             // response interceptors so feature packages (streaming / SSE, protocol upgrade / CONNECT
             // tunnelling, interim responses) can wrap them and install typed response features —

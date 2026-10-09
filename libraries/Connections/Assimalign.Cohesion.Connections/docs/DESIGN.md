@@ -215,7 +215,9 @@ Why this shape:
 
 - **It lives in the contracts library** so the TLS layer and the QUIC driver can each implement it
   without a new reference, and a consumer reads it while depending on the contracts alone. HTTP
-  never references the TLS layer.
+  never references the TLS layer. The HTTP server transport carries the facet one hop further: it
+  republishes the values on each exchange's connection info, where `Assimalign.Cohesion.Http.Tls`
+  reads them, so neither HTTP package references the other.
 - **Not an `Items` bag** (see Non-Goals): the facts are few, typed, and fixed at handshake time,
   which is exactly what a typed contract is for.
 - **Not a member of `IConnection` or `IMultiplexedConnection`**: every driver and test double

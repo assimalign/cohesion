@@ -2,6 +2,8 @@ using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 
+using Assimalign.Cohesion.Connections;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -11,11 +13,16 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The server transport attaches this feature to <see cref="IHttpContext.Features"/> on every exchange
-/// that arrived over TLS — HTTP/1.1 and HTTP/2 over a TLS connection, and HTTP/3, whose QUIC transport
-/// carries TLS itself — and attaches none to a cleartext exchange. Read it through the
-/// <see cref="HttpTlsConnectionExtensions"/> member <c>context.TlsConnection</c>. The values belong to
-/// the connection, not the request: every exchange on a connection observes the same session.
+/// Read it through the <see cref="HttpTlsConnectionExtensions"/> member <c>context.TlsConnection</c>.
+/// The server transport installs no HTTP feature: on every exchange that arrived over TLS — HTTP/1.1
+/// and HTTP/2 over a TLS connection, and HTTP/3, whose QUIC transport carries TLS itself — it publishes
+/// the handshake facts as the <see cref="ITlsConnectionInfo"/> facet of
+/// <see cref="IHttpContext.ConnectionInfo"/>, and a cleartext exchange's connection info carries no
+/// facet. The accessor builds this feature from the facet on first read and caches it in
+/// <see cref="IHttpContext.Features"/>. A feature already installed there wins, so a middleware can
+/// supply its own implementation (for example one reconstructed from a TLS-terminating proxy's
+/// forwarded client certificate). The values belong to the connection, not the request: every
+/// exchange on a connection observes the same session.
 /// </para>
 /// <para>
 /// A client certificate is present only when the server requested one during the handshake (RFC 8446

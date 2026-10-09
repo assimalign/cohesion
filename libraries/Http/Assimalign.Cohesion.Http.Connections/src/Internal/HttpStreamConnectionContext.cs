@@ -16,35 +16,16 @@ internal abstract class HttpStreamConnectionContext : HttpConnectionContext
     {
         Connection = connection;
         Stream = connection.AsStream();
-        ConnectionInfo = new HttpConnectionInfo(connection.LocalEndPoint, connection.RemoteEndPoint);
+        // One connection info per connection, shared by every exchange it carries. A connection that
+        // reports its TLS handshake gives it the ITlsConnectionInfo facet (see HttpTlsConnectionInfo).
+        ConnectionInfo = HttpTlsConnectionInfo.Create(connection.LocalEndPoint, connection.RemoteEndPoint, connection as ITlsConnectionInfo);
         IsSecure = isSecure;
-        TlsConnection = HttpTlsConnectionFeature.From(connection);
     }
 
     protected bool IsSecure { get; }
     protected IConnection Connection { get; }
     protected Stream Stream { get; }
     protected HttpConnectionInfo ConnectionInfo { get; }
-
-    /// <summary>
-    /// The TLS session of this connection, attached to every exchange it carries, or
-    /// <see langword="null"/> when the connection does not report one (see
-    /// <see cref="HttpTlsConnectionFeature.From(object)"/>).
-    /// </summary>
-    protected HttpTlsConnectionFeature? TlsConnection { get; }
-
-    /// <summary>
-    /// Attaches the connection's TLS session to an exchange, before any response interceptor or
-    /// application code observes the exchange's features.
-    /// </summary>
-    /// <param name="context">The exchange the connection just produced.</param>
-    protected void AttachTlsConnection(TransportHttpContext context)
-    {
-        if (TlsConnection is not null)
-        {
-            context.Features.Set(TlsConnection);
-        }
-    }
 
     public override EndPoint? LocalEndPoint => Connection.LocalEndPoint;
     public override EndPoint? RemoteEndPoint => Connection.RemoteEndPoint;

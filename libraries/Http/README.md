@@ -24,6 +24,7 @@ flowchart LR
     Streaming["Http.Streaming"]
     Sse["Http.ServerSentEvents"]
     HttpConn["Http.Connections"]
+    Tls["Http.Tls"]
     Root --> Core
     Cookies --> Root
     Forms --> Root
@@ -39,6 +40,8 @@ flowchart LR
     Sse --> Streaming
     HttpConn --> Root
     HttpConn --> Conn
+    Tls --> Root
+    Tls --> Conn
 ```
 
 The seven packages not drawn — `Http.ClientFactory`, `Http.DigestFields`, `Http.ExtendedConnect`,
@@ -64,7 +67,9 @@ concern and belongs there.
 
 In the repo's L1/L2/L3 model (see [docs/programs/DELIVERY_ROADMAP.md](../../docs/programs/DELIVERY_ROADMAP.md)),
 this area is **L1 — foundation**. It sits on `Assimalign.Cohesion.Core` and, for
-`Http.Connections`, on `Assimalign.Cohesion.Connections`. It references no `Assimalign.Cohesion.Hosting*`
+`Http.Connections` and `Http.Tls`, on `Assimalign.Cohesion.Connections`: the transport publishes a
+connection's TLS handshake as that library's `ITlsConnectionInfo` facet, and `Http.Tls` reads it,
+so neither of the two references the other. It references no `Assimalign.Cohesion.Hosting*`
 library and no resource area, and it never will: hosting composition, dependency injection, and
 configuration binding are `*.Hosting` concerns one layer up.
 

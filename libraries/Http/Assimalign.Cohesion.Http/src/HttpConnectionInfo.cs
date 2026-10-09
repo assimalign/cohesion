@@ -7,6 +7,11 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Provides concrete HTTP connection metadata.
 /// </summary>
+/// <remarks>
+/// The class is unsealed so a transport can publish connection facets on a subclass (see
+/// <see cref="IHttpConnectionInfo"/>): the server transport's TLS connection info derives from it and
+/// also implements <c>ITlsConnectionInfo</c>.
+/// </remarks>
 public class HttpConnectionInfo : IHttpConnectionInfo
 {
     /// <summary>

@@ -20,8 +20,7 @@ namespace Assimalign.Cohesion.Http;
 /// </para>
 /// <para>
 /// The contract lives in the protocol core because its producer is the transport itself, which
-/// references no feature package — the same placement as <see cref="IHttpTlsConnectionFeature"/>.
-/// The implementation is internal to the transport.
+/// references no feature package. The implementation is internal to the transport.
 /// </para>
 /// <para>
 /// <see cref="AcceptAsync"/> answers the request with <c>200</c> and surrenders the stream:

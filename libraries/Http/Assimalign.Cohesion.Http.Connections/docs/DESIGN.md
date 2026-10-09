@@ -261,10 +261,11 @@ What the handshake *negotiated* is a per-connection fact the capability
 cannot carry. HTTP reads it through the contracts library's
 `ITlsConnectionInfo`, which the connection that ran the handshake implements
 (the TLS layer's secured connection, a QUIC connection), for two purposes:
-choosing the protocol of a dual listener (next section) and showing the
-session to handlers (see "The TLS session on every exchange"). The package
-still depends only on `Assimalign.Cohesion.Connections`; it never references
-the TLS layer.
+choosing the protocol of a dual listener (next section) and republishing
+the facts on each exchange's connection info (see "The TLS session on every
+exchange"). The package still depends only on `Assimalign.Cohesion.Connections`
+and core Http; it references neither the TLS layer nor the HTTP TLS feature
+package (`Assimalign.Cohesion.Http.Tls`).
 
 ### Serving HTTP/1.1 and HTTP/2 on one TLS listener (ALPN)
 
@@ -661,40 +662,64 @@ gone, replaced by the listener's declared `ConnectionCapabilities`:
   is no renegotiation or post-handshake client authentication, which
   HTTP/2 forbids anyway (RFC 9113 §9.2.1, §9.2.3).
 
-## The TLS session on every exchange (`IHttpTlsConnectionFeature`)
+## The TLS session on every exchange (`ITlsConnectionInfo` facet)
 
 ### What it is
 
-Every exchange that arrived over TLS carries the core's `IHttpTlsConnectionFeature`: the client
-certificate, the TLS protocol version, the cipher suite, and the application protocol ALPN
-selected. The transport does not run TLS, so it copies these from the connection that did, through
-the contracts library's `ITlsConnectionInfo`:
+Every exchange that arrived over TLS has a connection info that also implements the contracts
+library's `ITlsConnectionInfo`: the client certificate, the TLS protocol version, the cipher suite,
+and the application protocol ALPN selected. The transport does not run TLS, so it copies these from
+the connection that did, through that same interface:
 
-| Version | Source of the session |
+| Version | Source of the handshake facts |
 |---|---|
 | HTTP/1.1, HTTP/2 | the accepted `IConnection`, which the TLS layer secured |
 | HTTP/3 | the accepted `IMultiplexedConnection`: QUIC's own TLS 1.3 handshake (RFC 9001) |
 
 A connection that does not implement `ITlsConnectionInfo` (cleartext, or secured by a layer that
-does not report its handshake) gives its exchanges no feature.
+does not report its handshake) gives its exchanges a plain `HttpConnectionInfo`.
 
-### Where it is attached
+The transport installs no HTTP TLS feature and references no package that declares one.
+Applications read the session as `context.TlsConnection` from `Assimalign.Cohesion.Http.Tls`, which
+builds its `IHttpTlsConnectionFeature` from this facet on first read (that package's DESIGN). Code
+that needs only the raw facts reads `context.ConnectionInfo is ITlsConnectionInfo`.
 
-The internal `HttpTlsConnectionFeature` is built once per connection when the connection context
-opens (`HttpStreamConnectionContext` for HTTP/1.1 and HTTP/2, `Http3ConnectionContext` for HTTP/3)
-and set on each exchange's feature collection as the exchange is produced: in the HTTP/1.1
-receive loop, in the HTTP/2 stream dispatch, and when an HTTP/3 request stream's context is built.
-That is after the request-parse interceptors have run and before the response interceptors'
-`BeforeResponse`, so response hooks and middleware see it and request-parse hooks do not.
-Request-parse hooks run on a parse context that has no exchange yet; giving them the session would
-mean seeding every parse context, and no parse-time consumer needs it.
+### Where it is published
+
+The internal `HttpTlsConnectionInfo` derives from `HttpConnectionInfo` and implements
+`ITlsConnectionInfo`. `HttpTlsConnectionInfo.Create` returns it when the accepted connection reports
+a handshake and a plain `HttpConnectionInfo` otherwise, and it is called wherever the transport
+builds a connection info:
+
+- **HTTP/1.1 and HTTP/2** build one when the connection context opens
+  (`HttpStreamConnectionContext`). Every exchange on the connection shares it.
+- **HTTP/3** builds one per request stream, because each carries the stream's endpoints. The
+  facet's values come from the multiplexed connection, captured once when `Http3ConnectionContext`
+  opens.
+
+The same instance goes to the request-parse interceptors' context, the exchange, and the response
+interceptors' context. Request-parse hooks therefore see the session from `AfterRequestHead`
+onward, through their context's `ConnectionInfo`. When the transport attached a feature instead,
+those hooks could not see it, because they run before the exchange exists.
+
+### Why a facet and not a feature
+
+Core Http holds base contracts only, and a concern-specific feature lives in its own package (owner
+decision 20, 2026-10-09). The transport could install a feature only by referencing the package that
+declares it. `Http.Connections` is a member of every area's framework, so that reference would add
+the package to 18 framework lists, and it would make the transport reference a feature package. A
+facet needs neither: the contracts library already declares `ITlsConnectionInfo`, and the transport
+already references it. The per-exchange `Features.Set` the transport used to make is gone too, so an
+exchange that never reads the session pays nothing for it.
 
 ### Sharing and ownership
 
-One immutable instance serves all of a connection's exchanges, which is safe for concurrent
-HTTP/2 and HTTP/3 streams. It is not disposable, because an exchange's disposal walk disposes the
-disposable features it carries and the session outlives every exchange: the certificate belongs to
-the connection, which disposes it when it is disposed.
+The snapshot is immutable, which is safe for concurrent HTTP/2 and HTTP/3 streams. It copies the
+four values and never references the connection that ran the handshake: `QuicMultiplexedConnection`
+is public, and a handler that could cast the connection info back to it could open streams. The
+certificate is the connection's own instance, which the connection disposes when it is disposed, so
+code that keeps it beyond the exchange copies it. A context wrapper that returns a new connection
+info object hides the facet. The shipped wrappers forward the inner context's object.
 
 ## Response streaming: raw body sink behind the response-interceptor seam
 
@@ -3122,12 +3147,12 @@ exchange's feature collection: the requested `:protocol` and the
 `context.IsExtendedConnect` is `false` and `context.ExtendedConnect` is
 `null` for them, and baseline request handling is unchanged.
 
-The contract lives in the core `Assimalign.Cohesion.Http` library, beside
-`IHttpTlsConnectionFeature`, because the transport produces the capability
-and references no feature package (core Http DESIGN, "The TLS connection
-feature"). The transport installs its own implementation at dispatch —
-`Http2ExtendedConnectFeature` from the frame pump, next to the TLS feature,
-and `Http3ExtendedConnectFeature` when the request stream's exchange is
+The contract lives in the core `Assimalign.Cohesion.Http` library, because
+the transport produces the capability and references no feature package
+(core Http DESIGN, "The extended CONNECT feature"; owner decision 20 returns
+it to `Http.ExtendedConnect` under #1368). The transport installs its own
+implementation at dispatch — `Http2ExtendedConnectFeature` from the frame
+pump, and `Http3ExtendedConnectFeature` when the request stream's exchange is
 built — so response interceptors and the application see it from the
 start. The `context.ExtendedConnect` / `context.IsExtendedConnect`
 accessors live in `Assimalign.Cohesion.Http.ExtendedConnect` and read the

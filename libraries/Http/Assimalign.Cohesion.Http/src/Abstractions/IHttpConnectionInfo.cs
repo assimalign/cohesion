@@ -8,7 +8,19 @@ namespace Assimalign.Cohesion.Http;
 /// Describes the local and remote endpoints associated with an HTTP request.
 /// </summary>
 /// <remarks>
+/// <para>
 /// This represents the transport connection.
+/// </para>
+/// <para>
+/// A transport may publish further facts about the connection as <em>facets</em>: additional
+/// interfaces the object it hands out also implements, found with a type test. The server transport
+/// (<c>Assimalign.Cohesion.Http.Connections</c>) publishes what a TLS handshake negotiated as the
+/// Connections contracts library's <c>ITlsConnectionInfo</c>, which the
+/// <c>context.TlsConnection</c> accessor (<c>Assimalign.Cohesion.Http.Tls</c>) reads. A facet keeps
+/// this interface free of members only some connections can answer. Code that wraps an
+/// <see cref="IHttpContext"/> therefore forwards the inner context's connection info rather than
+/// building a new object, which would hide the facets.
+/// </para>
 /// </remarks>
 public interface IHttpConnectionInfo
 {

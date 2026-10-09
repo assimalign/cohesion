@@ -18,7 +18,7 @@ completeness lives in the L01.01.11 backlog under feature parents
 | HTTP/1.1 | Substantial: framing, chunked encoding, content-length, connection reuse, upgrade transitions |
 | HTTP/2 | Substantial: HPACK encoder/decoder/tables, frame I/O, stream / connection model |
 | HTTP/3 | Substantial: QPACK encoder and decoder (static and dynamic tables), control and request streams over QUIC, GOAWAY |
-| TLS | ALPN dispatch serves HTTP/1.1 and HTTP/2 on one endpoint; `IHttpTlsConnectionFeature` exposes the client certificate, protocol, cipher suite and negotiated ALPN protocol |
+| TLS | ALPN dispatch serves HTTP/1.1 and HTTP/2 on one endpoint; each exchange's `ConnectionInfo` carries the handshake (client certificate, protocol, cipher suite, negotiated ALPN protocol) as the `ITlsConnectionInfo` facet, which `context.TlsConnection` in `Http.Tls` reads |
 
 The transports do **not** parse form bodies; the body stream is
 delivered to the application layer via `IHttpRequest.Body` and

@@ -136,8 +136,9 @@ How it is applied, and why:
   TLS-layered listener"). Before #1304 the failure came out of `AcceptAsync`, so `RequireClientCertificate`
   made every client without a certificate stop the listener.
 
-Reading the certificate after the handshake is the application's job (`ITlsConnectionInfo`, and the
-HTTP transport's TLS connection feature); authenticating a user from it is out of scope here.
+Reading the certificate after the handshake is the application's job (`ITlsConnectionInfo`, and over
+HTTP `context.TlsConnection` from `Assimalign.Cohesion.Http.Tls`); authenticating a user from it is out
+of scope here.
 
 ## Composition
 

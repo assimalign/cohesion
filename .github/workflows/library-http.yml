@@ -33,6 +33,7 @@ jobs:
             "Assimalign.Cohesion.Http.DigestFields",
             "Assimalign.Cohesion.Http.InterimResponses",
             "Assimalign.Cohesion.Http.ServerSentEvents",
+            "Assimalign.Cohesion.Http.Tls",
             "Assimalign.Cohesion.Http.WebSockets"
           ]
     steps:

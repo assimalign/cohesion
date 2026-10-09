@@ -825,6 +825,17 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Tls/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Tls/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Tls/src/Assimalign.Cohesion.Http.Tls.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Tls/tests/Assimalign.Cohesion.Http.Tls.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.WebSockets/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.WebSockets/docs/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.WebSockets/docs/DESIGN.md" />

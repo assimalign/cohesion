@@ -1955,7 +1955,6 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 $"HTTP/2 stream {stream.StreamId} was rejected by a request-parse interceptor with status '{rejection.StatusCode}'.");
         }
 
-        AttachTlsConnection(context);
         AttachExtendedConnect(context);
 
         if (stream.IsDeclaredBodyOverLimit)

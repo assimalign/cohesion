@@ -38,12 +38,13 @@ sibling `Http.ProtocolUpgrade` package and is recorded as a deliberate deviation
 
 ## Why the contract lives in the core and the accessors here
 
-The repo places a feature contract with the package that produces the capability (core Http
-DESIGN, "The TLS connection feature"). Accepting a tunnel means writing a `200` HEADERS block without
+Accepting a tunnel means writing a `200` HEADERS block without
 ending the stream and framing `DATA` under the stream's flow control: only the transport can do
 that, so the transport is the producer, and it references no feature package. The contract therefore
-lives in the core, beside `IHttpTlsConnectionFeature`, and the transport installs its own
-implementation on the exchange's feature collection. This package keeps the application-facing
+lives in the core (core Http DESIGN, "The extended CONNECT feature"), and the transport installs its
+own implementation on the exchange's feature collection. It is the last feature contract in the core:
+owner decision 20 (2026-10-09) returns it to this package under #1368, the way the TLS session
+feature moved to `Assimalign.Cohesion.Http.Tls` (#1367). This package keeps the application-facing
 ergonomics. `Http.WebSockets`, which bootstraps a WebSocket over the tunnel on HTTP/2 and HTTP/3,
 reads the core contract from the exchange's features and does not reference this package: ADR 1
 planned the reference before the contract moved to the core.

@@ -30,9 +30,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
-    // The QUIC handshake's TLS session, attached to every exchange; null when the connection does not
-    // report it (see HttpTlsConnectionFeature.From).
-    private readonly HttpTlsConnectionFeature? _tlsConnection;
+    // The QUIC handshake's facts, published on every request stream's connection info as the
+    // ITlsConnectionInfo facet; null when the connection does not report them (see HttpTlsConnectionInfo).
+    private readonly ITlsConnectionInfo? _tls;
     private readonly Http3QPackOptions _qpackOptions;
     private readonly Http3PeerSettings _peerSettings = new();
     // Cancelled when the receive enumeration tears down — the consumer ended it, or a connection error
@@ -118,7 +118,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         _connection = connection;
         _isSecure = isSecure;
-        _tlsConnection = HttpTlsConnectionFeature.From(connection);
+        _tls = connection as ITlsConnectionInfo;
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
@@ -1395,7 +1395,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             headToken);
         requestHead = requestHead with { Body = body };
 
-        HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
+        HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);
 
         if (_requestInterceptors.Length > 0 || _responseInterceptors.Length > 0)
         {
@@ -1458,11 +1458,6 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             AddedResponseInterceptors = interception.ResponseInterceptors,
         };
         body.AttachOwner(context);
-
-        if (_tlsConnection is not null)
-        {
-            context.Features.Set(_tlsConnection);
-        }
 
         AttachExtendedConnect(context, extendedConnectProtocol);
 

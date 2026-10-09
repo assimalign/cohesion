@@ -19,9 +19,10 @@ That placement conflated two different kinds of surface:
 
 The repo encodes this taxonomy elsewhere too: feature packages such as
 `Assimalign.Cohesion.Http.ProtocolUpgrade` and `Assimalign.Cohesion.Http.InterimResponses` own their
-contracts, and the transport never references them. (A contract only moves into core when the
-transport itself must implement it — `IHttpTlsConnectionFeature`, and `IHttpExtendedConnectFeature`
-once extended CONNECT gained its tunnel; see core Http DESIGN.) This package restores that
+contracts, and the transport never references them. (A transport never needs a feature contract in core:
+it publishes connection facts as facets on its connection info (the TLS handshake, which `Http.Tls`
+reads), or offers wire mechanisms through `IHttpExchangeControl`. `IHttpExtendedConnectFeature` is
+the one exception left, pending #1368; see core Http DESIGN.) This package restores that
 discipline for the body-size feature. The enforcement itself —
 the wire-level cap with 413 semantics — is *not* a feature and stays transport-owned in
 `Http.Connections` (`HttpConnectionListenerLimits.MaxRequestBodySize`): the security guarantee must hold
