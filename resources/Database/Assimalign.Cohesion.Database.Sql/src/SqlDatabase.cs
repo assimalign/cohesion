@@ -112,7 +112,7 @@ public sealed class SqlDatabase : DatabaseInstance
         // Parse and bind every persisted CHECK and DEFAULT now, once, before anything else
         // touches the database: a definition that does not load fails the open, naming its
         // table, instead of failing an arbitrary later write. Writes reuse these bindings.
-        _definitions = new SqlBoundTableCache(_catalog);
+        _definitions = new SqlBoundTableCache(_catalog, new SqlFunctionEnvironment(engine.Functions, name));
         try
         {
             _definitions.BindCatalog();

@@ -35,15 +35,17 @@ internal sealed record SqlGroupPlan(
     bool IsDistinct) : SqlPlan;
 
 /// <summary>
-/// One distinct aggregate call of a grouping plan, bound to the signature it matched, so the
-/// executor accumulates by the function the planner resolved instead of by the written name.
+/// One distinct aggregate call of a grouping plan, bound to the overload it resolved to, so the
+/// executor creates one accumulator of that function per group instead of finding it by name.
 /// </summary>
-/// <param name="Call">The aggregate call; its one argument is the accumulated operand, or <c>*</c> for <c>COUNT(*)</c>.</param>
-/// <param name="Signature">The aggregate signature the call matched.</param>
-/// <param name="Argument">The bound operand over the input row, or null for <c>COUNT(*)</c>.</param>
-/// <param name="Collation">The collation <c>MIN</c> and <c>MAX</c> compare the operand's values under.</param>
-internal sealed record SqlGroupAggregate(SqlFunctionCallExpression Call, SqlFunctionSignature Signature,
-    SqlBoundExpression? Argument, SqlBoundCollation Collation);
+/// <param name="Call">The aggregate call as written.</param>
+/// <param name="Function">The overload the call resolved to.</param>
+/// <param name="Arguments">The bound arguments over the input row; empty for <c>name(*)</c>, as in <c>COUNT(*)</c>.</param>
+/// <param name="Targets">The storage type each argument converts to before it is added, or null when none converts.</param>
+/// <param name="Collation">The collation the arguments compare under, which the function's context carries (<c>MIN</c>, <c>MAX</c>).</param>
+/// <param name="Database">The database whose statement runs the aggregate.</param>
+internal sealed record SqlGroupAggregate(SqlFunctionCallExpression Call, SqlAggregateFunction Function,
+    SqlBoundExpression[] Arguments, DatabaseType[]? Targets, SqlBoundCollation Collation, DatabaseName Database);
 
 /// <summary>A grouping key bound over the input row, with the collation its values are grouped under.</summary>
 /// <param name="Value">The bound key expression.</param>
@@ -68,6 +70,12 @@ internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpress
 
     /// <summary>Gets the collation <c>DISTINCT</c> compares and hashes the output's values under.</summary>
     internal SqlBoundCollation Collation { get; init; }
+
+    /// <summary>
+    /// Gets whether a grouped output may be NULL: false only for a bare call of an aggregate that
+    /// never returns NULL, such as <c>COUNT</c>, which counts 0 for an empty group.
+    /// </summary>
+    internal bool IsNullable { get; init; } = true;
 }
 
 internal sealed record SqlSelectPlan(

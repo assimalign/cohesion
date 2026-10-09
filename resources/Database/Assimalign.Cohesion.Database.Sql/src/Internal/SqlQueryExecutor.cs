@@ -49,7 +49,7 @@ internal sealed class SqlQueryExecutor
             throw new DatabaseException($"Expected SqlQueryRequest but received {request.GetType().Name}.");
         }
 
-        var planner = new SqlPlanner(_catalog, sqlRequest.Parameters);
+        var planner = new SqlPlanner(_catalog, sqlRequest.Parameters, _definitions.Functions);
         SqlPlan plan;
         try
         {

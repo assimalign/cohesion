@@ -184,7 +184,9 @@ column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
 after `ALTER TABLE` is a missing table name. `TABLE` is required: `ALTER INDEX`,
 `ALTER VIEW` and other `ALTER <object>` forms report `SQL0003` naming the object.
 
-**Unknown functions.** A call to a name outside the profile's function list fails
+**Unknown functions.** A call to a name outside the engine's function catalog (the
+standard library and the functions the application registered on the engine, see
+[Builtin functions](#builtin-functions)) and outside the profile's function list fails
 at plan time with `Unknown function '<name>'.`, a `DatabaseException`
 (`ExecutionFailure` on the wire). The planner checks every expression position
 before it binds the statement or reads a row: projections, predicates, joins,
@@ -218,6 +220,21 @@ COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with
 A call passes `'*'` only when `*` is its sole argument; the parser also accepts `*`
 after other arguments (`COUNT(id, *)`, `COALESCE(a, *)`), and such a call is reported
 by its full count.
+
+**Overloads (E2).** A function name can carry several overloads, distinguished by their
+parameter types. Among the overloads whose count matches, the planner chooses the one
+the arguments' types fit best: an exact type, then an implicit widening along INT8 →
+INT16 → INT32 → INT64 → DECIMAL → DOUBLE (nothing converts to or from text, and REAL does
+not widen), then a polymorphic overload. An integer literal has the smallest of INTEGER
+and BIGINT that holds it; a NULL literal, a NULL parameter and a grouped value match any
+type. A call no overload's types accept also reports `COHSQLE006`, and one that several
+accept equally well reports `COHSQLE008` (SQLSTATE 42725); a `CAST` on an argument
+chooses. Both are raised while planning:
+
+```text
+COHSQLE006: Function 'SUM' has no overload that accepts argument types (TEXT). Accepted: SUM(numeric).
+COHSQLE008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well. Cast an argument to choose one.
+```
 
 The engine resolves a call's arguments before the call itself, as PostgreSQL's parse
 analysis does, so `COALESCE(name, UPPER())` reports `UPPER`, and `FOO(ABS())` reports
@@ -880,10 +897,13 @@ queries under the ordering contract above. Aliases in `GROUP BY` or `HAVING`
 remain outside this subset; use the source/grouping expression or repeat the
 aggregate. GROUP BY ordinals report `COHDBL001`.
 
-`DISTINCT` and explicit `ALL` inside aggregates, aggregate `FILTER`, in-aggregate
-`ORDER BY`, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
+`DISTINCT` and explicit `ALL` inside a call, aggregate `FILTER`, `ORDER BY` inside a
+call, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
 functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
-and report `COHDBL001`. Top-level `SELECT DISTINCT` remains available. These
+and report `COHDBL001`. Which names are aggregates is the engine's function catalog to
+say, so the parser reports `DISTINCT`, `ALL` and `ORDER BY` inside any call, an
+application's aggregate included; PostgreSQL refuses them on a function that is not an
+aggregate. Top-level `SELECT DISTINCT` remains available. These
 boundaries do not add named clauses to the 49-clause denominator.
 
 ## Subqueries and query-source inserts (#1021)
@@ -1298,12 +1318,15 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 ## Builtin functions
 
 The profile's function list is lexical vocabulary, not an execution claim and
-not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
-`UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
-`AVG`, `MIN`, and `MAX`, under the contract below. Each has one signature, which the
-planner checks every call against before it reads a row, the evaluator checks again
-before it computes one, and opening a database checks in every stored CHECK (#1189).
-A call outside it reports `COHSQLE006` (see Function arguments under
+not part of the 49-clause denominator. What executes is the engine's function catalog
+(E2): the standard library below, and the functions the application registered on the
+engine builder (`SqlDatabaseEngineBuilder.Functions`), which every database of the engine
+calls exactly as it calls the built-ins. Executable built-in scalars are `UPPER`, `LOWER`,
+`LENGTH` and `ABS`, beside the special form `COALESCE`; built-in aggregates are `COUNT`,
+`SUM`, `AVG`, `MIN` and `MAX`, under the contract below. The planner checks every call
+against its function's overloads before it reads a row, the evaluator checks again before
+it computes one, and opening a database checks every stored CHECK (#1189). A call outside
+them reports `COHSQLE006` (see Function arguments under
 [Statement completeness](#statement-completeness-1068)):
 
 | Function | Kind | Arguments | Accepted call forms |
@@ -1326,7 +1349,24 @@ same signatures. `ABS` accepts every numeric
 storage type: integer arguments return BIGINT (so `ABS` of the INT minimum is
 exact), REAL returns REAL, DOUBLE returns DOUBLE, and DECIMAL returns DECIMAL.
 `ABS` of the BIGINT minimum reports `COHSQLE002`.
-A call to a name outside the recognized list fails at plan time with
+`COALESCE`, `NULLIF`, `CASE`, `CAST` and `EXTRACT` are grammar, not catalog functions:
+`COALESCE` evaluates its operands lazily, so one after the first non-NULL operand never
+runs, and an application cannot register a function under any of those names or under a
+keyword.
+
+**Registered functions.** An application function has a name (an identifier), parameter
+types, a result type, a volatility and a NULL rule. A name and parameter-type list is
+registered once: a built-in's cannot be replaced, only overloaded with other parameter
+types, and a name is either scalar or aggregate. A strict function (the default) returns
+NULL over a NULL argument without being called, and a strict aggregate skips the row. An
+`IMMUTABLE` call whose arguments are constants or parameters is computed once, while the
+statement is planned. A `CHECK` admits only `IMMUTABLE` functions, so a function registered
+with the default `VOLATILE` volatility is refused there, naming its volatility; one
+returning BOOLEAN is a predicate by itself. What a function throws fails the statement as
+`COHSQLE007`, which names it; the statement writes nothing and an explicit transaction stays
+usable, as for every coded failure.
+
+A call to a name outside the catalog and the recognized list fails at plan time with
 `Unknown function '<name>'.`, before any row is read (#1068). A recognized name
 outside the executable set still parses and plans, then fails during evaluation,
 so it fails only when a row reaches it; #1103 rejects those names at parse time.
@@ -1355,7 +1395,9 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
-| `COHSQLE006` | Error | Function call whose arguments no signature of its function accepts: a count outside the signature's bounds (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`) or `*` for a function other than `COUNT`. Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding one (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
+| `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding one (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
+| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, a cancellation or an exhausted stack or memory, which is the inner exception. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
+| `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1387,8 +1429,9 @@ Plan-time rejections, such as `Unknown column '<name>'.` and
 (`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.
 While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
 is not a number, `COHSQLE005` for a column reference where no columns are in
-scope, and `COHSQLE006` for a function call whose arguments its function does not
-accept; a `LIMIT`/`OFFSET` count is evaluated while planning, so its arithmetic
+scope, `COHSQLE006` for a function call whose arguments no overload of its function
+accepts, and `COHSQLE008` for one several accept equally well; a `LIMIT`/`OFFSET` count
+is evaluated while planning, so its arithmetic
 faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
 from any planner walk.
 
@@ -1397,7 +1440,8 @@ carry no position. They lead the `DatabaseException` message in process and the
 `ExecutionFailure` message on the wire; the arithmetic fault contract above
 defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
-counts when `COHSQLE005` is, and the function-argument rule under Statement
-completeness when `COHSQLE006` is. The engine's transaction-state codes,
+counts when `COHSQLE005` is, the function-argument and overload rules under Statement
+completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function rules
+under Builtin functions when `COHSQLE007` is. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
 code, `COHSQLT005`, are documented in the SQL engine design.

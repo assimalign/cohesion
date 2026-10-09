@@ -29,7 +29,7 @@ internal sealed partial class SqlPlanner
             ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
-        var aggregates = new List<(SqlFunctionCallExpression Call, SqlFunctionSignature Signature)>();
+        var aggregates = new List<(SqlFunctionCallExpression Call, SqlAggregateFunction Function)>();
         var slots = new Dictionary<SqlExpression, int>();
         var projections = new List<SqlProjection>();
         foreach (var column in select.Columns)
@@ -41,7 +41,12 @@ internal sealed partial class SqlPlanner
                 SqlFunctionCallExpression call when IsAggregate(call) => call.FunctionName.ToLowerInvariant(),
                 _ => $"column{projections.Count + 1}",
             });
-            projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator)));
+            projections.Add(new SqlProjection(name, null, column.Expression, GroupExpressionType(column.Expression, columns, evaluator))
+            {
+                // A bare COUNT never returns NULL, even over no rows; every other projection may.
+                IsNullable = !(column.Expression is SqlFunctionCallExpression projected && IsAggregate(projected)
+                    && aggregates[slots[projected] - select.GroupBy.Count].Function.IsNeverNull),
+            });
         }
         if (select.Having is not null)
         {
@@ -59,9 +64,9 @@ internal sealed partial class SqlPlanner
         // then aggregate results, then the projected outputs that ordering may name). Both scopes
         // resolve columns through the join bindings alone, as grouped execution always has.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots);
+            subquerySlots: _subquerySlots, functions: _functions);
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots);
+            subquerySlots: _subquerySlots, functions: _functions);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);
@@ -82,11 +87,10 @@ internal sealed partial class SqlPlanner
         var boundAggregates = new SqlGroupAggregate[aggregates.Count];
         for (int i = 0; i < boundAggregates.Length; i++)
         {
-            var (call, signature) = aggregates[i];
-            var argument = call.Arguments[0];
-            boundAggregates[i] = argument is SqlStarExpression
-                ? new SqlGroupAggregate(call, signature, null, sourceScope.BindCollation(argument))
-                : new SqlGroupAggregate(call, signature, sourceScope.Bind(argument, out SqlBoundCollation collation), collation);
+            var (call, function) = aggregates[i];
+            var arguments = sourceScope.BindArguments(call.Arguments, out SqlBoundCollation collation);
+            boundAggregates[i] = new SqlGroupAggregate(call, function, arguments,
+                SqlFunctionResolver.CoercionTargets(function, arguments.Length), collation, _functions.Database);
         }
 
         for (int i = 0; i < projections.Count; i++)
@@ -112,33 +116,26 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
-                // Planning resolved every call already; the signature is read again rather than
-                // assumed, because the argument below is indexed on it and the grouping executor
-                // accumulates by it (#1189).
-                var signature = SqlFunctionSignatures.Resolve(call)!;
-                var argument = call.Arguments[0];
-                if (ContainsAggregate(argument))
+                // The overload is chosen by its arguments' types over the input row: SUM and AVG
+                // take a numeric argument, so SUM over text fails here with COHSQLE006, whatever
+                // the rows (#1189). The grouping executor creates the chosen function's accumulators.
+                var function = (SqlAggregateFunction)evaluator.ResolveFunction(call)!;
+                foreach (var argument in call.Arguments)
                 {
-                    throw new DatabaseException("Nested aggregate functions are not allowed.");
-                }
-                if (argument is not SqlStarExpression)
-                {
-                    ValidateExpression(argument, evaluator, _subqueryTypes);
-                }
-                if (signature.Function is SqlBuiltinFunction.Sum or SqlBuiltinFunction.Avg)
-                {
-                    var type = GroupExpressionType(argument, columns, evaluator);
-                    if (type is not (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
-                        or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal))
+                    if (ContainsAggregate(argument))
                     {
-                        throw new DatabaseException($"{call.FunctionName} requires a numeric argument.");
+                        throw new DatabaseException("Nested aggregate functions are not allowed.");
+                    }
+                    if (argument is not SqlStarExpression)
+                    {
+                        ValidateExpression(argument, evaluator, _subqueryTypes);
                     }
                 }
                 int index = aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
                 {
                     index = aggregates.Count;
-                    aggregates.Add((call, signature));
+                    aggregates.Add((call, function));
                 }
                 slots[expression] = select.GroupBy.Count + index;
                 return;
@@ -176,8 +173,8 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    /// <summary>Recognizes the executable aggregate functions of the signature table.</summary>
-    private static bool IsAggregate(SqlFunctionCallExpression call) => SqlFunctionSignatures.IsAggregate(call.FunctionName);
+    /// <summary>Recognizes a call to an aggregate of the engine's function catalog, by its name.</summary>
+    private bool IsAggregate(SqlFunctionCallExpression call) => _functions.Catalog.IsAggregate(call.FunctionName);
 
     /// <summary>
     /// Compares expression structure after column binding. Qualified and bare
@@ -261,22 +258,9 @@ internal sealed partial class SqlPlanner
             SqlLiteralType.Boolean => DatabaseType.Boolean,
             _ => DatabaseType.Null,
         },
-        // The function's result type, until #1120 makes it a member of its signature.
-        SqlFunctionCallExpression call => SqlFunctionSignatures.FunctionOf(call) switch
-        {
-            SqlBuiltinFunction.Count or SqlBuiltinFunction.Length => DatabaseType.Int64,
-            SqlBuiltinFunction.Sum or SqlBuiltinFunction.Avg => DatabaseType.Decimal,
-            SqlBuiltinFunction.Upper or SqlBuiltinFunction.Lower => call.Arguments.Count == 1
-                ? GroupExpressionType(call.Arguments[0], columns, evaluator) : DatabaseType.Null,
-            SqlBuiltinFunction.Abs when call.Arguments.Count == 1 => GroupExpressionType(call.Arguments[0], columns, evaluator) switch
-            {
-                DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 => DatabaseType.Int64,
-                var type => type,
-            },
-            SqlBuiltinFunction.Coalesce => call.Arguments.Select(argument => GroupExpressionType(argument, columns, evaluator))
-                .Aggregate(DatabaseType.Null, CommonGroupType),
-            _ => call.Arguments.Count > 0 ? GroupExpressionType(call.Arguments[0], columns, evaluator) : DatabaseType.Null,
-        },
+        SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName)
+            => call.Arguments.Select(argument => GroupExpressionType(argument, columns, evaluator)).Aggregate(DatabaseType.Null, CommonGroupType),
+        SqlFunctionCallExpression call => CallResultType(call, columns, evaluator),
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
         // Unary plus returns its operand unchanged; only negation widens exact integers.
         SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus => GroupExpressionType(plus.Operand, columns, evaluator),
@@ -299,6 +283,35 @@ internal sealed partial class SqlPlanner
             .Aggregate(DatabaseType.Null, CommonGroupType),
         _ => DatabaseType.Null,
     };
+
+    /// <summary>
+    /// A call's declared output type: the result type of the overload it resolves to, a polymorphic
+    /// result typed from the arguments' output types (<c>UPPER(name)</c> is text, <c>MAX(amount)</c>
+    /// has the amount's type, <c>ABS</c> of an integer is BIGINT). A call outside the catalog keeps
+    /// the type of its first argument, as before.
+    /// </summary>
+    private DatabaseType CallResultType(SqlFunctionCallExpression call, IReadOnlyList<SqlCatalogColumn> columns,
+        SqlExpressionEvaluator evaluator)
+    {
+        var types = new DatabaseType[call.Arguments.Count];
+        for (int index = 0; index < types.Length; index++)
+        {
+            types[index] = GroupExpressionType(call.Arguments[index], columns, evaluator);
+        }
+
+        SqlFunction? function;
+        try
+        {
+            function = evaluator.ResolveFunction(call);
+        }
+        catch (SqlEvaluationException)
+        {
+            function = null;
+        }
+
+        return function is not null ? SqlFunctionResolver.ResultType(function, types)
+            : types.Length > 0 ? types[0] : DatabaseType.Null;
+    }
 
     /// <summary>Finds the numeric common type of alternative scalar results.</summary>
     private static DatabaseType CommonGroupType(DatabaseType left, DatabaseType right)

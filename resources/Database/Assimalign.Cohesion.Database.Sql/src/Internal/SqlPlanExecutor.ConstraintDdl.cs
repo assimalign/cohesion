@@ -338,7 +338,8 @@ internal sealed partial class SqlPlanExecutor
 
             try
             {
-                SqlPersistedExpression.Bind(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
+                SqlPersistedExpression.Bind(check.Predicate,
+                    new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions));
             }
             catch (DatabaseException exception)
             {

@@ -29,13 +29,21 @@ internal sealed partial class SqlPlanner
     private readonly SqlCatalog _catalog;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
+    /// <summary>The engine's function catalog and the database, which every call of the statement resolves against.</summary>
+    private readonly SqlFunctionEnvironment _functions;
+
     /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
     private SqlExpressionEvaluator? _scopelessEvaluator;
 
-    internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters)
+    /// <summary>Initializes a planner for one statement.</summary>
+    /// <param name="catalog">The database's catalog.</param>
+    /// <param name="parameters">The statement's parameter values.</param>
+    /// <param name="functions">The engine's function catalog and the database; the standard library alone when null.</param>
+    internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters, SqlFunctionEnvironment? functions = null)
     {
         _catalog = catalog;
         _parameters = parameters;
+        _functions = functions ?? SqlFunctionEnvironment.Standard;
     }
 
     internal SqlPlan Plan(SqlQueryExpression expression)
@@ -77,7 +85,7 @@ internal sealed partial class SqlPlanner
         var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
             ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
         var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots);
+            subquerySlots: _subquerySlots, functions: _functions);
 
         if (bindings is not null)
         {
@@ -448,13 +456,14 @@ internal sealed partial class SqlPlanner
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
         bool columnOnLeft = true)
     {
-        if (ReferencesAnyColumn(comparand))
+        // A comparand that calls a volatile function can change between the plan and a row.
+        if (ReferencesAnyColumn(comparand) || ContainsVolatileCall(comparand, ScopelessEvaluator))
         {
             return;
         }
 
         var column = (SqlColumnReferenceExpression)UnwrapCollation(columnExpression);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
         int ordinal;
         try
         {
@@ -478,7 +487,7 @@ internal sealed partial class SqlPlanner
         object? value;
         try
         {
-            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation)
+            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions)
                 .Evaluate(comparand, Array.Empty<object?>());
             object? storageValue = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
             // A rounded bound can exclude qualifying rows before residual evaluation
@@ -667,7 +676,7 @@ internal sealed partial class SqlPlanner
     /// created on first use and shared by the statement.
     /// </summary>
     private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
-        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation);
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
     /// <param name="expression">The expression to search.</param>
@@ -738,7 +747,7 @@ internal sealed partial class SqlPlanner
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -774,7 +783,7 @@ internal sealed partial class SqlPlanner
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions);
             ValidateExpression(delete.Where, evaluator);
             where = evaluator.Bind(delete.Where);
         }
@@ -788,7 +797,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     /// <param name="where">The statement's WHERE filter.</param>
     /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
-    private static void RejectAggregateInDmlWhere(SqlExpression where)
+    private void RejectAggregateInDmlWhere(SqlExpression where)
     {
         if (ContainsAggregate(where))
         {
@@ -1090,6 +1099,31 @@ internal sealed partial class SqlPlanner
         {
             ValidateExpression(child, evaluator, boundSubqueries, boundValues);
         }
+
+        // After its arguments, as PostgreSQL resolves a call, so an argument's error is reported
+        // first. The planner's walk (ValidateFunctionCalls) checked every call's count already; this
+        // chooses the overload by the arguments' types, with the scope's columns in hand.
+        if (expression is SqlFunctionCallExpression call)
+        {
+            ResolveCall(call, evaluator);
+        }
+    }
+
+    /// <summary>
+    /// Resolves a call to its overload while planning: a call no overload's types accept fails here
+    /// with <c>COHSQLE006</c>, and one several accept equally well with <c>COHSQLE008</c>, the same
+    /// over an empty table as over a populated one.
+    /// </summary>
+    /// <param name="call">The call.</param>
+    /// <param name="evaluator">The scope its arguments are typed in.</param>
+    /// <exception cref="SqlEvaluationException">The call does not resolve to exactly one overload.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
+    {
+        if (!SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        {
+            evaluator.ResolveFunction(call);
+        }
     }
 
     /// <summary>
@@ -1123,8 +1157,11 @@ internal sealed partial class SqlPlanner
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
             SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
-            SqlFunctionCallExpression call when SqlFunctionSignatures.FunctionOf(call) is SqlBuiltinFunction.Upper or SqlBuiltinFunction.Lower
-                => DatabaseType.String,
+            // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
+            // UPPER over text is text. An aggregate's is left to its value, as before.
+            SqlFunctionCallExpression call => evaluator.StaticCallType(call, scalarOnly: true) is var result && result != DatabaseType.Null
+                ? result
+                : null,
             _ => null,
         };
     }
@@ -1132,15 +1169,41 @@ internal sealed partial class SqlPlanner
     private static bool IsNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
         or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.Null;
 
-    private static bool ContainsAggregate(SqlExpression expression)
+    /// <summary>Whether an expression calls an aggregate of the engine's catalog, outside a subquery.</summary>
+    private bool ContainsAggregate(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlFunctionCallExpression call && SqlFunctionSignatures.IsAggregate(call.FunctionName))
+        if (expression is SqlFunctionCallExpression call && _functions.Catalog.IsAggregate(call.FunctionName))
         {
             return true;
         }
 
         return Children(expression).Any(ContainsAggregate);
+    }
+
+    /// <summary>
+    /// Whether an expression calls a <see cref="SqlFunctionVolatility.Volatile"/> function, outside a
+    /// subquery: its value can change between the plan and a row, so it never bounds an index seek.
+    /// </summary>
+    private bool ContainsVolatileCall(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlFunctionCallExpression call)
+        {
+            try
+            {
+                if (evaluator.ResolveFunction(call) is { Volatility: SqlFunctionVolatility.Volatile })
+                {
+                    return true;
+                }
+            }
+            catch (SqlEvaluationException)
+            {
+                return true; // it fails when evaluated; never a seek bound
+            }
+        }
+
+        return Children(expression).Any(child => ContainsVolatileCall(child, evaluator));
     }
 
     /// <summary>Finds conversions even when wrapped in an unsupported DDL default expression.</summary>

@@ -38,10 +38,21 @@ internal sealed class SqlBoundTableCache
 
     /// <summary>Initializes an empty cache over a catalog.</summary>
     /// <param name="catalog">The catalog whose table versions are bound.</param>
-    internal SqlBoundTableCache(SqlCatalog catalog)
+    /// <param name="functions">
+    /// The engine's function catalog and the database, which persisted definitions bind against and
+    /// every statement of the database plans with; the standard library alone when null.
+    /// </param>
+    internal SqlBoundTableCache(SqlCatalog catalog, SqlFunctionEnvironment? functions = null)
     {
         _catalog = catalog;
+        Functions = functions ?? SqlFunctionEnvironment.Standard;
     }
+
+    /// <summary>
+    /// Gets the engine's function catalog and the database: what a statement of the database
+    /// resolves its calls against, and what the bound CHECK predicates were bound against.
+    /// </summary>
+    internal SqlFunctionEnvironment Functions { get; }
 
     /// <summary>
     /// Gets how many table versions this cache has bound. Binding is the only place the engine
@@ -182,7 +193,7 @@ internal sealed class SqlBoundTableCache
                 // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind. The
                 // bound tree is what every write to this version evaluates, so a write resolves no
                 // column, function or collation of the predicate again.
-                bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation);
+                bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, Functions);
                 ordinals = ColumnOrdinals(table, predicate);
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)

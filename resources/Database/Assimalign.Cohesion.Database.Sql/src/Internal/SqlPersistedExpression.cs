@@ -203,7 +203,7 @@ internal static class SqlPersistedExpression
                 throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
             case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
                 throw new DatabaseException("Parameters, subqueries and * have no value in a persisted row expression.");
-            case SqlFunctionCallExpression call when SqlFunctionSignatures.IsAggregate(call.FunctionName):
+            case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
                 throw new DatabaseException($"Aggregate function '{call.FunctionName}' has no value in a persisted row expression.");
         }
 
@@ -215,7 +215,26 @@ internal static class SqlPersistedExpression
         // After the arguments, as the planner resolves a call (SqlPlanner.ValidateFunctionCalls).
         if (expression is SqlFunctionCallExpression function)
         {
-            SqlFunctionSignatures.Resolve(function);
+            ResolveCall(function, evaluator);
+        }
+    }
+
+    /// <summary>
+    /// Resolves a persisted call to its overload in the engine's function catalog: <c>COALESCE</c>'s
+    /// operands, or the overload its argument count and types match. A name outside the catalog is
+    /// left to the CHECK rules, which refuse it.
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">No overload accepts the call (<c>COHSQLE006</c>), or several do (<c>COHSQLE008</c>).</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ResolveCall(SqlFunctionCallExpression call, SqlExpressionEvaluator evaluator)
+    {
+        if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        {
+            SqlExpressionEvaluator.CheckCoalesce(call);
+        }
+        else
+        {
+            evaluator.ResolveFunction(call);
         }
     }
 

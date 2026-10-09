@@ -24,7 +24,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>The build runs fixed phases</b>, each seeing only what earlier phases produced (the design's
-/// §5.2): (1) the options are checked and copied; (3) each declared database's schema is compiled,
+/// §5.2): (1) the options are checked and copied; (2) <see cref="Functions"/> is frozen into the
+/// engine's function catalog; (3) each declared database's schema is compiled,
 /// and a declaration the engine cannot provision (a principal, a custom type) is refused before
 /// any file is touched; (4) the engine is created and its
 /// built-in workers start; (5) the <see cref="AddWorker"/> products are attached, then the
@@ -32,9 +33,9 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// stopped), and composition is frozen; (6) each declared database is provisioned in declaration
 /// order: opened, or created when it does not exist, its collation checked, then its schema applied
 /// or verified; (7) the engine is returned. A failure in phases 4 to 6 disposes the engine, with its
-/// servers, workers and open databases, before the build throws. Phase 2, the function and type
-/// catalog, and phase 3's binding of declared CHECK and DEFAULT expressions to it arrive with the
-/// engine's function abstraction.
+/// servers, workers and open databases, before the build throws. Each database the engine opens
+/// binds its persisted CHECK predicates against the frozen catalog; verifying a declared database's
+/// persisted definitions against it in phase 6 is the second part of phase E2.
 /// </para>
 /// <para>
 /// Worker and server factories run after the engine exists, in registration order (every worker
@@ -74,6 +75,8 @@ public sealed class SqlDatabaseEngineBuilder
     {
         _state = new(name);
         _options.EngineName = name;
+        Functions = new SqlFunctionCollection(_state.EnsureMutable);
+        Types = new SqlTypeCollection();
     }
 
     /// <summary>
@@ -93,6 +96,25 @@ public sealed class SqlDatabaseEngineBuilder
     /// when the engine is named only by its builder.
     /// </remarks>
     public SqlDatabaseEngineOptions Options => _options;
+
+    /// <summary>
+    /// Gets the functions the engine will execute: the standard library, registered first, and
+    /// the application's own, added with <see cref="SqlFunctionCollection.Add"/>.
+    /// </summary>
+    /// <remarks>
+    /// A registered function is visible in every database of the engine, its name shares one flat
+    /// namespace with the built-ins, and one instance serves every session at once (owner decisions
+    /// 61 and 62 of 2026-10-09). The build freezes the collection into
+    /// <see cref="SqlDatabaseEngine.Functions"/> (phase 2), before any declared database binds a
+    /// definition to it; a registration after the build began throws.
+    /// </remarks>
+    public SqlFunctionCollection Functions { get; }
+
+    /// <summary>
+    /// Gets the SQL types the engine knows: the built-in storage types in phase E2; the domains and
+    /// casts an application adds arrive with phase E3.
+    /// </summary>
+    public SqlTypeCollection Types { get; }
 
     /// <summary>
     /// Declares a database the engine owns: the build opens it, or creates it when it does not
@@ -274,6 +296,10 @@ public sealed class SqlDatabaseEngineBuilder
         SqlDatabaseEngine.ValidateOptions(options);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Phase 2: the function catalog, frozen. Registration closed when the build began
+        // (Functions.Add checks the same state as every other verb), so this is the final set.
+        SqlFunctionCatalog functions = Functions.Freeze();
+
         // Phase 3: every declaration compiled; a refusal touches no file.
         var declarations = new SqlDeclaredDatabase[_databases.Count];
         for (int index = 0; index < declarations.Length; index++)
@@ -285,7 +311,7 @@ public sealed class SqlDatabaseEngineBuilder
 
         // Phases 4 and 5: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = SqlDatabaseEngine.CreateUncomposed(options);
+        var engine = SqlDatabaseEngine.CreateUncomposed(options, functions);
         _state.Complete(engine, engine.Compose, SqlDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 6: each declared database, in declaration order.

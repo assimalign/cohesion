@@ -47,6 +47,17 @@ shared storage, with DDL flowing through the relational catalog
   executing thread's stack fails with `COHSQLE004` instead of ending the process
   (#1151). Typed requests for an engine with another limit parse with it through
   `SqlQueryRequest.FromSql(sql, parameters, parserOptions)`.
+- **Functions** — `SqlDatabaseEngineBuilder.Functions` holds the standard library (`UPPER`,
+  `LOWER`, `LENGTH`, `ABS`, `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) and an application's own,
+  registered the same way: a `SqlScalarFunction` or `SqlAggregateFunction` leaf, or the typed
+  shorthands `SqlScalarFunction.Create<T1, TResult>(...)` (up to four arguments) and
+  `SqlAggregateFunction.Create<TState, T1, TResult>(...)`, over the allocation-free value ABI
+  (`SqlValue`, `SqlArguments`, `SqlFunctionContext`). The build freezes them into
+  `SqlDatabaseEngine.Functions`, visible in every database of the engine. Calls resolve by name,
+  argument count and type once per statement (an ambiguous call is `COHSQLE008`); an `Immutable`
+  call over constants is folded; a strict function is not called over NULL; a CHECK admits only
+  `Immutable` functions; and what a function throws fails the statement as `COHSQLE007`. One
+  function instance serves every session, so it must be thread-safe. See DESIGN.md, "Functions (E2)".
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).
@@ -114,6 +125,8 @@ Without a host, the same builder provisions while it builds:
 ```csharp
 SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("local");
 sql.Options.RootPath = dataDirectory;
+sql.Functions.Add(SqlScalarFunction.Create("slugify",
+    static (string text) => text.ToLowerInvariant().Replace(' ', '-'), SqlFunctionVolatility.Immutable));
 sql.AddDatabase(SalesSchema.Declaration);                        // a reusable SqlSchema value
 await using SqlDatabaseEngine engine = await sql.BuildAsync(cancellationToken);
 SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken);

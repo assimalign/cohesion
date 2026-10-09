@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -6,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -21,7 +21,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues, cancellationToken);
         var keys = plan.Keys;
         var aggregates = plan.Aggregates;
         var keyCollations = new Collation[keys.Count];
@@ -29,7 +29,15 @@ internal sealed partial class SqlPlanExecutor
         {
             keyCollations[i] = keys[i].Collation.Resolve(_subqueryValues);
         }
-        var groups = new Dictionary<object?[], AggregateState[]>(new GroupKeyComparer(keyCollations));
+
+        // Each aggregate call's input collation, resolved once for the statement: its functions'
+        // contexts carry it (MIN and MAX compare text with it).
+        var aggregateCollations = new Collation[aggregates.Count];
+        for (int i = 0; i < aggregateCollations.Length; i++)
+        {
+            aggregateCollations[i] = aggregates[i].Collation.Resolve(_subqueryValues);
+        }
+        var groups = new Dictionary<object?[], SqlAggregateAccumulator[]>(new GroupKeyComparer(keyCollations));
         if (keys.Count == 0)
         {
             // The implicit global group exists even on empty input.
@@ -55,8 +63,7 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < states.Length; i++)
             {
-                // COUNT(*) counts every row: its operand is a non-null sentinel, not a value.
-                states[i].Add(aggregates[i].Argument is { } argument ? evaluator.Evaluate(argument, row) : CountedRow);
+                AddRow(states[i], aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken);
             }
         }
 
@@ -69,7 +76,8 @@ internal sealed partial class SqlPlanExecutor
             key.CopyTo(row, 0);
             for (int i = 0; i < states.Length; i++)
             {
-                row[key.Length + i] = states[i].Finish();
+                // Once per group, the implicit empty group included.
+                row[key.Length + i] = states[i].Finish().ToObject();
             }
             if (!evaluator.Matches(plan.Having, row))
             {
@@ -106,99 +114,94 @@ internal sealed partial class SqlPlanExecutor
             Name = projection.Name,
             Ordinal = ordinal,
             Type = projection.Type,
-            // COUNT never returns NULL, even over no rows; every other projection may.
-            IsNullable = projection.Expression is not SqlFunctionCallExpression call
-                || SqlFunctionSignatures.FunctionOf(call) != SqlBuiltinFunction.Count,
+            IsNullable = projection.IsNullable,
         }).ToArray();
         return new SqlMaterializedResultSet(columns, window.ToList());
 
-        AggregateState[] CreateStates() => aggregates.Select(aggregate => new AggregateState(aggregate.Signature,
-            aggregate.Collation.Resolve(_subqueryValues))).ToArray();
+        // One accumulator per group, per aggregate call, per statement, owned here and never shared.
+        SqlAggregateAccumulator[] CreateStates()
+        {
+            var states = new SqlAggregateAccumulator[aggregates.Count];
+            for (int i = 0; i < states.Length; i++)
+            {
+                var aggregate = aggregates[i];
+                states[i] = aggregate.Function.CreateAccumulator(
+                    new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken));
+            }
+
+            return states;
+        }
     }
 
-    /// <summary>The operand <c>COUNT(*)</c> accumulates for every row: any non-null value, boxed once.</summary>
-    private static readonly object CountedRow = 1L;
-
     /// <summary>
-    /// All five aggregates skip NULL operands. COUNT(*) supplies a non-null
-    /// sentinel for each row. SUM/AVG accumulate decimal; MIN/MAX retain values.
+    /// Adds one input row to one group's accumulator of one aggregate call: its arguments evaluated
+    /// over the row, converted to the value ABI on the stack (four inline, a pooled buffer past
+    /// four) and to their parameters' types. A strict aggregate's accumulator skips the row when an
+    /// argument is NULL; <c>COUNT(*)</c> has no argument, so it counts every row.
     /// </summary>
-    private sealed class AggregateState
+    private static void AddRow(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
     {
-        private readonly SqlBuiltinFunction _function;
-        private readonly string _name;
-        private readonly Collation _collation;
-        private long _count;
-        private decimal _sum;
-        private object? _extreme;
-
-        /// <summary>Initializes a new instance of the <see cref="AggregateState"/> class.</summary>
-        /// <param name="signature">The aggregate signature the planner bound the call to.</param>
-        /// <param name="collation">The collation MIN and MAX use to compare values.</param>
-        /// <exception cref="DatabaseException">The signature is not an aggregate this state accumulates.</exception>
-        public AggregateState(SqlFunctionSignature signature, Collation collation)
+        var arguments = aggregate.Arguments;
+        var context = new SqlFunctionContext(aggregate.Database, collation, cancellationToken);
+        switch (arguments.Length)
         {
-            if (signature.Function is not (SqlBuiltinFunction.Count or SqlBuiltinFunction.Sum or SqlBuiltinFunction.Avg
-                or SqlBuiltinFunction.Min or SqlBuiltinFunction.Max))
-            {
-                // An aggregate entry added to the signature table without an accumulator here.
-                throw new DatabaseException($"Function '{signature.Name}' is not supported by the executor yet.");
-            }
-
-            _function = signature.Function;
-            _name = signature.Name;
-            _collation = collation;
-        }
-
-        internal void Add(object? value)
-        {
-            if (value is null)
-            {
+            case 0:
+                state.Add(new SqlArguments([], context));
                 return;
-            }
+            case 1:
+                // The shape of every standard-library aggregate but COUNT(*): one value, no buffer.
+                SqlValue value = default;
+                EvaluateArguments(aggregate, evaluator, row, new Span<SqlValue>(ref value));
+                state.Add(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context));
+                return;
+            case <= SqlValueBuffer.Length:
+                SqlValueBuffer buffer = default;
+                Span<SqlValue> values = buffer[..arguments.Length];
+                EvaluateArguments(aggregate, evaluator, row, values);
+                state.Add(new SqlArguments(values, context));
+                return;
+            default:
+                AddRowPooled(state, aggregate, collation, evaluator, row, cancellationToken);
+                return;
+        }
+    }
+
+    private static void AddRowPooled(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+    {
+        SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(aggregate.Arguments.Length);
+        try
+        {
+            Span<SqlValue> values = rented.AsSpan(0, aggregate.Arguments.Length);
+            EvaluateArguments(aggregate, evaluator, row, values);
+            state.Add(new SqlArguments(values, new SqlFunctionContext(aggregate.Database, collation, cancellationToken)));
+        }
+        finally
+        {
+            ArrayPool<SqlValue>.Shared.Return(rented, clearArray: true);
+        }
+    }
+
+    private static void EvaluateArguments(SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator, object?[] row, Span<SqlValue> values)
+    {
+        var arguments = aggregate.Arguments;
+        var targets = aggregate.Targets;
+        for (int i = 0; i < values.Length; i++)
+        {
+            var value = SqlValue.FromObject(evaluator.Evaluate(arguments[i], row));
             try
             {
-                _count = checked(_count + 1);
-                switch (_function)
-                {
-                    case SqlBuiltinFunction.Sum:
-                    case SqlBuiltinFunction.Avg:
-                        if (value is not (sbyte or short or int or long or float or double or decimal))
-                        {
-                            throw new DatabaseException($"{_name} requires a numeric argument.");
-                        }
-                        _sum = checked(_sum + Convert.ToDecimal(value, CultureInfo.InvariantCulture));
-                        break;
-                    case SqlBuiltinFunction.Min:
-                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) < 0)
-                        {
-                            _extreme = value;
-                        }
-                        break;
-                    case SqlBuiltinFunction.Max:
-                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) > 0)
-                        {
-                            _extreme = value;
-                        }
-                        break;
-                }
+                values[i] = targets is null || targets[i] == DatabaseType.Null
+                    ? value
+                    : SqlFunctionResolver.Coerce(value, targets[i], aggregate.Function, i);
             }
-            catch (OverflowException exception)
+            catch (ArithmeticException exception)
             {
-                throw SqlEvaluationException.NumericValueOutOfRange(
-                    $"{_name} overflowed; the aggregate cannot be represented as a decimal or count.", exception);
+                // An integer that does not fit its parameter, coded as the evaluator codes one.
+                throw SqlEvaluationException.FromArithmetic(exception);
             }
         }
-
-        /// <summary>Decimal division preserves fractional averages, rounding to even when necessary.</summary>
-        internal object? Finish() => _function switch
-        {
-            SqlBuiltinFunction.Count => _count,
-            _ when _count == 0 => null,
-            SqlBuiltinFunction.Sum => _sum,
-            SqlBuiltinFunction.Avg => _sum / _count,
-            _ => _extreme,
-        };
     }
 
     /// <summary>Uses SQL comparison equality, with NULL keys in one group and binary values by content.</summary>

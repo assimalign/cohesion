@@ -61,14 +61,79 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// </summary>
     internal const string FunctionSignatureMismatchCode = "COHSQLE006";
 
+    /// <summary>
+    /// A function threw while the statement ran: anything a <see cref="SqlFunction"/>'s core throws
+    /// other than <see cref="OperationCanceledException"/>, <see cref="InsufficientExecutionStackException"/>,
+    /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/>, which is the inner
+    /// exception (ISO SQLSTATE 38000, external routine exception). The statement fails like any
+    /// other coded failure: it writes nothing, and an explicit transaction stays usable (owner
+    /// decision 71 of 2026-10-09).
+    /// </summary>
+    internal const string FunctionFailedCode = "COHSQLE007";
+
+    /// <summary>
+    /// A function call matches more than one overload of its function equally well, so the engine
+    /// cannot choose (ISO SQLSTATE 42725, ambiguous function). Raised while planning; a CAST on an
+    /// argument chooses (owner decision 71 of 2026-10-09).
+    /// </summary>
+    internal const string AmbiguousFunctionCallCode = "COHSQLE008";
+
+    private readonly string _detail;
+
     private SqlEvaluationException(string code, string detail, Exception? innerException)
         : base($"{code}: {detail}", innerException)
     {
         Code = code;
+        _detail = detail;
     }
 
     /// <summary>Gets the stable engine diagnostic code.</summary>
     internal string Code { get; }
+
+    /// <summary>
+    /// Creates a new exception with this one's code, message and inner exception, for a bound node
+    /// that raises the same failure on every evaluation: one exception instance must never be thrown
+    /// on two threads.
+    /// </summary>
+    /// <returns>The copy.</returns>
+    internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException);
+
+    /// <summary>
+    /// Whether an exception a function's core threw becomes <c>COHSQLE007</c>: anything but a
+    /// cancellation, an exhausted stack or memory, or a database exception, which keep their own
+    /// meaning.
+    /// </summary>
+    /// <param name="exception">What the function threw.</param>
+    /// <returns><see langword="true"/> when the engine codes it as <c>COHSQLE007</c>.</returns>
+    internal static bool IsFunctionFailure(Exception exception)
+        => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException or DatabaseException);
+
+    /// <summary>Creates the failure of a function that threw.</summary>
+    /// <param name="functionName">The function's registered name.</param>
+    /// <param name="innerException">What the function threw.</param>
+    /// <returns>The coded failure.</returns>
+    internal static SqlEvaluationException FunctionFailed(string functionName, Exception innerException)
+        => new(FunctionFailedCode, $"Function '{functionName}' failed: {innerException.Message}", innerException);
+
+    /// <summary>Creates the failure for a call whose argument types no overload of its function accepts.</summary>
+    /// <param name="functionName">The function name as written.</param>
+    /// <param name="given">The argument types, for example <c>TEXT, BIGINT</c>.</param>
+    /// <param name="usage">The accepted call forms.</param>
+    /// <returns>The coded failure (<c>COHSQLE006</c>, PostgreSQL's 42883).</returns>
+    internal static SqlEvaluationException FunctionArgumentTypeMismatch(string functionName, string given, string usage)
+        => new(FunctionSignatureMismatchCode,
+            $"Function '{functionName}' has no overload that accepts argument types ({given}). Accepted: {usage}.",
+            null);
+
+    /// <summary>Creates the failure for a call that more than one overload accepts equally well.</summary>
+    /// <param name="functionName">The function name as written.</param>
+    /// <param name="given">The argument types, for example <c>unknown</c>.</param>
+    /// <param name="candidates">The overloads that tie, for example <c>f(BIGINT) and f(TEXT)</c>.</param>
+    /// <returns>The coded failure.</returns>
+    internal static SqlEvaluationException AmbiguousFunctionCall(string functionName, string given, string candidates)
+        => new(AmbiguousFunctionCallCode,
+            $"Function call '{functionName}({given})' is ambiguous: {candidates} accept it equally well. Cast an argument to choose one.",
+            null);
 
     /// <summary>Creates the division-by-zero failure for a <c>/</c> or <c>%</c> operator.</summary>
     /// <param name="operatorText">The SQL operator whose right operand is zero.</param>

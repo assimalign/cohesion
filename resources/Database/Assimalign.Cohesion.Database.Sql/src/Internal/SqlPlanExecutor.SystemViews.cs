@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 

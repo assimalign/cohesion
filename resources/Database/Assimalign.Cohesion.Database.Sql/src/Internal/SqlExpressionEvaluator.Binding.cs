@@ -354,31 +354,43 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Binds a call to the function its signature resolves to: once, here, instead of for every row.
-    /// A call the evaluator does not compute binds as the failure it raised when it reached the call
-    /// — <c>COHSQLE006</c> for arguments the signature refuses, "not supported by the executor yet"
-    /// for a declared name outside the signature table or an aggregate outside a grouping plan — and
-    /// its arguments, which never ran, are not bound.
+    /// Binds a call to the overload it resolves to in the engine's function catalog: once, here,
+    /// instead of for every row. A call the evaluator does not compute binds as the failure it raises
+    /// when it is reached — <c>COHSQLE006</c> for arguments no overload accepts, <c>COHSQLE008</c> for
+    /// arguments several accept equally well, "not supported by the executor yet" for a name outside
+    /// the catalog or an aggregate outside the grouping plan that binds it to a slot — and its
+    /// arguments, which never run, are not bound. <c>COALESCE</c> is a special form, evaluated lazily.
+    /// An <see cref="SqlFunctionVolatility.Immutable"/> call whose arguments are all constants or
+    /// parameters is folded here into its value (PostgreSQL's <c>evaluate_function</c>,
+    /// <c>src/backend/optimizer/util/clauses.c</c>); one that fails is left to fail when it is reached.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation)
     {
-        SqlFunctionSignature? signature;
+        bool coalesce = SqlStandardLibrary.IsCoalesce(call.FunctionName);
+        SqlFunction? function = null;
         try
         {
-            signature = SqlFunctionSignatures.Resolve(call);
+            if (coalesce)
+            {
+                CheckCoalesce(call);
+            }
+            else
+            {
+                function = ResolveFunction(call);
+            }
         }
-        catch (Exception exception) when (IsDeferrable(exception))
+        catch (SqlEvaluationException exception)
         {
             collation = CollationOf(call, ChildCollations(call));
-            return SignatureFailure(call);
+            return ResolutionFailure(exception);
         }
 
-        if (signature is not { Kind: SqlFunctionKind.Scalar, Function: SqlBuiltinFunction.Coalesce or SqlBuiltinFunction.Upper
-            or SqlBuiltinFunction.Lower or SqlBuiltinFunction.Length or SqlBuiltinFunction.Abs })
+        if (!coalesce && function is not SqlScalarFunction)
         {
-            // A declared name outside the signature table (NULLIF, TRIM, ...), an aggregate outside
-            // the grouping plan that binds it to a slot, or a scalar entry without a case here.
+            // A name outside the catalog (a declared name that does not execute yet, such as NULLIF,
+            // or an unknown name in a tree that was never planned), or an aggregate outside the
+            // grouping plan that binds it to a slot.
             collation = CollationOf(call, ChildCollations(call));
             return UnsupportedFunction(call.FunctionName);
         }
@@ -391,9 +403,46 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         collation = CollationOf(call, collations);
-        return signature.Function == SqlBuiltinFunction.Coalesce
-            ? new SqlBoundCoalesce(arguments)
-            : new SqlBoundCall(signature.Function, arguments);
+        if (coalesce)
+        {
+            return new SqlBoundCoalesce(arguments);
+        }
+
+        var scalar = (SqlScalarFunction)function!;
+        var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
+            SqlBoundCollation.Of(collation, default, _defaultCollation), _functions.Database);
+        return scalar.Volatility == SqlFunctionVolatility.Immutable && AreFixed(arguments) ? Fold(bound) : bound;
+    }
+
+    /// <summary>Whether every argument has a value fixed when the statement was bound: a constant or a parameter.</summary>
+    private static bool AreFixed(SqlBoundExpression[] arguments)
+    {
+        foreach (var argument in arguments)
+        {
+            if (argument.Kind is not (SqlBoundExpressionKind.Constant or SqlBoundExpressionKind.Parameter))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Computes an immutable call over fixed arguments once, so no row calls it again. A call that
+    /// fails is kept, and fails, as before folding existed, only when a row reaches it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression Fold(SqlBoundCall call)
+    {
+        try
+        {
+            return new SqlBoundConstant(EvaluateCall(call, []));
+        }
+        catch (Exception exception) when (IsDeferrable(exception))
+        {
+            return call;
+        }
     }
 
     /// <summary>The collation candidates of a node's operands, in operand order, for a node whose operands are not bound.</summary>
@@ -468,7 +517,7 @@ internal sealed partial class SqlExpressionEvaluator
     private static SqlBoundFailure MissingParameter(string parameterName)
         => new(() => throw new DatabaseException($"No value was supplied for parameter '{parameterName.TrimStart('@', '$')}'."));
 
-    private static SqlBoundFailure SignatureFailure(SqlFunctionCallExpression call) => new(() => SqlFunctionSignatures.Resolve(call));
+    private static SqlBoundFailure ResolutionFailure(SqlEvaluationException exception) => new(() => throw exception.Duplicate());
 
     private static SqlBoundFailure UnsupportedFunction(string name)
         => new(() => throw new DatabaseException($"Function '{name}' is not supported by the executor yet."));
