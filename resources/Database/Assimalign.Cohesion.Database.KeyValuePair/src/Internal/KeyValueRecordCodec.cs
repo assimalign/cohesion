@@ -73,40 +73,41 @@ internal static class KeyValueRecordCodec
         => RecordVersionStamp.WithoutDeleter(record);
 
     /// <summary>
-    /// Decodes a stamped record's key and value; returns false when the record is
-    /// too short to carry a stamp header or the payload is malformed. The version
-    /// stamps are returned alongside — visibility is the caller's decision, made
-    /// against its snapshot.
+    /// Decodes a stamped record's key and value. The version stamps are returned
+    /// alongside — visibility is the caller's decision, made against its snapshot.
     /// </summary>
-    internal static bool TryDecode(
+    /// <remarks>
+    /// Every caller reads the record from the key space's own page chain, so a record that does
+    /// not decode is damaged, not another owner's or reclaimed, and the decode throws rather than
+    /// offering a result a caller could read as an absent key (#1362). The caller knows the
+    /// record's location and reports it as corrupt.
+    /// </remarks>
+    /// <exception cref="DatabaseTypeException">
+    /// The record is too short for its stamp header, its key or value component is malformed or
+    /// truncated, or bytes follow the value.
+    /// </exception>
+    internal static void Decode(
         ReadOnlySpan<byte> record,
         out byte[] key,
         out byte[] value,
         out TransactionSequence writer,
         out TransactionSequence deleter)
     {
-        key = [];
-        value = [];
-        writer = default;
-        deleter = default;
-
         if (record.Length < StampHeaderSize)
         {
-            return false;
+            throw new DatabaseTypeException(
+                $"The record holds {record.Length} bytes, fewer than its {StampHeaderSize}-byte version-stamp header.");
         }
 
         (writer, deleter) = ReadStamps(record);
 
-        try
+        var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
+        key = reader.ReadBinary();
+        value = reader.ReadBinary();
+
+        if (!reader.IsAtEnd)
         {
-            var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
-            key = reader.ReadBinary();
-            value = reader.ReadBinary();
-            return reader.IsAtEnd;
-        }
-        catch (DatabaseTypeException)
-        {
-            return false;
+            throw new DatabaseTypeException("The record continues past its value component.");
         }
     }
 }

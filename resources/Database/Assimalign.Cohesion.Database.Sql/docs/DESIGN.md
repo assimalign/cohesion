@@ -598,7 +598,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   page freed, or the page reallocated to another table or as an index node)
   and throws for a row page that fails its checksum or cannot be read. Until
   #1342 the fetch skipped on any `StorageException`, so a corrupt page dropped
-  its rows from the result instead of failing the statement. Prefix ranges ride the
+  its rows from the result instead of failing the statement. A row the fetch
+  returns is the table's, so one that does not decode fails the statement too
+  (#1362; "Error model" below). Prefix ranges ride the
   codec's order preservation: every composite key starting with prefix `P`
   sorts in `[P, successor(P))`; bound inclusivity maps to prefix-successor
   arithmetic on the encoded component. Per-statement observability
@@ -622,8 +624,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   layer's per-owner chains), so **a table scan touches only its own table's
   pages** — O(table), not O(database) — and `DROP TABLE` releases the
   table's whole chain back to the allocator (transactionally, inside the
-  statement bracket; the record-byte layout is unchanged from version 2, and
-  the object-id prefix stays as defense in depth).
+  statement bracket; the record-byte layout is unchanged from version 2). The
+  object-id prefix is now an integrity check, not a filter: every read meets
+  only its own table's records, so a prefix naming another object is a damaged
+  record and fails the statement (#1362).
 - **Scans are snapshot-visible.** Every scan filters through the statement's
   snapshot: a version is visible when `IsVisible(writer)` and its deleter — when
   stamped — is *not* admitted (a visible tombstone reads as absence). Updates
@@ -754,7 +758,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   rewrites no tuple (`src/backend/catalog/heap.c:1692-1732`, reached from
   `ATExecDropColumn`, `src/backend/commands/tablecmds.c:9355`; documented at
   `doc/src/sgml/ref/alter_table.sgml:1546-1552`).
-  - *Every decode path skips dropped ordinals.* `SqlRowCodec.TryDecode` walks the
+  - *Every decode path skips dropped ordinals.* `SqlRowCodec.Decode` walks the
     physical components up to the bound definition's `PhysicalColumnCount` and
     skips each dropped one with `DatabaseKeyReader.Skip`, which materializes no
     value, as `heap_deform_tuple` walks a dropped attribute by its stored length
@@ -2328,6 +2332,36 @@ a `SELECT` without a seek) failed the statement with "Cannot read a deleted
 slot", an out-of-range slot index or "Page N is not allocated". The storage scan
 now skips what was reclaimed beneath it and still fails on a page it cannot read
 (Storage DESIGN, "Reading a record through a reference").
+
+A row record that the page's checksum, type and owner checks pass and that still does not
+decode fails the statement the same way, on every access path (#1362):
+`StorageCorruptionException` carrying the page id, with the slot, the table and the defect in its
+message. Both reads of a row, the seek's `TryReadRecord` with the table's object id and the scan's
+owner-scoped iterator, find the record in a live slot of the table's own page chain, so it is not
+another object's and was not reclaimed: a record too short for its stamps, an object-id prefix
+naming another object, a malformed or truncated component, a component of another type than its
+column's, and a value outside its type's range are all damage. `SqlRowCodec.Decode` throws
+`DatabaseTypeException` for each, and `DecodeRow` (`SqlPlanExecutor.Defaults.cs`), which knows the
+location, reports it. Until #1362 the codec returned null for the first two and the executor
+dropped the row from the result, a malformed component failed with a `DatabaseException` or
+`DatabaseTypeException` naming no page, and a component of another type decoded as a value of that
+type, because the codec read whatever type the tag named rather than the column's. PostgreSQL
+raises `ERRCODE_DATA_CORRUPTED` for a stored value that disagrees with its own header
+(`src/backend/access/heap/heaptoast.c:740-760`), as the
+Graph, Documents and Blob codecs here raise `StorageCorruptionException` for a malformed record.
+The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (a failed
+statement's bracket rollback restoring the page, the purge freeing and clearing it); that copy is
+torn, not damaged. `DecodeRow` therefore reads the slot again, with the same owner check, before it
+reports a failed decode: a slot reclaimed by then is skipped, a re-read that decodes is the row, and
+only a record that fails both reads is corrupt. Without the re-read, a scan racing a writer that
+reverts inserts and frees pages failed within two seconds on each of three runs, reading a cleared
+page as "Expected a Int64 component but found Null" (`SqlRecordDecodeIntegrityTests`); the code
+before #1362 reads such a copy the same way and fails the statement with that type error.
+PostgreSQL needs no second read because it reads a heap page under a share lock
+(`src/backend/access/heap/heapam.c:647`, `:1706`).
+The latest-version check under the row lock makes the same split for the stamps it reads: a live
+slot whose record is too short for them is damage, not the retryable write-write conflict it was
+reported as.
 
 ## The MVCC integration (scoped under #862)
 

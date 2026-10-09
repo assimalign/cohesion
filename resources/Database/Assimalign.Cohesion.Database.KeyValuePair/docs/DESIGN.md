@@ -588,10 +588,20 @@ or reallocated) reads as absence, and anything else that stops the read fails th
 That includes a record that passes its page checksum and does not decode: the read checked the
 page's type and owner, so the record is a key-space entry record, and one that does not decode
 is damaged, not reclaimed. It fails the command with `StorageCorruptionException` (carrying the
-page id), as the Graph, Documents and Blob codecs raise on a malformed record; before, the key
-read as missing.
+page id, with the slot and the defect in its message), as the Graph, Documents and Blob codecs
+raise on a malformed record; before, the key read as missing. Get, Exists, Scan and the
+resolution a Put or Delete starts with all fetch through the same read, so each fails this way
+(#1362). `KeyValueRecordCodec.Decode` throws `DatabaseTypeException` for a record too short for its
+stamps, a malformed or truncated key or value component, and bytes past the value; it has no
+`false` result a caller could read as an absent key. The read holds a pin, not a latch, so it can
+copy a slot while a writer reclaims it (a failed command's bracket rollback restoring the page,
+the purge freeing and clearing it), and that copy is torn rather than damaged: a failed decode is
+confirmed by reading the slot again, with the same owner check, before it is reported. A slot
+reclaimed by then reads as absence, a re-read that decodes is the entry, and only a record that
+fails both reads is corrupt (the SQL DESIGN's "Error model" measures the race the re-read closes).
 The latest-version check under the key lock makes the same split: a reclaimed version is the
-retryable write-write conflict, a page it cannot read is the storage error. Until #1342
+retryable write-write conflict, and a page it cannot read, or a live slot whose record is too
+short for its stamps (#1362), is the storage error. Until #1342
 both caught `StorageException`: a corrupt entry page made its keys read as missing, and a
 PUT over such a key resolved it as missing and then failed with a retryable conflict that no
 retry could clear.

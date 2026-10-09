@@ -714,14 +714,21 @@ internal sealed partial class SqlPlanExecutor
     /// uniqueness-discipline precedent applied to row updates.)
     /// </summary>
     /// <exception cref="TransactionAbortedException">The row was modified by a concurrently committed transaction.</exception>
+    /// <exception cref="StorageCorruptionException">
+    /// The row's slot holds a record too short for its version stamps. <c>ReadRow</c> fails on a
+    /// deleted slot, so a short record is a live slot's, and it is damaged, not a reclaimed version
+    /// to retry against (#1362).
+    /// </exception>
     private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
     {
         var record = _storage.ReadRow(pageId, slotIndex);
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
         {
-            throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': the target row version was reclaimed by a concurrent transaction. Retry the transaction.");
+            throw new StorageCorruptionException(
+                pageId,
+                $"The row record in slot {slotIndex} of page {(long)pageId} of table '{table.Schema}.{table.Name}' holds " +
+                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
         }
 
         var (_, deleter) = SqlRowCodec.ReadStamps(record.Span);
@@ -804,7 +811,7 @@ internal sealed partial class SqlPlanExecutor
     /// Drops a column as a catalog-only change (#1241): the catalog marks the column's
     /// physical ordinal dropped in one self-committed record and no stored version is
     /// read or written. Every version keeps the dropped component, which every decode
-    /// skips (<see cref="SqlRowCodec.TryDecode"/>), and versions written afterwards store
+    /// skips (<see cref="SqlRowCodec.Decode"/>), and versions written afterwards store
     /// NULL there, or nothing when no live column follows. This is PostgreSQL's DROP COLUMN: <c>ATExecDropColumn</c>
     /// (<c>src/backend/commands/tablecmds.c:9355</c>) reaches <c>RemoveAttributeById</c>,
     /// which sets <c>attisdropped</c> and rewrites no tuple
@@ -1183,17 +1190,18 @@ internal sealed partial class SqlPlanExecutor
                 var (pageId, slotIndex) = SqlRecordLocation.Unpack(cursor.CurrentEntryReference);
 
                 // Only a row reclaimed beneath the entry is skipped; a page that fails its
-                // checksum or cannot be read fails the statement (#1342).
+                // checksum or cannot be read (#1342), or a row that does not decode (#1362),
+                // fails the statement.
                 if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record))
                 {
                     continue;
                 }
 
-                var values = DecodeRow(record.Span, table, defaults, out var writer, out var deleter);
+                var values = DecodeRow(record, pageId, slotIndex, table, defaults, out var writer, out var deleter);
 
                 if (values is null)
                 {
-                    continue;
+                    continue; // reclaimed before the read that confirmed a failed decode
                 }
 
                 if (!snapshot.IsVisible(writer))
@@ -1352,7 +1360,9 @@ internal sealed partial class SqlPlanExecutor
     /// this: an index must carry an entry for every version an older snapshot
     /// can still read, with the version's own stamps. The scan is scoped to the
     /// table's record chain (per-object pages), so its cost is O(table), not
-    /// O(database); the object-id prefix filter below stays as defense in depth.
+    /// O(database). Every record the scan meets is the table's: one whose object-id
+    /// prefix names another object, or that does not decode, fails the scan with
+    /// <see cref="StorageCorruptionException"/> rather than being skipped (#1362).
     /// </summary>
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)> ScanVersions(
         SqlCatalogTable table,
@@ -1367,8 +1377,9 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             var unit = iterator.Current;
-            var values = DecodeRow(unit.Data.Span, table, defaults, out var writer, out var deleter);
+            var values = DecodeRow(unit.Data, unit.PageId, unit.SlotIndex, table, defaults, out var writer, out var deleter);
 
+            // Null only when the slot was reclaimed before the read that confirmed a failed decode.
             if (values is not null)
             {
                 if (metrics is not null)

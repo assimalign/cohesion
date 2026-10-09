@@ -373,12 +373,20 @@ internal sealed class KeyValueOperationExecutor
     /// reverted slot, a freed or reallocated page) reads as absence; a page that
     /// fails its checksum or cannot be read fails the command (#1342).
     /// </summary>
+    /// <remarks>
+    /// The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (a
+    /// failed command's bracket rollback restoring the page, the version purge freeing and
+    /// clearing it), and that copy is torn rather than damaged. A record that does not decode is
+    /// therefore read again, with the same owner check, before it is reported (#1362): a slot
+    /// reclaimed by then reads as absence, a re-read that decodes is the entry, and only a record
+    /// that does not decode on both reads fails the command.
+    /// </remarks>
     /// <exception cref="StorageCorruptionException">
     /// The entry page failed its checksum or is malformed, or the record does not decode. The read
     /// checked the page's type and owner, so a record it returned is a key-space entry record, and
     /// one that does not decode is damaged, not reclaimed or reused: it fails the command instead
-    /// of reading the key as missing (#1342), as the Graph, Documents and Blob codecs raise on a
-    /// malformed record.
+    /// of reading the key as missing (#1342, #1362), as the Graph, Documents and Blob codecs raise
+    /// on a malformed record.
     /// </exception>
     private ResolvedVersion? ReadVisibleVersion(ulong entryReference, TransactionSnapshot snapshot)
     {
@@ -389,16 +397,49 @@ internal sealed class KeyValueOperationExecutor
             return null;
         }
 
-        if (!KeyValueRecordCodec.TryDecode(record.Span, out byte[] key, out byte[] value, out var writer, out var deleter))
+        byte[] key;
+        byte[] value;
+        TransactionSequence writer;
+        TransactionSequence deleter;
+
+        try
         {
-            throw new StorageCorruptionException(
-                pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode.");
+            KeyValueRecordCodec.Decode(record.Span, out key, out value, out writer, out deleter);
+        }
+        catch (DatabaseTypeException)
+        {
+            if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out record))
+            {
+                return null;
+            }
+
+            DecodeConfirmed(record.Span, pageId, slotIndex, out key, out value, out writer, out deleter);
         }
 
         bool visible = snapshot.IsVisible(writer)
             && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter));
 
         return visible ? new ResolvedVersion(key, value, writer, entryReference) : null;
+    }
+
+    /// <summary>
+    /// Decodes the confirming read of an entry record whose first read did not decode
+    /// (<see cref="ReadVisibleVersion"/>), and reports the record as corrupt when it does not
+    /// decode again.
+    /// </summary>
+    /// <exception cref="StorageCorruptionException">The record does not decode.</exception>
+    private static void DecodeConfirmed(ReadOnlySpan<byte> record, PageId pageId, int slotIndex,
+        out byte[] key, out byte[] value, out TransactionSequence writer, out TransactionSequence deleter)
+    {
+        try
+        {
+            KeyValueRecordCodec.Decode(record, out key, out value, out writer, out deleter);
+        }
+        catch (DatabaseTypeException defect)
+        {
+            throw new StorageCorruptionException(
+                pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode: {defect.Message}");
+        }
     }
 
     /// <summary>
@@ -410,20 +451,26 @@ internal sealed class KeyValueOperationExecutor
     /// target row.)
     /// </summary>
     /// <exception cref="TransactionAbortedException">The key was modified by a concurrently committed transaction.</exception>
-    /// <exception cref="StorageCorruptionException">The version's page failed its checksum; a damaged page is not a conflict to retry (#1342).</exception>
+    /// <exception cref="StorageCorruptionException">
+    /// The version's page failed its checksum, or the version's live slot holds a record too short
+    /// for its stamps: a damaged page or record is not a conflict to retry (#1342, #1362).
+    /// </exception>
     private void EnsureLatestVersion(ulong entryReference, TransactionSequence self)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
 
         if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
-            record = ReadOnlyMemory<byte>.Empty;
+            throw new TransactionAbortedException(
+                "Write-write conflict: the target entry version was reclaimed by a concurrent transaction. Retry the transaction.");
         }
 
         if (record.Length < KeyValueRecordCodec.StampHeaderSize)
         {
-            throw new TransactionAbortedException(
-                "Write-write conflict: the target entry version was reclaimed by a concurrent transaction. Retry the transaction.");
+            throw new StorageCorruptionException(
+                pageId,
+                $"The key-value entry record in slot {slotIndex} of page {(long)pageId} holds {record.Length} bytes, " +
+                $"fewer than its {KeyValueRecordCodec.StampHeaderSize}-byte version-stamp header.");
         }
 
         var (_, deleter) = KeyValueRecordCodec.ReadStamps(record.Span);
