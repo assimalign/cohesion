@@ -28,9 +28,12 @@ internal static class HttpExtendedConnectRules
     public const string NotExtendedConnectMessage =
         "The exchange is not an extended CONNECT (RFC 8441, RFC 9220), so no tunnel can be accepted for it.";
 
-    /// <summary>The refusal for a second accept.</summary>
+    /// <summary>
+    /// The refusal for a second accept attempt. The first attempt latches even when a later guard
+    /// refuses it, so the tunnel may never have been accepted.
+    /// </summary>
     public const string AlreadyAcceptedMessage =
-        "The extended CONNECT tunnel has already been accepted for this exchange.";
+        "An extended CONNECT accept has already been attempted for this exchange.";
 
     /// <summary>The refusal for a cancelled exchange.</summary>
     public const string CancelledMessage =

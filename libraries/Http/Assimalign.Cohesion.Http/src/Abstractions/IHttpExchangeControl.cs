@@ -131,13 +131,20 @@ public interface IHttpExchangeControl
     /// Gets whether this exchange's stream can be accepted as an extended CONNECT tunnel
     /// (<see cref="AcceptTunnelAsync"/>): the exchange is a validated HTTP/2 or HTTP/3 extended
     /// CONNECT (RFC 8441 §4, RFC 9220 §3; see <see cref="HttpExchangeInterceptorRequestContext.Protocol"/>),
-    /// its tunnel has not already been accepted, its final response has not started, and it has not
+    /// no accept has been attempted for it yet, its final response has not started, and it has not
     /// been cancelled. Always <see langword="false"/> on HTTP/1.1, whose <c>CONNECT</c> and upgrades
     /// take the whole connection over instead (<see cref="TakeOver"/>).
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The accept latches on its first attempt: once <see cref="AcceptTunnelAsync"/> has been called
+    /// on an extended CONNECT, this is <see langword="false"/> for the rest of the exchange, whether or
+    /// not that call succeeded.
+    /// </para>
+    /// <para>
     /// The probe does not report a stream the peer has already reset: that is learned from
     /// <see cref="AcceptTunnelAsync"/>, which fails with an <see cref="IOException"/>.
+    /// </para>
     /// </remarks>
     bool CanAcceptTunnel { get; }
 
@@ -147,6 +154,14 @@ public interface IHttpExchangeControl
     /// (RFC 8441 §5, RFC 9220 §3). One-shot.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// On an extended CONNECT, the first call latches the accept before any other guard runs. A call
+    /// that then fails — the exchange was cancelled, its response started, its stream was reset, or
+    /// writing the head failed or was cancelled — still uses the accept up: every later call throws
+    /// <see cref="System.InvalidOperationException"/>, and <see cref="CanAcceptTunnel"/> reports
+    /// <see langword="false"/>. A call on an exchange that is not an extended CONNECT is refused
+    /// without latching.
+    /// </para>
     /// <list type="bullet">
     /// <item><description>The response head carries the headers already set on the exchange's
     /// response, with the fields a tunnel cannot carry removed: <c>Content-Length</c> and
@@ -183,8 +198,9 @@ public interface IHttpExchangeControl
     /// The duplex tunnel. The caller owns it and disposes it to end the server's side of the stream.
     /// </returns>
     /// <exception cref="System.InvalidOperationException">
-    /// The exchange is not an extended CONNECT on HTTP/2 or HTTP/3, its tunnel was already accepted,
-    /// its response has already started, or it was cancelled.
+    /// The exchange is not an extended CONNECT on HTTP/2 or HTTP/3, an accept was already attempted
+    /// for it (whether or not that attempt succeeded), its response has already started, or it was
+    /// cancelled.
     /// </exception>
     /// <exception cref="IOException">
     /// The peer reset the stream or the connection closed before the response head was written.

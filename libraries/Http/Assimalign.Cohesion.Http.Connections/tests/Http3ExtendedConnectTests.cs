@@ -215,6 +215,29 @@ public class Http3ExtendedConnectTests
         await Should.ThrowAsync<InvalidOperationException>(() => context.ExtendedConnect!.AcceptAsync().AsTask());
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 ExtendedConnect: A refused accept should still latch, so a later one throws the already-attempted refusal")]
+    public async Task AcceptAsync_AfterRefusedAttempt_ShouldThrowAlreadyAttempted()
+    {
+        // Arrange — the first attempt latches before the response-started guard refuses it.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            configureListener: static options =>
+            {
+                WithExtendedConnect(options);
+                options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+            });
+        await OpenExtendedConnectAsync(peer);
+        IHttpContext context = await peer.NextContextAsync();
+        await context.Response.Streaming.WriteAsync(Encoding.ASCII.GetBytes("started")).AsTask().WaitAsync(_timeout);
+        InvalidOperationException first = await Should.ThrowAsync<InvalidOperationException>(() => context.ExtendedConnect!.AcceptAsync().AsTask());
+
+        // Act
+        InvalidOperationException second = await Should.ThrowAsync<InvalidOperationException>(() => context.ExtendedConnect!.AcceptAsync().AsTask());
+
+        // Assert
+        first.Message.ShouldBe(HttpExtendedConnectRules.ResponseStartedMessage);
+        second.Message.ShouldBe(HttpExtendedConnectRules.AlreadyAcceptedMessage);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 ExtendedConnect: A peer reset should fault a pending read and later writes with IOException")]
     public async Task Tunnel_OnPeerReset_ShouldFaultPendingReadAndWrites()
     {

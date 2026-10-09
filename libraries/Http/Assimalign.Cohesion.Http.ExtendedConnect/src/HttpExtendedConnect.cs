@@ -23,14 +23,20 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="IHttpExchangeInterceptor.BeforeResponse"/> hook binds that feature to the transport's
 /// exchange control (<see cref="HttpExchangeInterceptorResponseContext.Control"/>), whose
 /// <see cref="IHttpExchangeControl.AcceptTunnelAsync"/> commits the <c>200</c> and returns the
-/// tunnel. The instance is stateless and shared, so the feature itself carries the exchange's
-/// state between the two hooks.
+/// tunnel. Each call returns a new instance, which is stateless: the listener shares it across its
+/// exchanges, so the feature itself carries the exchange's state between the two hooks.
 /// </para>
 /// <para>
 /// It declares <see cref="HttpInterceptorScopes.Request"/> and joins the response phase only of an
 /// extended CONNECT (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), so
-/// registering it costs any other exchange one version check and nothing more: the transport builds
-/// no response sink or exchange control for it on its account.
+/// the transport builds no response sink or exchange control for any other exchange on its account.
+/// Such an ordinary exchange pays one null check in
+/// <see cref="IHttpExchangeInterceptor.AfterRequestHead"/> plus the dispatch of the interceptor's no-op
+/// <see cref="IHttpExchangeInterceptor.BeforeRequestBody"/> and
+/// <see cref="IHttpExchangeInterceptor.AfterRequestBody"/> hooks, and the interceptor allocates
+/// nothing for it. Like any request-scoped interceptor, it does make the transport build its
+/// per-exchange request-parse context; a listener with another request-scoped interceptor, such as
+/// the Web host's defaults, builds that context already.
 /// </para>
 /// <para>
 /// The HTTP/2 and HTTP/3 transports advertise <c>SETTINGS_ENABLE_CONNECT_PROTOCOL</c> whether or not

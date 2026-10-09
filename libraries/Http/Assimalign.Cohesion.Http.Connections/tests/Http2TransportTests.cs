@@ -457,8 +457,10 @@ public class Http2TransportTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")]
     public async Task Http2_OnConnect_ShouldAdvertiseConnectProtocolEnabled()
     {
-        // RFC 8441 §3 — a server willing to accept extended CONNECT advertises
-        // SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 in its initial SETTINGS.
+        // RFC 8441 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 in the initial SETTINGS tells the
+        // client it may send extended CONNECT. The transport advertises it unconditionally, as here
+        // on a listener with no interceptors; surfacing an extended CONNECT to the application is the
+        // Http.ExtendedConnect interceptor's job, which the listener must register.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
 

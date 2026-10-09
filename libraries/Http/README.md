@@ -14,7 +14,6 @@ packages whose dependencies go beyond the root are drawn.
 ```mermaid
 flowchart LR
     Root["Http — area root"]
-    Core["Assimalign.Cohesion.Core — L1"]
     Conn["Assimalign.Cohesion.Connections — L1"]
     Cookies["Http.Cookies"]
     Forms["Http.Forms"]
@@ -26,7 +25,6 @@ flowchart LR
     Sse["Http.ServerSentEvents"]
     HttpConn["Http.Connections"]
     Tls["Http.Tls"]
-    Root --> Core
     Cookies --> Root
     Forms --> Root
     Streaming --> Root
@@ -51,7 +49,8 @@ The six packages not drawn — `Http.ClientFactory`, `Http.DigestFields`, `Http.
 `Http.InterimResponses`, `Http.RequestLimits`, and `Http.Sessions` — each reference the root
 `Assimalign.Cohesion.Http` and nothing else, so they would add six nodes and six identical arrows
 without adding information. `Http.ExtendedConnect` references only the root too; it is drawn
-because `Http.WebSockets` references it. The full reference graph for every Cohesion
+because `Http.WebSockets` references it. The root's own reference to `Assimalign.Cohesion.Core` is
+stated under [Layering](#layering) rather than drawn. The full reference graph for every Cohesion
 assembly is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## The per-concern packaging rule
@@ -70,7 +69,8 @@ concern and belongs there.
 ## Layering
 
 In the repo's L1/L2/L3 model (see [docs/programs/DELIVERY_ROADMAP.md](../../docs/programs/DELIVERY_ROADMAP.md)),
-this area is **L1 — foundation**. It sits on `Assimalign.Cohesion.Core` and, for
+this area is **L1 — foundation**. It sits on `Assimalign.Cohesion.Core`, which the root
+`Assimalign.Cohesion.Http` references, and, for
 `Http.Connections` and `Http.Tls`, on `Assimalign.Cohesion.Connections`: the transport publishes a
 connection's TLS handshake as that library's `ITlsConnectionInfo` facet, and `Http.Tls` reads it,
 so neither of the two references the other. It references no `Assimalign.Cohesion.Hosting*`

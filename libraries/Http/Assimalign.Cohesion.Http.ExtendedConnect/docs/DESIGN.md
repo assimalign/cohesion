@@ -67,8 +67,9 @@ package.
 
 ## The interceptor
 
-`HttpExtendedConnect.CreateInterceptor()` returns one stateless, shared instance. It declares
-`HttpInterceptorScopes.Request`:
+`HttpExtendedConnect.CreateInterceptor()` returns a new instance on each call. It is not a singleton,
+but it is stateless, so the listener that registers it shares it across all of its exchanges, and
+per-exchange state lives in the exchange's features. It declares `HttpInterceptorScopes.Request`:
 
 1. **`AfterRequestHead`.** On an HTTP/2 or HTTP/3 `CONNECT` whose `Protocol` is set, it installs an
    unbound `HttpExtendedConnectFeature` and adds itself to that exchange's response phase
@@ -79,9 +80,14 @@ package.
    whose accept could not work. The hook is CPU-only, as the interceptor contract requires on the
    HTTP/2 frame pump.
 
-Every other exchange pays one version check: the interceptor never joins its response phase, so the
-transport builds no response sink or exchange control for it. An extended CONNECT does pay for them,
-once per WebSocket handshake: the response phase is how the feature reaches the control.
+`AfterRequestHead` tests `Protocol` first, then the version, then the method, so every other exchange
+pays one null check there, plus the dispatch of the interceptor's inherited no-op `BeforeRequestBody`
+and `AfterRequestBody` hooks, and the interceptor allocates nothing for it. It never joins that
+exchange's response phase, so the transport builds no response sink or exchange control for it. Like
+any request-scoped interceptor, it does make the transport build its per-exchange request-parse
+context; the Web host's other default interceptors are request-scoped too, so that context exists
+there already. An extended CONNECT does pay for the sink and the control, once per WebSocket
+handshake: the response phase is how the feature reaches the control.
 
 **The registration is a dependency.** The feature exists only on a listener that registers the
 interceptor. The HTTP/2 and HTTP/3 transports advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1`
@@ -89,6 +95,31 @@ regardless, so a listener without it receives extended CONNECT requests and surf
 `CONNECT` requests: WebSockets over HTTP/2 and HTTP/3 cannot be accepted there. The Web host
 registers it by default, after the protocol-upgrade interceptor (Web.Hosting DESIGN); a host that
 clears `options.Interceptors` loses it, as it loses HTTP/1.1 WebSockets with the upgrade interceptor.
+Because the advertisement is unconditional, a listener that registers `HttpProtocolUpgrade` but not
+`HttpExtendedConnect` accepts HTTP/2 and HTTP/3 extended CONNECT handshakes it cannot surface: a
+WebSocket client that chose HTTP/2 or HTTP/3 on the strength of the setting then fails, instead of
+falling back to HTTP/1.1, where that listener would have served it.
+
+## Behavior change from 10.0.0-preview.1
+
+Checked against the `v10.0.0-preview.1` tag:
+
+- **The listener must register the interceptor.** In preview.1 the HTTP/2 and HTTP/3 transports
+  published the validated `:protocol` under the `IHttpContext.Items` key `":protocol"`, and
+  `context.ExtendedConnect` built the feature from that string on every read. Extended CONNECT
+  detection therefore worked on a bare listener, with nothing registered, although the feature
+  could only report `Protocol`. The transport now publishes nothing to `Items`, and the feature
+  exists only on a listener that registers `HttpExtendedConnect.CreateInterceptor()`. The Web host
+  registers it by default; a listener built directly on `Http.Connections` must add it, and code
+  that read `Items[":protocol"]` reads `context.ExtendedConnect` instead.
+- **`IHttpExchangeControl` gained `CanAcceptTunnel` and `AcceptTunnelAsync`.** The interface
+  shipped in preview.1 with `HasResponseStarted`, `CanWriteInterimResponse`,
+  `WriteInterimResponseAsync`, `CanTakeOver` and `TakeOver`. The new members are plain interface
+  members without default implementations (core Http DESIGN, "The extended CONNECT seam"), so an
+  implementation outside this repository is a source break: it no longer compiles until it adds
+  both.
+- **`IHttpExtendedConnectFeature` gained `AcceptAsync`.** It shipped in preview.1 with `Protocol`
+  only, so an outside implementation, such as a test double, has the same source break.
 
 ## Accepting the tunnel
 
@@ -105,10 +136,12 @@ the stream (the full contract is on the interface):
 - **Disposing** ends the server's side: `END_STREAM` on HTTP/2, a FIN on HTTP/3.
 - **Failures.** A peer reset or a lost connection faults pending and later reads and writes with an
   `IOException`, never a clean end of stream.
-- **Guards.** The transport checks them, in this order, before writing anything: accepting twice,
-  accepting a cancelled exchange, or accepting after the response started throws
+- **Guards.** The transport checks them, in this order, before writing anything: a second accept
+  attempt, accepting a cancelled exchange, or accepting after the response started throws
   `InvalidOperationException`; accepting a stream the peer reset, or on a closed connection, throws
-  `IOException`. The feature adds no rule of its own, so the order is the same on every path.
+  `IOException`. The first attempt latches before the later guards run, so an attempt that fails
+  still uses the accept up: `CanAcceptTunnel` is then `false`, and another call throws. The feature
+  adds no rule of its own, so the order is the same on every path.
 
 Accepting takes the exchange over, as an HTTP/1.1 protocol upgrade does: the transport no longer
 writes the application's response, and the exchange interceptors' response-head and after-response
@@ -149,5 +182,5 @@ on the validator alone.
 ## AOT posture
 
 Pure managed code with no reflection, dynamic code generation, or runtime type inspection. The
-interceptor's hooks are a version check, a feature set and a type test, and the accessors are one
-feature lookup each, so the package is trimming- and NativeAOT-safe.
+interceptor's hooks are a null check, a version and a method check, a feature set and a type test,
+and the accessors are one feature lookup each, so the package is trimming- and NativeAOT-safe.

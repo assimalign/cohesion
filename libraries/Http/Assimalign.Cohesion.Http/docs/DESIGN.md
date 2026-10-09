@@ -619,9 +619,10 @@ carries two generic seam members for it and no feature contract:
   `TakeOver`. The accept is one-shot: it answers `200` in a head that does not end the stream (without
   `Content-Length`, `Transfer-Encoding` or connection-specific fields), takes the exchange over, and
   returns the stream as a duplex `Stream`. Reads deliver the client's `DATA`, writes go out as
-  `DATA` under flow control, and disposing ends the server's side. The member's documentation
-  carries the full contract. HTTP/1.1's control reports `false`, because its `CONNECT` and upgrades
-  take the whole connection over instead.
+  `DATA` under flow control, and disposing ends the server's side. The first attempt on an extended
+  CONNECT latches, so `CanAcceptTunnel` is `false` once `AcceptTunnelAsync` has been called, whether
+  or not that call succeeded. The member's documentation carries the full contract. HTTP/1.1's
+  control reports `false`, because its `CONNECT` and upgrades take the whole connection over instead.
 
 The application-facing feature, `IHttpExtendedConnectFeature` (`context.ExtendedConnect`), ships in
 `Assimalign.Cohesion.Http.ExtendedConnect`. Its interceptor installs the feature from `Protocol` and
@@ -653,7 +654,11 @@ Two consequences follow:
 
 `IHttpExchangeControl` shipped in preview.1, and the two members were added as plain interface
 members, not default implementations: a throwing default on a public seam would hide an unsupported
-mechanism behind a runtime failure. The only implementers are the transport's three controls.
+mechanism behind a runtime failure. The only shipped implementers are the transport's three
+controls. For an implementer outside this repository the addition is a source break: a class
+written against preview.1's interface no longer compiles until it implements `CanAcceptTunnel` and
+`AcceptTunnelAsync` (Http.ExtendedConnect DESIGN, "Behavior change from 10.0.0-preview.1", which also
+records that the feature now needs its interceptor registered).
 
 ### What it does not do
 

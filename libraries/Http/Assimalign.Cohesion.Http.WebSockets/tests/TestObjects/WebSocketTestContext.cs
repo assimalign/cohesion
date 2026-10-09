@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.Http.WebSockets.Tests.TestObjects;
 /// A configurable <see cref="IHttpContext"/> double with real header and feature collections. An
 /// HTTP/1.1 handshake context also carries a <see cref="FakeProtocolUpgrade"/>, standing in for the
 /// protocol-upgrade interceptor, so <c>context.Upgrade</c> reads what the transport would surface;
-/// an HTTP/2 or HTTP/3 one carries a <see cref="FakeExtendedConnect"/>, standing in for the
-/// transport's extended CONNECT feature.
+/// an HTTP/2 or HTTP/3 one carries a <see cref="FakeExtendedConnect"/>, standing in for the extended
+/// CONNECT feature the <c>Http.ExtendedConnect</c> interceptor installs.
 /// </summary>
 internal sealed class WebSocketTestContext : IHttpContext
 {

@@ -309,6 +309,26 @@ public class Http2ExtendedConnectTests
         await EndExchangeAsync(peer, context);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 ExtendedConnect: A refused accept should still latch, so a later one throws the already-attempted refusal")]
+    public async Task AcceptAsync_AfterRefusedAttempt_ShouldThrowAlreadyAttempted()
+    {
+        // Arrange — the first attempt latches before the cancelled guard refuses it.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
+        await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
+        IHttpContext context = await peer.ReceiveContextAsync();
+        context.Cancel();
+        InvalidOperationException first = await Should.ThrowAsync<InvalidOperationException>(() => context.ExtendedConnect!.AcceptAsync().AsTask());
+
+        // Act
+        InvalidOperationException second = await Should.ThrowAsync<InvalidOperationException>(() => context.ExtendedConnect!.AcceptAsync().AsTask());
+
+        // Assert
+        first.Message.ShouldBe(HttpExtendedConnectRules.CancelledMessage);
+        second.Message.ShouldBe(HttpExtendedConnectRules.AlreadyAcceptedMessage);
+
+        await EndExchangeAsync(peer, context);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 ExtendedConnect: Accepting a stream the peer already reset should throw IOException")]
     public async Task AcceptAsync_OnStreamResetByPeer_ShouldThrowIOException()
     {

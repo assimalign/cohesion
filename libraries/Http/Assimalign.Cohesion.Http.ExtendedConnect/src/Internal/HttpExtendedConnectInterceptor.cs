@@ -40,12 +40,14 @@ internal sealed class HttpExtendedConnectInterceptor : HttpExchangeInterceptor
     /// <inheritdoc />
     public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
-        // HTTP/1.1 has no extended CONNECT: its CONNECT and upgrades take the whole connection over
-        // (Http.ProtocolUpgrade). The transport sets Protocol only on a CONNECT it validated against
-        // RFC 8441 §4 / RFC 9220 §3; the version and method checks keep a hand-built context honest.
-        if (context.Version is not (HttpVersion.Http20 or HttpVersion.Http30)
-            || context.Method != HttpMethod.Connect
-            || context.Protocol is not { Length: > 0 } protocol)
+        // The cheapest test first: every exchange but an extended CONNECT has no Protocol, so an
+        // ordinary exchange pays one null check here. The transport sets Protocol only on a CONNECT it
+        // validated against RFC 8441 §4 / RFC 9220 §3. HTTP/1.1 has no extended CONNECT: its CONNECT
+        // and upgrades take the whole connection over (Http.ProtocolUpgrade). The version and method
+        // checks keep a hand-built context honest.
+        if (context.Protocol is not { Length: > 0 } protocol
+            || context.Version is not (HttpVersion.Http20 or HttpVersion.Http30)
+            || context.Method != HttpMethod.Connect)
         {
             return;
         }

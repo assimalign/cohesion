@@ -7,9 +7,10 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Http.WebSockets.Tests.TestObjects;
 
 /// <summary>
-/// Stands in for the HTTP/2 and HTTP/3 transports' extended CONNECT feature: accepting records the
-/// response status and headers staged at that moment, which is what the real transport sends on the
-/// <c>200</c>, and surrenders the configured tunnel stream.
+/// Stands in for the extended CONNECT feature the <c>Http.ExtendedConnect</c> interceptor installs on
+/// an HTTP/2 or HTTP/3 extended CONNECT: accepting records the response status and headers staged at
+/// that moment, which is what the transport's exchange control sends on the <c>200</c>, and
+/// surrenders the configured tunnel stream.
 /// </summary>
 internal sealed class FakeExtendedConnect : IHttpExtendedConnectFeature
 {

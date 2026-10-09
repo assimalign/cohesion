@@ -15,10 +15,12 @@ namespace Assimalign.Cohesion.Http;
 /// pseudo-header, plus <c>:scheme</c>, <c>:path</c>, and <c>:authority</c>. A client uses it to run
 /// another protocol over one HTTP/2 or HTTP/3 stream; WebSocket (<c>:protocol = websocket</c>) is
 /// the common case. The interceptor <see cref="HttpExtendedConnect.CreateInterceptor"/> produces
-/// installs this feature on every exchange the server transport validated as an extended CONNECT
-/// and on no other exchange, so the interceptor must be registered on the listener; the Web host
-/// registers it by default. Read the feature as <c>context.ExtendedConnect</c>
-/// (<see cref="HttpExtendedConnectExtensions"/>).
+/// installs this feature on every exchange the HTTP/2 or HTTP/3 server transport validated as an
+/// extended CONNECT and on no other exchange, so the interceptor must be registered on the listener;
+/// the Web host registers it by default. The feature remains only if the transport's exchange
+/// control can still accept the tunnel when the exchange's response phase begins; otherwise the
+/// interceptor's <see cref="IHttpExchangeInterceptor.BeforeResponse"/> hook removes it. Read the
+/// feature as <c>context.ExtendedConnect</c> (<see cref="HttpExtendedConnectExtensions"/>).
 /// </para>
 /// <para>
 /// <see cref="AcceptAsync"/> answers the request with <c>200</c> and surrenders the stream:
@@ -70,8 +72,8 @@ public interface IHttpExtendedConnectFeature : IHttpFeature
     /// The duplex tunnel. The caller owns it and disposes it to end the server's side of the stream.
     /// </returns>
     /// <exception cref="System.InvalidOperationException">
-    /// The tunnel was already accepted for this exchange, the response has already started, or the
-    /// exchange was cancelled.
+    /// An accept was already attempted for this exchange (whether or not that attempt succeeded), the
+    /// response has already started, or the exchange was cancelled.
     /// </exception>
     /// <exception cref="IOException">
     /// The peer reset the stream or the connection closed before the response head was written.

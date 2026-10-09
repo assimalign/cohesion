@@ -22,7 +22,8 @@ options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 The Web host (`Assimalign.Cohesion.Web.Hosting`) registers it by default. Without it, an extended
 CONNECT reaches the application as an ordinary `CONNECT` and `context.ExtendedConnect` is `null`,
 although the HTTP/2 and HTTP/3 transports still advertise extended CONNECT to clients. An ordinary
-exchange pays nothing for the registration beyond a version check.
+exchange pays one null check and the interceptor's no-op body hooks, with no allocation (see
+DESIGN, "The interceptor").
 
 ## Usage
 
