@@ -475,7 +475,7 @@ public sealed class KeyValueDatabaseEventSourceTests
             Task? flood = whileServerWrites ? TcpResetPeer.FloodPingsAsync(socket, 4_000_000) : null;
             if (flood is not null)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1));
+                await TcpResetPeer.WaitUntilServerStalledAsync(socket, TimeSpan.FromSeconds(15));
             }
 
             TcpResetPeer.Reset(socket);
@@ -489,10 +489,15 @@ public sealed class KeyValueDatabaseEventSourceTests
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
         var closed = await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
 
-        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault.
+        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault. The
+        // write case accepts only the transport reasons: a PeerClosed there means the flood no
+        // longer blocked the pump in a send, and the case stopped testing the classification.
         string seen = string.Join("; ", recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventName + "(" + string.Join(", ", e.Payload!.Skip(1)) + ")"));
         recorder.Events.Where(e => IsFor(e, 7, sessionId)).ShouldBeEmpty("The pump reported the reset as a fault: " + seen);
-        ((string)closed.Payload![1]!).ShouldBeOneOf(["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"], seen);
+        string[] expected = whileServerWrites
+            ? ["TransportFailed", "ConnectionAborted"]
+            : ["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"];
+        ((string)closed.Payload![1]!).ShouldBeOneOf(expected, seen);
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 

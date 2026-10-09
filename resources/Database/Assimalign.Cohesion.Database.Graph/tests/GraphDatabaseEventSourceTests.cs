@@ -489,6 +489,26 @@ public sealed class GraphDatabaseEventSourceTests
         ((double)stop.Payload![2]!).ShouldBeGreaterThan(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should close a recovery that threw with an Error stop, by a direct write")]
+    public void IndexRecoveryStop_RecoveryThrew_ShouldWriteAnErrorStop()
+    {
+        // Arrange: no fault-injection seam reaches RecoverIndexesAsync inside the open, so the
+        // status a recovery that threw writes is checked by a direct write.
+        string name = "threw" + Guid.NewGuid().ToString("N");
+        var database = new DatabaseName(name);
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Informational);
+
+        // Act
+        long started = GraphDatabaseEventSource.Log.IndexRecoveryStart(database, 1);
+        GraphDatabaseEventSource.Log.IndexRecoveryStop(database, succeeded: false, started);
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => e.EventId is 10 or 11 && Equals(e.Payload![0], name)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["IndexRecoveryStart", "IndexRecoveryStop"]);
+        events[1].Payload![1].ShouldBe("Error");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should report a wire statement that fails to parse once, before the root sees it")]
     [InlineData(false)]
     [InlineData(true)]
@@ -590,7 +610,7 @@ public sealed class GraphDatabaseEventSourceTests
             Task? flood = whileServerWrites ? TcpResetPeer.FloodPingsAsync(socket, 4_000_000) : null;
             if (flood is not null)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1));
+                await TcpResetPeer.WaitUntilServerStalledAsync(socket, TimeSpan.FromSeconds(15));
             }
 
             TcpResetPeer.Reset(socket);
@@ -604,10 +624,15 @@ public sealed class GraphDatabaseEventSourceTests
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
         var closed = await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
 
-        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault.
+        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault. The
+        // write case accepts only the transport reasons: a PeerClosed there means the flood no
+        // longer blocked the pump in a send, and the case stopped testing the classification.
         string seen = string.Join("; ", recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventName + "(" + string.Join(", ", e.Payload!.Skip(1)) + ")"));
         recorder.Events.Where(e => IsFor(e, 7, sessionId)).ShouldBeEmpty("The pump reported the reset as a fault: " + seen);
-        ((string)closed.Payload![1]!).ShouldBeOneOf(["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"], seen);
+        string[] expected = whileServerWrites
+            ? ["TransportFailed", "ConnectionAborted"]
+            : ["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"];
+        ((string)closed.Payload![1]!).ShouldBeOneOf(expected, seen);
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 

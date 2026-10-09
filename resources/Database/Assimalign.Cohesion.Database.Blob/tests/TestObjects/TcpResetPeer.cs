@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -71,6 +72,40 @@ internal static class TcpResetPeer
         }
 
         return socket.SendAsync(wire, SocketFlags.None);
+    }
+
+    /// <summary>
+    /// Waits until the server's pong writes stop arriving: the bytes waiting unread in this peer's
+    /// receive buffer stay the same over several polls, so both buffers are full and the server's
+    /// pump is blocked in a send. Gives up after <paramref name="timeout"/> and leaves the caller's
+    /// assertion to report a pump that never blocked.
+    /// </summary>
+    /// <param name="socket">The flooding peer's socket.</param>
+    /// <param name="timeout">How long to wait at most.</param>
+    /// <returns>A task that completes once the pongs stalled, or the timeout passed.</returns>
+    public static async Task WaitUntilServerStalledAsync(Socket socket, TimeSpan timeout)
+    {
+        const int StablePolls = 4;
+        long started = Stopwatch.GetTimestamp();
+        int last = -1;
+        int stable = 0;
+        while (Stopwatch.GetElapsedTime(started) < timeout)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+            int available = socket.Available;
+            if (available > 0 && available == last)
+            {
+                if (++stable >= StablePolls)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                stable = 0;
+                last = available;
+            }
+        }
     }
 
     /// <summary>

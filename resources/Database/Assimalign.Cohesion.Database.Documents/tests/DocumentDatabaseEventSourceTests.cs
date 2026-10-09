@@ -105,6 +105,26 @@ public sealed class DocumentDatabaseEventSourceTests
         ((double)stop.Payload![2]!).ShouldBeGreaterThan(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - DocumentDatabaseEventSource: Should close a recovery that threw with an Error stop, by a direct write")]
+    public void IndexRecoveryStop_RecoveryThrew_ShouldWriteAnErrorStop()
+    {
+        // Arrange: no fault-injection seam reaches RecoverIndexesAsync inside the open, so the
+        // status a recovery that threw writes is checked by a direct write.
+        string name = "threw" + Guid.NewGuid().ToString("N");
+        var database = new DatabaseName(name);
+        using var recorder = new EventSourceRecorder(DocumentDatabaseEventSource.Log, EventLevel.Informational);
+
+        // Act
+        long started = DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1);
+        DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, succeeded: false, started);
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload![0], name)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["IndexRecoveryStart", "IndexRecoveryStop"]);
+        events[1].Payload![1].ShouldBe("Error");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - DocumentDatabaseEventSource: Should not report a database it creates, which has nothing to recover")]
     public async Task IndexRecovery_CreatedDatabase_ShouldNotBeReported()
     {

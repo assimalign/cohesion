@@ -42,9 +42,12 @@ public sealed class DatabaseActivityNestingTests
     public async Task ExecuteAsync_SqlInsertUnderActivityTracking_ShouldNestKernelEventsUnderTheStatement()
     {
         // Arrange: a file-backed engine whose commits wait for a grouped flush with a one-tick window
-        // (the engine refuses zero), so
-        // the commit the INSERT runs writes the Storage source's GroupCommitWindowMissed on the
-        // statement's own flow.
+        // (the engine refuses zero), so the commit the INSERT runs writes the Storage source's
+        // GroupCommitWindowMissed on the statement's own flow. The flush worker can still win the
+        // race: a committer descheduled between registering its LSN and checking it finds the
+        // worker's flush already durable and writes nothing, so the INSERT is retried until one
+        // commit misses its window, and every attempt's kernel events are checked.
+        const int MaxAttempts = 5;
         string name = "nesting" + Guid.NewGuid().ToString("N");
         string root = Path.Combine(Path.GetTempPath(), "wf-trace-int-nesting", Guid.NewGuid().ToString("N"));
         try
@@ -60,40 +63,52 @@ public sealed class DatabaseActivityNestingTests
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             (await session.ExecuteAsync("CREATE TABLE items (id INT NOT NULL)")).Status.ShouldBe(QueryResultStatus.Success);
             using var recorder = new ActivityRecorder();
+            bool missedWindow = false;
 
-            // Act
-            var inserted = await session.ExecuteAsync("INSERT INTO items (id) VALUES (1)");
-
-            // Assert
-            inserted.Status.ShouldBe(QueryResultStatus.Success);
-            EventWrittenEventArgs[] events = recorder.Events.Where(e => IsFor(e, name)).ToArray();
-            foreach (var written in events)
+            for (int attempt = 1; attempt <= MaxAttempts && !missedWindow; attempt++)
             {
-                _output.WriteLine($"{written.EventSource.Name}/{written.EventName} activity={written.ActivityId} related={written.RelatedActivityId}");
+                int before = recorder.Count;
+
+                // Act
+                var inserted = await session.ExecuteAsync($"INSERT INTO items (id) VALUES ({attempt})");
+
+                // Assert
+                inserted.Status.ShouldBe(QueryResultStatus.Success);
+                EventWrittenEventArgs[] events = recorder.Events.Skip(before).Where(e => IsFor(e, name)).ToArray();
+                foreach (var written in events)
+                {
+                    _output.WriteLine($"attempt {attempt}: {written.EventSource.Name}/{written.EventName} activity={written.ActivityId} related={written.RelatedActivityId}");
+                }
+
+                events.ShouldNotContain(e => e.EventId == 0, "An event source reported an instrumentation error.");
+                int start = Array.FindIndex(events, e => e.EventSource.Name == ActivityRecorder.Root && e.EventName == "StatementStart");
+                int stop = Array.FindLastIndex(events, e => e.EventSource.Name == ActivityRecorder.Root && e.EventName == "StatementStop");
+                start.ShouldBeGreaterThanOrEqualTo(0, "The root wrote no StatementStart for the INSERT.");
+                stop.ShouldBeGreaterThan(start, "The root wrote no StatementStop after the INSERT's start.");
+
+                Guid statement = events[start].ActivityId;
+                statement.ShouldNotBe(Guid.Empty, "Activity tracking gave the statement no activity id.");
+                events[stop].ActivityId.ShouldBe(statement, "The stop closes the statement's own activity.");
+
+                EventWrittenEventArgs[] inside = events[(start + 1)..stop];
+                var begun = inside.Where(e => e.EventSource.Name == ActivityRecorder.Transactions && e.EventName == "TransactionBegun").ShouldHaveSingleItem();
+                var committed = inside.Where(e => e.EventSource.Name == ActivityRecorder.Transactions && e.EventName == "TransactionCommitted").ShouldHaveSingleItem();
+                begun.ActivityId.ShouldBe(statement, "The kernel transaction's begin is not nested under the statement.");
+                committed.ActivityId.ShouldBe(statement, "The kernel transaction's commit is not nested under the statement.");
+
+                // At most one missed window per commit, and it is the statement's own.
+                var flush = inside.Where(e => e.EventSource.Name == ActivityRecorder.Storage && e.EventName == "GroupCommitWindowMissed").ToArray();
+                flush.Length.ShouldBeLessThanOrEqualTo(1);
+                flush.ShouldAllBe(e => e.ActivityId == statement, "The commit's storage event is not nested under the statement.");
+                missedWindow = flush.Length == 1;
+
+                // A flush worker's group flush may fall inside the pair; it runs on the worker's flow, so
+                // it never carries the statement's activity.
+                inside.Where(e => e.EventName is "PendingCommitsFlushed" or "WorkerPassStart" or "WorkerPassStop")
+                    .ShouldAllBe(e => e.ActivityId != statement);
             }
 
-            events.ShouldNotContain(e => e.EventId == 0, "An event source reported an instrumentation error.");
-            int start = Array.FindIndex(events, e => e.EventSource.Name == ActivityRecorder.Root && e.EventName == "StatementStart");
-            int stop = Array.FindLastIndex(events, e => e.EventSource.Name == ActivityRecorder.Root && e.EventName == "StatementStop");
-            start.ShouldBeGreaterThanOrEqualTo(0, "The root wrote no StatementStart for the INSERT.");
-            stop.ShouldBeGreaterThan(start, "The root wrote no StatementStop after the INSERT's start.");
-
-            Guid statement = events[start].ActivityId;
-            statement.ShouldNotBe(Guid.Empty, "Activity tracking gave the statement no activity id.");
-            events[stop].ActivityId.ShouldBe(statement, "The stop closes the statement's own activity.");
-
-            EventWrittenEventArgs[] inside = events[(start + 1)..stop];
-            var begun = inside.Where(e => e.EventSource.Name == ActivityRecorder.Transactions && e.EventName == "TransactionBegun").ShouldHaveSingleItem();
-            var flush = inside.Where(e => e.EventSource.Name == ActivityRecorder.Storage && e.EventName == "GroupCommitWindowMissed").ShouldHaveSingleItem();
-            var committed = inside.Where(e => e.EventSource.Name == ActivityRecorder.Transactions && e.EventName == "TransactionCommitted").ShouldHaveSingleItem();
-            begun.ActivityId.ShouldBe(statement, "The kernel transaction's begin is not nested under the statement.");
-            flush.ActivityId.ShouldBe(statement, "The commit's storage event is not nested under the statement.");
-            committed.ActivityId.ShouldBe(statement, "The kernel transaction's commit is not nested under the statement.");
-
-            // A flush worker's group flush may fall inside the pair; it runs on the worker's flow, so it
-            // never carries the statement's activity.
-            inside.Where(e => e.EventName is "PendingCommitsFlushed" or "WorkerPassStart" or "WorkerPassStop")
-                .ShouldAllBe(e => e.ActivityId != statement);
+            missedWindow.ShouldBeTrue($"No commit of {MaxAttempts} INSERTs missed its group-commit window, so no Storage event was written on the statement's flow.");
         }
         finally
         {
@@ -134,6 +149,8 @@ public sealed class DatabaseActivityNestingTests
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
 
         public IReadOnlyList<EventWrittenEventArgs> Events => _events.ToArray();
+
+        public int Count => _events.Count;
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
