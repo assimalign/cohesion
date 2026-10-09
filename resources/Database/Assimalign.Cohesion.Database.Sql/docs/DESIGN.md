@@ -176,8 +176,8 @@ flowchart TD
 - **Planner walkers.** `SqlPlanner.Children` returns the shared empty sequence for a
   node without operands and a chain's or call's own operand list, so the walkers that
   visit every node of every statement no longer allocate an iterator per leaf. With the
-  bound VALUES row and CHECK, an INSERT of three parameters into a checked table
-  allocates 2.2 KB (13%) less per statement (Q7 below).
+  bound VALUES row and CHECK and closure-free binding, an INSERT of three parameters
+  into a checked table allocates 2.4 KB (14%) less per statement (Q7 below).
 - **Not in E1.** A bound call carries no argument coercions: the built-ins take any
   argument type and convert nothing, and overload resolution over typed signatures,
   which introduces coercions, is phase E2.
@@ -188,20 +188,25 @@ and five measured iterations per case in each process, wall-clock nanoseconds pe
 (Q1 to Q3) or per statement (Q7) and the measuring thread's bytes
 (`GC.GetAllocatedBytesForCurrentThread`). Q7's CHECK calls the built-ins `LENGTH` and
 `ABS`; the registered-function variant arrives with E2. Published for win-arm64 from
-`27db14c7` and from E1 with the same harness and flags, and run as four alternating
-process pairs at high priority pinned to cores 8 to 11 (unpinned runs on the shared
-machine varied by about 30% with the cores a process landed on). Each cell is the range
-of the four runs' medians:
+`27db14c7` and from E1 (after its review fixes) with the same harness and flags, and run
+as four alternating process pairs at high priority pinned to cores 8 to 11 (unpinned
+runs on the shared machine varied by up to 2x with the cores a process landed on and
+the load beside it, while their processor time did not). Each cell is the range of the
+four runs' medians:
 
 | Case | Statement | Baseline ns | E1 ns | Baseline bytes | E1 bytes |
 | --- | --- | --- | --- | --- | --- |
-| Q1 | `SELECT UPPER(name), ABS(id), LENGTH(name) FROM t` | 1,406–1,533 | 1,160–1,350 | 1,076.6 | 1,015.6 |
-| Q2 | `SELECT id FROM t WHERE ABS(id) > 10` | 1,358–1,537 | 1,086–1,162 | 1,252.6 | 927.6 |
-| Q3 | `SELECT g, COUNT(*), SUM(v), AVG(v), MIN(s), MAX(s) FROM t GROUP BY g` | 1,747–1,913 | 1,458–1,589 | 1,257.1 | 1,041.8 |
-| Q7 | 100,000 autocommitted `INSERT`s under `CHECK (LENGTH(name) > 0 AND ABS(v) < 1000000000)` | 12,419–12,845 | 11,692–11,992 | 17,087 | 14,863 |
+| Q1 | `SELECT UPPER(name), ABS(id), LENGTH(name) FROM t` | 1,603–1,842 | 1,239–1,356 | 1,076.6 | 1,015.6 |
+| Q2 | `SELECT id FROM t WHERE ABS(id) > 10` | 1,541–2,089 | 1,046–1,231 | 1,252.6 | 927.6 |
+| Q3 | `SELECT g, COUNT(*), SUM(v), AVG(v), MIN(s), MAX(s) FROM t GROUP BY g` | 1,922–2,071 | 1,439–1,719 | 1,257.1 | 1,041.8 |
+| Q7 | 100,000 autocommitted `INSERT`s under `CHECK (LENGTH(name) > 0 AND ABS(v) < 1000000000)` | 13,341–15,620 | 11,841–12,805 | 17,087 | 14,719 |
 
-Every E1 run was faster than every baseline run in each case. Most of a row's cost is
-the scan and materialization around the expressions, which E1 does not change.
+By the median of the per-process medians E1 is faster in every case: Q1 by 23%, Q2 by
+31%, Q3 by 21% and Q7 by 11% (12% over a separate six-pair Q7 run). Q7's gain is close
+to run-to-run variance, so a single Q7 process can overlap the baseline, as one in an
+earlier campaign did; bytes per row are deterministic and lower in every case. Most of a
+row's cost is the scan and materialization around the expressions, which E1 does not
+change.
 
 ## Compiled-schema provisioning
 
