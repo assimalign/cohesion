@@ -152,18 +152,10 @@ public sealed class RecordSpaceVersionStore : VersionStore
     {
         var (pageId, slotIndex) = _records.UnpackLocation(entryId);
 
-        ReadOnlyMemory<byte> record;
-        try
+        // A reclaimed location (a deleted or reverted slot, a freed or reallocated page) has
+        // no visible version; a page that fails its checksum or cannot be read throws (#1342).
+        if (!_storage.TryReadRecord(pageId, slotIndex, out var record))
         {
-            record = _records.Read(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // The slot was reverted out of existence by a bracket rollback.
             return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
         }
 
@@ -475,25 +467,28 @@ public sealed class RecordSpaceVersionStore : VersionStore
         }
     }
 
+    /// <summary>
+    /// Reads the stamps of the version a ledger or prunable entry names, when the location still
+    /// holds a record. A reclaimed location reads as nothing to do: a failed statement's bracket
+    /// rollback restored a pre-image without the slot (reverting the very insert the entry
+    /// recorded), an earlier pass deleted the slot, or the emptied page was freed and perhaps
+    /// reallocated, which the stamp rechecks of the callers then reject.
+    /// </summary>
+    /// <exception cref="StorageCorruptionException">
+    /// The version's page failed its checksum or is malformed. The undo or prune fails instead of
+    /// treating the version as gone (#1342): an undo that skipped it would release an aborted writer
+    /// whose stamps are still on the page, and once the page read again every snapshot would admit
+    /// them as committed. The failure requeues the writer for the purge worker's retry, and a failed
+    /// prune keeps its candidates.
+    /// </exception>
+    /// <exception cref="StorageIOException">The version's page could not be read; handled as a failed checksum is.</exception>
     private bool TryReadStamps(PageId pageId, int slotIndex, out TransactionSequence writer, out TransactionSequence deleter)
     {
         writer = default;
         deleter = default;
 
-        ReadOnlyMemory<byte> record;
-        try
+        if (!_storage.TryReadRecord(pageId, slotIndex, out var record))
         {
-            record = _records.Read(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            return false;
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // The slot no longer exists: a failed statement's bracket rollback
-            // restored the page's in-memory pre-image, reverting the very insert this
-            // ledger entry recorded. Nothing to undo.
             return false;
         }
 

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// Exercises record-space undo through real storage brackets and the shared
@@ -191,6 +193,53 @@ public class RecordSpaceVersionStoreTests
         own!.Value.Span[RecordVersionStamp.HeaderSize].ShouldBe((byte)7);
         await coordinator.RollbackAsync(writer, CancellationToken.None);
         await coordinator.CommitAsync(reader, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// A committed tombstone whose page cannot be read is not a reclaimed one (#1342): the prune
+    /// fails and keeps the candidate for the next pass, where before the fix it read the failure
+    /// as "already gone" and dropped the candidate, leaving the dead version on its page for good.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a version page that cannot be read fails the pass and keeps its candidate (#1342)")]
+    public async Task Prune_VersionPageMalformed_ShouldFailAndKeepTheCandidate()
+    {
+        // Arrange: a committed tombstone below the bound, its slot entry then made to address
+        // bytes past the page.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        (PageId PageId, int SlotIndex) location = default;
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            location = storage.Insert(bracket, Stamped(TransactionSequence.None, deleter.Sequence, 5));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, CancellationToken.None);
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+        byte[] slotEntry;
+        using (var handle = storage.PageManager.GetPage(location.PageId))
+        {
+            var entry = handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4);
+            slotEntry = entry.ToArray();
+            BinaryPrimitives.WriteUInt16LittleEndian(entry, Page.Size - 1);
+        }
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+        int trackedAfterTheFailure = coordinator.VersionStore.TrackedVersionCount;
+        using (var handle = storage.PageManager.GetPage(location.PageId))
+        {
+            slotEntry.CopyTo(handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4));
+        }
+
+        long pruned = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        failure.PageId.ShouldBe(location.PageId);
+        trackedAfterTheFailure.ShouldBe(1);
+        pruned.ShouldBe(1);
+        CountRecords(storage).ShouldBe(0);
+        coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
     }
 
     private static byte[] Stamped(TransactionSequence writer, TransactionSequence deleter, byte payload)

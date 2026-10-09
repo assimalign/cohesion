@@ -369,24 +369,16 @@ internal sealed class KeyValueOperationExecutor
     /// <summary>
     /// Reads and decodes the record behind an index entry, returning it only when
     /// its stamps admit it through the snapshot (visible writer, no visible
-    /// deleter). A missing or reverted slot reads as absence.
+    /// deleter). An entry whose record was reclaimed beneath it (a deleted or
+    /// reverted slot, a freed or reallocated page) reads as absence; a page that
+    /// fails its checksum or cannot be read fails the command (#1342).
     /// </summary>
     private ResolvedVersion? ReadVisibleVersion(ulong entryReference, TransactionSnapshot snapshot)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
 
-        ReadOnlyMemory<byte> record;
-        try
+        if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
-            record = _storage.ReadEntry(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            return null;
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // The slot was reverted out of existence by a bracket rollback.
             return null;
         }
 
@@ -410,20 +402,12 @@ internal sealed class KeyValueOperationExecutor
     /// target row.)
     /// </summary>
     /// <exception cref="TransactionAbortedException">The key was modified by a concurrently committed transaction.</exception>
+    /// <exception cref="StorageCorruptionException">The version's page failed its checksum; a damaged page is not a conflict to retry (#1342).</exception>
     private void EnsureLatestVersion(ulong entryReference, TransactionSequence self)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
 
-        ReadOnlyMemory<byte> record;
-        try
-        {
-            record = _storage.ReadEntry(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            record = ReadOnlyMemory<byte>.Empty;
-        }
-        catch (ArgumentOutOfRangeException)
+        if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
             record = ReadOnlyMemory<byte>.Empty;
         }

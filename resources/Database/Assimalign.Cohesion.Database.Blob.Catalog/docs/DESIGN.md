@@ -38,8 +38,14 @@ Blob.Storage; it never scans chunk content. Each reread takes the kernel page pa
 CRC validation. Candidate writer stamps and logical identities must still match, so reclaimed
 slots or pages cannot make stale directory entries address a different record.
 Lookups discard reclaimed references and remove directory keys whose final reference has been
-reclaimed. Listing performs the same cleanup across the selected metadata names. Live malformed
-records raise a catalog error; a checksum-valid but malformed record is not treated as missing.
+reclaimed. Listing performs the same cleanup across the selected metadata names. A reference is
+reclaimed when `Storage.TryReadRecord` with owner zero says so: its slot was deleted or reverted,
+its metadata page was freed by the purge, or the page was reallocated to a chunk chain or as an
+index node. A page that fails its CRC or cannot be read throws instead (#1342). Before #1342 the
+reread caught only the slot exceptions, so a reference into a freed metadata page failed the
+lookup with "Page N is not allocated" (250 versions of one blob's metadata and a purge pass).
+Live malformed records raise a catalog error; a checksum-valid but malformed record is not
+treated as missing.
 
 Writers acquire model locks in the engine before reaching the catalog. A save tombstones the
 snapshot-visible old metadata record and inserts the new version in one coordinator physical

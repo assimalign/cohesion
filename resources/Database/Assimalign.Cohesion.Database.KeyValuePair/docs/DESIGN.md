@@ -577,6 +577,20 @@ retryable) for a commit whose record was written but whose fsync failed, and
 `DatabaseOfflineException` (`COHDBK002`, → `Unavailable` on the wire) for every operation
 after it ("Storage operations").
 
+An entry page the command cannot read fails the command with the storage library's own
+error: `StorageCorruptionException` (carrying the page id) for a page that fails its
+checksum or whose slot geometry is malformed, `StorageIOException` for a page cut short or
+a pool with every frame pinned, and the device's `IOException`. The engine does not wrap
+them yet. Every command resolves its key by a primary-index seek, and the seek fetches the
+entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
+entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
+or reallocated) reads as absence, and anything else that stops the read fails the command.
+The latest-version check under the key lock makes the same split: a reclaimed version is the
+retryable write-write conflict, a page it cannot read is the storage error. Until #1342
+both caught `StorageException`: a corrupt entry page made its keys read as missing, and a
+PUT over such a key resolved it as missing and then failed with a retryable conflict that no
+retry could clear.
+
 ## Shared MVCC composition (#918 — area DESIGN §3.10)
 
 `TransactionCoordinator` and `RecordSpaceVersionStore` now live in the existing

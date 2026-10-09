@@ -1711,6 +1711,101 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Reads the record at a location captured earlier (an index entry, a cached directory
+    /// reference, a version-ledger entry) when the location still holds a record on a data
+    /// page of any owner.
+    /// </summary>
+    /// <remarks>
+    /// The classification is the one <see cref="TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>
+    /// describes, without the owner check: a caller that does not know the record's owner,
+    /// such as the version ledger, rechecks the record's stamps instead.
+    /// </remarks>
+    /// <param name="pageId">The page the reference names.</param>
+    /// <param name="slotIndex">The slot the reference names.</param>
+    /// <param name="record">A copy of the record when the method returns <c>true</c>; otherwise, empty.</param>
+    /// <returns><c>true</c> when the location still holds a record; <c>false</c> when the record was reclaimed beneath the reference.</returns>
+    /// <exception cref="StorageCorruptionException">The page failed its checksum, or it is malformed.</exception>
+    /// <exception cref="StorageIOException">The stream ended inside the page, or every buffer-pool frame is pinned.</exception>
+    /// <exception cref="System.IO.IOException">The device failed the read.</exception>
+    /// <exception cref="InvalidOperationException">The storage has not been initialized.</exception>
+    public bool TryReadRecord(PageId pageId, int slotIndex, out ReadOnlyMemory<byte> record)
+        => TryReadRecordAt(pageId, slotIndex, null, out record);
+
+    /// <summary>
+    /// Reads the record at a location captured earlier (an index entry, a cached directory
+    /// reference) when the location still holds a record of <paramref name="ownerId"/>'s chain.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A reference outlives its record when the record is reclaimed beneath it: the version
+    /// purge deleted the slot, a bracket rollback restored a pre-image without the slot, or
+    /// the emptied page was freed, and then perhaps reallocated to another owner or as a page
+    /// that is not a data page, such as an index node. Each of these is checked positively and
+    /// returns <c>false</c>, so the caller treats the reference as stale. PostgreSQL's
+    /// <c>heap_fetch</c> makes the same checks for a TID an index returned: an offset past the
+    /// page's line pointers, or a line pointer that is no longer normal, is "not found".
+    /// </para>
+    /// <para>
+    /// A page that cannot be read was not reclaimed. A failed checksum, a malformed page and an
+    /// I/O error throw, so a reader fails rather than reading a damaged record as absent
+    /// (#1342), as PostgreSQL raises <c>ERRCODE_DATA_CORRUPTED</c> for an invalid page instead
+    /// of skipping its tuples. A page freed between the allocation check and the pin is the one
+    /// read failure classified as reclamation, and only after the allocation check is repeated.
+    /// </para>
+    /// </remarks>
+    /// <param name="pageId">The page the reference names.</param>
+    /// <param name="slotIndex">The slot the reference names.</param>
+    /// <param name="ownerId">The owner whose chain the record belongs to; zero is the shared space.</param>
+    /// <param name="record">A copy of the record when the method returns <c>true</c>; otherwise, empty.</param>
+    /// <returns><c>true</c> when the location still holds a record; <c>false</c> when the record was reclaimed beneath the reference.</returns>
+    /// <exception cref="StorageCorruptionException">The page failed its checksum, or it is malformed.</exception>
+    /// <exception cref="StorageIOException">The stream ended inside the page, or every buffer-pool frame is pinned.</exception>
+    /// <exception cref="System.IO.IOException">The device failed the read.</exception>
+    /// <exception cref="InvalidOperationException">The storage has not been initialized.</exception>
+    public bool TryReadRecord(PageId pageId, int slotIndex, ulong ownerId, out ReadOnlyMemory<byte> record)
+        => TryReadRecordAt(pageId, slotIndex, ownerId, out record);
+
+    private bool TryReadRecordAt(PageId pageId, int slotIndex, ulong? ownerId, out ReadOnlyMemory<byte> record)
+    {
+        record = ReadOnlyMemory<byte>.Empty;
+        var freeSpaceMap = FreeSpaceMap;
+        var pageManager = PageManager;
+
+        if (!freeSpaceMap.IsAllocated(pageId))
+        {
+            return false;
+        }
+
+        StoragePageHandle handle;
+        try
+        {
+            handle = pageManager.GetPage(pageId);
+        }
+        catch (StorageIOException) when (!freeSpaceMap.IsAllocated(pageId))
+        {
+            return false;
+        }
+
+        using (handle)
+        {
+            var page = handle.Page;
+
+            if (page.Type != PageType.Data || (ownerId is { } owner && page.OwnerId != owner))
+            {
+                return false;
+            }
+
+            if (!new SlottedPage(page).TryReadSlot(slotIndex, out byte[] bytes))
+            {
+                return false;
+            }
+
+            record = bytes;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Reads and deserializes a tuple from the specified page and slot.
     /// </summary>
     /// <param name="pageId">The page containing the tuple.</param>

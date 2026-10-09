@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -7,6 +8,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -39,6 +42,64 @@ public sealed class DocumentCatalogTests
         document.Version.ShouldBe(2UL);
         Encoding.UTF8.GetString(reopened.ReadContent(Content(document)).Span).ShouldBe("{\"new\":[true,{},null]}");
         await coordinator.CommitAsync(reader);
+    }
+
+    /// <summary>
+    /// The directory keeps a reference to every version a document had until a lookup finds it
+    /// stale. Once the purge reclaims enough old versions to empty a metadata page, the page is
+    /// freed, and a lookup that reaches one of its references treats it as reclaimed. Before #1342
+    /// the lookup read the freed page and failed with "Page N is not allocated".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Reclaimed versions: a lookup skips references into metadata pages the purge freed (#1342)")]
+    public async Task FindDocument_PurgeFreedOldVersionPages_ShouldReturnTheLatestVersion()
+    {
+        // Arrange: enough versions of one document to fill several metadata pages.
+        await using var fixture = await Fixture.Create();
+        const int versions = 250;
+        for (int version = 1; version <= versions; version++)
+        {
+            await fixture.Write("a", "{\"v\":" + version + "}");
+        }
+
+        long freeBeforePurge = fixture.Storage.FreeSpaceMap.FreePageCount;
+        fixture.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
+        var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        var document = fixture.Catalog.FindDocument(fixture.Collection.Id, "a", reader.Snapshot);
+
+        // Assert
+        fixture.Storage.FreeSpaceMap.FreePageCount.ShouldBeGreaterThan(freeBeforePurge);
+        document.ShouldNotBeNull().Version.ShouldBe((ulong)versions);
+        Encoding.UTF8.GetString(fixture.Storage.ReadContent(Content(document.Value)).Span).ShouldBe("{\"v\":" + versions + "}");
+        await fixture.Coordinator.CommitAsync(reader);
+    }
+
+    /// <summary>
+    /// A metadata page that cannot be read is not a reclaimed one: the lookup fails instead of
+    /// reading the document as absent (#1342).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Reclaimed versions: a lookup over a malformed metadata page throws instead of reading the document as absent (#1342)")]
+    public async Task FindDocument_LatestVersionSlotMalformed_ShouldThrowStorageCorruption()
+    {
+        // Arrange: the newest metadata record's slot entry made to address bytes past its page.
+        await using var fixture = await Fixture.Create();
+        await fixture.Write("a", "{\"v\":1}");
+        var page = fixture.Storage.GetOwnerPages(0)[^1];
+        using (var handle = fixture.Storage.PageManager.GetPage(page))
+        {
+            int newest = new SlottedPage(handle.Page).SlotCount - 1;
+            BinaryPrimitives.WriteUInt16LittleEndian(handle.Page.AsSpan().Slice(Page.Size - ((newest + 1) * 4), 2), Page.Size - 1);
+        }
+
+        var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => fixture.Catalog.FindDocument(fixture.Collection.Id, "a", reader.Snapshot));
+
+        // Assert
+        failure.PageId.ShouldBe(page);
+        await fixture.Coordinator.CommitAsync(reader);
     }
 
     [Fact]

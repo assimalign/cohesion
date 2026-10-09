@@ -432,6 +432,8 @@ Storage owns the physical journal (`Database.Storage`); the transaction log is t
 
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). `TransactionCommitUnconfirmedException : Exception`, a second independent root, for a commit whose record was written but not made durable: the transaction is committed, so it is deliberately not an abort and not retryable ("A commit record that was written but not made durable", above); engines wrap it in the area's `DatabaseTransactionCommitUnconfirmedException`. Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end, and `ObjectDisposedException` once the manager's disposal began.
 
+The version store throws the storage library's errors unchanged when a version page cannot be read: `PurgeWriterAsync` (a failed undo, which requeues the writer), `PruneAsync` and so `RunVersionPurgePass`, and `GetVisibleVersionAsync`. A version reclaimed beneath its ledger entry is not one of them (#1342; "Shared per-database composition (#918)", below).
+
 ## The engine binding (first adopter: the SQL engine)
 
 The area's recorded *isolation split-brain* — a complete MVCC manager no engine
@@ -508,11 +510,29 @@ The seam follows the executable differences between the original implementations
 `RecordSpaceVersionStore` is a ledger over actual records, not a second payload
 store. Logical rollback deletes created versions and clears tombstones only
 when their current stamps match the recorded writer. A failed physical statement
-can leave stale ledger entries; missing/reverted slots remain harmless through
-the original `StorageException`/`ArgumentOutOfRangeException` handling and stamp
-rechecks. Committed tombstones enter the prunable set. Pruning requires
+can leave stale ledger entries; they stay harmless because the store reads a
+ledger location with `Storage.TryReadRecord`, which reports a reclaimed location
+(a deleted or reverted slot, a freed page, a page reallocated as a non-data page)
+as nothing to do, and the stamp rechecks reject a location another writer reused.
+Committed tombstones enter the prunable set. Pruning requires
 `deleter < safeBound` and rechecks the current deleter before deleting. Index
 undo stays in recorded order, including its original accounting semantics.
+
+A version page the store cannot read is not a reclaimed location (#1342): the
+undo or the prune throws the storage error (`StorageCorruptionException` for a
+page that fails its checksum or is malformed, `StorageIOException`, or the
+device's `IOException`). A failed undo requeues the writer for the purge worker,
+which keeps it in flight and its versions hidden until a retry completes; a
+failed prune keeps its candidates for the next pass. Before #1342 the store read
+every `StorageException` as "the slot is gone": an undo that met an unreadable
+page forgot the aborted writer with its version still on the page, and once the
+page read again every snapshot read the rolled-back write as committed
+(`TransactionCoordinatorRollbackTests`, the malformed-page case); a prune
+dropped the candidate and left the dead version on its page for good. The
+ledger's reads go through the storage the store brackets, not through
+`TransactionRecordSpace.Read`: classifying a location needs the page header and
+the free-space map, which the record-space seam does not expose, and every
+record space reads the same slotted record the storage returns.
 
 ### Ending a transaction under a running statement
 

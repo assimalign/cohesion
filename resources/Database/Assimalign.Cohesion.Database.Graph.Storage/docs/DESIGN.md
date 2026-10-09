@@ -122,7 +122,9 @@ cannot detect a database this engine wrote and must not open one (owner review o
 Physical references use the high 48 bits for the page ID and low 16 bits for the slot.
 Readers check page allocation, data-page owner, record identity and writer stamp before
 trusting cached references. Checksum errors and real I/O failures propagate; reclaimed
-pages/slots and reused locations are treated as stale directory entries.
+pages/slots and reused locations are treated as stale directory entries. The allocation,
+page-type, owner and slot checks are `Storage.TryReadRecord` with owner 2, the storage's
+shared reclamation check (#1342), which the store made inline before.
 
 ## Secondary indexes
 

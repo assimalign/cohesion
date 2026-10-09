@@ -1157,16 +1157,9 @@ internal sealed partial class SqlPlanExecutor
 
                 var (pageId, slotIndex) = SqlRecordLocation.Unpack(cursor.CurrentEntryReference);
 
-                ReadOnlyMemory<byte> record;
-                try
-                {
-                    record = _storage.ReadRow(pageId, slotIndex);
-                }
-                catch (StorageException)
-                {
-                    continue; // reclaimed beneath an invisible entry: skip
-                }
-                catch (ArgumentOutOfRangeException)
+                // Only a row reclaimed beneath the entry is skipped; a page that fails its
+                // checksum or cannot be read fails the statement (#1342).
+                if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record))
                 {
                     continue;
                 }

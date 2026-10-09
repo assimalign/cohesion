@@ -155,6 +155,51 @@ public readonly unsafe struct SlottedPage
     }
 
     /// <summary>
+    /// Copies the record at the specified slot when the slot still holds one. An index past
+    /// the slot directory (a bracket rollback restored a pre-image with fewer slots) and a
+    /// deleted slot are the two ways a slot stops holding a record, and both return
+    /// <c>false</c>; a malformed page throws, as <see cref="ReadSlot"/> does.
+    /// </summary>
+    /// <param name="index">The zero-based slot index.</param>
+    /// <param name="record">A copy of the record, or an empty array when the method returns <c>false</c>.</param>
+    /// <returns><c>true</c> when the slot holds a record; otherwise, <c>false</c>.</returns>
+    /// <exception cref="StorageCorruptionException">
+    /// The page header records more slots than a page can hold, or the slot describes a record outside the page body.
+    /// </exception>
+    internal bool TryReadSlot(int index, out byte[] record)
+    {
+        int slotCount = SlotCount;
+
+        if ((uint)index >= (uint)slotCount)
+        {
+            record = [];
+            return false;
+        }
+
+        if (slotCount > maxSlotCount)
+        {
+            throw Corruption($"the header records {slotCount} slots; a page holds at most {maxSlotCount}");
+        }
+
+        // One snapshot of the entry, as in ReadSlot: the checks and the copy use the same values.
+        PageSlot slot = *SlotAt(index);
+
+        if (slot.IsDeleted)
+        {
+            record = [];
+            return false;
+        }
+
+        if (slot.Offset < BodyOffset || slot.Offset + slot.Length > Page.Size)
+        {
+            throw Corruption($"slot {index} addresses bytes {slot.Offset}..{slot.Offset + slot.Length}, outside the page body");
+        }
+
+        record = new ReadOnlySpan<byte>(_pointer + slot.Offset, slot.Length).ToArray();
+        return true;
+    }
+
+    /// <summary>
     /// Gets the length of the record at the specified slot index.
     /// </summary>
     /// <param name="index">The zero-based slot index.</param>

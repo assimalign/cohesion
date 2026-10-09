@@ -31,8 +31,13 @@ check their reference arguments themselves. Public metadata records are immutabl
 Opening scans only owner-zero metadata pages, building directories keyed by ordinal collection
 name, `(collectionId, documentId)`, and `(collectionId, indexName)`. Directories retain physical
 version references. Every lookup rereads record stamps and identity: rollback, purge, and slot
-reuse cannot silently stale the directory. CRC and I/O failures propagate. Reclaimed slots and
-reused identities invalidate cached references. Reads choose the newest visible writer whose
+reuse cannot silently stale the directory. Each reread is `Storage.TryReadRecord` with owner
+zero, which reports a reclaimed location (a deleted or reverted slot, a metadata page the purge
+freed, a page reallocated to a content chain or as an index node) without reading it; that
+reference, and one whose identity changed, is dropped from the directory. CRC and I/O failures
+propagate. Until #1342 the lookup caught only the slot exceptions, so once the purge freed a
+metadata page every lookup that reached one of its references failed with "Page N is not
+allocated": 250 versions of one document and a purge pass were enough. Reads choose the newest visible writer whose
 deleter is not visible. Enumeration is ordinal name/identity order, independent of insertion,
 page allocation, or B+Tree scan order.
 

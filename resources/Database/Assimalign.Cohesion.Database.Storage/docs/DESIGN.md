@@ -518,6 +518,43 @@ object ids, so a table scan stops decoding the whole database.
   that lands, chains keep releases proportional to the object, which is already
   incomparably better than the previous permanent leak.
 
+### Reading a record through a reference (#1342)
+
+An index entry, a catalog directory reference and a version-ledger entry name a record by
+(page, slot), and the record can be reclaimed beneath the reference: the version purge deletes
+the slot, a bracket rollback restores a pre-image without it, or the emptied page is freed and
+then reallocated, to another owner or as an index node. `Storage.TryReadRecord` is the one place
+that tells a reclaimed location from a page that cannot be read. It checks each kind of
+reclamation positively and returns `false`; every other failure throws:
+
+| The location | Checked by | Result |
+|---|---|---|
+| Its page was freed | `FreeSpaceMap.IsAllocated` before the pin, and again when the pin fails | `false` |
+| Its page now holds a non-data page, or (owner overload) another owner's records | the page header's type and owner tag, under the pin | `false` |
+| Its slot lies past the slot directory (a rollback reverted it), or is deleted | `SlottedPage.TryReadSlot`, over one snapshot of the slot entry | `false` |
+| Its page fails its checksum, or its header or slot addresses bytes outside the page | the buffer-pool load; the slotted geometry checks | `StorageCorruptionException` |
+| Its page ends inside the stream, or every buffer-pool frame is pinned | the buffer-pool load | `StorageIOException` |
+| The device fails the read | the file handle | its `IOException` |
+
+The type check matters as much as the allocation check: a freed data page that comes back as an
+index node does not have a slot directory, and reading it as one reports corruption that is not
+there. The overload without an owner serves the version ledger, which does not know a record's
+owner and rechecks its stamps instead. The checks share the caveat of every pinned read beside the
+page's single writer (above): a read that races a free, a reallocation and a rewrite of the same
+frame can still see torn geometry.
+
+Before #1342 each caller classified the exceptions `ReadRecord` threw, and they disagreed. The SQL
+index seek, the key-value lookup and the version ledger caught `StorageException`, so a page that
+failed its checksum read as reclaimed: the seek dropped its rows, the key read as missing, and an
+undo forgot an aborted writer whose stamps were still on the page, so once the page read again
+every snapshot saw the rolled-back write as committed. The Documents and Blob catalogs caught only
+the slot exceptions, so a lookup that reached a reference into a metadata page the purge had freed
+failed with "Page N is not allocated". The Graph catalog and store already made the positive checks
+inline and now call the shared one. PostgreSQL draws the same line in `heap_fetch`: an offset past
+the page's line pointers, or a line pointer that is no longer normal, is "not found"
+(`src/backend/access/heap/heapam.c:1709-1736`), while an invalid page raises
+`ERRCODE_DATA_CORRUPTED` (`src/backend/storage/buffer/bufmgr.c:8889`, `:8913-8919`).
+
 ## The journal (write-ahead log)
 
 `StorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
@@ -1780,9 +1817,9 @@ place: `Compact` is correct now, but compacting moves other records, and scans r
 pages under a pin without a latch, so in-place compaction waits for page latches.
 Under heavy ALTER churn a catalog page fills with dead record images, the record moves
 to another page, and the dead space stays until its page holds no live record.
-Separately, the SQL index seek and the version store treat any
-`StorageException` from a record read as "reclaimed" and skip the record; that now
-includes `StorageCorruptionException`, which deserves to surface rather than hide a row.
+(The SQL index seek and the version store used to read any `StorageException` from a record
+read as reclamation, `StorageCorruptionException` included; #1342 closed that with
+`Storage.TryReadRecord`, "Reading a record through a reference" above.)
 Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` trusts
 the header only because the pool refuses an oversized one at load, and a `Page` built
 over caller memory carries no such check. Each follow-up needs its own work item.
@@ -2117,6 +2154,9 @@ catch the family or the specific failure.
 Engines translate `StorageOfflineException` into the area root's `DatabaseOfflineException`
 with their own code, or into `DatabaseTransactionCommitUnconfirmedException` when
 `CommitRecordWritten` is set.
+A record reclaimed beneath a reference is not an error: `TryReadRecord` returns `false` for it
+and throws only for a page it cannot read, so no caller has to sort exception types into
+"reclaimed" and "failed" (#1342; "Reading a record through a reference").
 
 ## AOT posture
 

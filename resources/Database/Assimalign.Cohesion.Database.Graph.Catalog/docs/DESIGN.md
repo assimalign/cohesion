@@ -88,7 +88,10 @@ Opening scans only owner 0 and builds an in-memory directory keyed by kind, pare
 The directory holds physical references and creator stamps, not mutable metadata copies.
 Every read reloads the record and checks identity, creator, and deleter visibility against the
 snapshot. Reclaimed slots and reused identities invalidate cached references; corrupt live
-records propagate an error rather than appearing absent.
+records propagate an error rather than appearing absent. The reload is `Storage.TryReadRecord`
+with owner zero, the storage's shared reclamation check (#1342): the catalog made the same
+allocation, page-type, owner and slot checks inline before, and the other models' catalogs
+now make them through the same member.
 
 Saving a version tombstones the old version and inserts the new one inside one shared physical
 statement bracket. Both changes register with the coordinator's version store. Deleting a
