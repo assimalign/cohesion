@@ -13,6 +13,10 @@
          Database default control plane — readiness, health, observed endpoints, stop, Database commands — owned by
          Database.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <!-- Keeps the Database engine's EventSource tracing in a NativeAOT or trimmed publish, so dotnet-trace,
+         dotnet-counters and the log forwarder still receive its events. The .NET SDK default removes EventSource
+         support from such builds; delete this line to accept that default. -->
+    <EventSourceSupport>true</EventSourceSupport>
   </PropertyGroup>
   <ItemGroup>
     <CohesionSetting Include="Database:Durability" Type="Assimalign.Cohesion.Database.Storage.StorageCommitDurability" Default="synchronous" />
