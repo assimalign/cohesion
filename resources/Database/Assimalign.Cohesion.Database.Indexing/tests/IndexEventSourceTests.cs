@@ -298,13 +298,13 @@ public sealed class IndexEventSourceTests
         // Assert
         recorder.ShouldHaveNoInstrumentationError();
         purged.ShouldBe(5);
-        var event_ = recorder.For(name).ShouldHaveSingleItem();
-        event_.EventName.ShouldBe("WritersPurged");
-        event_.EventId.ShouldBe(8);
-        event_.Level.ShouldBe(EventLevel.Verbose);
-        event_.PayloadNames.ShouldBe(["database", "writers", "entriesRemoved", "durationMilliseconds"]);
-        event_.Payload!.Take(3).ShouldBe([name, 1, purged]);
-        ((double)event_.Payload![3]!).ShouldBeGreaterThanOrEqualTo(0);
+        var purge = recorder.For(name).ShouldHaveSingleItem();
+        purge.EventName.ShouldBe("WritersPurged");
+        purge.EventId.ShouldBe(8);
+        purge.Level.ShouldBe(EventLevel.Verbose);
+        purge.PayloadNames.ShouldBe(["database", "writers", "entriesRemoved", "durationMilliseconds"]);
+        purge.Payload!.Take(3).ShouldBe([name, 1, purged]);
+        ((double)purge.Payload![3]!).ShouldBeGreaterThanOrEqualTo(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should write nothing below its enabled level")]

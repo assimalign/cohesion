@@ -781,8 +781,8 @@ The kernel raises its own events through one internal event source, named for th
 catalog: `docs/programs/DATABASE_EVENT_SOURCES_PLAN.md` §4.3). Every engine model composes its
 database's kernel through `TransactionCoordinator`, so the one source covers the transactions of
 all five engines. The explicit transaction a session runs is the root's
-(`Assimalign.Cohesion.Database`); the events here are the kernel transactions under it, one per
-autocommit statement.
+(`Assimalign.Cohesion.Database`); the events here are the kernel transactions: one under each
+explicit transaction, and one per autocommit statement.
 
 **The `database` payload is the storage's name.** The kernel types do not know their database,
 so the coordinator hands `Storage.Name` to the two it builds, through internal members only: the
@@ -791,9 +791,13 @@ events the coordinator writes itself read the name from its storage inside the e
 standalone `TransactionManager.Create` or `LockManager.Create` reports an empty `database`.
 
 **Payloads carry identifiers only** (event-source.md rule 11; plan D8): a sequence, a lock mode,
-a `LockResource` (its kind, object id and entry id; a unique index's entry id is the key's hash,
-never the key), a storage-offline cause, counts, and an exception's type full name and
-`Message`. No record, key or value.
+a `LockResource` (its kind, object id and entry id), a storage-offline cause, counts, and an
+exception's type full name and `Message`. No record, key or value. A unique index's and a
+KeyValuePair key's entry id is an unseeded FNV-1a hash of the key (`IndexKey.Hash`), never the key
+itself; a Sql row's is its packed page and slot. An unseeded 64-bit hash of a key drawn from a
+small domain can be reversed by enumerating the domain, so whether that hash is an identifier
+under D8 is an owner question; if it is not, `resource` for an entry lock is reduced to its kind
+and object id.
 
 Keywords: `Transactions = 0x1`, `Locks = 0x2`, `Checkpoints = 0x4`, `Purge = 0x8`; the other
 events check `EventKeywords.None`.
@@ -860,12 +864,17 @@ and no counter moves on a per-row or per-statement path (plan D6).
 
 **Cost when nobody listens** (event-source.md rule 9): every write is behind
 `IsEnabled(level, keywords)`, and every `ToString` and the storage name read are inside it. An
-uncontended `LockManager.AcquireAsync` reaches no instrumentation before its grant. The
-`TransactionEventSourceTests` delta test pins the engine-mode path every engine uses: a re-grant
-allocates 0 bytes, and a new resource allocates exactly what the `TryAcquire` it runs does. A
-Release probe of the standalone and engine paths, run against this project at `96d3caac` and with
-this source, measured the same bytes per uncontended request in both builds: 56 (the existing
-closure of the standalone path's cancellation registration, allocated at its method's entry) and 0.
+uncontended `LockManager.AcquireAsync` reaches no instrumentation before its grant. Two
+`TransactionEventSourceTests` delta tests pin it. The engine-mode path every engine uses never
+enters `AcquireCoreAsync`: a re-grant allocates 0 bytes, and a new resource allocates exactly what
+the `TryAcquire` it runs does. The standalone path (`LockManager.Create`) runs `AcquireCoreAsync`,
+the method the lock-wait and deadlock events are written from, on every request: in an optimized
+build it allocates at most the 56-byte closure of its cancellation registration per request, which
+the compiler creates at the method's entry and which predates this source. A Debug build also
+allocates the async state machine, which the compiler emits as a class there, so the test checks
+that bound only in an optimized build; CI tests Release. A Release probe run against this project
+at `96d3caac` and with this source measured the same bytes per uncontended request in both builds:
+56 standalone, 0 in engine mode.
 `RunVersionPurgePass` takes its timestamp only while a listener takes event 18.
 
 ## Non-goals

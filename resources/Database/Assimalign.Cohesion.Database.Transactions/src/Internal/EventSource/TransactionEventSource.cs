@@ -183,7 +183,7 @@ internal sealed class TransactionEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            CommitUnconfirmed(storage.Name,(long)context.Sequence.Value, (exception.InnerException ?? exception).Message);
+            CommitUnconfirmed(storage.Name, (long)context.Sequence.Value, (exception.InnerException ?? exception).Message);
         }
     }
 

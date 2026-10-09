@@ -93,7 +93,7 @@ internal sealed class IndexEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            IndexInvariantViolated((string)storage.Name, index, pageId, detail);
+            IndexInvariantViolated(storage.Name, index, pageId, detail);
         }
     }
 
@@ -108,7 +108,7 @@ internal sealed class IndexEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Splits))
         {
-            PageSplit((string)storage.Name, index, pageId, leaf, entries);
+            PageSplit(storage.Name, index, pageId, leaf, entries);
         }
     }
 
@@ -118,7 +118,7 @@ internal sealed class IndexEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Splits))
         {
-            RootGrown((string)storage.Name, index, rootPageId);
+            RootGrown(storage.Name, index, rootPageId);
         }
     }
 

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
@@ -311,6 +313,35 @@ public sealed class TransactionEventSourceTests
         holder.State.ShouldBe(TransactionState.Active);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should end a wait whose own transaction ended while it waited as ended, once")]
+    public async Task AcquireAsync_WaitersTransactionRolledBackWhileWaiting_ShouldEndTheWaitAsEnded()
+    {
+        // Arrange: one transaction holds the row, and another queues for it.
+        string name = UniqueName();
+        using var storage = EventStorage.Create(name);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var locks = coordinator.LockManager;
+        var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await locks.AcquireAsync(holder.Sequence, Row, LockMode.Exclusive);
+        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+        var waiting = locks.AcquireAsync(waiter.Sequence, Row, LockMode.Exclusive).AsTask();
+
+        // Act: the waiter's own transaction ends, which fails its queued request.
+        await coordinator.RollbackAsync(waiter);
+        await Should.ThrowAsync<TransactionAbortedException>(async () => await waiting.WaitAsync(Timeout));
+        await coordinator.CommitAsync(holder);
+
+        // Assert
+        recorder.ShouldHaveNoInstrumentationError();
+        var events = recorder.For(name);
+        events.Where(e => e.EventName == "LockWaitStart").ShouldHaveSingleItem().Payload![1].ShouldBe(Sequence(waiter));
+        var stop = events.Where(e => e.EventName == "LockWaitStop").ShouldHaveSingleItem();
+        stop.Payload!.Take(3).ShouldBe([name, Sequence(waiter), "Ended"]);
+        ((double)stop.Payload![3]!).ShouldBeGreaterThanOrEqualTo(0);
+        waiter.State.ShouldBe(TransactionState.RolledBack);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report a commit whose record could not be made durable once, with the flush failure")]
     public async Task CommitAsync_CommitRecordFlushFails_ShouldReportTheUnconfirmedCommitOnce()
     {
@@ -540,6 +571,41 @@ public sealed class TransactionEventSourceTests
         recorder.For(name).ShouldNotContain(e => e.EventName == "DeferredCheckpointFailed");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report a deferred checkpoint an offline storage dropped, once")]
+    public async Task TryCheckpoint_GateHeldAndTheDeferredCheckpointTakesTheStorageOffline_ShouldReportTheSkipOnce()
+    {
+        // Arrange: a writer's statement holds the apply gate over a dirty page, and the journal
+        // device fails the next write, so the deferred checkpoint's drain takes the storage
+        // offline (#1243).
+        string name = UniqueName();
+        using var storage = EventStorage.Create(name);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await BeginWriterAsync(coordinator, storage);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var statement = await HoldApplyGateAsync(coordinator, writer, release.Task);
+        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+
+        // Act: the checkpoint defers to the statement, which runs it as it ends.
+        bool ran = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
+        storage.Log.Flush();
+        storage.JournalStream.FailWrites = 1;
+        release.TrySetResult();
+        await statement.WaitAsync(Timeout);
+
+        // Assert: a skip, not a failure held for the next TryCheckpoint to throw.
+        recorder.ShouldHaveNoInstrumentationError();
+        ran.ShouldBeFalse();
+        var events = recorder.For(name).Where(e => e.EventName is "CheckpointDeferred" or "DeferredCheckpointSkipped" or "DeferredCheckpointFailed").ToArray();
+        events.Select(e => e.EventName).ShouldBe(["CheckpointDeferred", "DeferredCheckpointSkipped"]);
+
+        var skipped = events[1];
+        skipped.EventId.ShouldBe(16);
+        skipped.Level.ShouldBe(EventLevel.Verbose);
+        Declared(skipped.Keywords).ShouldBe(TransactionEventSource.Keywords.Checkpoints);
+        skipped.PayloadNames.ShouldBe(["database", "reason"]);
+        skipped.Payload.ShouldBe([name, "StorageOffline"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should write nothing below its enabled level")]
     public async Task BeginAsync_WarningListener_ShouldNotWriteVerboseEvents()
     {
@@ -634,6 +700,79 @@ public sealed class TransactionEventSourceTests
         // Assert
         regrant.ShouldBe(0, "An uncontended re-grant allocated.");
         acquireNew.ShouldBe(tryAcquireNew, "An uncontended AcquireAsync allocated more than the TryAcquire it runs.");
+    }
+
+    /// <summary>
+    /// The standalone lock path (<see cref="LockManager.Create"/>): an uncontended request runs
+    /// <c>AcquireCoreAsync</c>, the method the lock-wait and deadlock events are written from, and is
+    /// granted before it reaches any of them. With no listener it must allocate only what it did
+    /// before the event source existed: the closure of its cancellation registration, which the
+    /// compiler creates at the method's entry because the closure captures a parameter. In an
+    /// optimized build that is the only allocation, and its size is fixed: an object header and
+    /// method table (16 bytes), <c>this</c> and the waiter (8 each), and the 24-byte
+    /// <see cref="LockResource"/>, 56 bytes in a 64-bit process. An unoptimized (Debug) build also
+    /// allocates the async state machine, which the compiler emits as a class there; the bound is
+    /// checked only where it holds, and CI tests the Release build.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: An uncontended standalone lock request allocates only its registration closure with no listener")]
+    public void AcquireAsync_UncontendedStandaloneWithNoListener_ShouldAllocateOnlyTheRegistrationClosure()
+    {
+        // Arrange
+        const long RegistrationClosureBytes = 56;
+        var locks = LockManager.Create();
+        var owner = new TransactionSequence(1_000_000_011);
+        var other = new TransactionSequence(1_000_000_013);
+        var held = LockResource.Entry(9, 1);
+        var fresh = LockResource.Entry(9, 2);
+        bool optimized = typeof(LockManager).Assembly.GetCustomAttribute<DebuggableAttribute>() is not { IsJITOptimizerDisabled: true };
+        TransactionEventSource.Log.IsEnabled().ShouldBeFalse("A listener is attached; the check measures the disabled path.");
+        Granted(locks.AcquireAsync(owner, held, LockMode.Exclusive));
+
+        // Act: the minimum of several rounds, so a one-off runtime allocation does not count.
+        const int Operations = 1_000;
+        long regrant = long.MaxValue;
+        long acquireNew = long.MaxValue;
+        long tryAcquireNew = long.MaxValue;
+        for (int round = 0; round < 5; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < Operations; i++)
+            {
+                Granted(locks.AcquireAsync(owner, held, LockMode.Exclusive));
+            }
+
+            regrant = Math.Min(regrant, GC.GetAllocatedBytesForCurrentThread() - before);
+
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < Operations; i++)
+            {
+                Granted(locks.AcquireAsync(other, fresh, LockMode.Exclusive));
+                locks.ReleaseAll(other);
+            }
+
+            acquireNew = Math.Min(acquireNew, GC.GetAllocatedBytesForCurrentThread() - before);
+
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < Operations; i++)
+            {
+                locks.TryAcquire(other, fresh, LockMode.Exclusive);
+                locks.ReleaseAll(other);
+            }
+
+            tryAcquireNew = Math.Min(tryAcquireNew, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        locks.ReleaseAll(owner);
+        _output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"standalone, {(optimized ? "optimized" : "unoptimized")} build, {Operations} ops: re-grant {regrant} B; new resource + ReleaseAll: AcquireAsync {acquireNew} B, TryAcquire {tryAcquireNew} B"));
+
+        // Assert: a request costs the same over the TryAcquire it matches, granted anew or again.
+        (acquireNew - tryAcquireNew).ShouldBe(regrant, "An uncontended AcquireAsync on a new resource allocated differently from a re-grant.");
+        if (optimized)
+        {
+            Environment.Is64BitProcess.ShouldBeTrue("The closure's size is the 64-bit layout.");
+            regrant.ShouldBeLessThanOrEqualTo(RegistrationClosureBytes * Operations, "An uncontended standalone re-grant allocated more than its registration closure.");
+        }
     }
 
     private static string UniqueName() => "tx-events-" + Guid.NewGuid().ToString("N");
