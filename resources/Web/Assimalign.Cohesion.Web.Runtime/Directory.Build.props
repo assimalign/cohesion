@@ -77,6 +77,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Antiforgery" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Cookies" />
+        <!-- Public: Web.Hosting registers its interceptor by default and Http.WebSockets reads
+             context.ExtendedConnect, and handlers read it directly (#1368). -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
@@ -91,13 +94,10 @@
              assembly references them, and consumed directly by application handlers.
              Incremental response streaming, the Server-Sent Events primitives, 1xx
              interim responses (100 Continue, 103 Early Hints) and RFC 9530 digest
-             fields ride the transport interceptor seam. Http.ExtendedConnect holds the
-             context.ExtendedConnect accessors over IHttpExtendedConnectFeature, which
-             the transports install in core Http since #1316. Http.Tls holds
+             fields ride the transport interceptor seam. Http.Tls holds
              IHttpTlsConnectionFeature and context.TlsConnection, which it builds from the
              ITlsConnectionInfo facet the transport publishes on each exchange's
              connection info (#1367); its other reference, Connections, is an App kernel root. -->
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Tls" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Streaming" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />

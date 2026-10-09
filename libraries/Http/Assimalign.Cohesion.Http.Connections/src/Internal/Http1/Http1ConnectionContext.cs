@@ -154,7 +154,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             return;
         }
 
-        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        // The exchange was aborted (IHttpContext.Cancel / CancelAsync — the
         // directive is Abort). HTTP/1.1 has no per-exchange reset finer than the connection, so
         // no response is written and the keep-alive loop ends after this exchange.
         if (http1Context.CancelRequested)

@@ -92,6 +92,9 @@ internal static class HttpRequestInterceptorPipeline
             Path = head.Path,
             Scheme = head.Scheme,
             Host = head.Host,
+            // The validated :protocol of an extended CONNECT (null otherwise): the one signal that tells
+            // a hook an extended CONNECT from a classic one.
+            Protocol = head.Protocol,
             // Hooks observe headers through a read-only view; derived values belong in Features.
             Headers = head.Headers.AsReadOnly(),
             Features = features,

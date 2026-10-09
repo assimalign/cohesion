@@ -42,7 +42,7 @@ A real-time hub framework (SignalR-style) waits on this decision, but it is a se
      - permessage-deflate negotiation (RFC 7692), mapped onto `WebSocketDeflateOptions`;
      - the request surface: `IsWebSocketRequest`, the requested subprotocols, and an accept call that returns the `WebSocket`.
 
-     It references Http, Http.ProtocolUpgrade and Http.ExtendedConnect. *(As built: Http and Http.ProtocolUpgrade only. #1316 moved `IHttpExtendedConnectFeature` into Http, so the HTTP/2 and HTTP/3 handshake reads it from the exchange's features without Http.ExtendedConnect.)*
+     It references Http, Http.ProtocolUpgrade and Http.ExtendedConnect. *(As built: #1316 moved `IHttpExtendedConnectFeature` into Http, and until #1368 the package referenced Http and Http.ProtocolUpgrade only, reading the feature from the exchange's features. #1368 returned the feature to Http.ExtendedConnect and restored this reference; the handshake reads `context.ExtendedConnect`.)*
    - `Assimalign.Cohesion.Web.WebSockets` (resources/Web) owns the policy: `UseWebSockets(options)` middleware for the origin policy, the keep-alive interval, and closing open WebSockets with `1001` when the server drains.
 4. **The extended CONNECT tunnel ships in the transports.** `IHttpExtendedConnectFeature` gains an accept call on HTTP/2 and HTTP/3. It sends `200` and returns a duplex `Stream`:
    - reads deliver the client's DATA;
@@ -50,7 +50,9 @@ A real-time hub framework (SignalR-style) waits on this decision, but it is a se
    - disposing the stream ends it.
 
    The transport installs the feature in the exchange's feature collection.
-5. **Web.Hosting installs the HTTP/1.1 upgrade interceptor by default**, as it already does the request-size interceptor. A request that no application accepts is served exactly as before.
+
+   *(As built since #1368, owner decision 20 of 2026-10-09: the transport installs no feature. It passes the validated `:protocol` to the request-parse hooks (`HttpExchangeInterceptorRequestContext.Protocol`) and offers the accept as a generic mechanism on its exchange control (`IHttpExchangeControl.CanAcceptTunnel` and `AcceptTunnelAsync`). `Http.ExtendedConnect`'s interceptor, `HttpExtendedConnect.CreateInterceptor()`, installs `IHttpExtendedConnectFeature` over it, the way `Http.ProtocolUpgrade` wraps `TakeOver`. The feature therefore exists only on a listener that registers the interceptor.)*
+5. **Web.Hosting installs the HTTP/1.1 upgrade interceptor by default**, as it already does the request-size interceptor. A request that no application accepts is served exactly as before. *(Since #1368 it also installs the extended CONNECT interceptor, after the upgrade interceptor. A host that clears `options.Interceptors` loses WebSockets on all three protocols: the HTTP/2 and HTTP/3 transports keep advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL`, but no feature surfaces the handshake.)*
 6. **Cross-site WebSocket hijacking is refused by default.** A handshake whose `Origin` is present and is neither the request's own origin nor in `AllowedOrigins` gets `403`. A handshake without `Origin` (a non-browser client) passes.
 7. **The drain closes WebSockets cleanly.** The default server publishes its drain signal to each exchange through a Web-root feature, in the same pattern as `IWebResponseCompletionFeature`. Web.WebSockets closes open sockets with `1001 Going Away` when the drain begins, rather than letting the budget abort them without a close frame.
 
@@ -95,7 +97,8 @@ Option B's one advantage is pipeline-native framing. WebSocket traffic is messag
 - The non-goal statements in Http.ProtocolUpgrade, Http.ExtendedConnect and Http.Connections are superseded and rewritten.
 
 **Also:**
-- App.Web gains Http.WebSockets, Web.WebSockets, Http.ProtocolUpgrade and Http.ExtendedConnect.
+- App.Web gains Http.WebSockets, Web.WebSockets, Http.ProtocolUpgrade and Http.ExtendedConnect. Since #1368, Web.Hosting references Http.ExtendedConnect, so every other area framework that carries Web.Hosting lists it as a private member, beside Http.ProtocolUpgrade.
+- Since #1368, each HTTP/2 or HTTP/3 WebSocket handshake builds the transport's response sink and exchange control, because the extended CONNECT interceptor reaches the control through the response phase. Ordinary exchanges keep the fast path.
 - An open WebSocket holds its connection on HTTP/1.1, or its stream on HTTP/2 and HTTP/3, so it counts against `MaxConcurrentConnections` and the stream limits.
 - **To revisit:** a hub framework, and per-message size limits beyond what the application reads.
 

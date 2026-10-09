@@ -11,6 +11,19 @@ feature on `IHttpContext`.
 - Accept the exchange as a duplex tunnel: a `200` response head, then raw octets in both directions
   over the exchange's stream.
 
+## Registration
+
+The feature is installed by an exchange interceptor, so register it on the listener:
+
+```csharp
+options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+```
+
+The Web host (`Assimalign.Cohesion.Web.Hosting`) registers it by default. Without it, an extended
+CONNECT reaches the application as an ordinary `CONNECT` and `context.ExtendedConnect` is `null`,
+although the HTTP/2 and HTTP/3 transports still advertise extended CONNECT to clients. An ordinary
+exchange pays nothing for the registration beyond a version check.
+
 ## Usage
 
 ```csharp
@@ -37,11 +50,12 @@ HTTP/1.1.
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Http` — the protocol core, which owns the `IHttpExtendedConnectFeature`
-  contract.
+- `Assimalign.Cohesion.Http` — the protocol core: the interceptor seam, the validated `:protocol` on
+  the request context, and the exchange control's `AcceptTunnelAsync`.
 
-The HTTP/2 and HTTP/3 transports (`Assimalign.Cohesion.Http.Connections`) implement the contract and
-install it on every valid extended CONNECT; this package reads it. Neither references the other.
+The HTTP/2 and HTTP/3 transports (`Assimalign.Cohesion.Http.Connections`) validate extended CONNECT
+and implement the tunnel accept on their exchange controls; this package's interceptor wraps it into
+the feature. Neither references the other.
 
 ## Non-goals
 

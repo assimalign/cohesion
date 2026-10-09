@@ -85,11 +85,12 @@ internal abstract class HttpWebSocketBootstrap
         }
 
         // HTTP/2 and HTTP/3 (RFC 8441 §4, RFC 9220 §3): an extended CONNECT whose :protocol names
-        // websocket. The transport installs the feature only on a valid extended CONNECT, so its
-        // presence is the pseudo-header check; the method test first keeps the feature lookup off
-        // every other request. An extended CONNECT for another protocol is not a WebSocket attempt.
+        // websocket. The extended CONNECT interceptor installs the feature only on an extended CONNECT
+        // the transport validated, so its presence is the pseudo-header check; the method test first
+        // keeps the feature lookup off every other request. An extended CONNECT for another protocol
+        // is not a WebSocket attempt.
         if (context.Request.Method == HttpMethod.Connect
-            && context.Features.Get<IHttpExtendedConnectFeature>() is { } extendedConnect
+            && context.ExtendedConnect is { } extendedConnect
             && string.Equals(extendedConnect.Protocol, HttpWebSocketHandshake.ProtocolToken, StringComparison.OrdinalIgnoreCase))
         {
             return new ExtendedConnectWebSocketBootstrap(context.Request, extendedConnect);

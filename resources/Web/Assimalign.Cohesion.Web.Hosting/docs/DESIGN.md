@@ -836,7 +836,9 @@ WebSocket close it enables (`1001` before the budget runs out) is pinned end to 
 The default protocol-upgrade interceptor is pinned by `WebApplicationServerDefaultsTests` (slot 1,
 by behavior) and by `WebApplicationProtocolUpgradeTests` over a real loopback connection: an
 upgrade nobody accepts is served as an ordinary `200`, and an accepted one answers `101` and hands
-the handler the raw connection.
+the handler the raw connection. The default extended CONNECT interceptor is pinned by the same
+defaults suite (slot 2, by behavior) and by `WebApplicationServerExtendedConnectTests`, a WebSocket
+echo over a real HTTP/2 extended CONNECT.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
@@ -1120,7 +1122,7 @@ registration verbs, and certificate files load through the BCL's
 When the web host composes the `HttpConnectionListener`, it installs the
 default interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
-There are two, in this order:
+There are three, in this order:
 
 1. `Http.RequestLimits`' max-request-body-size interceptor (request scope), in slot 0, described
    below.
@@ -1129,20 +1131,40 @@ There are two, in this order:
    HTTP/1.1 upgrade or `CONNECT` as `context.Upgrade`, so a WebSocket handshake
    (`context.WebSockets`, `Http.WebSockets`) works on every HTTP/1.1 listener with no listener
    configuration. Nothing changes for a request no application accepts: it is served exactly as
-   before, and the upgrade is ignored (RFC 9110 §7.8). `Web.Hosting` references
-   `Http.ProtocolUpgrade` for this, a reference outside the Web area (COHRES002 is about same-area
-   references).
+   before, and the upgrade is ignored (RFC 9110 §7.8).
+3. `Http.ExtendedConnect`'s interceptor (#1368, owner decision 20). It surfaces an HTTP/2 or HTTP/3
+   extended CONNECT (RFC 8441, RFC 9220) as `context.ExtendedConnect`, bound to the exchange
+   control's `AcceptTunnelAsync`, so a WebSocket handshake works on every HTTP/2 and HTTP/3 listener
+   too. A request no application accepts is served exactly as before.
 
-The upgrade interceptor needs the exchange control's takeover, and a response-scoped interceptor
+`Web.Hosting` references `Http.ProtocolUpgrade` and `Http.ExtendedConnect` for this, references
+outside the Web area (COHRES002 is about same-area references); both are private members of every
+non-Web area framework that carries this module, and public members of `App.Web`.
+
+The two transition interceptors need the exchange control, and a response-scoped interceptor
 is what makes a transport build the per-exchange response sink and exchange control for every
-exchange. So it declares the request scope only and joins the response phase of the exchanges
-that ask for a transition: its `AfterRequestHead` adds it to an HTTP/1.1 upgrade's or `CONNECT`'s
-exchange (`HttpExchangeInterceptorRequestContext.AddResponseInterceptor`). Every other exchange,
-and every HTTP/2 and HTTP/3 one, stays on the transports' fast path, so default-on WebSockets cost
-an ordinary request a version and header check. Measured with the two default interceptors and a
-loopback `HttpClient` in one process, a plain `GET` allocates 12,552 B over HTTP/1.1 and 9,842 B
-over HTTP/2, the same as with no upgrade interceptor; the interceptor in every response phase cost
-12,912 B and 10,125 B.
+exchange. So each declares the request scope only and joins the response phase of the exchanges
+that ask for a transition (`HttpExchangeInterceptorRequestContext.AddResponseInterceptor`): the
+upgrade interceptor an HTTP/1.1 upgrade's or `CONNECT`'s exchange, the extended CONNECT interceptor
+an HTTP/2 or HTTP/3 exchange whose validated `:protocol` the transport passed on
+(`HttpExchangeInterceptorRequestContext.Protocol`). Every other exchange stays on the transports'
+fast path, so default-on WebSockets cost an ordinary request a version and header check, which
+`HttpExchangeResponseInterceptorTests` pins on all three versions under all three defaults. An
+extended CONNECT pays for the sink and the control once per WebSocket handshake. Measured with a
+loopback `HttpClient` in one process, a plain `GET` allocates the same with the three default
+interceptors as with the first two: 12,560 B over HTTP/1.1 and about 9,967 B over HTTP/2. Before
+#1368, with two defaults, it allocated 12,552 B and about 9,962 B; the difference is the request
+context's new `Protocol` field (8 B), paid by every exchange that runs a request hook. For comparison,
+the upgrade interceptor cost 12,912 B and 10,125 B when it still sat in every exchange's response
+phase (measured against 12,552 B and 9,840 B without it, before it moved to the request scope).
+
+**Clearing the defaults removes WebSockets.** A `UseServer` callback that clears
+`HttpConnectionListenerOptions.Interceptors` removes both transition interceptors: HTTP/1.1
+upgrades no longer surface as `context.Upgrade`, and HTTP/2 and HTTP/3 extended CONNECT no longer
+surface as `context.ExtendedConnect`. The transports still advertise
+`SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` on HTTP/2 and HTTP/3, so browsers keep sending WebSocket
+handshakes as extended CONNECT, and `context.WebSockets.IsWebSocketRequest` reads `false` for them.
+A host that clears the list and still serves WebSockets adds the two interceptors back.
 
 The max-request-body-size interceptor occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
@@ -1163,7 +1185,15 @@ policy, not transport policy. They live here because this is the composition roo
 apps that want a leaner pipeline can
 inspect or clear `HttpConnectionListenerOptions.Interceptors` in their own
 `UseServer` callback (user configurations run after the defaults), which keeps
-the default overridable without a dedicated opt-out knob.
+the default overridable without a dedicated opt-out knob. The cost of clearing
+them is stated above: the WebSocket handshake on every protocol.
+
+The extended CONNECT interceptor is a default rather than a transport behavior
+because the feature it installs is a package's, not the transport's: the
+transport offers the tunnel as a mechanism on its exchange control and references
+no feature package (core Http DESIGN, "The extended CONNECT seam"). There is no
+Web-root seam through which a feature library could register an interceptor, so
+the composition root registers it, as it does the upgrade interceptor.
 
 ### Non-goals
 

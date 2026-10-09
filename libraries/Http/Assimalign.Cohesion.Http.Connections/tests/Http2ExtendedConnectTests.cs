@@ -36,7 +36,7 @@ public class Http2ExtendedConnectTests
     public async Task AcceptAsync_OnExtendedConnect_ShouldSend200HeadWithApplicationHeadersAndNoEndStream()
     {
         // Arrange — the application staged a status, a header the tunnel keeps, and fields it cannot carry.
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
         IHttpContext context = await peer.ReceiveContextAsync();
         context.Response.StatusCode = HttpStatusCode.Accepted;
@@ -72,7 +72,7 @@ public class Http2ExtendedConnectTests
     public async Task Tunnel_OnBidirectionalEcho_ShouldCarryDataBothWays()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
         byte[] buffer = new byte[64];
 
@@ -103,7 +103,7 @@ public class Http2ExtendedConnectTests
     public async Task Tunnel_OnClientEndStream_ShouldEndReadsAndLeaveTheWriteSideOpen()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
 
         // Act — the client sends its last octets and ends its side first.
@@ -134,7 +134,7 @@ public class Http2ExtendedConnectTests
     public async Task Tunnel_OnServerDispose_ShouldEndStreamAndResetWithNoErrorAtTheExchangeEnd()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
         await tunnel.WriteAsync(Encoding.ASCII.GetBytes("last")).AsTask().WaitAsync(_timeout);
 
@@ -162,7 +162,7 @@ public class Http2ExtendedConnectTests
     public async Task SendAsync_OnTunnelLeftOpen_ShouldEndTheTunnelWithoutASecondHead()
     {
         // Arrange — the handler accepts, writes, and returns without disposing the tunnel.
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
         await tunnel.WriteAsync(Encoding.ASCII.GetBytes("open")).AsTask().WaitAsync(_timeout);
         context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("a buffered body that must never be sent"));
@@ -187,7 +187,7 @@ public class Http2ExtendedConnectTests
         // Arrange — the peer advertises a 16 KiB stream window.
         const int streamWindow = 16 * 1024;
         byte[] payload = Http2TestPeer.CreateBody(100_000);
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(initialWindowSize: streamWindow);
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect(), initialWindowSize: streamWindow);
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
 
         // Act — only the first window can go out before the peer grants more.
@@ -224,7 +224,7 @@ public class Http2ExtendedConnectTests
     {
         // Arrange — 200 KB is three times the server's stream and connection receive windows.
         byte[] payload = Http2TestPeer.CreateBody(200_000);
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
         Task<byte[]> reading = ReadExactlyAsync(tunnel, payload.Length);
 
@@ -265,7 +265,7 @@ public class Http2ExtendedConnectTests
     public async Task AcceptAsync_OnSecondCall_ShouldThrowInvalidOperationException()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
 
         // Act / Assert — and the second call wrote nothing.
@@ -281,7 +281,7 @@ public class Http2ExtendedConnectTests
     public async Task AcceptAsync_AfterResponseStarted_ShouldThrowInvalidOperationException()
     {
         // Arrange — the streaming feature commits the response head with its first write.
-        HttpConnectionListenerOptions options = new();
+        HttpConnectionListenerOptions options = WithExtendedConnect();
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
@@ -298,7 +298,7 @@ public class Http2ExtendedConnectTests
     public async Task AcceptAsync_OnCancelledExchange_ShouldThrowInvalidOperationException()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
         IHttpContext context = await peer.ReceiveContextAsync();
         context.Cancel();
@@ -313,7 +313,7 @@ public class Http2ExtendedConnectTests
     public async Task AcceptAsync_OnStreamResetByPeer_ShouldThrowIOException()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         await peer.SendHeadersAsync(1, endStream: false, ExtendedConnect());
         IHttpContext context = await peer.ReceiveContextAsync();
         await peer.SendRstStreamAsync(1, Http2ErrorCode.Cancel);
@@ -329,7 +329,7 @@ public class Http2ExtendedConnectTests
     public async Task Tunnel_OnPeerReset_ShouldFaultPendingRead()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (_, Stream tunnel) = await AcceptTunnelAsync(peer);
         Task<int> read = tunnel.ReadAsync(new byte[16]).AsTask();
 
@@ -345,7 +345,7 @@ public class Http2ExtendedConnectTests
     public async Task Tunnel_OnPeerReset_ShouldFaultPendingWrite()
     {
         // Arrange — a 1 KiB stream window parks a 4 KiB write after its first frame.
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(initialWindowSize: 1024);
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect(), initialWindowSize: 1024);
         (_, Stream tunnel) = await AcceptTunnelAsync(peer);
         Task write = tunnel.WriteAsync(new byte[4096]).AsTask();
         await peer.Output.ReadUntilAsync(_ => peer.Output.DataLength(1) >= 1024, "the first window of DATA");
@@ -363,7 +363,7 @@ public class Http2ExtendedConnectTests
     public async Task Tunnel_OnConnectionLoss_ShouldFaultPendingReadAndWrite()
     {
         // Arrange — a read waits for DATA and a write waits for credit.
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(initialWindowSize: 1024);
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect(), initialWindowSize: 1024);
         (_, Stream tunnel) = await AcceptTunnelAsync(peer);
         Task<int> read = tunnel.ReadAsync(new byte[16]).AsTask();
         Task write = tunnel.WriteAsync(new byte[4096]).AsTask();
@@ -381,7 +381,7 @@ public class Http2ExtendedConnectTests
     public async Task SendAsync_OnCancelledTunnel_ShouldResetWithCancel()
     {
         // Arrange
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(WithExtendedConnect());
         (IHttpContext context, Stream tunnel) = await AcceptTunnelAsync(peer);
 
         // Act — the host abandons the exchange (a faulted handler, a stop budget run out).
@@ -401,7 +401,7 @@ public class Http2ExtendedConnectTests
     public async Task StreamingSink_AfterTunnelAccepted_ShouldRefuseToCommitASecondHead()
     {
         // Arrange
-        HttpConnectionListenerOptions options = new();
+        HttpConnectionListenerOptions options = WithExtendedConnect();
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
         (IHttpContext context, _) = await AcceptTunnelAsync(peer);
@@ -412,6 +412,14 @@ public class Http2ExtendedConnectTests
         peer.Output.ForStream(1).Count(frame => frame.IsHeaders).ShouldBe(1);
 
         await EndExchangeAsync(peer, context);
+    }
+
+    // The extended CONNECT feature is installed by its interceptor (#1368), which a host registers.
+    private static HttpConnectionListenerOptions WithExtendedConnect()
+    {
+        HttpConnectionListenerOptions options = new();
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        return options;
     }
 
     private static (string Name, string Value)[] ExtendedConnect() =>

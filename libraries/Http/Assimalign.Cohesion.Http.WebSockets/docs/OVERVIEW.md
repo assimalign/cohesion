@@ -64,15 +64,17 @@ server ends the connection (HTTP/1.1) or the stream (HTTP/2, HTTP/3) when the ex
 select a subprotocol, pick one of `webSockets.RequestedProtocols` (the client's offer, in its order
 of preference) and pass it as `HttpWebSocketAcceptOptions.SubProtocol`.
 
-On a bare HTTP/1.1 listener, register the protocol-upgrade interceptor yourself, and check `Origin`
-before accepting a socket that serves browsers. HTTP/2 and HTTP/3 listeners need nothing registered:
-the transport surfaces extended CONNECT itself.
+On a bare listener, register the interceptors yourself, and check `Origin` before accepting a socket
+that serves browsers: the protocol-upgrade interceptor for HTTP/1.1, and the extended CONNECT
+interceptor for HTTP/2 and HTTP/3. The Web host registers both by default; a host that clears its
+listener's interceptors loses WebSockets on the protocols whose interceptor it removed.
 
 ```csharp
 HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 {
     options.UseHttp1(tcpListener);
     options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+    options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 });
 ```
 
@@ -82,10 +84,12 @@ alongside attacker-controlled data leaks them through the compressed size.
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Http` — the protocol core (`IHttpContext`, the feature collection, headers,
-  and `IHttpExtendedConnectFeature`, the HTTP/2 and HTTP/3 tunnel the handshake rides).
+- `Assimalign.Cohesion.Http` — the protocol core (`IHttpContext`, the feature collection, and
+  headers).
 - `Assimalign.Cohesion.Http.ProtocolUpgrade` — the HTTP/1.1 upgrade and raw-stream takeover the
   handshake rides.
+- `Assimalign.Cohesion.Http.ExtendedConnect` — `IHttpExtendedConnectFeature`, the HTTP/2 and HTTP/3
+  extended CONNECT tunnel the handshake rides.
 
 The framing is `System.Net.WebSockets` from the shared framework; there is no package dependency.
 

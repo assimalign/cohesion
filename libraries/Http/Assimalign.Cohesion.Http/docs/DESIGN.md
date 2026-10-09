@@ -604,46 +604,64 @@ case-sensitively per the RFC.
 No reflection or dynamic serialization; the format path uses a small `StringBuilder` and the parse
 path is span-based. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
 
-## The extended CONNECT feature (`IHttpExtendedConnectFeature`)
+## The extended CONNECT seam
 
 ### What it is
 
-`IHttpExtendedConnectFeature` is the HTTP/2 and HTTP/3 *extended CONNECT* capability (RFC 8441,
-RFC 9220): a `CONNECT` request that carries `:protocol` asks to run another protocol — most often
-WebSocket — over its one stream. The feature reports the requested `Protocol` and offers
-`AcceptAsync`, which answers `200` without ending the stream and returns the stream as a duplex
-`Stream`: reads deliver the client's `DATA`, writes go out as `DATA` under flow control, and
-disposing ends the server's side. The server transport (`Assimalign.Cohesion.Http.Connections`)
-installs it on every valid extended CONNECT and on no other exchange. Code reads it as
-`context.ExtendedConnect`, an accessor that ships in `Assimalign.Cohesion.Http.ExtendedConnect`.
-The interface's documentation carries the full accept contract; the transport's DESIGN carries the
-wire behavior; `docs/libraries/Http/DECISIONS.md` (ADR 1) records why the tunnel exists.
+An HTTP/2 or HTTP/3 *extended CONNECT* (RFC 8441, RFC 9220) is a `CONNECT` request that carries
+`:protocol`, asking to run another protocol, most often WebSocket, over its one stream. The core
+carries two generic seam members for it and no feature contract:
 
-### Why the contract lives in the core
+- **`HttpExchangeInterceptorRequestContext.Protocol`** is the `:protocol` the transport validated
+  (RFC 8441 §4, RFC 9220 §3), or `null` on any other request. It is the only signal that tells a
+  request-parse hook an extended CONNECT from a classic one; the method alone cannot.
+- **`IHttpExchangeControl.CanAcceptTunnel` and `AcceptTunnelAsync`** are the per-stream counterpart of
+  `TakeOver`. The accept is one-shot: it answers `200` in a head that does not end the stream (without
+  `Content-Length`, `Transfer-Encoding` or connection-specific fields), takes the exchange over, and
+  returns the stream as a duplex `Stream`. Reads deliver the client's `DATA`, writes go out as
+  `DATA` under flow control, and disposing ends the server's side. The member's documentation
+  carries the full contract. HTTP/1.1's control reports `false`, because its `CONNECT` and upgrades
+  take the whole connection over instead.
 
-The producer of the capability is the transport. Accepting writes a HEADERS block without
-`END_STREAM` and frames `DATA` under the stream's flow-control windows, which only the transport can
-do, and the transport references no feature package. The contract therefore sits here and the
-implementation stays internal to the transport.
+The application-facing feature, `IHttpExtendedConnectFeature` (`context.ExtendedConnect`), ships in
+`Assimalign.Cohesion.Http.ExtendedConnect`. Its interceptor installs the feature from `Protocol` and
+binds it to the exchange control, the way `Http.ProtocolUpgrade` wraps `TakeOver`. The transport's
+DESIGN carries the wire behavior, and `docs/libraries/Http/DECISIONS.md` (ADR 1) records why the
+tunnel exists.
 
-This is the one feature contract left in the core, and it is an exception to the rule in "Why the
-seam is core and the features are not" below. Owner decision 20 (2026-10-09) returns it to `Http.ExtendedConnect`, installed
-by an interceptor over generic seam members on `IHttpExchangeControl` (#1368). The TLS session
-feature that used to sit beside it has already moved to `Assimalign.Cohesion.Http.Tls` (#1367).
+### Why seam members, not a feature contract
 
-The application-facing accessors stay in their package, which is what the WebSocket package builds
-on. Until the tunnel existed the feature only reported `:protocol`, and the transport published
-that string under an `IHttpContext.Items` key for the package to wrap — a one-way bridge that suits
-a single string and nothing richer. An accept call cannot travel as a string, so the bridge is
-gone and the contract moved here. It used to live in the `Http.ExtendedConnect` assembly; the
-namespace is unchanged, so source that referenced the package compiles as before, but a binary built
-against the old assembly has to be rebuilt.
+Only the transport can perform the accept: it writes a HEADERS block without `END_STREAM` through the
+connection's shared HPACK or QPACK state and frames `DATA` under the stream's flow-control windows.
+#1316 therefore put the feature contract in the core, so that the transport could install its own
+implementation without referencing a feature package. That contradicted the rule in "Why the seam is
+core and the features are not" below, and owner decision 20 (2026-10-09) reversed it in #1368: the
+accept became a mechanism on `IHttpExchangeControl`, the generic control that exists so that a new
+wire mechanism needs no per-capability contract, and the feature returned to `Http.ExtendedConnect`,
+its preview.1 home. The TLS session feature that sat beside it moved to `Assimalign.Cohesion.Http.Tls`
+in #1367, so the core now holds no transport-produced feature contract.
+
+Two consequences follow:
+
+- **The feature depends on a registration.** It exists only on a listener that registers
+  `HttpExtendedConnect.CreateInterceptor()`; the Web host does by default. The HTTP/2 and HTTP/3
+  transports advertise extended CONNECT regardless, so a listener without the interceptor surfaces a
+  client's extended CONNECT as an ordinary `CONNECT`.
+- **An extended CONNECT pays for the response phase.** The interceptor reaches the control through
+  `AddResponseInterceptor`, so the transport builds a response sink and an exchange control for each
+  extended CONNECT, once per WebSocket handshake. Every other exchange keeps the fast path.
+
+`IHttpExchangeControl` shipped in preview.1, and the two members were added as plain interface
+members, not default implementations: a throwing default on a public seam would hide an unsupported
+mechanism behind a runtime failure. The only implementers are the transport's three controls.
 
 ### What it does not do
 
 It carries octets, not a protocol: WebSocket framing comes from the BCL over the accepted stream,
-and the handshake from `Http.WebSockets`. A classic `CONNECT` (no `:protocol`) carries no such
-feature, and nothing here dials the request's authority.
+and the handshake from `Http.WebSockets`. A classic `CONNECT` (no `:protocol`) has no `Protocol`, and
+nothing here dials the request's authority. `AcceptTunnelAsync` is the stream tunnel a classic
+`CONNECT` over HTTP/2 or HTTP/3 (RFC 9113 §8.5) would need, so adding that later is a package change,
+not a core one.
 
 ## The exchange interceptor seam
 
@@ -770,10 +788,13 @@ with a type test (the TLS handshake is the Connections library's
 `ITlsConnectionInfo`, which `Assimalign.Cohesion.Http.Tls` turns into
 `context.TlsConnection`). A wire mechanism only the transport can perform is
 offered through `IHttpExchangeControl`, which a feature package wraps
-(`context.Upgrade` over `TakeOver`). Either way the feature package owns the
+(`context.Upgrade` over `TakeOver`, `context.ExtendedConnect` over
+`AcceptTunnelAsync`). A request fact a hook needs that the parsed head cannot
+show is a member of the request context (`Protocol`, the validated `:protocol`
+of an extended CONNECT). Either way the feature package owns the
 application-facing contract, and the transport references no feature package.
-Extended CONNECT is the one exception still in the core, pending #1368 (see its
-section above).
+The rule has no exceptions left: the last two transport-produced contracts moved
+out in #1367 (TLS) and #1368 (extended CONNECT).
 
 ### Contract details that are load-bearing
 
@@ -989,9 +1010,11 @@ context instead of per-capability members:
   `IHttpExchangeControl` on `HttpExchangeInterceptorResponseContext.Control` — the
   single generic surface for the transport-owned wire mechanisms outside the
   normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
-  `WriteInterimResponseAsync`) and the raw-stream takeover (`CanTakeOver` /
-  `TakeOver()`). One control deliberately replaces the former per-capability
-  contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`): a new
+  `WriteInterimResponseAsync`), the raw-connection takeover (`CanTakeOver` /
+  `TakeOver()`), and the extended CONNECT stream tunnel (`CanAcceptTunnel` /
+  `AcceptTunnelAsync`). One control deliberately replaces the former per-capability
+  contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`, and the
+  core `IHttpExtendedConnectFeature` that #1368 removed): a new
   wire mechanism composes from the hooks plus this control instead of adding a
   new core abstraction and new transport plumbing. The control carries
   mechanisms, not decisions — aborting is `IHttpContext.Cancel`, on the
@@ -1001,7 +1024,8 @@ context instead of per-capability members:
   `Http.Streaming` wraps the sink in `IHttpResponseStreamingFeature`;
   `Http.InterimResponses` wraps the control's interim writes in
   `IHttpInterimResponseFeature`; `Http.ProtocolUpgrade` wraps the control's
-  takeover in `IHttpProtocolUpgradeFeature`.
+  takeover in `IHttpProtocolUpgradeFeature`; `Http.ExtendedConnect` wraps the
+  control's tunnel accept in `IHttpExtendedConnectFeature`.
 
 So the streaming write/flush API, its state machine, the SSE wire format, the
 interim-response ergonomics, and all upgrade semantics live in feature packages;
@@ -1026,9 +1050,18 @@ word — it fires immediately before the commit on whichever path commits first.
 - **Capability probes are report-don't-throw.** `CanTakeOver` is `false` on
   HTTP/2 / HTTP/3 (multiplexed streams over a shared connection; those protocols
   removed `Upgrade`) and once the exchange can no longer be handed off;
+  `CanAcceptTunnel` is `false` on HTTP/1.1, on any exchange that is not an
+  extended CONNECT, and once the tunnel was accepted or the response started;
   `CanWriteInterimResponse` flips to `false` once the final head is committed.
-  Feature packages degrade (e.g. `context.Upgrade == null`) rather than surface
-  a feature whose action could never work.
+  Feature packages degrade (e.g. `context.Upgrade == null`,
+  `context.ExtendedConnect == null`) rather than surface a feature whose action
+  could never work.
+- **`AcceptTunnelAsync` registers the tunnel before writing the head**, the
+  per-stream analogue of `TakeOver` claiming the connection first: from that
+  instant the exchange is taken over, so neither the transport's send path nor
+  the raw response sink can put a second head on the stream, even if writing the
+  `200` fails. Its guards run before anything is written, in a fixed order:
+  accepted once, cancelled, response started, stream reset or connection closed.
 - **`TakeOver()` is one-shot** and claims the connection *before* any transition
   byte is written, so two features can never fight over the same connection and
   a failed accept can never be followed by a second HTTP response on a
@@ -1038,7 +1071,8 @@ word — it fires immediately before the commit on whichever path commits first.
   checkpoints** with the version's wire behavior (h1 writes no response and
   ends the connection after the exchange, h2 `RST_STREAM(CANCEL)`, h3 stream
   abort), and the control's probes observe it: a cancelled exchange reports
-  `CanWriteInterimResponse == false` and `CanTakeOver == false`.
+  `CanWriteInterimResponse == false`, `CanTakeOver == false` and
+  `CanAcceptTunnel == false`.
 - **`Control` is optional** (`null` in hand-built test contexts).
 
 ### AOT posture

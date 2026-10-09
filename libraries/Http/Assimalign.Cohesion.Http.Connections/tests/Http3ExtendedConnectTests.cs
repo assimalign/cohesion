@@ -30,7 +30,7 @@ public class Http3ExtendedConnectTests
     public async Task AcceptAsync_OnExtendedConnect_ShouldSend200HeadWithApplicationHeadersAndNoFin()
     {
         // Arrange — the application staged a status, a header the tunnel keeps, and fields it cannot carry.
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         Connection request = await OpenExtendedConnectAsync(peer);
         IHttpContext context = await peer.NextContextAsync();
         context.Response.StatusCode = HttpStatusCode.Accepted;
@@ -61,7 +61,7 @@ public class Http3ExtendedConnectTests
     public async Task Tunnel_OnBidirectionalEcho_ShouldCarryDataBothWays()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (Connection request, _, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
         byte[] buffer = new byte[64];
 
@@ -88,7 +88,7 @@ public class Http3ExtendedConnectTests
     public async Task Tunnel_OnClientFin_ShouldEndReadsAndLeaveTheWriteSideOpen()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (Connection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
 
         // Act — the client sends its last octets and ends its side first.
@@ -117,7 +117,7 @@ public class Http3ExtendedConnectTests
     public async Task Tunnel_OnServerDispose_ShouldEndTheStreamAndStopReadingAtTheExchangeEnd()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (Connection request, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
         await tunnel.WriteAsync(Encoding.ASCII.GetBytes("last")).AsTask().WaitAsync(_timeout);
 
@@ -142,7 +142,7 @@ public class Http3ExtendedConnectTests
     public async Task SendAsync_OnTunnelLeftOpen_ShouldEndTheTunnelWithoutASecondHead()
     {
         // Arrange — the handler accepts, writes, and returns without disposing the tunnel.
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (_, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
         await tunnel.WriteAsync(Encoding.ASCII.GetBytes("open")).AsTask().WaitAsync(_timeout);
         context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("a buffered body that must never be sent"));
@@ -164,7 +164,7 @@ public class Http3ExtendedConnectTests
         const int length = 1024 * 1024;
         byte[] upload = Http2TestPeer.CreateBody(length);
         byte[] download = Enumerable.Reverse(upload).ToArray();
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (Connection request, _, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
 
         // Act — the client sends in 64 KiB DATA frames while the server reads; then the server writes.
@@ -189,7 +189,7 @@ public class Http3ExtendedConnectTests
     public async Task AcceptAsync_OnSecondCall_ShouldThrowInvalidOperationException()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (_, IHttpContext context, Stream tunnel, _) = await AcceptTunnelAsync(peer);
 
         // Act / Assert
@@ -202,7 +202,11 @@ public class Http3ExtendedConnectTests
     {
         // Arrange — the streaming feature commits the response head with its first write.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
-            configureListener: static options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+            configureListener: static options =>
+            {
+                WithExtendedConnect(options);
+                options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+            });
         await OpenExtendedConnectAsync(peer);
         IHttpContext context = await peer.NextContextAsync();
         await context.Response.Streaming.WriteAsync(Encoding.ASCII.GetBytes("started")).AsTask().WaitAsync(_timeout);
@@ -215,7 +219,7 @@ public class Http3ExtendedConnectTests
     public async Task Tunnel_OnPeerReset_ShouldFaultPendingReadAndWrites()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (Connection request, _, Stream tunnel, _) = await AcceptTunnelAsync(peer);
         Task<int> read = tunnel.ReadAsync(new byte[16]).AsTask();
 
@@ -231,7 +235,7 @@ public class Http3ExtendedConnectTests
     public async Task Tunnel_OnConnectionLoss_ShouldFaultPendingReadAndWrites()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (_, _, Stream tunnel, _) = await AcceptTunnelAsync(peer);
         await peer.StopReceivingAsync();
         Task<int> read = tunnel.ReadAsync(new byte[16]).AsTask();
@@ -248,7 +252,7 @@ public class Http3ExtendedConnectTests
     public async Task SendAsync_OnCancelledTunnel_ShouldResetWithRequestCancelled()
     {
         // Arrange
-        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(configureListener: WithExtendedConnect);
         (_, IHttpContext context, Stream tunnel, Http3FrameCollector output) = await AcceptTunnelAsync(peer);
 
         // Act — the host abandons the exchange (a faulted handler, a stop budget run out).
@@ -262,6 +266,10 @@ public class Http3ExtendedConnectTests
         output.IsCompleted.ShouldBeFalse();
         await Should.ThrowAsync<ObjectDisposedException>(() => tunnel.WriteAsync(new byte[1]).AsTask());
     }
+
+    // The extended CONNECT feature is installed by its interceptor (#1368), which a host registers.
+    private static void WithExtendedConnect(HttpConnectionListenerOptions options)
+        => options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
     private static async Task<Connection> OpenExtendedConnectAsync(Http3InMemoryPeer peer)
     {

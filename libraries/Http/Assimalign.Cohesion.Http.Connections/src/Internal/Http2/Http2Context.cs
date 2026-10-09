@@ -13,6 +13,7 @@ internal sealed class Http2Context : TransportHttpContext
         : base(HttpVersion.Http20, requestHead, connectionInfo, requestAborted, features)
     {
         Stream = stream;
+        ExtendedConnectProtocol = requestHead.Protocol;
     }
 
     public Http2Stream Stream { get; }
@@ -21,9 +22,10 @@ internal sealed class Http2Context : TransportHttpContext
 
     /// <summary>
     /// The <c>:protocol</c> of a valid extended CONNECT (RFC 8441), or <see langword="null"/> for any
-    /// other request. The connection installs the extended CONNECT feature from it at dispatch.
+    /// other request. Only an exchange that carries one can accept a tunnel
+    /// (<see cref="Http2ExchangeControl.AcceptTunnelAsync"/>).
     /// </summary>
-    public string? ExtendedConnectProtocol { get; init; }
+    public string? ExtendedConnectProtocol { get; }
 
     /// <summary>
     /// The transport's request-body stream for this exchange — the innermost stream, independent of

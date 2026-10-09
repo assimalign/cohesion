@@ -5,10 +5,11 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
-// The extended CONNECT tunnel (RFC 8441): installing the feature, the tunnel's 200 head, its DATA under
-// the peer's send windows, the end of the server's side, and the exchange's finalization once the
-// application's handler returns. The tunnel's reads need nothing here: they drain the stream's request
-// body pipe, whose consumption credits the receive windows like any request body.
+// The extended CONNECT tunnel (RFC 8441): the tunnel's 200 head, its DATA under the peer's send windows,
+// the end of the server's side, and the exchange's finalization once the application's handler returns.
+// The accept itself is the exchange control's (Http2ExchangeControl.AcceptTunnelAsync). The tunnel's
+// reads need nothing here: they drain the stream's request body pipe, whose consumption credits the
+// receive windows like any request body.
 internal sealed partial class Http2ConnectionContext
 {
     /// <summary>
@@ -23,20 +24,6 @@ internal sealed partial class Http2ConnectionContext
             {
                 return _sendCreditClosed;
             }
-        }
-    }
-
-    /// <summary>
-    /// Installs the extended CONNECT feature on an exchange whose request is a valid extended CONNECT
-    /// (RFC 8441 §4), before any response interceptor or application code observes its features.
-    /// Ordinary exchanges get none.
-    /// </summary>
-    /// <param name="context">The exchange the frame pump just materialized.</param>
-    private void AttachExtendedConnect(Http2Context context)
-    {
-        if (context.ExtendedConnectProtocol is { } protocol && context.RequestBody is { } requestBody)
-        {
-            context.Features.Set(new Http2ExtendedConnectFeature(this, context, protocol, requestBody));
         }
     }
 

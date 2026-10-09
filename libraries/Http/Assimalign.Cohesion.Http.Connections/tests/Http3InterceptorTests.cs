@@ -165,6 +165,50 @@ public class Http3InterceptorTests
         interceptor.BodyInvocations.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hooks should observe the validated :protocol of an extended CONNECT")]
+    public async Task AfterRequestHead_OnExtendedConnect_ShouldObserveProtocol()
+    {
+        // Arrange — RFC 9220 §3: the :protocol is the only signal that tells an extended CONNECT from a
+        // classic one, so the transport hands the validated value to the head hooks (#1368).
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(payload, options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBe("websocket");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hooks should observe no :protocol on any other request")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AfterRequestHead_OnClassicConnectOrOrdinaryRequest_ShouldObserveNoProtocol(bool classicConnect)
+    {
+        // Arrange — a classic CONNECT carries only :method and :authority (RFC 9114 §4.4).
+        byte[] payload = classicConnect
+            ? HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":method", "CONNECT"), (":authority", "api.test:443"))
+            : HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test");
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(payload, options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Body hooks should run for empty bodies")]
     public async Task EmptyBody_ShouldStillRunBodyHooks()
     {

@@ -218,14 +218,19 @@ public sealed class WebApplicationServerBuilder
     /// <c>AfterRequestHead</c> hooks can observe it (all three protocol versions run the
     /// request-parse seam). The HTTP/1.1 protocol-upgrade interceptor follows, so
     /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1
-    /// listener; a request that no application accepts is served exactly as before. User
-    /// configurations may still inspect or clear <see cref="HttpConnectionListenerOptions.Interceptors"/>
-    /// to opt out.
+    /// listener. The extended CONNECT interceptor comes last, so <c>context.ExtendedConnect</c>, and
+    /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. A
+    /// request that no application accepts is served exactly as before, and an ordinary exchange keeps
+    /// the transport's fast path under all three. User configurations may still inspect or clear
+    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
+    /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended
+    /// CONNECT but no feature then surfaces it.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
     }
 }

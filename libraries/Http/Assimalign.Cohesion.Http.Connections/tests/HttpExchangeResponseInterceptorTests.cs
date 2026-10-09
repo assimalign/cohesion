@@ -18,9 +18,10 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// Response interceptors added to one exchange by a request-parse hook
 /// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>): the transport runs
 /// the response phase, with its response sink and exchange control, only for the exchanges that
-/// asked, on every protocol. The protocol-upgrade interceptor the Web host registers by default is
-/// the motivating case: a request-scoped interceptor that joins only the HTTP/1.1 exchanges asking
-/// for a transition, so an ordinary exchange keeps the fast path (no sink, no control).
+/// asked, on every protocol. The protocol-upgrade and extended CONNECT interceptors the Web host
+/// registers by default are the motivating cases: request-scoped interceptors that join only the
+/// exchanges asking for a transition (an HTTP/1.1 upgrade or <c>CONNECT</c>, an HTTP/2 or HTTP/3
+/// extended CONNECT), so an ordinary exchange keeps the fast path (no sink, no control).
 /// </summary>
 public class HttpExchangeResponseInterceptorTests
 {
@@ -111,13 +112,41 @@ public class HttpExchangeResponseInterceptorTests
         exchange.Context.Upgrade.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response interceptors: An HTTP/2 extended CONNECT (a WebSocket) keeps the fast path under the protocol-upgrade interceptor")]
-    public async Task ProtocolUpgradeInterceptor_OnHttp2ExtendedConnect_ShouldKeepTheFastPath()
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response interceptors: An ordinary request under all of the Web host's default interceptors keeps the fast path")]
+    [InlineData(Protocol.Http1)]
+    [InlineData(Protocol.Http2)]
+    [InlineData(Protocol.Http3)]
+    public async Task DefaultInterceptors_OnOrdinaryRequest_ShouldKeepTheFastPath(Protocol protocol)
+    {
+        // Arrange — the three interceptors Web.Hosting registers on every listener, in its order (#1368):
+        // none of them may cost an ordinary exchange a response sink or an exchange control.
+        await using Exchange exchange = await Exchange.OpenAsync(
+            protocol,
+            claim: false,
+            HttpRequestLimits.CreateMaxRequestBodySizeInterceptor(),
+            HttpProtocolUpgrade.CreateInterceptor(),
+            HttpExtendedConnect.CreateInterceptor());
+
+        // Act
+        exchange.Context.Response.StatusCode = HttpStatusCode.Ok;
+        await exchange.ConnectionContext.SendAsync(exchange.Context);
+
+        // Assert
+        exchange.Transport.ResponseBodySink.ShouldBeNull();
+        exchange.Context.Upgrade.ShouldBeNull();
+        exchange.Context.ExtendedConnect.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response interceptors: An HTTP/2 extended CONNECT (a WebSocket) joins the response phase under the default interceptors")]
+    public async Task DefaultInterceptors_OnHttp2ExtendedConnect_ShouldJoinTheResponsePhase()
     {
         // Arrange — HTTP/2 has no Upgrade mechanism (RFC 9113 §8.6); its WebSocket is an extended
-        // CONNECT (RFC 8441), which the transport surfaces itself.
+        // CONNECT (RFC 8441), whose feature the extended CONNECT interceptor binds to the exchange
+        // control (#1368). That needs the response phase, so this exchange, and only an extended
+        // CONNECT, gets the sink and the control.
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
 
         // Act
@@ -125,20 +154,26 @@ public class HttpExchangeResponseInterceptorTests
         IHttpContext context = await peer.ReceiveContextAsync();
 
         // Assert
-        ((TransportHttpContext)context).ResponseBodySink.ShouldBeNull();
+        ((TransportHttpContext)context).ResponseBodySink.ShouldNotBeNull();
         context.Upgrade.ShouldBeNull();
-        context.Features.Get<IHttpExtendedConnectFeature>().ShouldNotBeNull();
+        context.ExtendedConnect.ShouldNotBeNull();
+        context.ExtendedConnect!.Protocol.ShouldBe("websocket");
 
         await peer.ConnectionContext.SendAsync(context);
         await context.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response interceptors: An HTTP/3 extended CONNECT (a WebSocket) keeps the fast path under the protocol-upgrade interceptor")]
-    public async Task ProtocolUpgradeInterceptor_OnHttp3ExtendedConnect_ShouldKeepTheFastPath()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response interceptors: An HTTP/3 extended CONNECT (a WebSocket) joins the response phase under the default interceptors")]
+    public async Task DefaultInterceptors_OnHttp3ExtendedConnect_ShouldJoinTheResponsePhase()
     {
-        // Arrange — RFC 9114 §4.2 has no Upgrade either; RFC 9220 is the WebSocket bootstrap.
+        // Arrange — RFC 9114 §4.2 has no Upgrade either; RFC 9220 is the WebSocket bootstrap, and the
+        // extended CONNECT interceptor binds its feature to the exchange control (#1368).
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
-            configureListener: static options => options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor()));
+            configureListener: static options =>
+            {
+                options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+                options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+            });
         Connection request = await peer.OpenRequestStreamAsync();
 
         // Act
@@ -146,9 +181,10 @@ public class HttpExchangeResponseInterceptorTests
         IHttpContext context = await peer.NextContextAsync();
 
         // Assert
-        ((TransportHttpContext)context).ResponseBodySink.ShouldBeNull();
+        ((TransportHttpContext)context).ResponseBodySink.ShouldNotBeNull();
         context.Upgrade.ShouldBeNull();
-        context.Features.Get<IHttpExtendedConnectFeature>().ShouldNotBeNull();
+        context.ExtendedConnect.ShouldNotBeNull();
+        context.ExtendedConnect!.Protocol.ShouldBe("websocket");
 
         await peer.ConnectionContext.SendAsync(context);
         await context.DisposeAsync();

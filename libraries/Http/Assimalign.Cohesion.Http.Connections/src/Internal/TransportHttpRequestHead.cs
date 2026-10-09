@@ -28,6 +28,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// The request trailer collection, or <see langword="null"/> when the transport does not surface
 /// request trailers (the request then reports <see cref="HttpTrailerCollection.Unsupported"/>).
 /// </param>
+/// <param name="Protocol">
+/// The <c>:protocol</c> of an HTTP/2 or HTTP/3 extended CONNECT, set only once the head has been
+/// validated as one (RFC 8441 §4, RFC 9220 §3), or <see langword="null"/> for any other request. The
+/// request-parse interceptors read it as <see cref="HttpExchangeInterceptorRequestContext.Protocol"/>,
+/// and the exchange keeps it so its control can accept the tunnel.
+/// </param>
 internal readonly record struct TransportHttpRequestHead(
     HttpHost Host,
     HttpPath Path,
@@ -36,4 +42,5 @@ internal readonly record struct TransportHttpRequestHead(
     HttpQueryCollection Query,
     HttpHeaderCollection Headers,
     Stream Body,
-    HttpTrailerCollection? Trailers = null);
+    HttpTrailerCollection? Trailers = null,
+    string? Protocol = null);

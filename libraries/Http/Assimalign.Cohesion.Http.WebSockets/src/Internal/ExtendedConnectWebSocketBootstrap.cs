@@ -7,13 +7,16 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <summary>
 /// The HTTP/2 and HTTP/3 opening handshake (RFC 8441 §5, RFC 9220 §3): an extended CONNECT whose
 /// <c>:protocol</c> is <c>websocket</c>, carrying <c>Sec-WebSocket-Version: 13</c>, answered with
-/// <c>200</c> through the transport's tunnel accept (<see cref="IHttpExtendedConnectFeature"/>).
+/// <c>200</c> through the extended CONNECT feature's tunnel accept
+/// (<see cref="IHttpExtendedConnectFeature"/>, over the transport's
+/// <see cref="IHttpExchangeControl.AcceptTunnelAsync"/>).
 /// </summary>
 /// <remarks>
 /// <para>
 /// The method and the <c>:protocol</c>, <c>:scheme</c>, <c>:path</c> and <c>:authority</c>
-/// pseudo-headers are already checked: the transport installs
-/// <see cref="IHttpExtendedConnectFeature"/> only on a valid extended CONNECT, and
+/// pseudo-headers are already checked: the extended CONNECT interceptor
+/// (<c>HttpExtendedConnect.CreateInterceptor()</c>) installs
+/// <see cref="IHttpExtendedConnectFeature"/> only on an extended CONNECT the transport validated, and
 /// <see cref="HttpWebSocketBootstrap.Select"/> checks the protocol. The stream's <c>DATA</c> is the
 /// tunnel, so there is no request content to refuse, unlike the HTTP/1.1 <c>GET</c>.
 /// </para>

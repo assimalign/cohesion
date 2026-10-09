@@ -78,7 +78,8 @@ exchange control only when some interceptor takes part in its response phase. De
 the Web host registers this interceptor on every listener. So the interceptor declares
 `HttpInterceptorScopes.Request` and joins the response phase only of the exchange whose head asked
 for a transition (step 1). An ordinary HTTP/1.1 request, and every HTTP/2 and HTTP/3 request
-(including an extended CONNECT WebSocket, which the transport's own feature carries), costs one
+(including an extended CONNECT WebSocket, which `Http.ExtendedConnect`'s interceptor carries the
+same way, over the control's `AcceptTunnelAsync`), costs one
 version check and, on HTTP/1.1, a method check and a `Connection` header lookup. The transport's
 `HttpExchangeResponseInterceptorTests` pin the fast path on all three versions and the takeover
 on an upgrade; the Web.Hosting DESIGN records the measured allocations.

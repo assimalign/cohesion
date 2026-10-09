@@ -1045,6 +1045,10 @@ internal sealed class Http2Stream
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
         HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
+
+        // RFC 8441 §4 — :protocol is non-null only on a valid extended CONNECT (validated above). The
+        // request-parse interceptors read it, so a feature package can offer the tunnel, and the exchange
+        // keeps it, so its control can accept one.
         TransportHttpRequestHead requestHead = new(
             host,
             path,
@@ -1053,7 +1057,8 @@ internal sealed class Http2Stream
             query,
             decodedHeaders.Headers,
             body,
-            _requestTrailers);
+            _requestTrailers,
+            decodedHeaders.Protocol);
 
         // RFC 9218 §4 / §8 — the request's Priority header initialises the
         // effective priority. Parsing is tolerant: a malformed header value is
@@ -1090,9 +1095,7 @@ internal sealed class Http2Stream
             && TryGetDeclaredContentLength(decodedHeaders.Headers, out long declaredLength)
             && declaredLength > limit;
 
-        // RFC 8441 §4 — :protocol is non-null only on a valid extended CONNECT (validated above). The
-        // connection installs the extended CONNECT feature from it at dispatch; an accepted tunnel
-        // reads the peer's DATA from the transport's own body stream.
+        // An accepted extended CONNECT tunnel reads the peer's DATA from the transport's own body stream.
         Http2Context context = new(
             this,
             requestHead with { Body = interception.Body },
@@ -1100,7 +1103,6 @@ internal sealed class Http2Stream
             requestAborted,
             interception.Features)
         {
-            ExtendedConnectProtocol = decodedHeaders.Protocol,
             RequestBody = body,
             AddedResponseInterceptors = interception.ResponseInterceptors,
         };

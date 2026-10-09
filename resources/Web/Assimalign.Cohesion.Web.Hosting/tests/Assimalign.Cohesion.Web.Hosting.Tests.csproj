@@ -12,6 +12,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ExtendedConnect" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
 		<!-- Test-only: handlers read the TLS session through context.TlsConnection over real handshakes
 		     (#1065, #1367). The runtime module takes no dependency on it. -->

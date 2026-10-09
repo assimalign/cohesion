@@ -31,8 +31,10 @@ namespace Assimalign.Cohesion.Http;
 /// On HTTP/1.1 the handshake is an RFC 9110 §7.8 upgrade, so the protocol-upgrade interceptor
 /// (<c>HttpProtocolUpgrade.CreateInterceptor()</c>) must be registered on the listener; the Web host
 /// registers it by default. On HTTP/2 and HTTP/3 it is an extended CONNECT whose <c>:protocol</c> is
-/// <c>websocket</c> (RFC 8441, RFC 9220), which the transport surfaces as
-/// <see cref="IHttpExtendedConnectFeature"/> with nothing to register. The same calls serve every
+/// <c>websocket</c> (RFC 8441, RFC 9220), which the extended CONNECT interceptor
+/// (<c>HttpExtendedConnect.CreateInterceptor()</c>) surfaces as
+/// <see cref="IHttpExtendedConnectFeature"/>, so it must be registered on the listener too; the Web
+/// host registers it by default, after the upgrade interceptor. The same calls serve every
 /// protocol; only the response differs: <c>101</c> with <c>Sec-WebSocket-Accept</c> on HTTP/1.1,
 /// <c>200</c> with no accept value on HTTP/2 and HTTP/3. The request method differs too, <c>GET</c>
 /// against <c>CONNECT</c>, so code that routes on it must take both; on a Web application,

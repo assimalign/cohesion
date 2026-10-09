@@ -26,12 +26,12 @@ internal static class Http3HeaderCodec
     /// the dynamic table) and hands them here, so both paths validate identically.
     /// The request body is not part of the field section: the returned head carries
     /// a placeholder body the caller replaces with the lazily read request-body
-    /// stream.
+    /// stream. The head carries the <c>:protocol</c> of a validated extended CONNECT
+    /// (<see cref="TransportHttpRequestHead.Protocol"/>), <see langword="null"/> otherwise.
     /// </summary>
     /// <param name="fields">The decoded name/value field lines, in wire order.</param>
     /// <param name="fallbackScheme">The scheme to use when no <c>:scheme</c> is present.</param>
     /// <param name="trailers">The trailer collection the request surfaces, filled when a trailer section arrives.</param>
-    /// <param name="extendedConnectProtocol">The <c>:protocol</c> pseudo-header value, when present.</param>
     /// <param name="contentLength">The declared <c>Content-Length</c>, or <see langword="null"/> when absent.</param>
     /// <returns>The validated HTTP/3 request head.</returns>
     /// <exception cref="InvalidDataException">Thrown when the field section violates an HTTP/3 message rule.</exception>
@@ -39,7 +39,6 @@ internal static class Http3HeaderCodec
         List<(string Name, string Value)> fields,
         HttpScheme fallbackScheme,
         HttpTrailerCollection trailers,
-        out string? extendedConnectProtocol,
         out long? contentLength)
     {
         HttpHeaderCollection headers = new();
@@ -81,10 +80,10 @@ internal static class Http3HeaderCodec
                         AssignOncePseudoHeader(ref pathValue, value, name);
                         break;
                     case ":protocol":
-                        // RFC 8441 / RFC 9220 extended CONNECT indicator;
-                        // recognized so it is not rejected as unknown, and
-                        // surfaced verbatim (see extendedConnectProtocol) for a
-                        // higher layer to model. The transport does not interpret it.
+                        // RFC 8441 / RFC 9220 extended CONNECT indicator; validated
+                        // against the method and the other pseudo-headers below, then
+                        // carried on the head for the request-parse interceptors and
+                        // the exchange's tunnel accept.
                         AssignOncePseudoHeader(ref protocol, value, name);
                         break;
                     default:
@@ -179,16 +178,13 @@ internal static class Http3HeaderCodec
             ? fallbackScheme
             : string.Equals(schemeValue, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
-        // Surface the raw :protocol pseudo-header (RFC 8441 / RFC 9220) so the
-        // connection context can stash it generically for a higher layer; the
-        // transport itself does not interpret extended CONNECT.
-        extendedConnectProtocol = protocol;
-
         // RFC 9114 §4.1.2 — the request body is checked against a declared
         // Content-Length as its DATA frames arrive; a value that is not a valid
         // length makes the request malformed here, before it is dispatched.
         contentLength = ParseContentLength(headers);
 
+        // RFC 8441 §4 / RFC 9220 §3 — the head carries :protocol only once it passed the extended
+        // CONNECT validation above, so a non-null value always means a valid extended CONNECT.
         return new TransportHttpRequestHead(
             host,
             path,
@@ -197,7 +193,8 @@ internal static class Http3HeaderCodec
             query,
             headers,
             Stream.Null,
-            trailers);
+            trailers,
+            protocol);
     }
 
     /// <summary>

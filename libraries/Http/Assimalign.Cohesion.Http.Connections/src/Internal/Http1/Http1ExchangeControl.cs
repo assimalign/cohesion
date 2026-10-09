@@ -11,6 +11,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// exchange owns its whole connection, so this is the one version whose control offers the full
 /// surface: interim (<c>1xx</c>) writes straight onto the connection stream (RFC 9110 §15.2) and
 /// the raw-stream takeover that protocol upgrades / <c>CONNECT</c> tunnels need (§7.8 / §9.3.6).
+/// The extended CONNECT stream tunnel is HTTP/2 and HTTP/3 only, so it reports unsupported here.
 /// Aborting is not a control mechanism — it is the application-owned
 /// <see cref="IHttpContext.Cancel"/>, which <see cref="Http1ConnectionContext.SendAsync"/> honors
 /// by writing no response and ending the connection after the exchange.
@@ -95,4 +96,17 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         return _stream;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="false"/>: HTTP/1.1 has no extended CONNECT. Its <c>CONNECT</c> tunnels and
+    /// protocol upgrades take the whole connection over (<see cref="TakeOver"/>).
+    /// </remarks>
+    public bool CanAcceptTunnel => false;
+
+    /// <inheritdoc />
+    public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromException<Stream>(new InvalidOperationException(
+            "HTTP/1.1 has no extended CONNECT stream tunnel; a CONNECT or a protocol upgrade takes the connection over instead (RFC 9110 §9.3.6, §7.8)."));
+    }
 }

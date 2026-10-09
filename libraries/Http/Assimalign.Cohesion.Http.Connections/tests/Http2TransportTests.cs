@@ -495,8 +495,8 @@ public class Http2TransportTests
     public async Task Http2_OnExtendedConnect_ShouldInstallFeatureInFeatureCollection()
     {
         // RFC 8441 §4 — CONNECT + :protocol with :scheme/:path/:authority is a
-        // valid extended CONNECT. The transport installs the feature it
-        // implements on the exchange's feature collection, once.
+        // valid extended CONNECT. The extended CONNECT interceptor (#1368) installs
+        // the feature on the exchange's feature collection, once.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
@@ -511,6 +511,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -521,14 +522,13 @@ public class Http2TransportTests
         IHttpExtendedConnectFeature? feature = httpContext.Features.Get<IHttpExtendedConnectFeature>();
         feature.ShouldNotBeNull();
         feature!.Protocol.ShouldBe("websocket");
-        feature.ShouldBeOfType<Http2ExtendedConnectFeature>();
         httpContext.ExtendedConnect.ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A valid extended CONNECT exposes the ExtendedConnect feature")]
     public async Task Http2_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
     {
-        // The transport installs the feature; the Http.ExtendedConnect accessors read it.
+        // The interceptor installs the feature; the Http.ExtendedConnect accessors read it.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
@@ -543,6 +543,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -560,6 +561,7 @@ public class Http2TransportTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -585,6 +587,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

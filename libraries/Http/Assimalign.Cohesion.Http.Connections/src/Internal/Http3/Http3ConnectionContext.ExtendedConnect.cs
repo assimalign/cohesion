@@ -3,27 +3,13 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
-// The extended CONNECT tunnel (RFC 9220): installing the feature and finalizing the exchange once the
-// application's handler returns. The tunnel's frames go straight to the request stream's output (see
-// Http3ExtendedConnectStream); its reads drain the lazy request body, which carries a CONNECT's DATA
-// outside the body-size cap and the Content-Length rule.
+// The extended CONNECT tunnel (RFC 9220): finalizing the exchange once the application's handler
+// returns. The accept itself is the exchange control's (Http3ExchangeControl.AcceptTunnelAsync). The
+// tunnel's frames go straight to the request stream's output (see Http3ExtendedConnectStream); its
+// reads drain the lazy request body, which carries a CONNECT's DATA outside the body-size cap and the
+// Content-Length rule.
 internal sealed partial class Http3ConnectionContext
 {
-    /// <summary>
-    /// Installs the extended CONNECT feature on an exchange whose request is a valid extended CONNECT
-    /// (RFC 9220 §3), before any response interceptor or application code observes its features.
-    /// Ordinary exchanges get none.
-    /// </summary>
-    /// <param name="context">The exchange just built for the request stream.</param>
-    /// <param name="protocol">The validated <c>:protocol</c>, or <see langword="null"/> when the request is not an extended CONNECT.</param>
-    private void AttachExtendedConnect(Http3Context context, string? protocol)
-    {
-        if (protocol is not null)
-        {
-            context.Features.Set(new Http3ExtendedConnectFeature(this, context, protocol));
-        }
-    }
-
     /// <summary>
     /// Finalizes an exchange whose tunnel was accepted, in place of writing a response: the tunnel sent
     /// the exchange's only head.

@@ -1367,12 +1367,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         HttpScheme fallbackScheme = _isSecure ? HttpScheme.Https : HttpScheme.Http;
         HttpTrailerCollection trailers = new(isSupported: true);
         TransportHttpRequestHead requestHead;
-        string? extendedConnectProtocol;
         long? contentLength;
 
         try
         {
-            requestHead = Http3HeaderCodec.BuildRequestHead(fields, fallbackScheme, trailers, out extendedConnectProtocol, out contentLength);
+            requestHead = Http3HeaderCodec.BuildRequestHead(fields, fallbackScheme, trailers, out contentLength);
         }
         catch (InvalidDataException exception)
         {
@@ -1458,8 +1457,6 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             AddedResponseInterceptors = interception.ResponseInterceptors,
         };
         body.AttachOwner(context);
-
-        AttachExtendedConnect(context, extendedConnectProtocol);
 
         // RFC 9218 §4 — the request's Priority header sets the effective priority.
         // Parsing is tolerant: a malformed value leaves the default (urgency 3,
@@ -1684,7 +1681,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
-        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        // The exchange was aborted (IHttpContext.Cancel / CancelAsync — the
         // directive is Abort). RFC 9114 §4.1 — reset the request stream instead of writing a
         // response; the QUIC connection and its other streams are unaffected.
         if (http3Context.CancelRequested)

@@ -54,6 +54,30 @@ public class HttpRequestInterceptorTests
         context.ResponseInterceptors.ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: The extended CONNECT protocol is optional and defaults to null")]
+    public void Context_Protocol_ShouldDefaultToNull()
+    {
+        // Arrange / Act — a construction site that predates the member still compiles (#1368).
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        HttpExchangeInterceptorRequestContext extendedConnect = new()
+        {
+            Version = HttpVersion.Http20,
+            Method = HttpMethod.Connect,
+            Path = new HttpPath("/chat"),
+            Scheme = HttpScheme.Https,
+            Host = new HttpHost("api.test"),
+            Protocol = "websocket",
+            Headers = new HttpHeaderCollection().AsReadOnly(),
+            Features = new HttpFeatureCollection(),
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        };
+
+        // Assert
+        context.Protocol.ShouldBeNull();
+        extendedConnect.Protocol.ShouldBe("websocket");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Added response interceptors keep their order and are added once each")]
     public void Context_AddResponseInterceptor_ShouldKeepOrderAndIgnoreDuplicates()
     {

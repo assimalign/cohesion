@@ -30,7 +30,15 @@ internal sealed class Http3Context : TransportHttpContext
         StreamConnection = streamConnection;
         StreamId = streamId;
         RequestBody = requestBody;
+        ExtendedConnectProtocol = requestHead.Protocol;
     }
+
+    /// <summary>
+    /// The <c>:protocol</c> of a valid extended CONNECT (RFC 9220), or <see langword="null"/> for any
+    /// other request. Only an exchange that carries one can accept a tunnel
+    /// (<see cref="Http3ExchangeControl.AcceptTunnelAsync"/>).
+    /// </summary>
+    public string? ExtendedConnectProtocol { get; }
 
     /// <summary>
     /// The bidirectional QUIC stream this exchange arrived on; the response is written

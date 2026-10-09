@@ -4,14 +4,17 @@ namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Surfaces the extended CONNECT capability (RFC 8441 / RFC 9220) of the current exchange on
-/// <see cref="IHttpContext"/>, backed by the <see cref="IHttpExtendedConnectFeature"/> the HTTP/2 and
-/// HTTP/3 server transports install on the exchange's feature collection.
+/// <see cref="IHttpContext"/>, backed by the <see cref="IHttpExtendedConnectFeature"/> the
+/// interceptor from <see cref="HttpExtendedConnect.CreateInterceptor"/> installs on the exchange's
+/// feature collection.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The transport installs the feature on every valid extended CONNECT and on no other exchange, so
-/// these members are plain feature reads: the same feature instance is returned on every read, and
-/// an ordinary exchange — including any HTTP/1.1 exchange — reads <see langword="null"/>.
+/// The interceptor installs the feature on every extended CONNECT the HTTP/2 and HTTP/3 transports
+/// validated and on no other exchange, so these members are plain feature reads: the same feature
+/// instance is returned on every read, and an ordinary exchange — including any HTTP/1.1 exchange —
+/// reads <see langword="null"/>. So does every exchange on a listener that did not register the
+/// interceptor.
 /// </para>
 /// <code>
 /// if (context.ExtendedConnect is { Protocol: "websocket" } extendedConnect)

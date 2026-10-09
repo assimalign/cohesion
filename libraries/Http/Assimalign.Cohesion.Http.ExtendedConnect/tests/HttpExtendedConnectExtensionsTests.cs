@@ -15,7 +15,7 @@ public class HttpExtendedConnectExtensionsTests
     [Fact(DisplayName = "Cohesion Test [Http.ExtendedConnect] - ExtendedConnect: An installed feature is exposed, the same instance on every read")]
     public void ExtendedConnect_OnInstalledFeature_ShouldExposeTheSameFeatureOnEveryRead()
     {
-        // Arrange — the transport installs its implementation on the feature collection.
+        // Arrange — the extended CONNECT interceptor installs its implementation on the feature collection.
         FakeHttpContext context = new();
         FakeExtendedConnectFeature feature = new("websocket", Stream.Null);
         context.Features.Set(feature);

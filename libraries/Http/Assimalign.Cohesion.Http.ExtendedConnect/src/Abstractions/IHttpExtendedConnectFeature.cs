@@ -14,13 +14,11 @@ namespace Assimalign.Cohesion.Http;
 /// An extended CONNECT is a <c>CONNECT</c> request that also carries the <c>:protocol</c>
 /// pseudo-header, plus <c>:scheme</c>, <c>:path</c>, and <c>:authority</c>. A client uses it to run
 /// another protocol over one HTTP/2 or HTTP/3 stream; WebSocket (<c>:protocol = websocket</c>) is
-/// the common case. The server transport (<c>Assimalign.Cohesion.Http.Connections</c>) installs this
-/// feature on every exchange that is a valid extended CONNECT and on no other exchange. Read it as
-/// <c>context.ExtendedConnect</c> (<c>Assimalign.Cohesion.Http.ExtendedConnect</c>).
-/// </para>
-/// <para>
-/// The contract lives in the protocol core because its producer is the transport itself, which
-/// references no feature package. The implementation is internal to the transport.
+/// the common case. The interceptor <see cref="HttpExtendedConnect.CreateInterceptor"/> produces
+/// installs this feature on every exchange the server transport validated as an extended CONNECT
+/// and on no other exchange, so the interceptor must be registered on the listener; the Web host
+/// registers it by default. Read the feature as <c>context.ExtendedConnect</c>
+/// (<see cref="HttpExtendedConnectExtensions"/>).
 /// </para>
 /// <para>
 /// <see cref="AcceptAsync"/> answers the request with <c>200</c> and surrenders the stream:
@@ -46,7 +44,9 @@ namespace Assimalign.Cohesion.Http;
 /// writes the application's response for the exchange, and the exchange interceptors' response-head
 /// and after-response hooks do not run for it. The tunnel lasts as long as the exchange: when the
 /// application's handler returns, the transport ends a tunnel the application left open, and a
-/// cancelled exchange (<see cref="IHttpContext.Cancel"/>) resets the stream instead.
+/// cancelled exchange (<see cref="IHttpContext.Cancel"/>) resets the stream instead. The wire work is
+/// the transport's: the feature wraps the exchange control's
+/// <see cref="IHttpExchangeControl.AcceptTunnelAsync"/>.
 /// </para>
 /// <para>
 /// The stream carries raw octets. Framing the inner protocol is the caller's concern; for WebSocket,

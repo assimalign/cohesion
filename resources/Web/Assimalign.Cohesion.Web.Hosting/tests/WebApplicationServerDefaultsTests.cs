@@ -127,7 +127,7 @@ public class WebApplicationServerDefaultsTests
 
         WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
 
-        options.Interceptors.Count.ShouldBe(2);
+        options.Interceptors.Count.ShouldBe(3);
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
@@ -194,6 +194,51 @@ public class WebApplicationServerDefaultsTests
         upgrade.Protocol.ShouldBe("websocket");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the extended CONNECT interceptor after the protocol-upgrade interceptor")]
+    public async Task ApplyDefaultInterceptors_ShouldInstallExtendedConnectThird()
+    {
+        // Arrange — #1368: the extended CONNECT feature is installed by an interceptor, so a WebSocket
+        // over HTTP/2 or HTTP/3 reaches context.ExtendedConnect only because the host registers it.
+        HttpConnectionListenerOptions options = new();
+        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+        HttpFeatureCollection features = new();
+        TunnelOnlyControl control = new();
+
+        // Act — prove slot 2 is the extended CONNECT interceptor by behavior: its head hook installs the
+        // feature for a validated :protocol, and its response hook binds it to the exchange control.
+        options.Interceptors[2].AfterRequestHead(new HttpExchangeInterceptorRequestContext
+        {
+            Version = HttpVersion.Http20,
+            Method = HttpMethod.Connect,
+            Path = new HttpPath("/socket"),
+            Scheme = HttpScheme.Https,
+            Host = new HttpHost("api.test"),
+            Protocol = "websocket",
+            Headers = new HttpHeaderCollection().AsReadOnly(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        });
+        options.Interceptors[2].BeforeResponse(new HttpExchangeInterceptorResponseContext
+        {
+            Version = HttpVersion.Http20,
+            Headers = new HttpHeaderCollection(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            ResponseBody = System.IO.Stream.Null,
+            Control = control,
+        });
+
+        IHttpExtendedConnectFeature? extendedConnect = features.Get<IHttpExtendedConnectFeature>();
+        System.IO.Stream? tunnel = extendedConnect is null ? null : await extendedConnect.AcceptAsync();
+
+        // Assert
+        extendedConnect.ShouldNotBeNull();
+        extendedConnect!.Protocol.ShouldBe("websocket");
+        tunnel.ShouldBeSameAs(System.IO.Stream.Null);
+        control.AcceptCount.ShouldBe(1);
+    }
+
     /// <summary>An exchange control whose only capability is a takeover that was never exercised.</summary>
     private sealed class TakeoverOnlyControl : IHttpExchangeControl
     {
@@ -207,6 +252,36 @@ public class WebApplicationServerDefaultsTests
         public bool CanTakeOver => true;
 
         public System.IO.Stream TakeOver() => throw new NotSupportedException();
+
+        public bool CanAcceptTunnel => false;
+
+        public ValueTask<System.IO.Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
+    /// <summary>An exchange control whose only capability is an extended CONNECT tunnel accept, counted.</summary>
+    private sealed class TunnelOnlyControl : IHttpExchangeControl
+    {
+        public int AcceptCount { get; private set; }
+
+        public bool HasResponseStarted => false;
+
+        public bool CanWriteInterimResponse => false;
+
+        public ValueTask WriteInterimResponseAsync(Assimalign.Cohesion.Http.HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public bool CanTakeOver => false;
+
+        public System.IO.Stream TakeOver() => throw new NotSupportedException();
+
+        public bool CanAcceptTunnel => AcceptCount == 0;
+
+        public ValueTask<System.IO.Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+        {
+            AcceptCount++;
+            return ValueTask.FromResult(System.IO.Stream.Null);
+        }
     }
 
     private sealed class TrackingApplicationServer : IWebApplicationServer, IHostService

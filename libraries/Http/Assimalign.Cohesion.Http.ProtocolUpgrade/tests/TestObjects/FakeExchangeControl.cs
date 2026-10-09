@@ -61,4 +61,11 @@ internal sealed class FakeExchangeControl : IHttpExchangeControl
         TakenOver = true;
         return _stream;
     }
+
+    /// <inheritdoc />
+    public bool CanAcceptTunnel => false;
+
+    /// <inheritdoc />
+    public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromException<Stream>(new InvalidOperationException("The fake exchange control does not offer an extended CONNECT tunnel."));
 }

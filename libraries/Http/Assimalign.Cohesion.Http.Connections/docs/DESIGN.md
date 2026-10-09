@@ -3139,32 +3139,45 @@ and lets the application accept the stream as a duplex tunnel: WebSockets on
 HTTP/2 and HTTP/3 run over that tunnel (`docs/libraries/Http/DECISIONS.md`,
 ADR 1).
 
-### The model: a transport-installed feature
+### The model: a mechanism on the exchange control, a feature in a package
 
-A valid extended CONNECT carries an `IHttpExtendedConnectFeature` on the
-exchange's feature collection: the requested `:protocol` and the
-`AcceptAsync` call. Ordinary requests carry none, so
-`context.IsExtendedConnect` is `false` and `context.ExtendedConnect` is
-`null` for them, and baseline request handling is unchanged.
+The transport installs no extended CONNECT feature and references no feature
+package. It offers two generic seam members from the core (core Http DESIGN,
+"The extended CONNECT seam"; owner decision 20, #1368):
 
-The contract lives in the core `Assimalign.Cohesion.Http` library, because
-the transport produces the capability and references no feature package
-(core Http DESIGN, "The extended CONNECT feature"; owner decision 20 returns
-it to `Http.ExtendedConnect` under #1368). The transport installs its own
-implementation at dispatch — `Http2ExtendedConnectFeature` from the frame
-pump, and `Http3ExtendedConnectFeature` when the request stream's exchange is
-built — so response interceptors and the application see it from the
-start. The `context.ExtendedConnect` / `context.IsExtendedConnect`
-accessors live in `Assimalign.Cohesion.Http.ExtendedConnect` and read the
-feature directly. The feature used to travel as a `:protocol` string under
-an `IHttpContext.Items` key that the package rebuilt into a feature on
-every read; a published string cannot carry an accept call, so that bridge
-is gone.
+- **The validated `:protocol`.** Once a head passes validation, the decoded
+  `:protocol` rides the request head (`TransportHttpRequestHead.Protocol`:
+  `decodedHeaders.Protocol` on HTTP/2, `Http3HeaderCodec.BuildRequestHead` on
+  HTTP/3), and `HttpRequestInterceptorPipeline` hands it to the request-parse
+  hooks as `HttpExchangeInterceptorRequestContext.Protocol`. It is `null` on
+  every other request, HTTP/1.1 included. `Http2Context` and `Http3Context`
+  keep it as `ExtendedConnectProtocol`.
+- **The tunnel accept.** `Http2ExchangeControl` and `Http3ExchangeControl`
+  implement `IHttpExchangeControl.CanAcceptTunnel` and `AcceptTunnelAsync`
+  for an exchange that carries a `:protocol`. `Http1ExchangeControl` reports
+  `false` and refuses: an HTTP/1.1 `CONNECT` takes the connection over
+  through `TakeOver` instead.
+
+`Assimalign.Cohesion.Http.ExtendedConnect` turns them into
+`IHttpExtendedConnectFeature`: its interceptor installs the feature when a
+head hook sees `Protocol`, adds itself to that exchange's response phase, and
+binds the feature to the control in `BeforeResponse`, before the application
+observes the exchange. The `context.ExtendedConnect` /
+`context.IsExtendedConnect` accessors read it. Without that interceptor on the
+listener, an extended CONNECT reaches the application as an ordinary
+`CONNECT`, although the transport still advertises the setting (below).
+
+Joining the response phase means an extended CONNECT exchange gets the raw
+response body sink and the exchange control the transport builds only for
+exchanges whose response phase is not empty. That is the price of one
+WebSocket handshake; an ordinary exchange keeps the fast path, which
+`HttpExchangeResponseInterceptorTests` pins under the Web host's three default
+interceptors.
 
 Recognition (`:protocol`), validation, and the `IsExtendedConnect` /
 `ValidateExtendedConnect` rules are shared between HTTP/2 and HTTP/3 via
 `HttpFieldNormalization` so both versions behave identically. A classic
-`CONNECT` (no `:protocol`) carries no feature.
+`CONNECT` (no `:protocol`) has no `Protocol` and cannot accept a tunnel.
 
 ### Deterministic validation (RFC 8441 §4 / RFC 9220)
 
@@ -3193,22 +3206,37 @@ with `H3_MESSAGE_ERROR` (the connection survives).
   the request is then recognized, validated, and modeled identically to
   HTTP/2 — there is no silent downgrade in either direction.
 
+Both advertisements are unconditional: they do not depend on whether the
+listener registered the extended CONNECT interceptor. A listener without it
+still receives extended CONNECT requests, validates them, and surfaces them as
+ordinary `CONNECT` requests with no `context.ExtendedConnect`, so a WebSocket
+over HTTP/2 or HTTP/3 cannot be accepted there. The Web host registers the
+interceptor by default (Web.Hosting DESIGN).
+
 ### The tunnel
 
-`AcceptAsync` turns the exchange's stream into a duplex tunnel (RFC 8441 §5,
-RFC 9220 §3). The rules both versions share live in
-`HttpExtendedConnectFeature` and `HttpExtendedConnectStream`; the
-per-version subclasses and the `Http2ConnectionContext` /
-`Http3ConnectionContext` partials (`*.ExtendedConnect.cs`) do the wire work.
+`AcceptTunnelAsync` turns the exchange's stream into a duplex tunnel (RFC 8441
+§5, RFC 9220 §3). The accept rules both versions share live in
+`HttpExtendedConnectRules` (the refusals and the `200` head) and
+`HttpExtendedConnectStream`; `Http2ExchangeControl` and `Http3ExchangeControl`
+run the accept, and the `Http2ConnectionContext` / `Http3ConnectionContext`
+partials (`*.ExtendedConnect.cs`) and the per-version tunnel streams do the
+wire work.
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Transport
+    participant Ext as Http.ExtendedConnect interceptor
     participant App as Application
     Client->>Transport: HEADERS CONNECT + :protocol, stream left open
+    Transport->>Ext: AfterRequestHead (Protocol = websocket)
+    Ext->>Transport: install the feature, join the response phase
+    Transport->>Ext: BeforeResponse (exchange control)
+    Ext->>Ext: bind the feature to the control
     Transport->>App: exchange carrying IHttpExtendedConnectFeature
-    App->>Transport: AcceptAsync
+    App->>Ext: AcceptAsync
+    Ext->>Transport: AcceptTunnelAsync
     Transport->>Client: HEADERS :status 200, stream left open
     Client->>Transport: DATA
     Transport->>App: tunnel read
@@ -3220,11 +3248,17 @@ sequenceDiagram
     Transport->>Client: RST_STREAM NO_ERROR or STOP_SENDING if still sending
 ```
 
-- **Accepting.** At most once; never after the final response started (a
-  streamed head, the buffered commit, or on HTTP/2 the transport's own
-  claim of the stream) and never on a cancelled exchange — each an
-  `InvalidOperationException` — and never on a stream that is already gone,
-  an `IOException`. The head is a `200` carrying the headers the application
+- **Accepting.** The guards run in a fixed order before anything is
+  written: at most once (the attempt latches even when a later guard refuses
+  it); never on a cancelled exchange; never after the final response started
+  (a streamed head, the buffered commit, or on HTTP/2 the transport's own
+  claim of the stream) — each an `InvalidOperationException` — and never on a
+  stream that is already gone (HTTP/2 reset; HTTP/3 reset or connection
+  closed), an `IOException`. Then the head is prepared, the HTTP/2 stream's
+  final response is claimed, the final response is marked started, the
+  tunnel is registered, the head is written, and the head is marked
+  committed. An exchange that is not an extended CONNECT is refused first,
+  without latching. The head is a `200` carrying the headers the application
   set, minus `Content-Length` (RFC 9110 §9.3.6), which accepting removes, and
   the connection-specific fields, `Transfer-Encoding` among them, which every
   HTTP/2 and HTTP/3 head drops (see "Connection-specific fields in HTTP/2 and
@@ -3304,9 +3338,9 @@ driver half-closes exactly.
 ### AOT posture
 
 No reflection or runtime codegen. Recognition is pseudo-header dispatch;
-validation is string comparison; the feature and the tunnel are plain
-classes resolved through the existing feature collection, and the tunnel
-waits on the write gate, the send-window signal, and a cancellation source.
+validation is string comparison; the accept is a method on the exchange
+control and the tunnel a plain class, and the tunnel waits on the write gate,
+the send-window signal, and a cancellation source.
 
 ### Non-goals
 
@@ -3315,7 +3349,9 @@ waits on the write gate, the send-window signal, and a cancellation source.
   handshake and policy from `Http.WebSockets` / `Web.WebSockets` (ADR 1).
 - **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
   as an ordinary CONNECT request; opaque TCP tunneling to its authority is
-  not implemented, and it carries no tunnel feature.
+  not implemented, and its control cannot accept a tunnel. The accept itself
+  is protocol-neutral, so supporting it later (RFC 9113 §8.5) would widen
+  `CanAcceptTunnel` here and ship the feature in a package.
 
 ## RFC 9218 extensible priorities
 

@@ -59,6 +59,20 @@ public sealed class HttpExchangeInterceptorRequestContext
     public required HttpHost Host { get; init; }
 
     /// <summary>
+    /// Gets the <c>:protocol</c> pseudo-header of an HTTP/2 or HTTP/3 <em>extended CONNECT</em>
+    /// (RFC 8441 §4, RFC 9220 §3), such as <c>websocket</c>, or <see langword="null"/> for any other
+    /// request, including every HTTP/1.1 request and a classic <c>CONNECT</c>.
+    /// </summary>
+    /// <remarks>
+    /// The transport sets it only after validating the request as an extended CONNECT: the method is
+    /// <c>CONNECT</c> and the request also carries <c>:scheme</c>, <c>:path</c> and
+    /// <c>:authority</c>. A non-<see langword="null"/> value therefore identifies a request that may be
+    /// answered with a stream tunnel (<see cref="IHttpExchangeControl.AcceptTunnelAsync"/>), which
+    /// <see cref="Method"/> alone cannot tell apart from a classic <c>CONNECT</c>.
+    /// </remarks>
+    public string? Protocol { get; init; }
+
+    /// <summary>
     /// Gets a read-only view of the parsed request headers. Mutation throws
     /// <see cref="InvalidOperationException"/>; derived values belong in <see cref="Features"/>.
     /// </summary>

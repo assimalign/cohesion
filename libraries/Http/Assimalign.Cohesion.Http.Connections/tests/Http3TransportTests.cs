@@ -485,8 +485,8 @@ public class Http3TransportTests
     public async Task Http3_OnExtendedConnect_ShouldInstallFeatureInFeatureCollection()
     {
         // RFC 9220 — CONNECT + :protocol with :scheme/:path/:authority is a
-        // valid extended CONNECT. The transport installs the feature it
-        // implements on the exchange's feature collection, once.
+        // valid extended CONNECT. The extended CONNECT interceptor (#1368) installs
+        // the feature on the exchange's feature collection, once.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),
@@ -498,6 +498,7 @@ public class Http3TransportTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -508,14 +509,13 @@ public class Http3TransportTests
         IHttpExtendedConnectFeature? feature = httpContext.Features.Get<IHttpExtendedConnectFeature>();
         feature.ShouldNotBeNull();
         feature!.Protocol.ShouldBe("websocket");
-        feature.ShouldBeOfType<Http3ExtendedConnectFeature>();
         httpContext.ExtendedConnect.ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A valid extended CONNECT exposes the ExtendedConnect feature")]
     public async Task Http3_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
     {
-        // The transport installs the feature; the Http.ExtendedConnect accessors read it.
+        // The interceptor installs the feature; the Http.ExtendedConnect accessors read it.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),
@@ -527,6 +527,7 @@ public class Http3TransportTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

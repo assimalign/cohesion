@@ -126,10 +126,12 @@ internal abstract class TransportHttpContext : HttpContext
 
     /// <summary>
     /// The exchange's current control-flow directive, derived from the transport flags the
-    /// <see cref="IHttpExchangeControl"/> transitions drive: <see cref="Cancel"/> /
-    /// <see cref="IHttpExchangeControl.Abort"/> maps to <see cref="HttpExchangeDirective.Abort"/>;
-    /// a protocol that supports handing off its connection overrides this to report
-    /// <see cref="HttpExchangeDirective.TakeOver"/> (see <c>Http1Context</c>).
+    /// application and the <see cref="IHttpExchangeControl"/> transitions drive: <see cref="Cancel"/>
+    /// maps to <see cref="HttpExchangeDirective.Abort"/>; a protocol that supports handing off its
+    /// connection or stream overrides this to report <see cref="HttpExchangeDirective.TakeOver"/>
+    /// (<see cref="IHttpExchangeControl.TakeOver"/> on <c>Http1Context</c>,
+    /// <see cref="IHttpExchangeControl.AcceptTunnelAsync"/> on <c>Http2Context</c> and
+    /// <c>Http3Context</c>).
     /// </summary>
     internal virtual HttpExchangeDirective ExchangeDirective =>
         CancelRequested ? HttpExchangeDirective.Abort : HttpExchangeDirective.Continue;

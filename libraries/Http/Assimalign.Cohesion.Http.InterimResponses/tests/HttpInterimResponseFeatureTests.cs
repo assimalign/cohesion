@@ -174,6 +174,11 @@ public class HttpInterimResponseFeatureTests
         public bool CanTakeOver => false;
 
         public Stream TakeOver() => throw new InvalidOperationException("This fake control does not offer takeover.");
+
+        public bool CanAcceptTunnel => false;
+
+        public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromException<Stream>(new InvalidOperationException("This fake control does not offer a tunnel."));
     }
 
     /// <summary>

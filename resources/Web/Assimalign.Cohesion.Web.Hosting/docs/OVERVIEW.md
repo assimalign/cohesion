@@ -22,10 +22,13 @@ its own failures — a listener that cannot bind, a connection fault, a drain th
 short — through `builder.Logging`, never with request content. Disposing the application
 disposes the service provider and every factory-created service.
 
-Every listener the default server composes gets two interceptors before any of the application's
-own: the request-size limit, and the HTTP/1.1 protocol upgrade, so `context.Upgrade` and a WebSocket
-handshake (`context.WebSockets`) work without listener configuration. A request no handler accepts
-is served as before.
+Every listener the default server composes gets three interceptors before any of the application's
+own: the request-size limit, the HTTP/1.1 protocol upgrade, and the HTTP/2 and HTTP/3 extended
+CONNECT, so `context.Upgrade`, `context.ExtendedConnect` and a WebSocket handshake
+(`context.WebSockets`) work on every protocol without listener configuration. A request no handler
+accepts is served as before. A `UseServer` callback that clears `options.Interceptors` removes
+them, and with them WebSockets on every protocol: the HTTP/2 and HTTP/3 transports keep advertising
+extended CONNECT, but nothing surfaces it.
 
 ## Telemetry
 

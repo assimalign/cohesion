@@ -65,7 +65,10 @@ public class Http3ExtendedConnectRoundTripTests
             {
                 await tunnel.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             }
-        }, cancellationToken);
+        },
+        configure: null,
+        configureListener: static options => options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor()),
+        cancellationToken);
 
         await using QuicConnection connection = await QuicConnection.ConnectAsync(CreateClientOptions(server.BaseUri.Port), cancellationToken);
         await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);

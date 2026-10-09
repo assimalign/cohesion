@@ -39,10 +39,13 @@ flowchart LR
     Policy --> Web["Assimalign.Cohesion.Web — Web root"]
     Policy --> Forwarded["Http.Forwarded"]
     Sockets --> Upgrade["Http.ProtocolUpgrade"]
-    Sockets --> Http["Assimalign.Cohesion.Http — area root (IHttpExtendedConnectFeature)"]
+    Sockets --> Ext["Http.ExtendedConnect"]
+    Sockets --> Http["Assimalign.Cohesion.Http — area root"]
     Upgrade --> Http
+    Ext --> Http
     Transport["Http.Connections — transport"] --> Http
     Hosting["Web.Hosting — runtime module"] --> Upgrade
+    Hosting --> Ext
     Hosting --> Web
 ```
 
@@ -50,15 +53,16 @@ flowchart LR
 | --- | --- |
 | `Assimalign.Cohesion.Http.WebSockets` | This package: the handshake on each protocol, subprotocols, permessage-deflate, the accept call |
 | `Assimalign.Cohesion.Http.ProtocolUpgrade` | The HTTP/1.1 upgrade the handshake rides: detection, the `101`, and the raw-stream takeover |
-| `Assimalign.Cohesion.Http` | The area root; holds `IHttpExtendedConnectFeature`, the HTTP/2 and HTTP/3 tunnel the handshake rides |
-| `Assimalign.Cohesion.Http.Connections` | The transport: installs `IHttpExtendedConnectFeature` on every valid extended CONNECT, writes the `200`, carries the tunnel |
+| `Assimalign.Cohesion.Http.ExtendedConnect` | The HTTP/2 and HTTP/3 tunnel the handshake rides: `IHttpExtendedConnectFeature`, installed by its interceptor |
+| `Assimalign.Cohesion.Http` | The area root: the interceptor seam and the exchange control both features wrap |
+| `Assimalign.Cohesion.Http.Connections` | The transport: validates extended CONNECT, and its exchange control writes the `200` and carries the tunnel |
 | `Assimalign.Cohesion.Web.WebSockets` | `UseWebSockets`: the origin check, keep-alive and compression defaults, and the drain close |
-| `Assimalign.Cohesion.Web.Hosting` | Installs the protocol-upgrade interceptor by default and publishes the drain signal |
+| `Assimalign.Cohesion.Web.Hosting` | Installs the protocol-upgrade and extended CONNECT interceptors by default and publishes the drain signal |
 
-`Http.ExtendedConnect` is not referenced. #1316 moved `IHttpExtendedConnectFeature` into the area
-root, because its producer is the transport; the handshake reads it from the exchange's features,
-and `Http.ExtendedConnect` adds only the `context.ExtendedConnect` accessor, which this package does
-not need.
+The package references `Http.ExtendedConnect`, as ADR 1 planned, and reads the tunnel through
+`context.ExtendedConnect`. Between #1316 and #1368 the feature contract sat in the area root and the
+package read it from the exchange's features without the reference; #1368 returned the contract to
+`Http.ExtendedConnect`, installed by an interceptor over the exchange control.
 
 ## The HTTP/1.1 handshake
 
@@ -111,25 +115,29 @@ it, and the throw says so.
 ## The HTTP/2 and HTTP/3 handshake
 
 A handshake attempt is an extended CONNECT (RFC 8441 §4, RFC 9220 §3) whose `:protocol` is
-`websocket`, compared case-insensitively as on HTTP/1.1. The transport installs
-`IHttpExtendedConnectFeature` on every exchange that is a valid extended CONNECT (it has already
-checked `:scheme`, `:path` and `:authority`, and advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL`) and
-on no other, so the feature's presence is the attempt's shape check. `Select` tests the method first,
-which keeps the feature lookup off every request that is not a `CONNECT`. An extended CONNECT for
-another protocol, and a classic `CONNECT` without `:protocol`, are not attempts.
+`websocket`, compared case-insensitively as on HTTP/1.1. The extended CONNECT interceptor
+(`Http.ExtendedConnect`) installs `IHttpExtendedConnectFeature` on every exchange the transport
+validated as an extended CONNECT (it has already checked `:scheme`, `:path` and `:authority`, and
+advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL`) and on no other, so the feature's presence is the
+attempt's shape check. `Select` tests the method first, which keeps the feature lookup off every
+request that is not a `CONNECT`. An extended CONNECT for another protocol, and a classic `CONNECT`
+without `:protocol`, are not attempts.
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Transport as HTTP/2 or HTTP/3 transport
+    participant Ext as Extended CONNECT interceptor
     participant Feature as context.WebSockets
     participant App as Application
     Client->>Transport: CONNECT, :protocol websocket, :scheme, :path, :authority, sec-websocket-version: 13
-    Transport-->>Feature: IHttpExtendedConnectFeature (Protocol websocket)
+    Transport->>Ext: AfterRequestHead (Protocol websocket), then BeforeResponse (exchange control)
+    Ext-->>Feature: context.ExtendedConnect (Protocol websocket)
     App->>Feature: IsWebSocketRequest (validated once)
     App->>Feature: AcceptWebSocketAsync(options)
     Feature->>Feature: select subprotocol, negotiate permessage-deflate, remove any Sec-WebSocket-Accept
-    Feature->>Transport: IHttpExtendedConnectFeature.AcceptAsync
+    Feature->>Ext: IHttpExtendedConnectFeature.AcceptAsync
+    Ext->>Transport: IHttpExchangeControl.AcceptTunnelAsync
     Transport->>Client: 200 with the staged headers, stream left open
     Transport-->>Feature: the stream's DATA as a duplex tunnel
     Feature-->>App: WebSocket.CreateFromStream(IsServer = true)
@@ -150,8 +158,11 @@ cannot carry. A `426` carries `Sec-WebSocket-Version: 13` only: `Upgrade` and `C
 connection-specific, which HTTP/2 and HTTP/3 prohibit (RFC 9113 §8.2.2, RFC 9114 §4.2), and an
 HTTP/2 client treats a response that carries them as malformed.
 
-Nothing needs registering for these protocols: the transport surfaces extended CONNECT on its own,
-unlike HTTP/1.1's opt-in protocol-upgrade interceptor.
+These protocols need the extended CONNECT interceptor (`HttpExtendedConnect.CreateInterceptor()`)
+on the listener, as HTTP/1.1 needs the protocol-upgrade interceptor; the Web host registers both by
+default. Without it the transport still advertises extended CONNECT, so a client sends the
+handshake, but no feature surfaces it: `IsWebSocketRequest` is `false` and the request is served as
+an ordinary `CONNECT`.
 
 ### The accept
 
@@ -227,8 +238,9 @@ and an application's endpoint does not branch on it.
 
 HTTP/2 support matters because browsers prefer it: a browser on an HTTP/2 connection that advertises
 `SETTINGS_ENABLE_CONNECT_PROTOCOL` uses RFC 8441 rather than opening an HTTP/1.1 connection (Http
-ADR 1, "Context"). The two HTTP/2-and-later protocols share one bootstrap because the transport's
-`IHttpExtendedConnectFeature` already hides how each frames the tunnel.
+ADR 1, "Context"). The two HTTP/2-and-later protocols share one bootstrap because
+`IHttpExtendedConnectFeature`, over the transport's exchange control, already hides how each frames
+the tunnel.
 
 ## Lifecycle and ownership
 

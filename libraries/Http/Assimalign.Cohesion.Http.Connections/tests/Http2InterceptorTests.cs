@@ -158,6 +158,56 @@ public class Http2InterceptorTests
         interceptor.BodyInvocations.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hooks should observe the validated :protocol of an extended CONNECT")]
+    public async Task AfterRequestHead_OnExtendedConnect_ShouldObserveProtocol()
+    {
+        // Arrange — RFC 8441 §4: the :protocol is the only signal that tells an extended CONNECT from a
+        // classic one, so the transport hands the validated value to the head hooks (#1368).
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1, // END_HEADERS + END_STREAM
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(Combine(preface, settings, headers), options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBe("websocket");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hooks should observe no :protocol on any other request")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AfterRequestHead_OnClassicConnectOrOrdinaryRequest_ShouldObserveNoProtocol(bool classicConnect)
+    {
+        // Arrange — a classic CONNECT carries only :method and :authority (RFC 9113 §8.5).
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        byte[] headers = classicConnect
+            ? HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "CONNECT"), (":authority", "api.test:443"))
+            : HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "GET"), (":scheme", "https"), (":path", "/"), (":authority", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(Combine(preface, settings, headers), options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Body hooks should run for empty bodies")]
     public async Task EmptyBody_ShouldStillRunBodyHooks()
     {
