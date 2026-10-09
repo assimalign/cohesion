@@ -86,8 +86,18 @@ public sealed class DocumentDatabase : DatabaseInstance
         {
             var recovery = Coordinator.AnalyzeAndScrub();
             Catalog = DocumentCatalog.Open(storage, Coordinator);
-            Catalog.RecoverIndexesAsync(recovery.Aborted).AsTask().GetAwaiter().GetResult();
-            Coordinator.CompleteRecovery();
+            // The stop closes the activity the start opened on this flow even when the recovery
+            // throws; the root's failed open reports the failure itself.
+            long recoveryStarted = DocumentDatabaseEventSource.Log.IndexRecoveryStart(name, recovery.Aborted.Count);
+            try
+            {
+                Catalog.RecoverIndexesAsync(recovery.Aborted).AsTask().GetAwaiter().GetResult();
+                Coordinator.CompleteRecovery();
+            }
+            finally
+            {
+                DocumentDatabaseEventSource.Log.IndexRecoveryStop(name, recoveryStarted);
+            }
         }
         else { Catalog = DocumentCatalog.Open(storage, Coordinator); }
     }

@@ -919,3 +919,82 @@ behind its `Open` factory.
   the worker disposal order (last attached first); the server's accept-loop failure rethrown by
   stop after the drain; and the database's disposal steps (the coordinator, then the storage),
   which a disposal through the engine now awaits asynchronously.
+
+## Diagnostics
+
+The model raises its own events through one internal event source, named for the assembly:
+`Assimalign.Cohesion.Database.Blob` (`src/Internal/EventSource/BlobDatabaseEventSource.cs`;
+database event-sources plan, batch B5). It reports the wire server and its sessions, the
+server's refusals of one database or of the whole engine, and the exchange failures it absorbs.
+The model has no statements: a container operation's transaction is the Transactions source's,
+and the engine, its databases and its workers are the root source's
+(`Assimalign.Cohesion.Database`), whose `ServerStartFailed` reports a start refused for the
+engine's state. The SQL, Key-value and Graph servers write events 1-9 with the same ids, names
+and payloads from their own sources (plan, D2), so one provider list and one log query cover the
+four servers.
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
+| 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit` or `EngineRefused`), `activeSessions`, `maxSessions` |
+| 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |
+| 4 | `HandshakeTimedOut` | Warning | — | `sessionId`, `timeoutMilliseconds` (the timeout lapsed anywhere in the handshake: at a read, or while the database opened, a frame was written, the authenticator ran or the session was created) |
+| 5 | `SessionClosed` | Verbose | `Sessions` | `sessionId`, `reason`, `durationMilliseconds` (zero for a session accepted while the event was off) |
+| 6 | `SessionProtocolViolation` | Warning | — | `sessionId`, `exceptionMessage` (cut to 1024 characters) |
+| 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
+| 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
+| 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
+| 10 | `DatabaseRefused` | Warning | — | `sessionId`, `database` (cut to 256 characters), `phase` (`Handshake` or `Exchange`), `detail` (the refusal, led by `COHDBB003`; cut to 1024 characters) |
+| 11 | `EngineRefused` | Warning | — | `engineName`, `phase` (`Accept`, `Handshake` or `Exchange`), `state` (the `EngineState` name) |
+| 12 | `HostTransactionAbortFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
+| 13 | `TransferFailed` | Warning | — | `sessionId`, `container` (cut to 256 characters), `exceptionType`, `exceptionMessage` (the blob's quoted name redacted to `'<blob>'`; cut to 1024 characters) |
+
+`SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
+graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
+`ProtocolViolation`, `Canceled` (aborted, its connection closed, or the stop arrived mid-frame),
+`ConnectionAborted`, `TransportFailed`, `Faulted`, `ExchangeRefused` (an exchange refused for the
+engine's or the database's state), `ExchangeFailed`, or `Unknown` (an out-of-memory failure,
+which the pump does not catch). The handshake refuses with `ProtocolViolation` a first frame that
+is not Startup and an answer that is not AuthenticateResponse, with `UnsupportedVersion`,
+`DatabaseNotFound` and `AuthenticationFailed`, and with `Unavailable` an engine that refuses
+every database, a database a failing worker refuses (owner decision 42) and an offline database
+(#1243). A refusal of the engine or of one database writes its own event beside the common one:
+`EngineRefused` beside `SessionRejected` at the accept and beside `HandshakeRefused` at the
+handshake, `DatabaseRefused` beside `HandshakeRefused`.
+
+`TransferFailed` is written once for each exchange the server ends over a failure, with the
+container its request named (the server reads it back from the request frame only while the
+event is on), and by the guarded stream when it swallows its completion's failure after a read
+already failed; the stream serves in-process readers too and knows neither, so it writes an
+empty `sessionId` and `container`, and a failed wire read writes both. An exchange the
+connection's abort or reset ends (`ConnectionException`: a peer that hung up, or the shutdown's
+abort, which `SessionsAborted` reports) writes no `TransferFailed`; `SessionClosed` carries
+`ConnectionAborted` or `TransportFailed` instead, as for the pump's own catches (plan D9). An
+`IOException` is still reported: inside an exchange it can be the storage device's, not the
+peer's. No payload carries a blob name, which may be user data (plan D8, owner question Q3): the
+engine's messages quote one (`Blob 'x' does not exist.`, `Blob 'x' already exists.`), so
+`TransferFailed` replaces every quoted occurrence of the request's blob name, or of a list's
+prefix, with `'<blob>'` before it writes the message; the client's error frame still carries the
+engine's message unchanged. `HostTransactionAbortFailed` and `SessionCleanupFailed` report
+failures the session swallows; `SessionFaulted` is the catch-all that used to leave only an
+internal-error frame.
+
+Counters, maintained whether or not anyone listens and updated on accept, rejection and close
+only, never per frame or chunk: `current-server-sessions` (gauge: up when the accept loop
+registers a session, down when the session's completion removes it), `total-server-sessions`,
+`total-rejected-sessions` (session-limit and engine refusals at the accept).
+
+Every write sits behind `IsEnabled(level, keywords)`, and a session reads its start timestamp
+only while `SessionClosed` is on. A string a peer sent can reach a payload before
+authentication, and a frame may hold 16 MB, so the handshake's `database` and `principal` and a
+transfer's `container` are cut to 256 characters and a `detail`, violation or transfer message to
+1024, marked with `...` (event-source.md rule 11). `BlobDatabaseEventSourceTests` checks the
+name, the strict manifest, the gauge's return, the counters, that no write allocates while nobody
+listens, events 1-7 and 9 once each with their payloads over real sessions on the in-memory
+driver (every handshake refusal code, a timeout at a read and inside the authenticator, the bound
+on an oversized startup), the `COHDBB003` refusal at the handshake and at an exchange, a disposed
+engine's refusals at the handshake and at the accept, and a read of a missing blob with the
+blob's name redacted. Not yet driven by a real operation: `SessionCleanupFailed`,
+`HostTransactionAbortFailed` and the guarded stream's `TransferFailed`, which need test doubles
+that fail a disposal, an abort or a stream's completion; they are covered by the allocation check
+and, for the redaction and bounds, by a direct write.

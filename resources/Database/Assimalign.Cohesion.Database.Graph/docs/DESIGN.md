@@ -1039,3 +1039,78 @@ their `Open` factories.
   has is refused (the model never checked names); each worker's pump thread is named for the
   worker (it was `{engine}/{kind}`); and a null session or database given to a typed operation or
   `GraphSchema.Open` is an `ArgumentNullException` (it was `COHDBG005`).
+
+## Diagnostics
+
+The model raises its own events through one internal event source, named for the assembly:
+`Assimalign.Cohesion.Database.Graph` (`src/Internal/EventSource/GraphDatabaseEventSource.cs`;
+database event-sources plan, batch B5). It reports the wire server and its sessions, the index
+recovery of a reopened database, and the wire statement that fails to parse. A statement's
+outcome, the engine, its databases and its workers are the root source's
+(`Assimalign.Cohesion.Database`); kernel transactions, locks and storage are the Transactions and
+Storage sources'. The SQL, Key-value and Blob servers write events 1-9 with the same ids, names
+and payloads from their own sources (plan, D2), so one provider list and one log query cover the
+four servers.
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
+| 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit`), `activeSessions`, `maxSessions` |
+| 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |
+| 4 | `HandshakeTimedOut` | Warning | — | `sessionId`, `timeoutMilliseconds` (the timeout lapsed anywhere in the handshake: at a read, or while the database opened, a frame was written, the authenticator ran or the session was created) |
+| 5 | `SessionClosed` | Verbose | `Sessions` | `sessionId`, `reason`, `durationMilliseconds` (zero for a session accepted while the event was off) |
+| 6 | `SessionProtocolViolation` | Warning | — | `sessionId`, `exceptionMessage` (cut to 1024 characters) |
+| 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
+| 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
+| 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
+| 10 | `IndexRecoveryStart` | Informational | — | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
+| 11 | `IndexRecoveryStop` | Informational | — | `database`, `durationMilliseconds` (written when the recovery ends, whether it recovered the indexes or threw) |
+| 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `exceptionType`, `exceptionMessage` (cut to 1024 characters) |
+
+`SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
+graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
+`ProtocolViolation`, `Canceled` (aborted, its connection closed, or the stop arrived mid-frame),
+`ConnectionAborted`, `TransportFailed`, `Faulted`, or `Unknown` (an out-of-memory failure, which
+the pump does not catch). The handshake refuses with `ProtocolViolation` a first frame that is
+not Startup and an answer that is not AuthenticateResponse, with `UnsupportedVersion`,
+`DatabaseNotFound` and `AuthenticationFailed`, and with `Unavailable` an offline database
+(#1243). `SessionFaulted` is the catch-all that used to leave only an internal-error frame; the
+handshake timeout and the session-close failures were silent before.
+
+Every open of an existing database writes `IndexRecoveryStart` and `IndexRecoveryStop` around
+`GraphStore.RecoverIndexesAsync`, from the constructor that recovers it; a create writes neither.
+The stop is written from a `finally`, so a recovery that throws still closes the activity its
+start opened on the opening flow (event-source.md rule 8): without it, every later event on that
+flow, the root's failed open among them, would be nested under a recovery that never ended. The
+root's failed open reports the failure itself.
+
+`StatementParseFailed` closes the gap the root's statement events leave on the wire path: the
+server parses a statement inside the delegate it hands `ExecuteStatementAsync`, before the root
+session sees a request, so a statement that fails to parse or validate there (a GQL syntax
+error, an empty statement, a non-scalar projection on Execute) is written here once and
+propagates unchanged. The delegates catch only `DatabaseException` and `DatabaseTypeException`,
+the failures the session answers as statement failures; any other exception is an unexpected
+fault, which the pump reports once, as `SessionFaulted`. The in-process text path parses inside
+the root call, so the root's `StatementFailed` reports it and this event does not.
+
+Counters, maintained whether or not anyone listens and updated on accept, rejection and close
+only, never per frame or row: `current-server-sessions` (gauge: up when the accept loop
+registers a session, down when the session's completion removes it), `total-server-sessions`,
+`total-rejected-sessions`.
+
+Every write sits behind `IsEnabled(level, keywords)`; a session reads its start timestamp only
+while `SessionClosed` is on, and a recovery reads its own only while its start is written. No
+payload carries statement text, parameter values or authentication evidence; principal names are
+kept as identifiers. A parse failure's message is the parser's diagnostic, which quotes at most
+one character or a property name (an identifier), never a literal value. A string a peer sent can
+reach a payload before authentication, and a frame may hold 16 MB, so the handshake's `database`
+and `principal` are cut to 256 characters and a `detail`, violation or parse message to 1024,
+marked with `...` (event-source.md rule 11). `GraphDatabaseEventSourceTests` checks the name,
+the strict manifest, the gauge's return, the counters, that no write allocates while nobody
+listens, events 1-7 and 9 once each with their payloads over real sessions on the in-memory
+driver (every handshake refusal code, a timeout at a read and inside the authenticator, the
+bound on an oversized startup), a reopen with an aborted writer, and a GQL syntax error over the
+wire (event 12 once) and in process (not at all). Not yet driven by a real operation:
+`SessionCleanupFailed` (no test double makes a session's resource fail to dispose) and a
+recovery that throws; and the wire test's "root event 28 not written" holds trivially until the
+root source's statement events (batch B1) merge.

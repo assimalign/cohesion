@@ -195,10 +195,14 @@ public sealed class BlobDatabaseServer : DatabaseServer
                 {
                     _hardAbortSource!.Cancel();
 
+                    int aborted = 0;
                     foreach (BlobDatabaseServerSession session in _sessions.Values)
                     {
                         session.Abort();
+                        aborted++;
                     }
+
+                    BlobDatabaseEventSource.Log.SessionsAborted(_engine, aborted, _options.ShutdownDrainTimeout);
                 }
 
                 await drain.ConfigureAwait(false);
@@ -261,8 +265,21 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
             // A connection names its database only in its handshake, so only a refusal of every
             // database turns it away here; a failing database is refused at the handshake.
-            if (_sessions.Count >= _options.MaxSessions || _engine.RefusesEveryDatabase(out _))
+            int activeSessions = _sessions.Count;
+            bool atLimit = activeSessions >= _options.MaxSessions;
+            EngineState state = default;
+            if (atLimit || _engine.RefusesEveryDatabase(out state))
             {
+                if (atLimit)
+                {
+                    BlobDatabaseEventSource.Log.SessionRejected(_engine, BlobDatabaseEventSource.RejectReason.SessionLimit, activeSessions, _options.MaxSessions);
+                }
+                else
+                {
+                    BlobDatabaseEventSource.Log.EngineRefused(_engine, BlobDatabaseEventSource.RefusalPhase.Accept, state);
+                    BlobDatabaseEventSource.Log.SessionRejected(_engine, BlobDatabaseEventSource.RejectReason.EngineRefused, activeSessions, _options.MaxSessions);
+                }
+
                 Guid rejectionId = Guid.NewGuid();
                 Task rejection = RejectAsync(connection, hardAbort);
                 _rejections.TryAdd(rejectionId, rejection);
@@ -273,7 +290,13 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
             var session = new BlobDatabaseServerSession(this, connection, _options, _engine, _authenticator);
 
-            _sessions.TryAdd(session.Id, session);
+            // The server-session gauge follows the registry exactly: up once here, down once when
+            // OnSessionCompleted removes the session.
+            if (_sessions.TryAdd(session.Id, session))
+            {
+                BlobDatabaseEventSource.Log.SessionAccepted(_engine, session, activeSessions + 1);
+            }
+
             session.Start(softStop, hardAbort);
         }
     }
@@ -322,6 +345,9 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
     internal void OnSessionCompleted(BlobDatabaseServerSession session)
     {
-        _sessions.TryRemove(session.Id, out _);
+        if (_sessions.TryRemove(session.Id, out _))
+        {
+            BlobDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
+        }
     }
 }
