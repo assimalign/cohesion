@@ -102,29 +102,33 @@ The Key-Value client's source has the same ids, names and payloads, so one query
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
 | 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
-| 2 | `CommandStop` | Verbose | `Commands` | `database`, `rowCount`, `affectedCount`, `durationMilliseconds` |
-| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`SqlClientErrorKind`), `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `status` (`Success`, `Error` or `Cancelled`), `rowCount`, `affectedCount` (both -1 unless `Success`), `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`SqlClientErrorKind`; empty for an uncoded failure), `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
 | 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
 
+**Every start has a stop** (the area's convention, `docs/resources/Database/DESIGN.md`,
+"Diagnostics"): the command writes its end from a `finally`, before its observer hears of it. A
+failure writes event 3 and then `CommandStop` with `Error`: a coded failure the server or the
+connection raised (`SqlClientException`, with its kind and code) or an uncoded one (an overlapping
+exchange, a disposed connection: kind and code empty). A cancellation, which is how a timeout
+surfaces, writes `CommandStop` with `Cancelled` and no failure. The failure is captured by an
+exception filter that declines it and written from the `finally`, so it reaches the caller unchanged.
 A command fails with an Error whatever its cause, a statement the server rejects included (owner
-question Q1 of the event-source plan). Only a coded failure (`DatabaseClientException`) ends a
-start with event 3: a cancellation, which is how a timeout surfaces, or an uncoded exception (an
-overlapping exchange, a disposed connection) leaves the start without a stop or a failure, and
-because event 3 is not a stop, an activity-tracking tool leaves a failed command's activity open.
-Pairing every start with a stop is an owner decision on the plan's catalog. Event 4 makes visible
-an observer failure the client swallows; the command's outcome is unchanged. The statement text and
-the parameter values are not written (Q3), but event 3's `exceptionMessage` is the server's text,
-and a parse error's can quote a fragment of the statement, a literal included (`Malformed numeric
-literal '…'`). The client cannot tell such a fragment from the rest of the message; the shared
-core's `ExchangeFailed` writes no statement-level server message at all, and whether event 3 may
-carry it is owner question Q3. The connection itself is the shared core's
-(`Assimalign.Cohesion.Database.Client`). No counters: a process-wide count updated per command would
-be a contention point. The command path already takes the timestamp its observer receives, so the
-events add only `IsEnabled` checks while nobody listens.
+question Q1 of the event-source plan).
+
+**The failure rule.** The statement text and the parameter values are never written (Q3), and nor is
+the server's message: a parse error's quotes a fragment of the statement, a literal included
+(`Malformed numeric literal '…'`), so event 3 writes the error kind, the wire code and the
+exception's type only (the area's failure rule). Event 4 makes visible an observer failure the
+client swallows; the command's outcome is unchanged, and the hook's own exception keeps its message.
+The connection itself is the shared core's (`Assimalign.Cohesion.Database.Client`). No counters: a
+process-wide count updated per command would be a contention point. The command path already takes
+the timestamp its observer receives, so the events add only `IsEnabled` checks while nobody listens.
 
 `SqlClientEventSourceTests` checks the name, the strict manifest, a succeeding and a failing command
-under an observer whose every hook throws (each event once, in order, with its payload, no
-statement text), and that start and stop need the `Commands` keyword. The test assembly's
+under an observer whose every hook throws (each event once, in order, with its payload, the failure's
+stop after it, no statement text and no server message), a cancelled command (a `Cancelled` stop and
+no failure), and that start and stop need the `Commands` keyword. The test assembly's
 observers override the hooks as `protected internal`, which the project's test-only
 `InternalsVisibleTo` requires (CS0507); an application overrides them as `protected`.
 

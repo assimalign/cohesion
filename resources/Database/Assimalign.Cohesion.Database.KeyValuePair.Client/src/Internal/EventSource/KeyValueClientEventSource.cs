@@ -1,12 +1,11 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 /// <summary>
-/// The typed key-value client's diagnostics: each command's start, stop and coded failure, and the
+/// The typed key-value client's diagnostics: each command's start, stop and failure, and the
 /// failures of the application's <see cref="KeyValueClientObserver"/> hooks, which the client swallows.
 /// </summary>
 /// <remarks>
@@ -19,18 +18,26 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 /// so one query reads both.
 /// </para>
 /// <para>
-/// A command writes its database, parameter count, row and affected counts, error kind and wire
-/// code; never its command text, keys or values (plan D8). A failure also writes the server's
-/// message, which names a conflicting key in hexadecimal, so <c>CommandFailed</c> replaces the
-/// hexadecimal form of the command's byte parameters in it. No counters: a process-wide count
+/// A command writes its database, parameter count, row and affected counts, and how it ended; never
+/// its command text, keys or values (plan D8). A failure is written by its error kind, wire code and
+/// exception type only, never a message: the server names a conflicting key in hexadecimal in some of
+/// its messages (the area's failure rule, <c>docs/resources/Database/DESIGN.md</c>). Every
+/// <c>CommandStart</c> is closed by one <c>CommandStop</c>, whose <c>status</c> is <c>Success</c>,
+/// <c>Error</c> (after <c>CommandFailed</c>) or <c>Cancelled</c>. No counters: a process-wide count
 /// updated per command would be a contention point (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.KeyValuePair.Client")]
 internal sealed class KeyValueClientEventSource : EventSource
 {
-    /// <summary>The text that stands for a key's or a value's bytes in a written failure message.</summary>
-    internal const string RedactedValue = "<redacted>";
+    /// <summary>The status of a command that returned its result.</summary>
+    internal const string StatusSuccess = "Success";
+
+    /// <summary>The status of a command that failed.</summary>
+    internal const string StatusError = "Error";
+
+    /// <summary>The status of a command its caller cancelled.</summary>
+    internal const string StatusCancelled = "Cancelled";
 
     public static readonly KeyValueClientEventSource Log = new();
 
@@ -48,6 +55,19 @@ internal sealed class KeyValueClientEventSource : EventSource
     }
 
     /// <summary>
+    /// Records what a command threw and returns false, so the exception filter that calls it catches
+    /// nothing; the command writes its end from the <c>finally</c> of the same <c>try</c>.
+    /// </summary>
+    /// <param name="exception">What the command threw.</param>
+    /// <param name="captured">Receives <paramref name="exception"/>.</param>
+    /// <returns>False, always.</returns>
+    public static bool CaptureFailure(Exception exception, out Exception captured)
+    {
+        captured = exception;
+        return false;
+    }
+
+    /// <summary>
     /// Writes the start of a command.
     /// </summary>
     /// <param name="connection">The connection that runs the command.</param>
@@ -62,40 +82,40 @@ internal sealed class KeyValueClientEventSource : EventSource
     }
 
     /// <summary>
-    /// Writes the successful end of a command.
+    /// Writes the end of a command on every path: <c>CommandFailed</c> first for a failure, then
+    /// <c>CommandStop</c> with the command's status.
     /// </summary>
     /// <param name="connection">The connection that ran the command.</param>
-    /// <param name="rowCount">The number of rows the command returned.</param>
-    /// <param name="affectedCount">The number of entries the command affected, or -1 for a row-returning command.</param>
+    /// <param name="failure">What the command threw, or <see langword="null"/> when it returned its result.</param>
+    /// <param name="rowCount">The rows the command returned; -1 when it failed.</param>
+    /// <param name="affectedCount">The entries it affected, -1 for a row-returning command or a failure.</param>
     /// <param name="startTimestamp">The timestamp taken when the command started.</param>
     [NonEvent]
-    public void CommandStop(KeyValueConnection connection, long rowCount, long affectedCount, long startTimestamp)
+    public void CommandEnded(KeyValueConnection connection, Exception? failure, long rowCount, long affectedCount, long startTimestamp)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Commands))
+        bool failed = failure is not null and not OperationCanceledException;
+        bool stop = IsEnabled(EventLevel.Verbose, Keywords.Commands);
+        if (!stop && !(failed && IsEnabled(EventLevel.Error, EventKeywords.None)))
         {
-            CommandStop(connection.Database, rowCount, affectedCount, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            return;
         }
-    }
 
-    /// <summary>
-    /// Writes a command that failed with a coded error.
-    /// </summary>
-    /// <param name="connection">The connection that ran the command.</param>
-    /// <param name="exception">The failure the command throws.</param>
-    /// <param name="parameters">The command's bound parameters, whose bytes are removed from the written message.</param>
-    /// <param name="startTimestamp">The timestamp taken when the command started.</param>
-    [NonEvent]
-    public void CommandFailed(KeyValueConnection connection, KeyValueClientException exception,
-        IReadOnlyDictionary<string, object?>? parameters, long startTimestamp)
-    {
-        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        if (failed && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
+            var coded = failure as KeyValueClientException;
             CommandFailed(
                 connection.Database,
-                exception.Kind.ToString(),
-                exception.Code.ToString(),
-                RedactParameters(exception.Message, parameters),
-                Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                coded?.Kind.ToString() ?? string.Empty,
+                coded?.Code.ToString() ?? string.Empty,
+                TypeName(failure!),
+                duration);
+        }
+
+        if (stop)
+        {
+            string status = failure is null ? StatusSuccess : failed ? StatusError : StatusCancelled;
+            CommandStop(connection.Database, status, rowCount, affectedCount, duration);
         }
     }
 
@@ -110,7 +130,7 @@ internal sealed class KeyValueClientEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            ObserverFailed(connection.Database, callback, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+            ObserverFailed(connection.Database, callback, TypeName(exception), exception.Message);
         }
     }
 
@@ -118,43 +138,17 @@ internal sealed class KeyValueClientEventSource : EventSource
     private void CommandStart(string database, int parameterCount)
         => WriteEvent(1, database, parameterCount);
 
-    [Event(2, Level = EventLevel.Verbose, Keywords = Keywords.Commands, Message = "Key-value command on '{0}' completed: {1} row(s), {2} affected, in {3} ms.")]
-    private void CommandStop(string database, long rowCount, long affectedCount, double durationMilliseconds)
-        => WriteEvent(2, database, rowCount, affectedCount, durationMilliseconds);
+    [Event(2, Level = EventLevel.Verbose, Keywords = Keywords.Commands, Message = "Key-value command on '{0}' ended {1}: {2} row(s), {3} affected, in {4} ms.")]
+    private void CommandStop(string database, string status, long rowCount, long affectedCount, double durationMilliseconds)
+        => WriteEvent(2, database, status, rowCount, affectedCount, durationMilliseconds);
 
-    [Event(3, Level = EventLevel.Error, Message = "Key-value command on '{0}' failed ({1}, {2}): {3}. After {4} ms.")]
-    private void CommandFailed(string database, string errorKind, string code, string exceptionMessage, double durationMilliseconds)
-        => WriteEvent(3, database, errorKind, code, exceptionMessage, durationMilliseconds);
+    [Event(3, Level = EventLevel.Error, Message = "Key-value command on '{0}' failed after {4} ms: kind '{1}', code '{2}', exception '{3}'.")]
+    private void CommandFailed(string database, string errorKind, string code, string exceptionType, double durationMilliseconds)
+        => WriteEvent(3, database, errorKind, code, exceptionType, durationMilliseconds);
 
     [Event(4, Level = EventLevel.Warning, Message = "The key-value client observer's {1} hook threw on a command on '{0}': {2}: {3}. The command's outcome is unchanged.")]
     private void ObserverFailed(string database, string callback, string exceptionType, string exceptionMessage)
         => WriteEvent(4, database, callback, exceptionType, exceptionMessage);
 
-    /// <summary>
-    /// Removes a command's key and value bytes from a failure's message. The server names a key in
-    /// hexadecimal in some of its messages (a write-write conflict names the key it lost), and keys
-    /// and values may be user data (plan D8), so the hexadecimal form of every byte parameter the
-    /// command bound is replaced. A parameter longer than half the message cannot occur in it and is
-    /// skipped, so a large value is never encoded.
-    /// </summary>
-    /// <param name="message">The failure's message.</param>
-    /// <param name="parameters">The command's bound parameters, or <see langword="null"/>.</param>
-    /// <returns>The message without the parameters' bytes.</returns>
-    private static string RedactParameters(string message, IReadOnlyDictionary<string, object?>? parameters)
-    {
-        if (parameters is null)
-        {
-            return message;
-        }
-
-        foreach (object? value in parameters.Values)
-        {
-            if (value is byte[] { Length: > 0 } bytes && bytes.Length <= message.Length / 2)
-            {
-                message = message.Replace(Convert.ToHexString(bytes), RedactedValue, StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
-        return message;
-    }
+    private static string TypeName(Exception exception) => exception.GetType().FullName ?? exception.GetType().Name;
 }

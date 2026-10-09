@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -647,93 +648,107 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         }
 
         long disposeStarted = DatabaseEventSource.Log.EngineDisposeStart(this);
-        DatabaseServer[] servers;
-        DatabaseEngineWorker[] workers;
-        Thread[] threads;
-        lock (_sync)
-        {
-            servers = [.. _servers];
-            workers = [.. _workers];
-            threads = [.. _threads];
-        }
-
         List<Exception>? failures = null;
-
-        // Servers release their listeners and sessions before the workers or the storages go.
-        for (int index = servers.Length - 1; index >= 0; index--)
-        {
-            try
-            {
-                await servers[index].DisposeAsync().ConfigureAwait(false);
-            }
-            catch (Exception failure) when (failure is not OutOfMemoryException)
-            {
-                (failures ??= []).Add(failure);
-            }
-        }
-
+        bool stopped = false;
         try
         {
-            _stop.Cancel();
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            // A cancellation callback must not skip the joins.
-            (failures ??= []).Add(failure);
-        }
+            DatabaseServer[] servers;
+            DatabaseEngineWorker[] workers;
+            Thread[] threads;
+            lock (_sync)
+            {
+                servers = [.. _servers];
+                workers = [.. _workers];
+                threads = [.. _threads];
+            }
 
-        foreach (var thread in threads)
-        {
+            // Servers release their listeners and sessions before the workers or the storages go.
+            for (int index = servers.Length - 1; index >= 0; index--)
+            {
+                try
+                {
+                    await servers[index].DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception failure) when (failure is not OutOfMemoryException)
+                {
+                    (failures ??= []).Add(failure);
+                }
+            }
+
             try
             {
-                thread.Join();
+                _stop.Cancel();
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                // A cancellation callback must not skip the joins.
+                (failures ??= []).Add(failure);
+            }
+
+            foreach (var thread in threads)
+            {
+                try
+                {
+                    thread.Join();
+                }
+                catch (Exception failure) when (failure is not OutOfMemoryException)
+                {
+                    (failures ??= []).Add(failure);
+                }
+            }
+
+            // A give-up a worker queued before its pump stopped ends before the databases close, so it
+            // never takes a database offline while the leaf closes it. One queued after disposal
+            // started finds the engine disposing and does nothing; a give-up never faults.
+            foreach (var givingUp in _givingUp.Values)
+            {
+                await givingUp.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+
+            // A worker may hold work of its own (a checkpoint left running on its lane); it ends
+            // before the storages close. The engine owns every worker it attached, so it releases each
+            // through the worker's internal entry point, which runs the worker's DisposeAsyncCore once
+            // (concrete-types plan, row 7); nothing outside the engine can release an owned worker.
+            for (int index = workers.Length - 1; index >= 0; index--)
+            {
+                try
+                {
+                    await workers[index].ReleaseAsync().ConfigureAwait(false);
+                }
+                catch (Exception failure) when (failure is not OutOfMemoryException)
+                {
+                    (failures ??= []).Add(failure);
+                }
+            }
+
+            try
+            {
+                await DisposeAsyncCore().ConfigureAwait(false);
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
             {
                 (failures ??= []).Add(failure);
             }
-        }
 
-        // A give-up a worker queued before its pump stopped ends before the databases close, so it
-        // never takes a database offline while the leaf closes it. One queued after disposal
-        // started finds the engine disposing and does nothing; a give-up never faults.
-        foreach (var givingUp in _givingUp.Values)
-        {
-            await givingUp.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        }
-
-        // A worker may hold work of its own (a checkpoint left running on its lane); it ends
-        // before the storages close. The engine owns every worker it attached, so it releases each
-        // through the worker's internal entry point, which runs the worker's DisposeAsyncCore once
-        // (concrete-types plan, row 7); nothing outside the engine can release an owned worker.
-        for (int index = workers.Length - 1; index >= 0; index--)
-        {
-            try
+            _stop.Dispose();
+            if (failures is not null)
             {
-                await workers[index].ReleaseAsync().ConfigureAwait(false);
+                DatabaseEventSource.Log.EngineDisposeFailed(this, failures.Count, failures[0]);
             }
-            catch (Exception failure) when (failure is not OutOfMemoryException)
+
+            DatabaseEventSource.Log.EngineDisposeStop(this, failures is null ? QueryResultStatus.Success : QueryResultStatus.Error, failures?.Count ?? 0, disposeStarted);
+            stopped = true;
+        }
+        finally
+        {
+            // Every step catches what it throws except an OutOfMemoryException, which leaves the
+            // disposal here; its stop still closes the activity the start opened.
+            if (!stopped)
             {
-                (failures ??= []).Add(failure);
+                DatabaseEventSource.Log.EngineDisposeStop(this, QueryResultStatus.Error, failures?.Count ?? 0, disposeStarted);
             }
         }
 
-        try
-        {
-            await DisposeAsyncCore().ConfigureAwait(false);
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            (failures ??= []).Add(failure);
-        }
-
-        _stop.Dispose();
-        if (failures is not null)
-        {
-            DatabaseEventSource.Log.EngineDisposeFailed(this, failures.Count, failures[0]);
-        }
-
-        DatabaseEventSource.Log.EngineDisposeStop(this, failures?.Count ?? 0, disposeStarted);
         if (failures is not null)
         {
             throw new AggregateException($"One or more components of engine '{_name}' failed to close.", failures);

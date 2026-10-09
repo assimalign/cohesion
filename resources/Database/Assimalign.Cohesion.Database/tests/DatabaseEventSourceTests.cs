@@ -281,7 +281,8 @@ public sealed class DatabaseEventSourceTests
         var disposeStop = events[9];
         disposeStop.EventId.ShouldBe(7);
         disposeStop.Opcode.ShouldBe(EventOpcode.Stop);
-        disposeStop.PayloadNames.ShouldBe(["engineName", "model", "failureCount", "durationMilliseconds"]);
+        disposeStop.PayloadNames.ShouldBe(["engineName", "model", "status", "failureCount", "durationMilliseconds"]);
+        Payload(disposeStop, "status").ShouldBe(nameof(QueryResultStatus.Success));
         Payload(disposeStop, "failureCount").ShouldBe(0);
     }
 
@@ -366,8 +367,9 @@ public sealed class DatabaseEventSourceTests
         var thrown = sessionEvents[5];
         thrown.EventId.ShouldBe(28);
         thrown.Level.ShouldBe(EventLevel.Error);
-        thrown.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "failure", "durationMilliseconds"]);
-        Payload(thrown, "failure").ShouldBe(typeof(DatabaseParseException).FullName);
+        thrown.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "code", "exceptionType", "durationMilliseconds"]);
+        Payload(thrown, "exceptionType").ShouldBe(typeof(DatabaseParseException).FullName);
+        Payload(thrown, "code").ShouldBe(string.Empty);
         Payload(thrown, "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
         Payload(sessionEvents[7], "status").ShouldBe(nameof(QueryResultStatus.Error));
         Payload(sessionEvents[7], "affectedCount").ShouldBe(-1L);
@@ -377,7 +379,8 @@ public sealed class DatabaseEventSourceTests
         var diagnostic = failed.Diagnostics!.First(d => d.Severity == DiagnosticSeverity.Error);
         coded.EventId.ShouldBe(28);
         diagnostic.Code.ShouldBe("COHSQLT002");
-        Payload(coded, "failure").ShouldBe(diagnostic.Code);
+        Payload(coded, "code").ShouldBe(diagnostic.Code);
+        Payload(coded, "exceptionType").ShouldBe(string.Empty);
         Payload(sessionEvents[11], "status").ShouldBe(nameof(QueryResultStatus.Error));
 
         var begun = sessionEvents[12];
@@ -405,8 +408,8 @@ public sealed class DatabaseEventSourceTests
         rolledBackEvents[1].Payload.ShouldBe([rolledBack.Id.ToString(), "Rollback"]);
         rolledBackEvents[2].EventId.ShouldBe(33);
         rolledBackEvents[2].Level.ShouldBe(EventLevel.Error);
-        rolledBackEvents[2].PayloadNames.ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
-        rolledBackEvents[2].Payload.ShouldBe([rolledBack.Id.ToString(), refusal.GetType().FullName, refusal.Message]);
+        rolledBackEvents[2].PayloadNames.ShouldBe(["transactionId", "exceptionType"]);
+        rolledBackEvents[2].Payload.ShouldBe([rolledBack.Id.ToString(), refusal.GetType().FullName]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a statement whose core threw, and leave the exception as it was")]
@@ -436,9 +439,9 @@ public sealed class DatabaseEventSourceTests
         var events = recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber) && e.EventName!.Contains("Statement", StringComparison.Ordinal)).ToArray();
         events.Select(e => e.EventName).ShouldBe(["StatementStart", "StatementFailed", "StatementStop", "StatementStart", "StatementStop"]);
         events[0].Payload.ShouldBe(["thrown", session.SessionNumber, nameof(TestRequest)]);
-        events[1].PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "failure", "durationMilliseconds"]);
+        events[1].PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "code", "exceptionType", "durationMilliseconds"]);
         Payload(events[1], "requestKind").ShouldBe(nameof(TestRequest));
-        Payload(events[1], "failure").ShouldBe(typeof(DatabaseException).FullName);
+        Payload(events[1], "exceptionType").ShouldBe(typeof(DatabaseException).FullName);
         events[1].Payload!.ShouldNotContain("the statement failed");
         Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Error));
         Payload(events[2], "affectedCount").ShouldBe(-1L);
@@ -446,7 +449,7 @@ public sealed class DatabaseEventSourceTests
         Payload(events[4], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write a failed result's first error diagnostic code, or its status when it has none")]
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write a failed result's first error diagnostic code, or an empty code when it has none")]
     public async Task StatementFailed_ErrorResult_ShouldWriteItsFirstErrorDiagnostic()
     {
         // Arrange: a result whose first diagnostic is a warning, and one with no diagnostics.
@@ -465,9 +468,10 @@ public sealed class DatabaseEventSourceTests
         // Assert
         var failures = recorder.Events.Where(e => e.EventId == 28 && Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ToArray();
         failures.Length.ShouldBe(2);
-        Payload(failures[0], "failure").ShouldBe("TESTE001");
+        Payload(failures[0], "code").ShouldBe("TESTE001");
         failures[0].Payload!.ShouldNotContain("the error");
-        Payload(failures[1], "failure").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(failures[1], "code").ShouldBe(string.Empty);
+        Payload(failures[1], "exceptionType").ShouldBe(string.Empty);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write no statement text for a parse error that quotes a string literal")]
@@ -486,7 +490,7 @@ public sealed class DatabaseEventSourceTests
         // Assert: the caller's exception quotes the literal; no event does (owner question Q3).
         failure.ShouldBeOfType<DatabaseParseException>().Message.ShouldContain(secret);
         var failed = recorder.Events.Where(e => e.EventId == 28 && Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldHaveSingleItem();
-        Payload(failed, "failure").ShouldBe(typeof(DatabaseParseException).FullName);
+        Payload(failed, "exceptionType").ShouldBe(typeof(DatabaseParseException).FullName);
         recorder.Events.SelectMany(e => e.Payload ?? []).OfType<string>().ShouldNotContain(text => text.Contains(secret, StringComparison.Ordinal));
     }
 
@@ -759,8 +763,8 @@ public sealed class DatabaseEventSourceTests
         abortedEvents[0].PayloadNames.ShouldBe(["transactionId", "exceptionType"]);
         abortedEvents[0].Payload.ShouldBe([aborted.Id.ToString(), typeof(DatabaseException).FullName]);
         abortedEvents[1].EventId.ShouldBe(33);
-        abortedEvents[1].PayloadNames.ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
-        abortedEvents[1].Payload.ShouldBe([aborted.Id.ToString(), refusal.GetType().FullName, string.Empty]);
+        abortedEvents[1].PayloadNames.ShouldBe(["transactionId", "exceptionType"]);
+        abortedEvents[1].Payload.ShouldBe([aborted.Id.ToString(), refusal.GetType().FullName]);
 
         var openEvents = recorder.Events.Where(e => Equals(Payload(e, "transactionId"), open.Id.ToString())).ToArray();
         openEvents.Select(e => e.EventName).ShouldBe(["TransactionBegun", "TransactionRolledBack"]);
@@ -822,10 +826,10 @@ public sealed class DatabaseEventSourceTests
         events[1].PayloadNames.ShouldBe(["workerName", "workerKind", "database"]);
         events[1].Payload.ShouldBe([name, nameof(DatabaseEngineWorkerKind.Checkpoint), "a"]);
         events[2].EventId.ShouldBe(15);
-        events[2].PayloadNames.ShouldBe(["workerName", "workerKind", "pass", "failed", "durationMilliseconds"]);
-        Payload(events[2], "failed").ShouldBe(false);
+        events[2].PayloadNames.ShouldBe(["workerName", "workerKind", "pass", "status", "durationMilliseconds"]);
+        Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Success));
         Payload(events[5], "pass").ShouldBe(2L);
-        Payload(events[5], "failed").ShouldBe(true);
+        Payload(events[5], "status").ShouldBe(nameof(QueryResultStatus.Error));
 
         var giveUpFailed = recorder.Events.Where(e => e.EventId == 17 && Equals(e.Payload?[0], engineName + "/checkpoint")).ShouldHaveSingleItem();
         giveUpFailed.EventName.ShouldBe("WorkerGiveUpFailed");
@@ -894,6 +898,46 @@ public sealed class DatabaseEventSourceTests
         events[2].Payload.ShouldBe([engineName, nameof(EngineModel.Sql), nameof(TestServer), typeof(InvalidOperationException).FullName, "bind failed"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should end a pass the engine's stop cancelled with a Cancelled stop, and no failure")]
+    public void RunIteration_PassCancelled_ShouldWriteACancelledStop()
+    {
+        // Arrange: a pass that observes its token after the engine's stop cancelled it.
+        string name = "event-source-" + Guid.NewGuid().ToString("N");
+        using var stop = new CancellationTokenSource();
+        var worker = new ScriptedWorker((self, pass) =>
+        {
+            stop.Cancel();
+            stop.Token.ThrowIfCancellationRequested();
+        }, name: name);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act
+        Should.Throw<OperationCanceledException>(() => worker.RunIteration(stop.Token));
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], name)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["WorkerPassStart", "WorkerPassStop"]);
+        Payload(events[1], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should bound a principal the peer sent at 256 characters")]
+    public void Authenticate_LongPrincipal_ShouldWriteItBounded()
+    {
+        // Arrange: a principal no authenticator bounded, longer than any event writes.
+        var session = new TestServerSession();
+        string principal = new('p', 300);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
+
+        // Act
+        session.Authenticate(principal);
+
+        // Assert
+        var authenticated = recorder.Events.Where(e => e.EventId == 22 && Equals(e.Payload?[0], session.Id)).ShouldHaveSingleItem();
+        authenticated.Payload![1].ShouldBe(new string('p', DatabaseEventSource.MaxNameLength) + "...");
+        ((string)authenticated.Payload![1]!).Length.ShouldBe(259);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a server session's negotiated version and authenticated principal")]
     public void SetNegotiatedVersion_Handshake_ShouldReportVersionAndPrincipal()
     {
@@ -940,6 +984,7 @@ public sealed class DatabaseEventSourceTests
         events[1].PayloadNames.ShouldBe(["engineName", "model", "failureCount", "exceptionType", "exceptionMessage"]);
         events[1].Payload.ShouldBe([engineName, nameof(EngineModel.Sql), 1, typeof(InvalidOperationException).FullName, "the databases failed to close"]);
         Payload(events[2], "failureCount").ShouldBe(1);
+        Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Error));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should set the slow-statement threshold from each enabling session")]

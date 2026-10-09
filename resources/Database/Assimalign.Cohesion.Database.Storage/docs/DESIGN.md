@@ -2033,10 +2033,10 @@ session enables.
 | --- | --- | --- | --- | --- | --- |
 | 1 | `StorageCreated` | Informational | — | `database`, `storageId`, `model` | the end of `InitializeNew` |
 | 2 | `RecoveryStart` | Informational | — | `database`, `storageId` | `OpenExisting`, before `StorageRecovery.Run` |
-| 3 | `RecoveryStop` | Informational | — | `database`, `rebuiltPages`, `maxSequence` (the journal's highest sequence), `redoLsn`, `durationMilliseconds` | `OpenExisting`, once the page scan set the redo point (before the open-time checkpoint, which reports itself) |
+| 3 | `RecoveryStop` | Informational | — | `database`, `status` (`Success`, or `Error` for a recovery that threw), `rebuiltPages`, `maxSequence` (the journal's highest sequence), `redoLsn`, `durationMilliseconds` | `OpenExisting`, once the page scan set the redo point (before the open-time checkpoint, which reports itself) |
 | 4 | `JournalTailLost` | Warning | — | `database`, `strayLsn`, `redoLsn` (before the open moved it) | `OpenExisting`: a page outlived the journal records that stamped it (a lost journal tail under `None`, or a journal older than the data file); the open raises the LSN floor and the redo point to it |
 | 5 | `CheckpointStart` | Informational | `Checkpoints` | `database`, `activeTransactions` (the logical writers the anchor lists), `journalLength` | `Checkpoint`, after the active-transaction check (a refused checkpoint writes nothing) |
-| 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint` |
+| 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `status` (`Success`, or `Error` for a checkpoint that threw), `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint`, on every path, from a `finally` |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
@@ -2050,9 +2050,13 @@ session enables.
 | 17 | `StorageClosed` | Informational | — | `database`, `durationMilliseconds` | the first `Dispose`/`DisposeAsync` of a storage whose create or open completed |
 
 **Start/Stop pairs always close.** Recovery and checkpoints are same-flow work, so they are
-`Start`/`Stop` activities. A recovery or a checkpoint that throws still writes its stop, with zeros
-(`rebuiltPages`, `maxSequence`, `redoLsn`; `checkpointLsn`), so the activity does not stay open on
-the caller's flow; the exception is the failure, which the engine reports (a failed open through
+`Start`/`Stop` activities. A recovery or a checkpoint that throws still writes its stop, with
+`status` `Error` and zeros (`rebuiltPages`, `maxSequence`, `redoLsn`; `checkpointLsn`), so the
+activity does not stay open on the caller's flow and an empty recovery's zeros are never read as a
+failure; the stop's `status` uses the area's names (`Success`, `Error`; neither pair is cancellable),
+which Storage spells itself because a child root takes no `QueryResultStatus` (the area
+[`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly)
+holds the convention and the failure rule); the exception is the failure, which the engine reports (a failed open through
 the root source's `DatabaseOperationFailed`, batch B1 of the plan; a failed checkpoint through its
 worker's `WorkerFailed`). The runtime's own sources pair
 their stops the same way (`System.Net.Http`'s `RequestStop` after `RequestFailed`). A stop is
@@ -2065,7 +2069,10 @@ already took a timestamp before this source existed. The pin path's hit branch i
 allocation-delta test (`StorageEventSourceTests`) asserts that a hit allocates exactly the
 `StoragePageHandle` it returns. Events on the pool's paths (13, 14, 16) are written under the pool
 lock, where the failures and the eviction happen; `BufferPoolResized` is written after it. An
-enabled listener's synchronous work therefore runs under that lock. For the Verbose
+enabled listener's synchronous work therefore runs under that lock. `StorageOffline` (10) can also
+be written under a lock: under the transaction lock when a checkpoint's or shutdown flush's journal
+flush takes the storage offline (`RaiseOffline` writes it before `OnOffline`), and the hook that
+follows writes the Transactions source's `LockWaitsAbandoned` there too. For the Verbose
 `DirtyPageEvicted` that is deliberate: the eviction it reports has already run the write-ahead
 gate (which can flush the journal durably) and the page write under the same lock, so a listener
 adds work of the same kind to a path that already waits on a device. Writing it after the lock

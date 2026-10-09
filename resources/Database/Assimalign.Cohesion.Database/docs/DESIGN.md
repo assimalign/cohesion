@@ -837,7 +837,7 @@ forwards, so keywords scope out-of-process tools only.
 | 4 | `EngineCreated` | Informational | — | `engineName`, `model`, `workerFailureWindowMilliseconds`, `workerFailureMinimumPasses` | the `DatabaseEngine` constructor every leaf reaches |
 | 5 | `EngineComposed` | Informational | — | `engineName`, `model`, `workerCount`, `serverCount` | `CompleteComposition`, its first call |
 | 6 | `EngineDisposeStart` | Informational | — | `engineName`, `model` | `DatabaseEngine.DisposeAsync`, after the once-only exchange |
-| 7 | `EngineDisposeStop` | Informational | — | `engineName`, `model`, `failureCount`, `durationMilliseconds` | the same, when every step ran |
+| 7 | `EngineDisposeStop` | Informational | — | `engineName`, `model`, `status` (`Success`; `Error` when a component failed to close, or for an `OutOfMemoryException` no step catches), `failureCount`, `durationMilliseconds` | the same, on every path, from a `finally` |
 | 8 | `WorkerLoopFaulted` | Error | — | `engineName`, `workerName`, `workerKind`, `exceptionType`, `exceptionMessage` | the engine's pump, when a worker's `Run` returned before the engine stopped it or threw (the base's loop allows neither; the frame and its event are kept so the pump never ends silently) |
 | 9 | `DatabaseCreated` | Informational | — | `engineName`, `model`, `database`, `durationMilliseconds` | `CreateDatabaseAsync`; not yet for `SqlDatabaseEngine.CreateDatabaseAsync(name, collation)`, which bypasses the base member (a follow-up for the Sql engine, batch D); the same holds for event 13 |
 | 10 | `DatabaseOpened` | Informational | — | `engineName`, `model`, `database`, `waitedForClose`, `durationMilliseconds` | `OpenDatabaseAsync`, once per instance an open made: an open that returns the instance the leaf already held writes nothing, and concurrent first opens of a closed database, which share one instance, write it once |
@@ -845,25 +845,25 @@ forwards, so keywords scope out-of-process tools only.
 | 12 | `DatabaseClosed` | Informational | — | `engineName`, `model`, `database` | `ForgetClosedDatabase`, which every first close reaches: a holder's, a drop's, a reopen's after the database went offline, the engine's disposal |
 | 13 | `DatabaseOperationFailed` | Error | — | `engineName`, `model`, `database`, `operation` (`Create`, `Open`, `Drop`), `exceptionType`, `exceptionMessage` | the three members above; never for a cancellation, nor for `DatabaseNotFoundException` on open, which a server's database resolution expects |
 | 14 | `WorkerPassStart` | Verbose | `Workers` | `workerName`, `workerKind`, `pass` | `DatabaseEngineWorker`, every pass |
-| 15 | `WorkerPassStop` | Verbose | `Workers` | `workerName`, `workerKind`, `pass`, `failed`, `durationMilliseconds` | the same pass; a pass cancelled at shutdown stops with `failed` false |
+| 15 | `WorkerPassStop` | Verbose | `Workers` | `workerName`, `workerKind`, `pass`, `status` (`Success`; `Error` for a pass that threw, reported a failure or escaped; `Cancelled` for a pass the engine's stop cancelled), `durationMilliseconds` | the same pass, on every path, from a `finally` |
 | 16 | `WorkerDatabaseUnfinished` | Verbose | `Workers` | `workerName`, `workerKind`, `database` | `ReportUnfinished`: a busy pass (owner decision 45) |
 | 17 | `WorkerGiveUpFailed` | Error | — | `workerName`, `workerKind`, `database`, `exceptionType`, `exceptionMessage` | `RecordGiveUpFailure`: the leaf's `TakeDatabaseOfflineCore` threw (event 1 is written too, as before) |
 | 18 | `ServerStarted` | Informational | — | `engineName`, `model`, `serverType` | `DatabaseServer.StartAsync` |
 | 19 | `ServerStartFailed` | Error | — | `engineName`, `model`, `serverType`, `exceptionType`, `exceptionMessage` | the terminal failed start: a bind failure, Blob's engine-wide refusal; never for a canceled start, which leaves the server stopped as well |
 | 20 | `ServerStopped` | Informational | — | `engineName`, `model`, `serverType`, `durationMilliseconds` | `DatabaseServer.StopAsync` of a server that ran; one that never started stops silently |
 | 21 | `ServerSessionNegotiated` | Verbose | `Sessions` | `sessionId`, `protocolVersion` | `DatabaseServerSession.SetNegotiatedVersion` |
-| 22 | `ServerSessionAuthenticated` | Informational | — | `sessionId`, `principal` | `DatabaseServerSession.SetAuthenticatedPrincipal` |
+| 22 | `ServerSessionAuthenticated` | Informational | — | `sessionId`, `principal` (cut to 256 characters and marked `...`: it is what the peer sent, which an accepting authenticator need not bound, and the servers cut it the same way) | `DatabaseServerSession.SetAuthenticatedPrincipal` |
 | 23 | `SessionOpened` | Verbose | `Sessions` | `engineName`, `database`, `sessionNumber` | the `DatabaseSession` constructor |
 | 24 | `SessionClosed` | Verbose | `Sessions` | `database`, `sessionNumber`, `failed` | `DatabaseSession.DisposeAsync`, its first call |
 | 25 | `StatementStart` | Verbose | `Statements` | `database`, `sessionNumber`, `requestKind` (the request type's name, or `Text`) | `DatabaseSession.ExecuteAsync`, both overloads, outermost call only |
 | 26 | `StatementStop` | Verbose | `Statements` | `database`, `sessionNumber`, `status` (`QueryResultStatus` name; `Error` or `Cancelled` for a core that threw), `affectedCount` (`-1` for a core that threw), `durationMilliseconds` | the same |
 | 27 | `SlowStatement` | Warning | — | `engineName`, `model`, `database`, `sessionNumber`, `requestKind`, `status`, `durationMilliseconds`, `thresholdMilliseconds` | the same, when the statement ran at least `SlowStatementThresholdMs` |
-| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `failure`, `durationMilliseconds` | the same: `failure` is a thrown exception's full type name, or the code of a failed result's first error diagnostic (its first diagnostic when it holds no error; `Error` when it holds none); never the message, which can quote the statement; never for a cancellation |
+| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for a failed result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is an offline refusal's model code (`DatabaseOfflineException.Code`), empty otherwise; never the message, which can quote the statement; never for a cancellation |
 | 29 | `TransactionBegun` | Verbose | `Transactions` | `database`, `sessionNumber`, `transactionId`, `isolationLevel` | `DatabaseSession.BeginTransactionAsync`, once the transaction is the session's |
 | 30 | `TransactionCommitted` | Verbose | `Transactions` | `transactionId`, `durationMilliseconds` (the commit's own) | `DatabaseTransaction.CommitAsync` |
 | 31 | `TransactionRolledBack` | Verbose | `Transactions` | `transactionId`, `cause` (`Rollback`, `Dispose`, `SessionClosed`) | `RollbackAsync`, `DisposeAsync` and the session's teardown, when a kernel rollback ran |
 | 32 | `TransactionAborted` | Verbose | `Transactions` | `transactionId`, `exceptionType` (the cause's; not its message, which can quote the statement) | `AbortAsync`, for the failure that aborted the transaction (the statement's own failure is event 28) |
-| 33 | `TransactionCommitFailed` | Error | — | `transactionId`, `exceptionType`, `exceptionMessage` (empty when an operation had aborted the transaction: the model's refusal repeats the operation's message) | `CommitAsync`: an offline refusal, a refused or aborted commit, a kernel commit that threw; never for a cancellation before the commit started |
+| 33 | `TransactionCommitFailed` | Error | — | `transactionId`, `exceptionType` (never the message: a commit is an operation, and the model's refusal of an aborted transaction's commit repeats the operation's message) | `CommitAsync`: an offline refusal, a refused or aborted commit, a kernel commit that threw; never for a cancellation before the commit started |
 | 34 | `EngineDisposeFailed` | Error | — | `engineName`, `model`, `failureCount`, `exceptionType`, `exceptionMessage` (the first failure collected) | `DatabaseEngine.DisposeAsync`, before event 7 |
 
 `consecutiveFailures` counts failed passes of that database since owner decision 25: a pass that
@@ -878,14 +878,22 @@ source: `engineName`, `model` (the `EngineModel` name), `database`, `sessionNumb
 first time an event needs it (no public surface). No payload carries statement text, parameter
 values, keys, values or authentication evidence (rule 11; the plan's D8, owner question Q3): a
 statement is located by its session, its request kind, its status and its diagnostic code, and a
-principal's name is an identifier (owner question Q4). An exception is its type's full name and
-its `Message`, except where the message can quote the statement: a parser quotes the token it
-stopped at, string literals included (`SqlQueryParser.DescribeToken`, `OqlQueryParser`), and every
-model's aborted-transaction refusal repeats the failed operation's message. So `StatementFailed`
-writes a diagnostic code or an exception type and no message, `TransactionAborted` writes its
-cause's type only, and `TransactionCommitFailed` writes an empty message for a commit an
-operation's failure aborted. This narrows the plan's catalog, which listed a `message` for event 28
-and an `exceptionMessage` for event 32, to its own D8.
+principal's name is an identifier (owner question Q4), cut to 256 characters because the peer sent
+it. The area's one failure rule
+([`docs/resources/Database/DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly))
+applies: an operation's failure (a statement, an aborted transaction, a commit) is written by its
+code and exception type only, never a message, because the message can quote the statement: a
+parser quotes the token it stopped at, string literals included (`SqlQueryParser.DescribeToken`,
+`OqlQueryParser`), and every model's aborted-transaction refusal repeats the failed operation's
+message. So `StatementFailed` writes a diagnostic code and an exception type, `TransactionAborted`
+and `TransactionCommitFailed` their exception's type. Lifecycle and infrastructure failures (events
+1, 3, 8, 13, 17, 19 and 34) keep the type and the `Message`.
+
+**Endings.** Every `Stop` here carries `status`, a `QueryResultStatus` name, and is written on every
+path that leaves its work: `StatementStop` (`Success`, `Error` after `StatementFailed`, or
+`Cancelled`), `WorkerPassStop` (`Success`, `Error`, or `Cancelled` for a pass the engine's stop
+cancelled) and `EngineDisposeStop` (`Success`, or `Error` after `EngineDisposeFailed`), the last two
+from a `finally`.
 
 **Statements and re-entry.** A statement is reported by the root session, once, whatever the model:
 Sql, KeyValuePair, Graph and Documents statements all enter through `DatabaseSession.ExecuteAsync`.

@@ -82,6 +82,7 @@ public sealed class KeyValueClientEventSourceTests
             ("ObserverFailed", "OnExecuting"),
             ("CommandStart", string.Empty),
             ("CommandFailed", string.Empty),
+            ("CommandStop", string.Empty),
             ("ObserverFailed", "OnFailed"),
         ]);
 
@@ -94,18 +95,20 @@ public sealed class KeyValueClientEventSourceTests
 
         var stop = events[2];
         stop.EventId.ShouldBe(2);
-        stop.PayloadNames.ShouldBe(["database", "rowCount", "affectedCount", "durationMilliseconds"]);
-        stop.Payload![1].ShouldBe(1L);
+        stop.PayloadNames.ShouldBe(["database", "status", "rowCount", "affectedCount", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe("Success");
+        stop.Payload[2].ShouldBe(1L);
 
         var failed = events[6];
         failed.EventId.ShouldBe(3);
         failed.Level.ShouldBe(EventLevel.Error);
-        failed.PayloadNames.ShouldBe(["database", "errorKind", "code", "exceptionMessage", "durationMilliseconds"]);
+        failed.PayloadNames.ShouldBe(["database", "errorKind", "code", "exceptionType", "durationMilliseconds"]);
         failed.Payload![1].ShouldBe(failure.Kind.ToString());
         failed.Payload[2].ShouldBe(failure.Code.ToString());
-        failed.Payload[3].ShouldBe(failure.Message);
+        failed.Payload[3].ShouldBe(typeof(KeyValueClientException).FullName);
+        events[7].Payload!.Take(4).ShouldBe([KeyValueClientTestHarness.DatabaseName, "Error", -1L, -1L]);
 
-        var observerFailed = events[7];
+        var observerFailed = events[8];
         observerFailed.EventId.ShouldBe(4);
         observerFailed.Level.ShouldBe(EventLevel.Warning);
         observerFailed.PayloadNames.ShouldBe(["database", "callback", "exceptionType", "exceptionMessage"]);
@@ -114,6 +117,25 @@ public sealed class KeyValueClientEventSourceTests
         // No payload carries a key, a value or the command text.
         events.SelectMany(e => e.Payload!).OfType<string>().ShouldNotContain(value =>
             value.Contains("secret", StringComparison.Ordinal) || value.Contains("PUT", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - KeyValueClientEventSource: Should close a cancelled command with a Cancelled stop and no failure")]
+    public async Task Command_Cancelled_ShouldWriteACancelledStop()
+    {
+        // Arrange
+        await using var harness = await KeyValueClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+        using var recorder = new KeyValueClientEventRecorder();
+
+        // Act: a token canceled before the command's exchange writes its first frame.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await connection.ExistsAsync(Encoding.UTF8.GetBytes("key"), new System.Threading.CancellationToken(canceled: true)));
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], KeyValueClientTestHarness.DatabaseName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["CommandStart", "CommandStop"]);
+        events[1].Payload!.Take(4).ShouldBe([KeyValueClientTestHarness.DatabaseName, "Cancelled", -1L, -1L]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - KeyValueClientEventSource: Should report a write-write conflict without the key the server's message names")]
@@ -152,12 +174,14 @@ public sealed class KeyValueClientEventSourceTests
         var failed = recorder.Events
             .Where(e => Equals(e.Payload?[0], KeyValueClientTestHarness.DatabaseName) && e.EventName == "CommandFailed")
             .ShouldHaveSingleItem();
-        failed.Payload![3].ShouldBe(failure.Message.Replace(keyHex, KeyValueClientEventSource.RedactedValue, StringComparison.Ordinal));
+        failed.PayloadNames.ShouldBe(["database", "errorKind", "code", "exceptionType", "durationMilliseconds"]);
+        failed.Payload![3].ShouldBe(typeof(KeyValueClientException).FullName);
 
         var exchangeFailed = recorder.CoreEvents
             .Where(e => Equals(e.Payload?[0], KeyValueClientTestHarness.DatabaseName) && e.EventName == "ExchangeFailed")
             .ShouldHaveSingleItem();
-        exchangeFailed.Payload![2].ShouldBe(string.Empty, "The core writes no statement-level server message.");
+        exchangeFailed.PayloadNames.ShouldBe(["database", "code", "exceptionType"]);
+        exchangeFailed.Payload![2].ShouldBe("Assimalign.Cohesion.Database.Client.DatabaseClientException", "The core writes the failure's type, never the server's message.");
 
         recorder.Events.Concat(recorder.CoreEvents).SelectMany(e => e.Payload!).OfType<string>().ShouldNotContain(value =>
             value.Contains(keyHex, StringComparison.OrdinalIgnoreCase) || value.Contains("secret", StringComparison.Ordinal));

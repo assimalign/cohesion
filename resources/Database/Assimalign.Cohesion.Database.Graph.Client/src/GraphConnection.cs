@@ -83,28 +83,76 @@ public sealed class GraphConnection : IAsyncDisposable
         var exchange = new GraphPathsExchange(statement, parameters);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
         GraphClientEventSource.Log.QueryStart(this, QueryPathsOperation);
-        Stream stream;
+
+        // The query's end is written on every path, from the finally: Success once the enumeration
+        // reached the server's terminal count; Error, after QueryFailed, for a failed open or read;
+        // Cancelled for a cancellation, or for a caller that stopped reading and disposed the
+        // enumerator early. An iterator cannot catch around a yield, so the open and each read
+        // capture their own failure.
+        long paths = 0;
+        bool completed = false;
+        Exception? failure = null;
         try
         {
-            stream = await _connection.ExecuteStreamingAsync(exchange, cancellationToken).ConfigureAwait(false);
-        }
-        catch (DatabaseClientException exception)
-        {
-            GraphClientEventSource.Log.QueryFailed(this, QueryPathsOperation, exception, startTimestamp);
-            throw new GraphClientException(exception.Code, exception.Message, exception);
-        }
-        await using (stream.ConfigureAwait(false))
-        {
-            byte[] length = new byte[sizeof(int)];
-            long paths = 0;
-            while (await ReadPathAsync(stream, length, startTimestamp, cancellationToken).ConfigureAwait(false) is { } path)
+            Stream stream;
+            try
             {
-                paths++;
-                yield return path;
+                try
+                {
+                    stream = await _connection.ExecuteStreamingAsync(exchange, cancellationToken).ConfigureAwait(false);
+                }
+                catch (DatabaseClientException exception)
+                {
+                    throw new GraphClientException(exception.Code, exception.Message, exception);
+                }
+            }
+            catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
+            {
+                // Unreachable: the filter records the failure and declines it.
+                throw;
             }
 
-            // The enumeration reached the server's terminal count: the query is complete.
-            GraphClientEventSource.Log.QueryStop(this, QueryPathsOperation, paths, startTimestamp);
+            await using (stream.ConfigureAwait(false))
+            {
+                byte[] length = new byte[sizeof(int)];
+                while (true)
+                {
+                    GraphPath? path;
+                    try
+                    {
+                        path = await ReadPathAsync(stream, length, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
+                    {
+                        // Unreachable: the filter records the failure and declines it.
+                        throw;
+                    }
+
+                    if (path is null)
+                    {
+                        break;
+                    }
+
+                    paths++;
+                    yield return path;
+                }
+
+                // The enumeration reached the server's terminal count: the query is complete.
+                completed = true;
+            }
+        }
+        finally
+        {
+            string status = completed
+                ? GraphClientEventSource.StatusSuccess
+                : failure is null or OperationCanceledException ? GraphClientEventSource.StatusCancelled : GraphClientEventSource.StatusError;
+            GraphClientEventSource.Log.QueryEnded(
+                this,
+                QueryPathsOperation,
+                status,
+                ReferenceEquals(status, GraphClientEventSource.StatusError) ? failure : null,
+                paths,
+                startTimestamp);
         }
     }
 
@@ -142,20 +190,36 @@ public sealed class GraphConnection : IAsyncDisposable
         var exchange = new GraphExecuteExchange(statement, parameters);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
         GraphClientEventSource.Log.QueryStart(this, operation);
+
+        // The query's end is written on every path, from the finally: QueryFailed and then
+        // QueryStop(Error) for a failure, QueryStop(Cancelled) for a cancellation.
+        GraphResultSet? result = null;
+        Exception? failure = null;
         try
         {
-            GraphResultSet result = await _connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
-            GraphClientEventSource.Log.QueryStop(this, operation, result.Count, startTimestamp);
+            try
+            {
+                result = await _connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DatabaseClientException exception)
+            {
+                throw new GraphClientException(exception.Code, exception.Message, exception);
+            }
+
             return result;
         }
-        catch (DatabaseClientException exception)
+        catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
         {
-            GraphClientEventSource.Log.QueryFailed(this, operation, exception, startTimestamp);
-            throw new GraphClientException(exception.Code, exception.Message, exception);
+            // Unreachable: the filter records the failure and declines it.
+            throw;
+        }
+        finally
+        {
+            GraphClientEventSource.Log.QueryEnded(this, operation, failure, result?.Count ?? -1, startTimestamp);
         }
     }
 
-    private async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, long startTimestamp, CancellationToken cancellationToken)
+    private static async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, CancellationToken cancellationToken)
     {
         try
         {
@@ -169,7 +233,6 @@ public sealed class GraphConnection : IAsyncDisposable
         }
         catch (DatabaseClientException exception)
         {
-            GraphClientEventSource.Log.QueryFailed(this, QueryPathsOperation, exception, startTimestamp);
             throw new GraphClientException(exception.Code, exception.Message, exception);
         }
     }

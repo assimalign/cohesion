@@ -29,9 +29,11 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 /// </para>
 /// <para>
 /// A statement-level server error can quote user data the core cannot recognize: a key, a blob name
-/// or a fragment of the statement. <c>ExchangeFailed</c> therefore writes the exception's message
-/// only for the transport and protocol codes, and leaves the server's statement-level message to the
-/// model client's own failure event, which removes the user data that client knows of (plan D8).
+/// or a fragment of the statement. <c>ExchangeFailed</c> therefore writes the failure's code and
+/// exception type only, as every model client's failure event does (the area's failure rule,
+/// <c>docs/resources/Database/DESIGN.md</c>). The lifecycle failures (a failed open, a broken
+/// connection, a failed release) keep their message: the dial's names the endpoint, the handshake's
+/// is a protocol refusal, and a transport or protocol fault's is the client's own text.
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Client")]
@@ -209,7 +211,11 @@ internal sealed class DatabaseClientEventSource : EventSource
     }
 
     /// <summary>
-    /// Writes an exchange that failed with a coded error.
+    /// Writes an exchange that failed with a coded error: every coded failure an exchange raises,
+    /// whether or not it left the response incomplete. Written by its code and exception type only
+    /// (the area's failure rule): a server's statement-level message can quote a key, a blob name or
+    /// a fragment of the statement. A connection the failure broke keeps its message through
+    /// <c>ConnectionBroken</c>.
     /// </summary>
     /// <param name="connection">The connection.</param>
     /// <param name="exception">The coded failure.</param>
@@ -218,23 +224,9 @@ internal sealed class DatabaseClientEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            ExchangeFailed(connection.Database, exception.Code.ToString(), GetExchangeFailureMessage(exception));
+            ExchangeFailed(connection.Database, exception.Code.ToString(), exception.GetType().FullName ?? exception.GetType().Name);
         }
     }
-
-    /// <summary>
-    /// The message an exchange failure writes. The client raises only
-    /// <see cref="ProtocolErrorCode.Internal"/> and <see cref="ProtocolErrorCode.ProtocolViolation"/>
-    /// itself, and a server sends those codes with fixed protocol text, so their message is written.
-    /// Every other code carries the server's statement-level message, which can quote a key, a blob
-    /// name or a fragment of the statement; it is written as an empty string.
-    /// </summary>
-    /// <param name="exception">The coded failure.</param>
-    /// <returns>The message to write.</returns>
-    private static string GetExchangeFailureMessage(DatabaseClientException exception)
-        => exception.Code is ProtocolErrorCode.Internal or ProtocolErrorCode.ProtocolViolation
-            ? exception.Message
-            : string.Empty;
 
     /// <summary>
     /// Writes a download whose broken rental could not be returned after the download failed.
@@ -274,9 +266,9 @@ internal sealed class DatabaseClientEventSource : EventSource
     private void ConnectionReturned(string database, bool pooled)
         => WriteEvent(6, database, pooled);
 
-    [Event(7, Level = EventLevel.Verbose, Message = "An exchange on the connection to '{0}' failed ({1}): {2}")]
-    private void ExchangeFailed(string database, string code, string exceptionMessage)
-        => WriteEvent(7, database, code, exceptionMessage);
+    [Event(7, Level = EventLevel.Verbose, Message = "An exchange on the connection to '{0}' failed: code '{1}', exception '{2}'.")]
+    private void ExchangeFailed(string database, string code, string exceptionType)
+        => WriteEvent(7, database, code, exceptionType);
 
     [Event(8, Level = EventLevel.Warning, Message = "A failed download on the connection to '{0}' could not return its rental: {1}: {2}")]
     private void DownloadReleaseFailed(string database, string exceptionType, string exceptionMessage)

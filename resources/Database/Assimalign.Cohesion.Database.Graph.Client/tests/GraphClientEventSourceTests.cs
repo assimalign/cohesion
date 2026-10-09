@@ -89,6 +89,7 @@ public sealed class GraphClientEventSourceTests
             ("QueryStop", "QueryPaths"),
             ("QueryStart", "Query"),
             ("QueryFailed", "Query"),
+            ("QueryStop", "Query"),
         ]);
 
         var start = events[0];
@@ -100,21 +101,67 @@ public sealed class GraphClientEventSourceTests
         var stop = events[3];
         stop.EventId.ShouldBe(2);
         stop.Level.ShouldBe(EventLevel.Verbose);
-        stop.PayloadNames.ShouldBe(["database", "operation", "rowCount", "durationMilliseconds"]);
-        stop.Payload![2].ShouldBe(2L);
-        ((double)stop.Payload[3]!).ShouldBeGreaterThan(0d);
-        events[5].Payload![2].ShouldBe(2L, "A path query's row count is its paths.");
+        stop.PayloadNames.ShouldBe(["database", "operation", "status", "rowCount", "durationMilliseconds"]);
+        stop.Payload![2].ShouldBe("Success");
+        stop.Payload[3].ShouldBe(2L);
+        ((double)stop.Payload[4]!).ShouldBeGreaterThan(0d);
+        events[5].Payload![2].ShouldBe("Success");
+        events[5].Payload![3].ShouldBe(2L, "A path query's row count is its paths.");
 
         var failed = events[7];
         failed.EventId.ShouldBe(3);
         failed.Level.ShouldBe(EventLevel.Error);
-        failed.PayloadNames.ShouldBe(["database", "operation", "code", "exceptionMessage", "durationMilliseconds"]);
+        failed.PayloadNames.ShouldBe(["database", "operation", "code", "exceptionType", "durationMilliseconds"]);
         failed.Payload![2].ShouldBe(failure.Code.ToString());
-        failed.Payload[3].ShouldBe(failure.Message);
+        failed.Payload[3].ShouldBe(typeof(GraphClientException).FullName);
+        events[8].Payload!.Take(4).ShouldBe(["graph", "Query", "Error", -1L]);
 
-        // No start or stop carries the statement text; a failure carries only the server's message.
-        events.Where(e => e.EventName != "QueryFailed").SelectMany(e => e.Payload!).OfType<string>()
-            .ShouldNotContain(value => value.Contains("MATCH", StringComparison.Ordinal) || value.Contains("CREATE", StringComparison.Ordinal));
+        // No event carries the statement text or the server's message, which quotes it.
+        events.SelectMany(e => e.Payload!).OfType<string>()
+            .ShouldNotContain(value => value.Contains("MATCH", StringComparison.Ordinal) || value.Contains("CREATE", StringComparison.Ordinal) || value == failure.Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph.Client] - GraphClientEventSource: Should close a path query its caller stopped reading with a Cancelled stop and the paths read")]
+    public async Task QueryPathsAsync_CallerStopsEarly_ShouldWriteACancelledStop()
+    {
+        // Arrange: two paths, of which the caller reads one.
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var setup = await harness.Client.ConnectAsync(harness.Token);
+        await setup.ExecuteAsync("CREATE (:Person {name: 'Alice'}), (:Person {name: 'Bob'})", cancellationToken: harness.Token);
+        await setup.DisposeAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        using var recorder = new GraphClientEventRecorder();
+
+        // Act
+        await foreach (GraphPath path in connection.QueryPathsAsync("MATCH (a:Person) RETURN a AS person", cancellationToken: harness.Token))
+        {
+            break;
+        }
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "graph") && Equals(e.Payload?[1], "QueryPaths")).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["QueryStart", "QueryStop"]);
+        events[1].Payload!.Take(4).ShouldBe(["graph", "QueryPaths", "Cancelled", 1L]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph.Client] - GraphClientEventSource: Should close a cancelled query with a Cancelled stop and no failure")]
+    public async Task QueryAsync_Cancelled_ShouldWriteACancelledStop()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        using var recorder = new GraphClientEventRecorder();
+
+        // Act: a token canceled before the exchange writes its first frame.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await connection.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: new System.Threading.CancellationToken(canceled: true)));
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "graph")).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["QueryStart", "QueryStop"]);
+        events[1].Payload!.Take(4).ShouldBe(["graph", "Query", "Cancelled", -1L]);
     }
 
     /// <summary>

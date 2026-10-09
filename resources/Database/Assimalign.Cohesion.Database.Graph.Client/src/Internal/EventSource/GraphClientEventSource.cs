@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 
@@ -6,7 +7,7 @@ using Assimalign.Cohesion.Database.Client;
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
 /// <summary>
-/// The graph client's diagnostics: each query's start, stop and coded failure.
+/// The graph client's diagnostics: each query's start, stop and failure.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,16 +18,28 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 /// </para>
 /// <para>
 /// <c>operation</c> names the public member: <c>Query</c>, <c>Execute</c> or <c>QueryPaths</c>. A path
-/// query stops when its enumeration reaches the server's terminal count, and <c>rowCount</c> is then
-/// the number of paths. A query writes its database, operation, row count and wire code; never its
-/// statement text or parameter values (plan D8). A failure also writes the server's message, which
-/// for a parse error can quote a fragment of the statement (plan owner question Q3). No counters
-/// (plan D6).
+/// query ends when its enumeration does: <c>Success</c> once it reaches the server's terminal count,
+/// <c>Cancelled</c> when its caller disposes it early or cancels it, <c>Error</c> when a read fails;
+/// <c>rowCount</c> is the paths read by then. A query writes its database, operation, row count and
+/// how it ended; never its statement text or parameter values (plan D8). A failure is written by its
+/// wire code and exception type only, never a message: the server's message for a parse error quotes
+/// the statement (the area's failure rule, <c>docs/resources/Database/DESIGN.md</c>). Every
+/// <c>QueryStart</c> is closed by one <c>QueryStop</c>, after <c>QueryFailed</c> for a failure. No
+/// counters (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Graph.Client")]
 internal sealed class GraphClientEventSource : EventSource
 {
+    /// <summary>The status of a query that completed.</summary>
+    internal const string StatusSuccess = "Success";
+
+    /// <summary>The status of a query that failed.</summary>
+    internal const string StatusError = "Error";
+
+    /// <summary>The status of a query its caller cancelled, or a path query its caller stopped reading.</summary>
+    internal const string StatusCancelled = "Cancelled";
+
     public static readonly GraphClientEventSource Log = new();
 
     private GraphClientEventSource()
@@ -40,6 +53,19 @@ internal sealed class GraphClientEventSource : EventSource
     {
         /// <summary>The per-query trace: <c>QueryStart</c> and <c>QueryStop</c>.</summary>
         public const EventKeywords Queries = (EventKeywords)0x1;
+    }
+
+    /// <summary>
+    /// Records what a query threw and returns false, so the exception filter that calls it catches
+    /// nothing; the query writes its end from the <c>finally</c> of the same <c>try</c>.
+    /// </summary>
+    /// <param name="exception">What the query threw.</param>
+    /// <param name="captured">Receives <paramref name="exception"/>.</param>
+    /// <returns>False, always.</returns>
+    public static bool CaptureFailure(Exception exception, out Exception captured)
+    {
+        captured = exception;
+        return false;
     }
 
     /// <summary>
@@ -65,34 +91,52 @@ internal sealed class GraphClientEventSource : EventSource
     }
 
     /// <summary>
-    /// Writes the successful end of a query.
+    /// Writes the end of a query on every path: <c>QueryFailed</c> first for a failure, then
+    /// <c>QueryStop</c> with the query's status.
     /// </summary>
     /// <param name="connection">The connection that ran the query.</param>
     /// <param name="operation">The public member that ran it.</param>
-    /// <param name="rowCount">The rows, or for a path query the paths, it returned.</param>
+    /// <param name="status"><see cref="StatusSuccess"/>, <see cref="StatusError"/> or <see cref="StatusCancelled"/>.</param>
+    /// <param name="failure">The failure, for <see cref="StatusError"/>; otherwise <see langword="null"/>.</param>
+    /// <param name="rowCount">The rows, or for a path query the paths, it returned or read.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the query started.</param>
     [NonEvent]
-    public void QueryStop(GraphConnection connection, string operation, long rowCount, long startTimestamp)
+    public void QueryEnded(GraphConnection connection, string operation, string status, Exception? failure, long rowCount, long startTimestamp)
     {
+        if (failure is not null && IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            QueryFailed(connection.Database, operation, GetCode(failure), TypeName(failure), GetElapsedMilliseconds(startTimestamp));
+        }
+
         if (IsEnabled(EventLevel.Verbose, Keywords.Queries))
         {
-            QueryStop(connection.Database, operation, rowCount, GetElapsedMilliseconds(startTimestamp));
+            QueryStop(connection.Database, operation, status, rowCount, GetElapsedMilliseconds(startTimestamp));
         }
     }
 
     /// <summary>
-    /// Writes a query that failed with a coded error.
+    /// Writes the end of a query whose call threw or returned: the status follows from
+    /// <paramref name="failure"/>, a cancellation being no failure.
     /// </summary>
     /// <param name="connection">The connection that ran the query.</param>
     /// <param name="operation">The public member that ran it.</param>
-    /// <param name="exception">The shared client's coded failure.</param>
+    /// <param name="failure">What the query threw, or <see langword="null"/> when it completed.</param>
+    /// <param name="rowCount">The rows it returned; -1 when it threw.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the query started.</param>
     [NonEvent]
-    public void QueryFailed(GraphConnection connection, string operation, DatabaseClientException exception, long startTimestamp)
+    public void QueryEnded(GraphConnection connection, string operation, Exception? failure, long rowCount, long startTimestamp)
     {
-        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        if (failure is null)
         {
-            QueryFailed(connection.Database, operation, exception.Code.ToString(), exception.Message, GetElapsedMilliseconds(startTimestamp));
+            QueryEnded(connection, operation, StatusSuccess, null, rowCount, startTimestamp);
+        }
+        else if (failure is OperationCanceledException)
+        {
+            QueryEnded(connection, operation, StatusCancelled, null, rowCount, startTimestamp);
+        }
+        else
+        {
+            QueryEnded(connection, operation, StatusError, failure, rowCount, startTimestamp);
         }
     }
 
@@ -100,13 +144,22 @@ internal sealed class GraphClientEventSource : EventSource
     private void QueryStart(string database, string operation)
         => WriteEvent(1, database, operation);
 
-    [Event(2, Level = EventLevel.Verbose, Keywords = Keywords.Queries, Message = "Graph {1} on '{0}' completed: {2} row(s) in {3} ms.")]
-    private void QueryStop(string database, string operation, long rowCount, double durationMilliseconds)
-        => WriteEvent(2, database, operation, rowCount, durationMilliseconds);
+    [Event(2, Level = EventLevel.Verbose, Keywords = Keywords.Queries, Message = "Graph {1} on '{0}' ended {2}: {3} row(s) in {4} ms.")]
+    private void QueryStop(string database, string operation, string status, long rowCount, double durationMilliseconds)
+        => WriteEvent(2, database, operation, status, rowCount, durationMilliseconds);
 
-    [Event(3, Level = EventLevel.Error, Message = "Graph {1} on '{0}' failed ({2}): {3}. After {4} ms.")]
-    private void QueryFailed(string database, string operation, string code, string exceptionMessage, double durationMilliseconds)
-        => WriteEvent(3, database, operation, code, exceptionMessage, durationMilliseconds);
+    [Event(3, Level = EventLevel.Error, Message = "Graph {1} on '{0}' failed after {4} ms: code '{2}', exception '{3}'.")]
+    private void QueryFailed(string database, string operation, string code, string exceptionType, double durationMilliseconds)
+        => WriteEvent(3, database, operation, code, exceptionType, durationMilliseconds);
+
+    private static string GetCode(Exception failure) => failure switch
+    {
+        GraphClientException graph => graph.Code.ToString(),
+        DatabaseClientException client => client.Code.ToString(),
+        _ => string.Empty,
+    };
+
+    private static string TypeName(Exception exception) => exception.GetType().FullName ?? exception.GetType().Name;
 
     private static double GetElapsedMilliseconds(long startTimestamp)
         => startTimestamp == 0 ? 0 : Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;

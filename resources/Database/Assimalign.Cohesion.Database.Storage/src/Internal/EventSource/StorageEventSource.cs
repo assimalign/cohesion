@@ -179,16 +179,17 @@ internal sealed class StorageEventSource : EventSource
     /// Nothing is written when <paramref name="started"/> is zero (the start was not written).
     /// </summary>
     /// <param name="storage">The storage being opened.</param>
+    /// <param name="succeeded">False for a recovery that threw: its stop carries zeros and <c>Error</c>, and the open's exception is the failure.</param>
     /// <param name="rebuiltPages">The pages recovery rebuilt from the journal.</param>
     /// <param name="maxSequence">The highest transaction sequence the journal held.</param>
     /// <param name="redoLsn">The redo point the open settled on.</param>
     /// <param name="started">The timestamp <see cref="RecoveryStart(Storage)"/> returned.</param>
     [NonEvent]
-    public void RecoveryStop(Storage storage, int rebuiltPages, long maxSequence, long redoLsn, long started)
+    public void RecoveryStop(Storage storage, bool succeeded, int rebuiltPages, long maxSequence, long redoLsn, long started)
     {
         if (started != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            RecoveryStop(storage.Name.ToString(), rebuiltPages, maxSequence, redoLsn, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            RecoveryStop(storage.Name.ToString(), Status(succeeded), rebuiltPages, maxSequence, redoLsn, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
     }
 
@@ -234,14 +235,15 @@ internal sealed class StorageEventSource : EventSource
     /// <paramref name="started"/> is zero (the start was not written).
     /// </summary>
     /// <param name="storage">The storage.</param>
+    /// <param name="succeeded">False for a checkpoint that threw: its stop carries <c>Error</c>, and the caller's exception is the failure.</param>
     /// <param name="checkpointLsn">The checkpoint record's LSN; zero when the checkpoint failed.</param>
     /// <param name="started">The timestamp <see cref="CheckpointStart(Storage, int)"/> returned.</param>
     [NonEvent]
-    public void CheckpointStop(Storage storage, long checkpointLsn, long started)
+    public void CheckpointStop(Storage storage, bool succeeded, long checkpointLsn, long started)
     {
         if (started != 0 && IsEnabled(EventLevel.Informational, Keywords.Checkpoints))
         {
-            CheckpointStop(storage.Name.ToString(), checkpointLsn, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            CheckpointStop(storage.Name.ToString(), Status(succeeded), checkpointLsn, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
     }
 
@@ -435,9 +437,9 @@ internal sealed class StorageEventSource : EventSource
     private void RecoveryStart(string database, string storageId)
         => WriteEvent(2, database, storageId);
 
-    [Event(3, Level = EventLevel.Informational, Message = "Storage '{0}' recovered: {1} page(s) rebuilt from the journal, highest sequence {2}, redo point {3}, in {4} ms.")]
-    private void RecoveryStop(string database, int rebuiltPages, long maxSequence, long redoLsn, double durationMilliseconds)
-        => WriteEvent(3, database, rebuiltPages, maxSequence, redoLsn, durationMilliseconds);
+    [Event(3, Level = EventLevel.Informational, Message = "Storage '{0}' ended recovery {1}: {2} page(s) rebuilt from the journal, highest sequence {3}, redo point {4}, in {5} ms.")]
+    private void RecoveryStop(string database, string status, int rebuiltPages, long maxSequence, long redoLsn, double durationMilliseconds)
+        => WriteEvent(3, database, status, rebuiltPages, maxSequence, redoLsn, durationMilliseconds);
 
     [Event(4, Level = EventLevel.Warning, Message = "Storage '{0}' found a page at LSN {1}, above the journal's redo point {2}: the journal lost the records that stamped it. LSNs resume above the page, and its next change journals a full image.")]
     private void JournalTailLost(string database, long strayLsn, long redoLsn)
@@ -447,9 +449,9 @@ internal sealed class StorageEventSource : EventSource
     private void CheckpointStart(string database, int activeTransactions, long journalLength)
         => WriteEvent(5, database, activeTransactions, journalLength);
 
-    [Event(6, Level = EventLevel.Informational, Keywords = Keywords.Checkpoints, Message = "Storage '{0}' checkpoint ended at LSN {1} in {2} ms.")]
-    private void CheckpointStop(string database, long checkpointLsn, double durationMilliseconds)
-        => WriteEvent(6, database, checkpointLsn, durationMilliseconds);
+    [Event(6, Level = EventLevel.Informational, Keywords = Keywords.Checkpoints, Message = "Storage '{0}' checkpoint ended {1} at LSN {2} in {3} ms.")]
+    private void CheckpointStop(string database, string status, long checkpointLsn, double durationMilliseconds)
+        => WriteEvent(6, database, status, checkpointLsn, durationMilliseconds);
 
     [Event(7, Level = EventLevel.Verbose, Keywords = Keywords.WriteBack, Message = "Storage '{0}' wrote back {1} dirty page(s) in {2} ms.")]
     private void PagesWrittenBack(string database, int pages, double durationMilliseconds)
@@ -546,4 +548,9 @@ internal sealed class StorageEventSource : EventSource
             DisplayRateTimeScale = TimeSpan.FromSeconds(1),
         };
     }
+
+    // The status a stop writes: the area's Success or Error (Storage has no cancellable start/stop
+    // pair, and as a child root it does not take the root's QueryResultStatus, so it spells the
+    // same names).
+    private static string Status(bool succeeded) => succeeded ? "Success" : "Error";
 }

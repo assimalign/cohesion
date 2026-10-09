@@ -130,8 +130,9 @@ public sealed class StorageEventSourceTests
         var checkpointStop = events[3];
         checkpointStop.EventId.ShouldBe(6);
         checkpointStop.Opcode.ShouldBe(EventOpcode.Stop);
-        checkpointStop.PayloadNames.ShouldBe(["database", "checkpointLsn", "durationMilliseconds"]);
-        ((long)checkpointStop.Payload![1]!).ShouldBeGreaterThan(0);
+        checkpointStop.PayloadNames.ShouldBe(["database", "status", "checkpointLsn", "durationMilliseconds"]);
+        checkpointStop.Payload![1].ShouldBe("Success");
+        ((long)checkpointStop.Payload![2]!).ShouldBeGreaterThan(0);
 
         var closed = events[6];
         closed.EventId.ShouldBe(17);
@@ -176,8 +177,9 @@ public sealed class StorageEventSourceTests
         var stop = events[3];
         stop.EventId.ShouldBe(6);
         stop.Opcode.ShouldBe(EventOpcode.Stop);
-        stop.PayloadNames.ShouldBe(["database", "checkpointLsn", "durationMilliseconds"]);
-        stop.Payload![1].ShouldBe(0L);
+        stop.PayloadNames.ShouldBe(["database", "status", "checkpointLsn", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe("Error");
+        stop.Payload[2].ShouldBe(0L);
 
         (StorageEventSource.Log.Checkpoints - checkpoints).ShouldBe(0);
         StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
@@ -222,10 +224,11 @@ public sealed class StorageEventSourceTests
         var stop = events[1];
         stop.EventId.ShouldBe(3);
         stop.Opcode.ShouldBe(EventOpcode.Stop);
-        stop.PayloadNames.ShouldBe(["database", "rebuiltPages", "maxSequence", "redoLsn", "durationMilliseconds"]);
-        stop.Payload![1].ShouldBe(1);
-        stop.Payload[2].ShouldBe(1L);
-        stop.Payload[3].ShouldBe(redoLsn);
+        stop.PayloadNames.ShouldBe(["database", "status", "rebuiltPages", "maxSequence", "redoLsn", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe("Success");
+        stop.Payload[2].ShouldBe(1);
+        stop.Payload[3].ShouldBe(1L);
+        stop.Payload[4].ShouldBe(redoLsn);
 
         StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
     }
@@ -255,9 +258,10 @@ public sealed class StorageEventSourceTests
         var stop = events[1];
         stop.EventId.ShouldBe(3);
         stop.Opcode.ShouldBe(EventOpcode.Stop);
-        stop.Payload![1].ShouldBe(0);
-        stop.Payload[2].ShouldBe(0L);
+        stop.Payload![1].ShouldBe("Error");
+        stop.Payload[2].ShouldBe(0);
         stop.Payload[3].ShouldBe(0L);
+        stop.Payload[4].ShouldBe(0L);
 
         StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
     }
@@ -294,7 +298,7 @@ public sealed class StorageEventSourceTests
         tail.PayloadNames.ShouldBe(["database", "strayLsn", "redoLsn"]);
         tail.Payload.ShouldBe([name, pageLsn, 0L]);
         redoLsn.ShouldBe(pageLsn);
-        events[2].Payload![3].ShouldBe(pageLsn);
+        events[2].Payload![4].ShouldBe(pageLsn);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should report a grouped commit that missed its window and a flush worker's group flush")]

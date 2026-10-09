@@ -121,6 +121,9 @@ public sealed class DatabaseConnection : IAsyncDisposable
 
         long startTimestamp = DatabaseClientEventSource.Log.GetTimestamp();
 
+        // A failed open is captured by the filter, which declines it, and written from the finally,
+        // once what the open threw from has unwound.
+        DatabaseClientException? openFailure = null;
         try
         {
             _connection = await DialAsync(cancellationToken).ConfigureAwait(false);
@@ -164,11 +167,18 @@ public sealed class DatabaseConnection : IAsyncDisposable
                 throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected a ready frame but received {ready.Type}."));
             }
         }
-        catch (DatabaseClientException exception) when (ReportOpenFailed(exception, startTimestamp))
+        catch (DatabaseClientException exception) when (CaptureOpenFailure(exception, out openFailure))
         {
-            // Unreachable: the filter writes the failure and declines the exception, so it
-            // propagates unchanged.
+            // Unreachable: the filter records the failure and declines it, so it propagates
+            // unchanged.
             throw;
+        }
+        finally
+        {
+            if (openFailure is not null)
+            {
+                DatabaseClientEventSource.Log.ConnectionOpenFailed(this, openFailure, startTimestamp);
+            }
         }
 
         ServerVersion = ProtocolVersion.Current;
@@ -180,13 +190,13 @@ public sealed class DatabaseConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Writes a failed open to the event source and declines the failure, so the exception filter
-    /// that calls it never catches.
+    /// Records a failed open and declines it, so the exception filter that calls it never catches;
+    /// the open writes the failure from its finally.
     /// </summary>
     /// <returns>Always false.</returns>
-    private bool ReportOpenFailed(DatabaseClientException exception, long startTimestamp)
+    private static bool CaptureOpenFailure(DatabaseClientException exception, out DatabaseClientException? captured)
     {
-        DatabaseClientEventSource.Log.ConnectionOpenFailed(this, exception, startTimestamp);
+        captured = exception;
         return false;
     }
 

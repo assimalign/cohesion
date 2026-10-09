@@ -263,7 +263,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         {
             if (thrown is not null)
             {
-                TraceCommitFailure(thrown);
+                TraceCommitFailure(this, thrown);
             }
         }
     }
@@ -575,22 +575,14 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     }
 
     // Writes a failed commit, after the commit released its lock and its end gate. A token canceled
-    // before the commit started is not a failed commit. A commit an operation's failure aborted is
-    // refused with the model's error, which repeats that failure's message, so it is written
-    // without its message (owner question Q3).
-    private void TraceCommitFailure(Exception exception)
+    // before the commit started is not a failed commit. A commit is an operation, so its failure is
+    // written by its exception's type only (the area's failure rule): a commit an operation's
+    // failure aborted is refused with the model's error, which repeats that failure's message.
+    private static void TraceCommitFailure(DatabaseTransaction transaction, Exception exception)
     {
-        if (exception is OperationCanceledException || !DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
+        if (exception is not OperationCanceledException)
         {
-            return;
+            DatabaseEventSource.Log.TransactionCommitFailed(transaction, exception);
         }
-
-        bool aborted;
-        lock (_sync)
-        {
-            aborted = _failure is not null;
-        }
-
-        DatabaseEventSource.Log.TransactionCommitFailed(this, exception, aborted);
     }
 }

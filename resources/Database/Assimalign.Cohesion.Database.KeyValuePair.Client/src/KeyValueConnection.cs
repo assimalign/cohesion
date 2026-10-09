@@ -337,21 +337,39 @@ public sealed class KeyValueConnection : IAsyncDisposable
         long startTimestamp = Stopwatch.GetTimestamp();
         KeyValueClientEventSource.Log.CommandStart(this, parameterCount);
 
+        // The command's end is written on every path, from the finally, before the observer hears
+        // of it: CommandFailed and then CommandStop(Error) for a failure, CommandStop(Cancelled)
+        // for a cancellation, CommandStop(Success) for a result.
+        KeyValueProtocolResult? result = null;
+        KeyValueClientException? translated = null;
+        Exception? failure = null;
         try
         {
-            KeyValueProtocolResult result = await _connection.ExecuteAsync(new KeyValueExecuteExchange(commandText, parameters), cancellationToken).ConfigureAwait(false);
-
-            KeyValueClientEventSource.Log.CommandStop(this, result.Rows.Count, result.AffectedCount, startTimestamp);
-            NotifyExecuted(commandText, result.Rows.Count, result.AffectedCount, Stopwatch.GetElapsedTime(startTimestamp));
-            return result;
+            result = await _connection.ExecuteAsync(new KeyValueExecuteExchange(commandText, parameters), cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception)
         {
-            KeyValueClientException translated = KeyValueClientException.FromClientException(exception);
-            KeyValueClientEventSource.Log.CommandFailed(this, translated, parameters, startTimestamp);
+            translated = KeyValueClientException.FromClientException(exception);
+            failure = translated;
+        }
+        catch (Exception exception) when (KeyValueClientEventSource.CaptureFailure(exception, out failure))
+        {
+            // Unreachable: the filter records the failure and declines it.
+            throw;
+        }
+        finally
+        {
+            KeyValueClientEventSource.Log.CommandEnded(this, failure, result?.Rows.Count ?? -1, result?.AffectedCount ?? -1, startTimestamp);
+        }
+
+        if (translated is not null)
+        {
             NotifyFailed(commandText, translated, Stopwatch.GetElapsedTime(startTimestamp));
             throw translated;
         }
+
+        NotifyExecuted(commandText, result!.Rows.Count, result.AffectedCount, Stopwatch.GetElapsedTime(startTimestamp));
+        return result;
     }
 
     private void NotifyExecuting(string commandText, int parameterCount)

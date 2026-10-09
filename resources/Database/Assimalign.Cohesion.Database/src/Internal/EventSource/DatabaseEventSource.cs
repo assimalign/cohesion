@@ -54,13 +54,22 @@ namespace Assimalign.Cohesion.Database.Internal;
 /// </para>
 /// <para>
 /// <b>Payloads</b> never carry statement text, parameter values, keys, values or authentication
-/// evidence (rule 11; plan D8, owner question Q3). An exception is written as its type's full name
-/// and its <see cref="Exception.Message"/>, except where the message can quote the statement: a
-/// parser quotes the token it stopped at, string literals included, and every model's
-/// aborted-transaction refusal repeats the failed operation's message. A failed statement is
-/// therefore identified by its request kind, its session and its diagnostic code or exception type;
-/// an aborted transaction by its cause's type; and a commit refused because an operation aborted the
-/// transaction writes an empty message.
+/// evidence (rule 11; plan D8, owner question Q3). The area's one failure rule
+/// (<c>docs/resources/Database/DESIGN.md</c>, Diagnostics): an operation's failure (a statement,
+/// an aborted transaction, a commit) is written by its code and its exception's type only, never a
+/// message, because the message can quote the statement (a parser quotes the token it stopped at,
+/// string literals included) or repeat it (every model's aborted-transaction refusal repeats the
+/// failed operation's message). <c>StatementFailed</c> writes the failed result's diagnostic code or
+/// the thrown exception's type, <c>TransactionAborted</c> and <c>TransactionCommitFailed</c> the
+/// exception's type. Lifecycle and infrastructure failures (a worker, an engine's disposal, a
+/// database's create, open or drop, a server's start) keep the type and the
+/// <see cref="Exception.Message"/>. A principal is what an unauthenticated peer sent, so it is cut to
+/// <see cref="MaxNameLength"/> characters, as the model servers cut it.
+/// </para>
+/// <para>
+/// <b>Endings.</b> Every <c>…Stop</c> carries <c>status</c>, a <see cref="QueryResultStatus"/> name:
+/// <c>Success</c>, <c>Error</c> (written after the pair's <c>…Failed</c> event, where one is
+/// catalogued) or <c>Cancelled</c>, and is written on every path that leaves the work.
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database")]
@@ -82,6 +91,13 @@ internal sealed class DatabaseEventSource : EventSource
     /// <c>ExecuteAsync</c>; a typed request's kind is its type's name.
     /// </summary>
     public const string TextRequestKind = "Text";
+
+    /// <summary>
+    /// The longest principal name an event writes: what an unauthenticated peer sends is not bounded
+    /// by the protocol below a frame's size, and the model servers bound the same name at the same
+    /// length (owner question Q4).
+    /// </summary>
+    internal const int MaxNameLength = 256;
 
     public static readonly DatabaseEventSource Log = new();
 
@@ -247,14 +263,15 @@ internal sealed class DatabaseEventSource : EventSource
     /// Writes the end of an engine's disposal that <see cref="EngineDisposeStart"/> reported.
     /// </summary>
     /// <param name="engine">The engine.</param>
+    /// <param name="status"><see cref="QueryResultStatus.Success"/>, or <see cref="QueryResultStatus.Error"/> when a component failed to close or the disposal escaped.</param>
     /// <param name="failureCount">How many components failed to close.</param>
     /// <param name="startTimestamp">What <see cref="EngineDisposeStart"/> returned.</param>
     [NonEvent]
-    public void EngineDisposeStop(DatabaseEngine engine, int failureCount, long startTimestamp)
+    public void EngineDisposeStop(DatabaseEngine engine, QueryResultStatus status, int failureCount, long startTimestamp)
     {
         if (startTimestamp != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            EngineDisposeStop(engine.Name, engine.Model.ToString(), failureCount, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            EngineDisposeStop(engine.Name, engine.Model.ToString(), status.ToString(), failureCount, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
 
@@ -390,14 +407,18 @@ internal sealed class DatabaseEventSource : EventSource
     /// </summary>
     /// <param name="worker">The worker.</param>
     /// <param name="pass">The pass's number.</param>
-    /// <param name="failed">Whether the pass threw or reported a failure.</param>
+    /// <param name="status">
+    /// <see cref="QueryResultStatus.Success"/>; <see cref="QueryResultStatus.Error"/> when the pass threw,
+    /// reported a failure or escaped; <see cref="QueryResultStatus.Cancelled"/> when the engine's stop
+    /// cancelled it.
+    /// </param>
     /// <param name="startTimestamp">What <see cref="WorkerPassStart"/> returned.</param>
     [NonEvent]
-    public void WorkerPassStop(DatabaseEngineWorker worker, long pass, bool failed, long startTimestamp)
+    public void WorkerPassStop(DatabaseEngineWorker worker, long pass, QueryResultStatus status, long startTimestamp)
     {
         if (startTimestamp != 0 && IsEnabled(EventLevel.Verbose, Keywords.Workers))
         {
-            WorkerPassStop(worker.Name, worker.Kind.ToString(), pass, failed, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            WorkerPassStop(worker.Name, worker.Kind.ToString(), pass, status.ToString(), Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
 
@@ -493,7 +514,9 @@ internal sealed class DatabaseEventSource : EventSource
 
     /// <summary>
     /// Writes the principal a server session's authentication accepted. The principal's name is an
-    /// identifier (rule 11); the evidence is never written.
+    /// identifier (rule 11); the evidence is never written. The name is what the peer sent, which an
+    /// accepting authenticator (the built-in one accepts every principal) need not bound, so it is cut
+    /// to <see cref="MaxNameLength"/> characters.
     /// </summary>
     /// <param name="session">The server session.</param>
     /// <param name="principal">The authenticated principal's name.</param>
@@ -502,7 +525,7 @@ internal sealed class DatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            ServerSessionAuthenticated(session.Id, principal);
+            ServerSessionAuthenticated(session.Id, Bound(principal, MaxNameLength));
         }
     }
 
@@ -574,13 +597,15 @@ internal sealed class DatabaseEventSource : EventSource
         double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
         if (status == QueryResultStatus.Error && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            // The code only: a diagnostic's message can quote the statement (owner question Q3).
+            // The code only: a diagnostic's message can quote the statement (owner question Q3). A
+            // returned result threw nothing, so its exception type is empty.
             var diagnostic = FindFailureDiagnostic(result!.Diagnostics);
             StatementFailed(
                 session.Database.Name.ToString(),
                 session.SessionNumber,
                 GetRequestKind(request),
-                diagnostic?.Code ?? nameof(QueryResultStatus.Error),
+                diagnostic?.Code ?? string.Empty,
+                string.Empty,
                 duration);
         }
 
@@ -605,11 +630,13 @@ internal sealed class DatabaseEventSource : EventSource
             status = QueryResultStatus.Error;
             if (IsEnabled(EventLevel.Error, EventKeywords.None))
             {
-                // The type only: a parse error quotes the token it stopped at (owner question Q3).
+                // The code and the type only: a parse error quotes the token it stopped at (owner
+                // question Q3).
                 StatementFailed(
                     session.Database.Name.ToString(),
                     session.SessionNumber,
                     GetRequestKind(request),
+                    GetFailureCode(exception),
                     GetTypeName(exception),
                     duration);
             }
@@ -681,21 +708,21 @@ internal sealed class DatabaseEventSource : EventSource
     /// <summary>
     /// Writes that an explicit transaction's commit failed: refused (offline, already ended, an
     /// operation still running), turned into a rollback because an operation aborted the transaction,
-    /// or failed in the kernel.
+    /// or failed in the kernel. A commit is an operation, so its failure is written by its exception's
+    /// type only (the area's failure rule): a model's refusal of an aborted transaction's commit
+    /// repeats the operation's message, which can quote the statement or a key. The device causes
+    /// that need their message are written with it by Storage (<c>StorageOffline</c>,
+    /// <c>StorageCommitUnconfirmed</c>) and Transactions (<c>CommitRecordWriteFailed</c>,
+    /// <c>CommitUnconfirmed</c>).
     /// </summary>
     /// <param name="transaction">The transaction.</param>
     /// <param name="exception">The failure.</param>
-    /// <param name="aborted">
-    /// Whether an operation's failure had aborted the transaction. Every model's refusal of such a
-    /// commit repeats the operation's message, which can quote the statement, so the message is
-    /// written empty (owner question Q3).
-    /// </param>
     [NonEvent]
-    public void TransactionCommitFailed(DatabaseTransaction transaction, Exception exception, bool aborted)
+    public void TransactionCommitFailed(DatabaseTransaction transaction, Exception exception)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            TransactionCommitFailed(transaction.Id.ToString(), GetTypeName(exception), aborted ? string.Empty : exception.Message);
+            TransactionCommitFailed(transaction.Id.ToString(), GetTypeName(exception));
         }
     }
 
@@ -723,9 +750,9 @@ internal sealed class DatabaseEventSource : EventSource
     private void EngineDisposeStart(string engineName, string model)
         => WriteEvent(6, engineName, model);
 
-    [Event(7, Level = EventLevel.Informational, Message = "Database engine {0} ({1}) disposed in {3} ms; {2} component(s) failed to close.")]
-    private void EngineDisposeStop(string engineName, string model, int failureCount, double durationMilliseconds)
-        => WriteEvent(7, engineName, model, failureCount, durationMilliseconds);
+    [Event(7, Level = EventLevel.Informational, Message = "Database engine {0} ({1}) disposed {2} in {4} ms; {3} component(s) failed to close.")]
+    private void EngineDisposeStop(string engineName, string model, string status, int failureCount, double durationMilliseconds)
+        => WriteEvent(7, engineName, model, status, failureCount, durationMilliseconds);
 
     [Event(8, Level = EventLevel.Error, Message = "Database engine {0}'s worker {1} ({2}) left its loop before the engine stopped it: {3}: {4}. The engine reports Faulted until it is disposed and runs the worker again.")]
     private void WorkerLoopFaulted(string engineName, string workerName, string workerKind, string exceptionType, string exceptionMessage)
@@ -755,9 +782,9 @@ internal sealed class DatabaseEventSource : EventSource
     private void WorkerPassStart(string workerName, string workerKind, long pass)
         => WriteEvent(14, workerName, workerKind, pass);
 
-    [Event(15, Level = EventLevel.Verbose, Keywords = Keywords.Workers, Message = "Database engine worker {0} ({1}) ended pass {2} in {4} ms; failed: {3}.")]
-    private void WorkerPassStop(string workerName, string workerKind, long pass, bool failed, double durationMilliseconds)
-        => WriteEvent(15, workerName, workerKind, pass, failed, durationMilliseconds);
+    [Event(15, Level = EventLevel.Verbose, Keywords = Keywords.Workers, Message = "Database engine worker {0} ({1}) ended pass {2} {3} in {4} ms.")]
+    private void WorkerPassStop(string workerName, string workerKind, long pass, string status, double durationMilliseconds)
+        => WriteEvent(15, workerName, workerKind, pass, status, durationMilliseconds);
 
     [Event(16, Level = EventLevel.Verbose, Keywords = Keywords.Workers, Message = "Database engine worker {0} ({1}) left work of database '{2}' for a later pass.")]
     private void WorkerDatabaseUnfinished(string workerName, string workerKind, string database)
@@ -807,9 +834,9 @@ internal sealed class DatabaseEventSource : EventSource
     private void SlowStatement(string engineName, string model, string database, long sessionNumber, string requestKind, string status, double durationMilliseconds, double thresholdMilliseconds)
         => WriteEvent(27, engineName, model, database, sessionNumber, requestKind, status, durationMilliseconds, thresholdMilliseconds);
 
-    [Event(28, Level = EventLevel.Error, Message = "A {2} statement of session {1} on database '{0}' failed after {4} ms: {3}.")]
-    private void StatementFailed(string database, long sessionNumber, string requestKind, string failure, double durationMilliseconds)
-        => WriteEvent(28, database, sessionNumber, requestKind, failure, durationMilliseconds);
+    [Event(28, Level = EventLevel.Error, Message = "A {2} statement of session {1} on database '{0}' failed after {5} ms: code '{3}', exception '{4}'.")]
+    private void StatementFailed(string database, long sessionNumber, string requestKind, string code, string exceptionType, double durationMilliseconds)
+        => WriteEvent(28, database, sessionNumber, requestKind, code, exceptionType, durationMilliseconds);
 
     [Event(29, Level = EventLevel.Verbose, Keywords = Keywords.Transactions, Message = "Session {1} on database '{0}' began transaction {2} at {3}.")]
     private void TransactionBegun(string database, long sessionNumber, string transactionId, string isolationLevel)
@@ -827,9 +854,9 @@ internal sealed class DatabaseEventSource : EventSource
     private void TransactionAborted(string transactionId, string exceptionType)
         => WriteEvent(32, transactionId, exceptionType);
 
-    [Event(33, Level = EventLevel.Error, Message = "Transaction {0} failed to commit: {1}: {2}")]
-    private void TransactionCommitFailed(string transactionId, string exceptionType, string exceptionMessage)
-        => WriteEvent(33, transactionId, exceptionType, exceptionMessage);
+    [Event(33, Level = EventLevel.Error, Message = "Transaction {0} failed to commit: {1}.")]
+    private void TransactionCommitFailed(string transactionId, string exceptionType)
+        => WriteEvent(33, transactionId, exceptionType);
 
     [Event(34, Level = EventLevel.Error, Message = "Database engine {0} ({1}) disposed with {2} component(s) that failed to close; the first failure was {3}: {4}")]
     private void EngineDisposeFailed(string engineName, string model, int failureCount, string exceptionType, string exceptionMessage)
@@ -927,6 +954,24 @@ internal sealed class DatabaseEventSource : EventSource
 
     private static string GetTypeName(Exception exception)
         => exception.GetType().FullName ?? exception.GetType().Name;
+
+    // The diagnostic code a thrown failure carries: only an offline refusal carries one (the
+    // model's COHxxx code that leads its message); empty otherwise.
+    private static string GetFailureCode(Exception exception)
+        => exception is DatabaseOfflineException offline ? offline.Code : string.Empty;
+
+    // Cuts a name to maxLength characters and marks the cut with an ellipsis, without splitting a
+    // surrogate pair: the model servers' helper (a private copy, rule 3).
+    private static string Bound(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return string.Concat(value.AsSpan(0, length), "...");
+    }
 
     /// <summary>
     /// The source's keywords: each family of high-volume <see cref="EventLevel.Verbose"/> events has
