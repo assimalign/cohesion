@@ -259,7 +259,7 @@ internal sealed partial class SqlPlanner
             _ => DatabaseType.Null,
         },
         SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName)
-            => call.Arguments.Select(argument => GroupExpressionType(argument, columns, evaluator)).Aggregate(DatabaseType.Null, CommonGroupType),
+            => CoalesceGroupType(call.Arguments, columns, evaluator),
         SqlFunctionCallExpression call => CallResultType(call, columns, evaluator),
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
         // Unary plus returns its operand unchanged; only negation widens exact integers.
@@ -278,9 +278,7 @@ internal sealed partial class SqlPlanner
                     ? DatabaseType.Decimal : DatabaseType.Int64,
         SqlLogicalExpression or SqlBinaryExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression
             or SqlLikeExpression => DatabaseType.Boolean,
-        SqlCaseExpression @case => @case.WhenClauses.Select(clause => GroupExpressionType(clause.Result, columns, evaluator))
-            .Append(@case.ElseResult is null ? DatabaseType.Null : GroupExpressionType(@case.ElseResult, columns, evaluator))
-            .Aggregate(DatabaseType.Null, CommonGroupType),
+        SqlCaseExpression @case => CaseGroupType(@case, columns, evaluator),
         _ => DatabaseType.Null,
     };
 
@@ -311,6 +309,41 @@ internal sealed partial class SqlPlanner
 
         return function is not null ? SqlFunctionResolver.ResultType(function, types)
             : types.Length > 0 ? types[0] : DatabaseType.Null;
+    }
+
+    // CASE and COALESCE fold their alternatives in loops, not LINQ chains. A chain adds an
+    // iterator, an aggregate and a lambda frame per nesting level, and a closure on every call,
+    // so this walk ran out of stack before the parser on a statement the parser had read
+    // (SqlExpressionDepthExecutionTests: the parser limits how deeply a statement nests).
+
+    /// <summary>Finds the common type of a CASE's results: its clauses in order, then its ELSE.</summary>
+    private DatabaseType CaseGroupType(SqlCaseExpression @case, IReadOnlyList<SqlCatalogColumn> columns,
+        SqlExpressionEvaluator evaluator)
+    {
+        // The ELSE is typed before the clauses, as the chain this replaces did, so a failure in
+        // either surfaces in the same order.
+        DatabaseType elseType = @case.ElseResult is null ? DatabaseType.Null : GroupExpressionType(@case.ElseResult, columns, evaluator);
+        DatabaseType type = DatabaseType.Null;
+        IReadOnlyList<SqlWhenClause> clauses = @case.WhenClauses;
+        for (int index = 0; index < clauses.Count; index++)
+        {
+            type = CommonGroupType(type, GroupExpressionType(clauses[index].Result, columns, evaluator));
+        }
+
+        return CommonGroupType(type, elseType);
+    }
+
+    /// <summary>Finds the common type of COALESCE's arguments, in order.</summary>
+    private DatabaseType CoalesceGroupType(IReadOnlyList<SqlExpression> arguments, IReadOnlyList<SqlCatalogColumn> columns,
+        SqlExpressionEvaluator evaluator)
+    {
+        DatabaseType type = DatabaseType.Null;
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            type = CommonGroupType(type, GroupExpressionType(arguments[index], columns, evaluator));
+        }
+
+        return type;
     }
 
     /// <summary>Finds the numeric common type of alternative scalar results.</summary>
