@@ -64,6 +64,10 @@ internal sealed class KeyValueOperationExecutor
     /// </summary>
     internal const string PrimaryIndexName = "key";
 
+    // How many times DecodeConfirmed reads a slot again before it reports a record that does not
+    // decode; it stops sooner when two reads agree.
+    private const int confirmingReads = 2;
+
     private static readonly IReadOnlyList<QueryColumn> _entryColumns =
     [
         new QueryColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
@@ -377,9 +381,9 @@ internal sealed class KeyValueOperationExecutor
     /// The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (a
     /// failed command's bracket rollback restoring the page, the version purge freeing and
     /// clearing it), and that copy is torn rather than damaged. A record that does not decode is
-    /// therefore read again, with the same owner check, before it is reported (#1362): a slot
-    /// reclaimed by then reads as absence, a re-read that decodes is the entry, and only a record
-    /// that does not decode on both reads fails the command.
+    /// therefore confirmed before it is reported (#1362, <see cref="DecodeConfirmed"/>). The
+    /// confirmation narrows the window and does not close it: a writer descheduled half-way
+    /// through rewriting the page leaves the same torn bytes for every read.
     /// </remarks>
     /// <exception cref="StorageCorruptionException">
     /// The entry page failed its checksum or is malformed, or the record does not decode. The read
@@ -408,12 +412,10 @@ internal sealed class KeyValueOperationExecutor
         }
         catch (DatabaseTypeException)
         {
-            if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out record))
+            if (!DecodeConfirmed(record, pageId, slotIndex, out key, out value, out writer, out deleter))
             {
                 return null;
             }
-
-            DecodeConfirmed(record.Span, pageId, slotIndex, out key, out value, out writer, out deleter);
         }
 
         bool visible = snapshot.IsVisible(writer)
@@ -423,22 +425,50 @@ internal sealed class KeyValueOperationExecutor
     }
 
     /// <summary>
-    /// Decodes the confirming read of an entry record whose first read did not decode
-    /// (<see cref="ReadVisibleVersion"/>), and reports the record as corrupt when it does not
-    /// decode again.
+    /// Confirms an entry record whose read did not decode (<see cref="ReadVisibleVersion"/>) by
+    /// reading its slot again, with the key space's owner check: a slot reclaimed by then reads
+    /// as absence, and a re-read that decodes is the entry. A re-read that does not decode is
+    /// corrupt when it returns the same bytes as the read before it, because damage is stable and
+    /// a copy a writer tore is not; a re-read that differs means the slot is still changing, so
+    /// the slot is read once more, up to <see cref="confirmingReads"/> re-reads.
     /// </summary>
-    /// <exception cref="StorageCorruptionException">The record does not decode.</exception>
-    private static void DecodeConfirmed(ReadOnlySpan<byte> record, PageId pageId, int slotIndex,
+    /// <param name="failed">The copy that did not decode.</param>
+    /// <param name="pageId">The page the record was read from.</param>
+    /// <param name="slotIndex">The slot the record was read from.</param>
+    /// <param name="key">The entry's key.</param>
+    /// <param name="value">The entry's value.</param>
+    /// <param name="writer">The record's writer stamp.</param>
+    /// <param name="deleter">The record's deleter stamp.</param>
+    /// <returns><c>true</c> when a re-read decodes; <c>false</c> when the slot was reclaimed.</returns>
+    /// <exception cref="StorageCorruptionException">The record does not decode, and the reads agree or ran out.</exception>
+    private bool DecodeConfirmed(ReadOnlyMemory<byte> failed, PageId pageId, int slotIndex,
         out byte[] key, out byte[] value, out TransactionSequence writer, out TransactionSequence deleter)
     {
-        try
+        for (int read = 1; ; read++)
         {
-            KeyValueRecordCodec.Decode(record, out key, out value, out writer, out deleter);
-        }
-        catch (DatabaseTypeException defect)
-        {
-            throw new StorageCorruptionException(
-                pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode: {defect.Message}");
+            if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
+            {
+                key = [];
+                value = [];
+                writer = default;
+                deleter = default;
+                return false;
+            }
+
+            try
+            {
+                KeyValueRecordCodec.Decode(record.Span, out key, out value, out writer, out deleter);
+                return true;
+            }
+            catch (DatabaseTypeException defect) when (read == confirmingReads || record.Span.SequenceEqual(failed.Span))
+            {
+                throw new StorageCorruptionException(
+                    pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode: {defect.Message}");
+            }
+            catch (DatabaseTypeException)
+            {
+                failed = record;
+            }
         }
     }
 

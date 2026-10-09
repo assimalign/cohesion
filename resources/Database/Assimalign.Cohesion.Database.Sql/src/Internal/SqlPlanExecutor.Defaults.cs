@@ -11,6 +11,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // How many times DecodeConfirmed reads a slot again before it reports a record that does not
+    // decode; it stops sooner when two reads agree.
+    private const int confirmingReads = 2;
+
     /// <summary>
     /// Decodes a stored version read from the table's page chain through the statement's bound
     /// table version: dropped columns' components are skipped, and only physically absent
@@ -31,11 +35,11 @@ internal sealed partial class SqlPlanExecutor
     /// The read holds a pin, not a latch (Storage DESIGN, "Reading a record through a
     /// reference"), so it can copy a slot while a writer reclaims it: a failed statement's
     /// bracket rollback restoring the page, or the version purge freeing and clearing it. That
-    /// copy is torn, not damaged. A failed decode is confirmed by reading the slot again, with
-    /// the same owner check, before it is reported: a slot reclaimed by then is skipped like any
-    /// reclaimed row, a re-read that decodes is the row, and only a record that does not decode
-    /// on both reads is corrupt. PostgreSQL needs no second read, because it reads a heap page
-    /// under a share lock (<c>src/backend/access/heap/heapam.c:647</c>, <c>:1706</c>).
+    /// copy is torn, not damaged, so a failed decode is confirmed before it is reported
+    /// (<see cref="DecodeConfirmed"/>). The confirmation narrows the window and does not close it:
+    /// a writer descheduled half-way through rewriting the page leaves the same torn bytes for
+    /// every read. PostgreSQL needs no second read, because it reads a heap page under a share
+    /// lock (<c>src/backend/access/heap/heapam.c:647</c>, <c>:1706</c>).
     /// </para>
     /// </remarks>
     /// <param name="record">The stored record.</param>
@@ -45,12 +49,12 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaults">That version's bound DEFAULTs, by ordinal (<see cref="SqlBoundTable.DefaultValues"/>).</param>
     /// <param name="writer">The record's writer stamp.</param>
     /// <param name="deleter">The record's deleter stamp.</param>
-    /// <returns>The row's values, or null when the slot was reclaimed before the confirming read.</returns>
-    /// <exception cref="StorageCorruptionException">The record does not decode through the table's definition on either read.</exception>
+    /// <returns>The row's values, or null when the slot was reclaimed before a confirming read.</returns>
+    /// <exception cref="StorageCorruptionException">The record does not decode through the table's definition, and the confirming reads agree or ran out.</exception>
     private object?[]? DecodeRow(ReadOnlyMemory<byte> record, PageId pageId, int slotIndex, SqlCatalogTable table,
         IReadOnlyList<SqlBoundExpression?> defaults, out TransactionSequence writer, out TransactionSequence deleter)
     {
-        object?[] values;
+        object?[]? values;
         int storedColumnCount;
 
         try
@@ -59,14 +63,12 @@ internal sealed partial class SqlPlanExecutor
         }
         catch (DatabaseTypeException)
         {
-            if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var reread))
+            values = DecodeConfirmed(record, pageId, slotIndex, table, out writer, out deleter, out storedColumnCount);
+
+            if (values is null)
             {
-                writer = default;
-                deleter = default;
                 return null;
             }
-
-            values = DecodeConfirmed(reread.Span, pageId, slotIndex, table, out writer, out deleter, out storedColumnCount);
         }
 
         for (int ordinal = storedColumnCount; ordinal < values.Length; ordinal++)
@@ -81,23 +83,50 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Decodes the confirming read of a record whose first read did not decode
-    /// (<see cref="DecodeRow"/>), and reports the record as corrupt when it does not decode again.
+    /// Confirms a row record whose read did not decode (<see cref="DecodeRow"/>) by reading its
+    /// slot again, with the table's owner check: a slot reclaimed by then is skipped like any
+    /// reclaimed row, and a re-read that decodes is the row. A re-read that does not decode is
+    /// corrupt when it returns the same bytes as the read before it, because damage is stable and
+    /// a copy a writer tore is not; a re-read that differs means the slot is still changing, so
+    /// the slot is read once more, up to <see cref="confirmingReads"/> re-reads.
     /// </summary>
-    /// <exception cref="StorageCorruptionException">The record does not decode.</exception>
-    private static object?[] DecodeConfirmed(ReadOnlySpan<byte> record, PageId pageId, int slotIndex, SqlCatalogTable table,
+    /// <param name="failed">The copy that did not decode.</param>
+    /// <param name="pageId">The page the record was read from.</param>
+    /// <param name="slotIndex">The slot the record was read from.</param>
+    /// <param name="table">The table version the statement is bound to.</param>
+    /// <param name="writer">The record's writer stamp.</param>
+    /// <param name="deleter">The record's deleter stamp.</param>
+    /// <param name="storedColumnCount">How many of the definition's live columns the record stores.</param>
+    /// <returns>The live columns' values, or null when the slot was reclaimed.</returns>
+    /// <exception cref="StorageCorruptionException">The record does not decode, and the reads agree or ran out.</exception>
+    private object?[]? DecodeConfirmed(ReadOnlyMemory<byte> failed, PageId pageId, int slotIndex, SqlCatalogTable table,
         out TransactionSequence writer, out TransactionSequence deleter, out int storedColumnCount)
     {
-        try
+        for (int read = 1; ; read++)
         {
-            return SqlRowCodec.Decode(record, table, out writer, out deleter, out storedColumnCount);
-        }
-        catch (DatabaseTypeException defect)
-        {
-            throw new StorageCorruptionException(
-                pageId,
-                $"The row record in slot {slotIndex} of page {(long)pageId} of table '{table.Schema}.{table.Name}' " +
-                $"(object {table.ObjectId}) does not decode: {defect.Message}");
+            if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record))
+            {
+                writer = default;
+                deleter = default;
+                storedColumnCount = 0;
+                return null;
+            }
+
+            try
+            {
+                return SqlRowCodec.Decode(record.Span, table, out writer, out deleter, out storedColumnCount);
+            }
+            catch (DatabaseTypeException defect) when (read == confirmingReads || record.Span.SequenceEqual(failed.Span))
+            {
+                throw new StorageCorruptionException(
+                    pageId,
+                    $"The row record in slot {slotIndex} of page {(long)pageId} of table '{table.Schema}.{table.Name}' " +
+                    $"(object {table.ObjectId}) does not decode: {defect.Message}");
+            }
+            catch (DatabaseTypeException)
+            {
+                failed = record;
+            }
         }
     }
 

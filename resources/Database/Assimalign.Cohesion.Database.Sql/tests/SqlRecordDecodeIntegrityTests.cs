@@ -200,12 +200,56 @@ public sealed class SqlRecordDecodeIntegrityTests
     }
 
     /// <summary>
+    /// A write statement scans its targets before it locks them, and the latest-version check under
+    /// the row lock reads the target's stamps again. A target damaged in between, so that its live
+    /// slot holds a record too short for its stamps, fails the statement as corruption; before #1362
+    /// the check reported it as a retryable write-write conflict that no retry could clear.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Record decode: a target damaged while its writer waits for the row lock fails with StorageCorruptionException, not a retryable conflict (#1362)")]
+    public async Task Update_TargetDamagedWhileWaitingForItsRowLock_ShouldFailWithStorageCorruption()
+    {
+        // Arrange: the holder tombstones row 2 and keeps its lock; the waiter's UPDATE scans rows 1
+        // and 2, takes row 1's lock and waits for row 2's.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("latest-db");
+        await using var holder = await database.CreateSessionAsync();
+        await using var waiter = await database.CreateSessionAsync();
+        await holder.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
+        await holder.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10), (2, 20)");
+        var first = RowLocation(database, id: 1);
+        var target = RowLocation(database, id: 2);
+        var transaction = await holder.BeginTransactionAsync();
+        await holder.ExecuteAsync("UPDATE t SET val = 21 WHERE id = 2");
+        var waiting = waiter.ExecuteAsync("UPDATE t SET val = val + 100", cancellationToken: TestTimeout.Token()).AsTask();
+        await WaitUntilRowLockIsHeld(database, first);
+
+        // Act: the version the waiter decoded is cut short beneath it, then the holder commits and
+        // the waiter takes the lock.
+        byte[] original = Damage(database, target, RecordDamage.ShorterThanStamps);
+        await transaction.CommitAsync();
+        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => waiting);
+        Rewrite(database, target, original);
+        var values = await Ids(holder, "SELECT val FROM t");
+
+        // Assert: the latest-version check reported it, not the decode; the waiter's statement
+        // rolled back its change to row 1.
+        failure.PageId.ShouldBe(target.PageId);
+        failure.Message.ShouldBe(
+            $"The row record in slot {target.SlotIndex} of page {(long)target.PageId} of table 'dbo.t' holds 8 bytes, " +
+            $"fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+        values.Order().ShouldBe([10, 21]);
+    }
+
+    /// <summary>
     /// A scan pins its page but takes no latch, so it can copy a slot while a writer reclaims it:
     /// a bracket rollback restores the page without the slot, or the last delete frees the page and
     /// clears it. The copy does not decode, but the slot was reclaimed, not damaged. The decode is
     /// confirmed by reading the slot again before it is reported, and the re-read finds the slot
     /// gone. The writer here inserts well-formed rows, reverts an insert and deletes every row,
-    /// freeing the pages, as statements, failed statements and the version purge do.
+    /// freeing the pages, as statements, failed statements and the version purge do. The test also
+    /// covers the slot directory below the decode: on ARM64 a scan beside the inserts used to see a
+    /// new slot count ahead of its entry and report the page as malformed, until the slotted page
+    /// published both in order (Storage DESIGN, "The slot directory is published in order").
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Record decode: a scan racing rollbacks and page frees never reports a reclaimed row as corrupt (#1362)")]
     public async Task Select_ScanRacingReclamation_ShouldNeverReportCorruption()
@@ -360,6 +404,25 @@ public sealed class SqlRecordDecodeIntegrityTests
         }
 
         Evict(database, location.PageId);
+    }
+
+    /// <summary>
+    /// Waits until another transaction holds a row's exclusive lock: a write statement takes its
+    /// row locks after its target scan, so the scan has finished by then. The probe owner is one no
+    /// transaction uses, and gives back any lock it gets at once.
+    /// </summary>
+    private static async Task WaitUntilRowLockIsHeld(SqlDatabase database, (PageId PageId, int SlotIndex) location)
+    {
+        var locks = database.Coordinator.LockManager;
+        var probe = new TransactionSequence(ulong.MaxValue);
+        var resource = LockResource.Entry(Table(database).ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex));
+        var timeout = TestTimeout.Token();
+
+        while (locks.TryAcquire(probe, resource, LockMode.Shared))
+        {
+            locks.ReleaseAll(probe);
+            await Task.Delay(TimeSpan.FromMilliseconds(5), timeout);
+        }
     }
 
     private static byte[] Patched(byte[] record, int offset, byte value)

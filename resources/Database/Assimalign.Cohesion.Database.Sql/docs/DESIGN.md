@@ -2351,17 +2351,31 @@ raises `ERRCODE_DATA_CORRUPTED` for a stored value that disagrees with its own h
 Graph, Documents and Blob codecs here raise `StorageCorruptionException` for a malformed record.
 The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (a failed
 statement's bracket rollback restoring the page, the purge freeing and clearing it); that copy is
-torn, not damaged. `DecodeRow` therefore reads the slot again, with the same owner check, before it
-reports a failed decode: a slot reclaimed by then is skipped, a re-read that decodes is the row, and
-only a record that fails both reads is corrupt. Without the re-read, a scan racing a writer that
-reverts inserts and frees pages failed within two seconds on each of three runs, reading a cleared
-page as "Expected a Int64 component but found Null" (`SqlRecordDecodeIntegrityTests`); the code
-before #1362 reads such a copy the same way and fails the statement with that type error.
-PostgreSQL needs no second read because it reads a heap page under a share lock
+torn, not damaged. `DecodeRow` therefore confirms a failed decode before it reports it
+(`DecodeConfirmed`): it reads the slot again with the same owner check, skips a slot reclaimed by
+then, and uses a re-read that decodes. A re-read that still does not decode is corrupt when its
+bytes equal the read before it, because damage is stable and a copy a writer tore is not; when
+they differ the slot is still changing and is read once more, up to two re-reads. Without the
+re-read, a scan racing a writer that reverts inserts and frees pages failed within two seconds on
+each of three runs, reading a cleared page as "Expected a Int64 component but found Null"
+(`SqlRecordDecodeIntegrityTests`); the code before #1362 reads such a copy the same way and fails
+the statement with that type error. The confirmation narrows the torn-copy window and does not
+close it: a writer descheduled half-way through rewriting the page (a rollback applying a
+pre-image, a free clearing the body) leaves the same torn bytes for every read. Closing it needs a
+read that confirms against the page write lock, which every bracket holds from its first touch of
+a page until it ends; the storage does not expose that check yet (a follow-up). PostgreSQL needs
+no second read because it reads a heap page under a share lock
 (`src/backend/access/heap/heapam.c:647`, `:1706`).
+The slot directory the read walks had a torn read of its own, below the decode: on ARM64 a scan
+beside an insert could see the new slot count before the slot's entry and fail with "Slotted page
+N is malformed" on a healthy page, which no re-read of the record reaches. The slotted page now
+publishes the entry and the count in order (Storage DESIGN, "The slot directory is published in
+order").
 The latest-version check under the row lock makes the same split for the stamps it reads: a live
 slot whose record is too short for them is damage, not the retryable write-write conflict it was
-reported as.
+reported as. A write statement scans its targets before it takes their row locks, so a version it
+decoded can be damaged by the time it holds the lock
+(`Update_TargetDamagedWhileWaitingForItsRowLock_ShouldFailWithStorageCorruption`).
 
 ## The MVCC integration (scoped under #862)
 

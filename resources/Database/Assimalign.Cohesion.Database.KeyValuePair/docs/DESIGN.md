@@ -597,11 +597,18 @@ stamps, a malformed or truncated key or value component, and bytes past the valu
 copy a slot while a writer reclaims it (a failed command's bracket rollback restoring the page,
 the purge freeing and clearing it), and that copy is torn rather than damaged: a failed decode is
 confirmed by reading the slot again, with the same owner check, before it is reported. A slot
-reclaimed by then reads as absence, a re-read that decodes is the entry, and only a record that
-fails both reads is corrupt (the SQL DESIGN's "Error model" measures the race the re-read closes).
+reclaimed by then reads as absence, and a re-read that decodes is the entry. A re-read that still
+does not decode is corrupt when its bytes equal the read before it, because damage is stable;
+when they differ the slot is read once more, up to two re-reads. The confirmation narrows the
+torn-copy window and does not close it: a writer descheduled half-way through rewriting the page
+leaves the same torn bytes for every read (the SQL DESIGN's "Error model" measures the race and
+names the follow-up that would close it).
 The latest-version check under the key lock makes the same split: a reclaimed version is the
 retryable write-write conflict, and a page it cannot read, or a live slot whose record is too
-short for its stamps (#1362), is the storage error. Until #1342
+short for its stamps (#1362), is the storage error. Unlike SQL's, the key-value short-record
+branch is defensive only: a Put or Delete resolves its key under the key lock, through the read
+above, immediately before the check, and that read already fails a record too short for its
+stamps, so only damage landing between the two reads reaches it, and no test drives it. Until #1342
 both caught `StorageException`: a corrupt entry page made its keys read as missing, and a
 PUT over such a key resolved it as missing and then failed with a retryable conflict that no
 retry could clear.
