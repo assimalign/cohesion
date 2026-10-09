@@ -59,9 +59,21 @@ while the feature lived in core Http compiles unchanged. This matches `Http.Cook
    installs it with `Features.Set`, and returns it, so later reads return the same instance. A
    cleartext exchange returns `null` and installs nothing. This is the `request.Cookies` pattern
    from `Http.Cookies`.
-3. **An installed feature wins.** Because `Features` is read first, a middleware can supply its own
-   implementation. One example is a session reconstructed from the client certificate a
-   TLS-terminating proxy forwards. Trusting that proxy is the middleware's decision.
+3. **A feature installed before the first read wins.** Because `Features` is read first, a
+   middleware can supply its own implementation. One example is a session reconstructed from the
+   client certificate a TLS-terminating proxy forwards. Trusting that proxy is the middleware's
+   decision. The override is order-dependent, so install it before anything reads
+   `context.TlsConnection`. After a read, the built feature is cached under the name
+   `Assimalign.Cohesion.Http.TlsConnection`, and `IHttpFeatureCollection.Set` replaces by name:
+   - an override registered under that name replaces the cached feature;
+   - `Features.Set<IHttpTlsConnectionFeature>(null)` removes the first installed implementation,
+     which is the cached feature, so an override under any other name installed after the removal
+     wins (with no override, the next read builds a fresh feature from the facet);
+   - an override under another name installed beside the cached feature leaves both installed, and
+     the accessor's `Get<IHttpTlsConnectionFeature>()` returns whichever the collection enumerates
+     first. That is not guaranteed to be the override.
+
+   The Http.Tls suite pins the first two paths and the pre-read install.
 
 The transport hands one connection info instance to the request-parse hooks, the exchange, and the
 response hooks. So the facet is visible from the first `AfterRequestHead` hook onward, through the

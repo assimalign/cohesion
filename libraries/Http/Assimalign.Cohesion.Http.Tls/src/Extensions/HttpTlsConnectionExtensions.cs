@@ -32,11 +32,16 @@ public static class HttpTlsConnectionExtensions
         /// exchange did not arrive over TLS (or its transport does not report the session).
         /// </summary>
         /// <remarks>
-        /// A feature already installed in <see cref="IHttpContext.Features"/> is returned as is, so a
-        /// middleware can supply its own. Otherwise, when <see cref="IHttpContext.ConnectionInfo"/>
-        /// implements <see cref="ITlsConnectionInfo"/>, the feature is built from it, installed in
-        /// <see cref="IHttpContext.Features"/>, and returned; later reads return the same instance. The
-        /// feature is not disposable, because the certificate it reports belongs to the connection.
+        /// An <see cref="IHttpTlsConnectionFeature"/> already installed in
+        /// <see cref="IHttpContext.Features"/> is returned as is, so a middleware that installs its own
+        /// before the first read overrides the connection's session. Otherwise, when
+        /// <see cref="IHttpContext.ConnectionInfo"/> implements <see cref="ITlsConnectionInfo"/>, the
+        /// feature is built from it, installed in <see cref="IHttpContext.Features"/>, and returned; later
+        /// reads return the same instance. An override installed after that first read wins only if it
+        /// replaces the cached feature: registered under the same feature name, or installed after
+        /// <c>Features.Set&lt;IHttpTlsConnectionFeature&gt;(null)</c> removed the cached one (see
+        /// <see cref="IHttpTlsConnectionFeature"/>). The feature is not disposable, because the
+        /// certificate it reports belongs to the connection.
         /// </remarks>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         public IHttpTlsConnectionFeature? TlsConnection

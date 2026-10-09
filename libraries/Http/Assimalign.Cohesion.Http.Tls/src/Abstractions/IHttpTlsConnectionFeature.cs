@@ -19,10 +19,20 @@ namespace Assimalign.Cohesion.Http;
 /// the handshake facts as the <see cref="ITlsConnectionInfo"/> facet of
 /// <see cref="IHttpContext.ConnectionInfo"/>, and a cleartext exchange's connection info carries no
 /// facet. The accessor builds this feature from the facet on first read and caches it in
-/// <see cref="IHttpContext.Features"/>. A feature already installed there wins, so a middleware can
-/// supply its own implementation (for example one reconstructed from a TLS-terminating proxy's
-/// forwarded client certificate). The values belong to the connection, not the request: every
+/// <see cref="IHttpContext.Features"/>. The values belong to the connection, not the request: every
 /// exchange on a connection observes the same session.
+/// </para>
+/// <para>
+/// A middleware can supply its own implementation (for example one reconstructed from a
+/// TLS-terminating proxy's forwarded client certificate). The accessor returns an implementation
+/// already in <see cref="IHttpContext.Features"/> without building one, so an override installed
+/// before the first read of <c>context.TlsConnection</c> wins. After that read, the built feature is
+/// cached under the name <c>Assimalign.Cohesion.Http.TlsConnection</c>, and
+/// <see cref="IHttpFeatureCollection.Set"/> replaces by name: an override registered under that name
+/// replaces the cached feature. An override under any other name must first remove the cached feature
+/// with <c>Features.Set&lt;IHttpTlsConnectionFeature&gt;(null)</c>, which removes the first installed
+/// implementation. Otherwise both stay installed, and the accessor's type lookup returns whichever the
+/// collection enumerates first, which is not guaranteed to be the override.
 /// </para>
 /// <para>
 /// A client certificate is present only when the server requested one during the handshake (RFC 8446

@@ -9,8 +9,9 @@ application protocol ALPN selected.
 - `IHttpTlsConnectionFeature`, the session contract.
 - `context.TlsConnection`, which returns the session or `null` for a cleartext exchange. It works
   the same on HTTP/1.1, HTTP/2, and HTTP/3.
-- An override point: a feature a middleware installs in `context.Features` is returned instead of
-  the connection's own session.
+- An override point: a feature a middleware installs in `context.Features` before the first read of
+  `context.TlsConnection` is returned instead of the connection's own session. After that read, the
+  override must replace the cached feature (DESIGN, "How the session reaches a handler").
 
 ## Usage
 

@@ -55,8 +55,16 @@ public interface IHttpConnectionInfo
     EndPoint? LocalEndPoint { get; }
 
     /// <summary>
-    /// 
+    /// Gets a token that is cancelled when the connection is aborted, for example through
+    /// <see cref="Abort"/> or <see cref="AbortAsync"/>.
     /// </summary>
+    /// <remarks>
+    /// An implementation that cannot observe its connection returns <see cref="CancellationToken.None"/>,
+    /// which is never cancelled. The default <see cref="HttpConnectionInfo"/> does, and so does the
+    /// server transport (<c>Assimalign.Cohesion.Http.Connections</c>), whose connection info derives
+    /// from it without overriding this member. Code that must stop when its exchange is abandoned
+    /// observes <see cref="IHttpContext.RequestCancelled"/> instead.
+    /// </remarks>
     CancellationToken ConnectionAborted { get; }
 
     /// <summary>

@@ -39,12 +39,16 @@ What #763 actually shipped, traced through the code:
   a TLS-capability listener yields `HttpScheme.Https` on every request, keep-alive
   included).
 
-So the "typed TLS feature" the issue calls for is realized, in the shipped code,
-as the transport-derived `HttpScheme` enum on the request — **not** a separate
-`ITlsConnectionFeature` in `IHttpFeatureCollection` (there is none; `IHttpConnectionInfo`
-carries no security field either). Reading the enum is not scheme-string
-sniffing: nothing parses the literal text `"https"`, inspects a header, or
-reflects. `Web.Compression` gates its BREACH protection on the same effective
+So the "typed TLS feature" the issue calls for is realized, for this package's
+question, as the transport-derived `HttpScheme` enum on the request. The TLS
+session itself has its own surface now: `Http.Tls`'s `context.TlsConnection`
+(`IHttpTlsConnectionFeature`, #1065), which the accessor builds on first read
+from the `ITlsConnectionInfo` facet the transport publishes on the exchange's
+connection info (#1367). This package does not read it. Whether an exchange is
+secure is a scheme question, which `HttpScheme` answers without a reference to
+`Http.Tls`; the session's certificate, protocol and cipher suite answer other
+questions. Reading the enum is not scheme-string sniffing: nothing parses the
+literal text `"https"`, inspects a header, or reflects. `Web.Compression` gates its BREACH protection on the same effective
 scheme (`context.EffectiveScheme == HttpScheme.Https`), so the two packages agree
 on what "secure" means for any given exchange.
 

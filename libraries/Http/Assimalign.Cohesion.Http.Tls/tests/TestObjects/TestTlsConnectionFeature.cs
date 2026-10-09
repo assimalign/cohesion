@@ -6,11 +6,20 @@ namespace Assimalign.Cohesion.Http.Tls.Tests.TestObjects;
 
 /// <summary>
 /// An application-supplied <see cref="IHttpTlsConnectionFeature"/>, as a middleware installs one to
-/// override what the connection reports.
+/// override what the connection reports. It registers under the built feature's name unless the test
+/// names another slot.
 /// </summary>
 internal sealed class TestTlsConnectionFeature : IHttpTlsConnectionFeature
 {
-    public string Name => "Assimalign.Cohesion.Http.TlsConnection";
+    /// <summary>The name the feature <c>context.TlsConnection</c> builds registers under.</summary>
+    public const string BuiltFeatureName = "Assimalign.Cohesion.Http.TlsConnection";
+
+    public TestTlsConnectionFeature(string name = BuiltFeatureName)
+    {
+        Name = name;
+    }
+
+    public string Name { get; }
 
     public X509Certificate2? ClientCertificate => null;
 

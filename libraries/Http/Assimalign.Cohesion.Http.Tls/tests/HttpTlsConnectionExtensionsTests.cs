@@ -59,7 +59,7 @@ public class HttpTlsConnectionExtensionsTests
         context.Features.Get<IHttpTlsConnectionFeature>().ShouldBeSameAs(first);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Tls] - TlsConnection: Should return a feature a middleware installed instead of the connection's facet")]
+    [Fact(DisplayName = "Cohesion Test [Http.Tls] - TlsConnection: Should return a feature a middleware installed before the first read instead of the connection's facet")]
     public void TlsConnection_WhenFeatureInstalled_ShouldReturnItOverTheFacet()
     {
         // Arrange — a middleware supplies its own session (for example behind a TLS-terminating proxy).
@@ -72,6 +72,61 @@ public class HttpTlsConnectionExtensionsTests
 
         // Assert
         tls.ShouldBeSameAs(installed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Tls] - TlsConnection: An override under the built feature's name should replace the cached feature after a read")]
+    public void TlsConnection_WhenSameNamedFeatureInstalledAfterFirstRead_ShouldReturnTheOverride()
+    {
+        // Arrange — the first read caches the built feature; Set replaces by name.
+        TestHttpContext context = new(new TestTlsConnectionInfo(SslApplicationProtocol.Http2));
+        IHttpTlsConnectionFeature? built = context.TlsConnection;
+        TestTlsConnectionFeature installed = new(TestTlsConnectionFeature.BuiltFeatureName);
+
+        // Act
+        context.Features.Set(installed);
+        IHttpTlsConnectionFeature? tls = context.TlsConnection;
+
+        // Assert
+        built.ShouldNotBeNull();
+        tls.ShouldBeSameAs(installed);
+        context.Features.ShouldHaveSingleItem().ShouldBeSameAs(installed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Tls] - TlsConnection: An override under another name should win once the cached feature is removed")]
+    public void TlsConnection_WhenCachedFeatureRemovedThenOverrideInstalled_ShouldReturnTheOverride()
+    {
+        // Arrange — Set<T>(null) removes the first installed implementation, the cached built feature.
+        TestHttpContext context = new(new TestTlsConnectionInfo(SslApplicationProtocol.Http2));
+        IHttpTlsConnectionFeature? built = context.TlsConnection;
+        TestTlsConnectionFeature installed = new("Example.ForwardedTlsConnection");
+
+        // Act
+        context.Features.Set<IHttpTlsConnectionFeature>(null);
+        context.Features.Set(installed);
+        IHttpTlsConnectionFeature? tls = context.TlsConnection;
+
+        // Assert
+        built.ShouldNotBeNull();
+        tls.ShouldBeSameAs(installed);
+        context.Features.ShouldHaveSingleItem().ShouldBeSameAs(installed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Tls] - TlsConnection: Removing the cached feature without an override should rebuild it from the facet")]
+    public void TlsConnection_WhenCachedFeatureRemoved_ShouldBuildAFreshFeatureFromTheFacet()
+    {
+        // Arrange
+        TestHttpContext context = new(new TestTlsConnectionInfo(SslApplicationProtocol.Http2));
+        IHttpTlsConnectionFeature? built = context.TlsConnection;
+
+        // Act
+        context.Features.Set<IHttpTlsConnectionFeature>(null);
+        IHttpTlsConnectionFeature? rebuilt = context.TlsConnection;
+
+        // Assert
+        built.ShouldNotBeNull();
+        rebuilt.ShouldNotBeNull();
+        rebuilt.ShouldNotBeSameAs(built);
+        rebuilt.ApplicationProtocol.ShouldBe(SslApplicationProtocol.Http2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Tls] - TlsConnection: Should return the installed feature on a cleartext exchange")]
