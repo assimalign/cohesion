@@ -883,40 +883,57 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Converts a call's evaluated arguments to the value ABI, in an inline buffer of four (a pooled
-    /// one past four), each to its parameter's type, and calls the function once.
+    /// Calls a function over its evaluated arguments: NULL without a call when the function is
+    /// strict and an argument is NULL (PostgreSQL's <c>EEOP_FUNCEXPR_STRICT</c>), otherwise the
+    /// arguments converted to the value ABI, in an inline buffer of four (a pooled one past four),
+    /// each to its parameter's type, and one call of the function's core.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? InvokeScalar(SqlBoundCall call, ReadOnlySpan<object?> values)
     {
+        var function = call.Function;
+        if (function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput)
+        {
+            foreach (object? candidate in values)
+            {
+                if (candidate is null)
+                {
+                    return null;
+                }
+            }
+        }
+
         var context = new SqlFunctionContext(call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
         if (values.Length == 1)
         {
             // The shape of every standard-library scalar: one value, no buffer to clear.
-            SqlValue value = default;
-            ConvertArguments(call, values, new Span<SqlValue>(ref value));
-            return call.Function.Invoke(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context)).ToObject();
+            var value = SqlValue.FromObject(values[0]);
+            if (call.Targets is { } targets && targets[0] != DatabaseType.Null)
+            {
+                value = SqlFunctionResolver.Coerce(value, targets[0], function, 0);
+            }
+
+            return function.InvokeResolved(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context)).ToObject();
         }
         if (values.Length > SqlValueBuffer.Length)
         {
-            return InvokeScalarPooled(call, values);
+            return InvokeScalarPooled(call, values, context);
         }
 
         SqlValueBuffer buffer = default;
         Span<SqlValue> arguments = buffer[..values.Length];
         ConvertArguments(call, values, arguments);
-        return call.Function.Invoke(new SqlArguments(arguments, context)).ToObject();
+        return function.InvokeResolved(new SqlArguments(arguments, context)).ToObject();
     }
 
-    private object? InvokeScalarPooled(SqlBoundCall call, ReadOnlySpan<object?> values)
+    private static object? InvokeScalarPooled(SqlBoundCall call, ReadOnlySpan<object?> values, scoped in SqlFunctionContext context)
     {
         SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(values.Length);
         try
         {
             Span<SqlValue> arguments = rented.AsSpan(0, values.Length);
             ConvertArguments(call, values, arguments);
-            var context = new SqlFunctionContext(call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
-            return call.Function.Invoke(new SqlArguments(arguments, context)).ToObject();
+            return call.Function.InvokeResolved(new SqlArguments(arguments, context)).ToObject();
         }
         finally
         {

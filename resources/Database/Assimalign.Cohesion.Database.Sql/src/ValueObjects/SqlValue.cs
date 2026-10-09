@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -180,12 +181,28 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     /// <summary>Reads a <c>TEXT</c> value.</summary>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">The value is NULL or of another type.</exception>
-    public string AsString() => _type == DatabaseType.String ? (string)_reference! : throw Mismatch(DatabaseType.String);
+    public string AsString()
+    {
+        if (_type != DatabaseType.String)
+        {
+            ThrowMismatch(DatabaseType.String);
+        }
+
+        return Unsafe.As<string>(_reference!);
+    }
 
     /// <summary>Reads a binary value. The array is the engine's: the function must not change it.</summary>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">The value is NULL or of another type.</exception>
-    public byte[] AsBinary() => _type == DatabaseType.Binary ? (byte[])_reference! : throw Mismatch(DatabaseType.Binary);
+    public byte[] AsBinary()
+    {
+        if (_type != DatabaseType.Binary)
+        {
+            ThrowMismatch(DatabaseType.Binary);
+        }
+
+        return Unsafe.As<byte[]>(_reference!);
+    }
 
     /// <summary>Reads a <c>DATE</c> value.</summary>
     /// <returns>The value.</returns>
@@ -349,6 +366,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         };
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static decimal Pack<T>(T value)
         where T : unmanaged
     {
@@ -357,13 +375,27 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         return payload;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private T Read<T>()
         where T : unmanaged
         => Unsafe.As<decimal, T>(ref Unsafe.AsRef(in _payload));
 
+    // The throw lives in its own method, so every accessor stays small enough to inline.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private T Unpack<T>(DatabaseType type)
         where T : unmanaged
-        => _type == type ? Read<T>() : throw Mismatch(type);
+    {
+        if (_type != type)
+        {
+            ThrowMismatch(type);
+        }
+
+        return Read<T>();
+    }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ThrowMismatch(DatabaseType requested) => throw Mismatch(requested);
 
     private InvalidCastException Mismatch(DatabaseType requested) => _type == DatabaseType.Null
         ? new InvalidCastException($"The value is NULL, not {requested}.")

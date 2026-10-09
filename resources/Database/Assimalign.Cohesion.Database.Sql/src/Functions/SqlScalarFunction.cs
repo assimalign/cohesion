@@ -68,6 +68,19 @@ public abstract class SqlScalarFunction : SqlFunction
             return SqlValue.Null;
         }
 
+        return InvokeResolved(in arguments);
+    }
+
+    /// <summary>
+    /// The engine's call of a resolved function: the planner matched the argument count and the
+    /// evaluator applied the strict short-circuit before converting a value, so this makes the one
+    /// <see cref="InvokeCore"/> call and codes what it throws, as <see cref="Invoke"/> does.
+    /// </summary>
+    /// <param name="arguments">The arguments: as many as the function declares, of their parameters' types.</param>
+    /// <returns>The result.</returns>
+    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    internal SqlValue InvokeResolved(scoped in SqlArguments arguments)
+    {
         try
         {
             return InvokeCore(in arguments);

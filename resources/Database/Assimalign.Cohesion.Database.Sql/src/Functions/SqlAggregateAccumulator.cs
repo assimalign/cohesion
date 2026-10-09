@@ -55,6 +55,19 @@ public abstract class SqlAggregateAccumulator
                 $"Aggregate '{function.Name}' takes {function.ParameterTypes.Length} argument(s), but {arguments.Count} were passed.",
                 nameof(arguments));
         }
+        AddResolved(in arguments);
+    }
+
+    /// <summary>
+    /// The engine's addition of a row to an accumulator it created and has not finished, with as
+    /// many arguments as the function declares: the strict skip of a row with a NULL argument and
+    /// the one <see cref="AddCore"/> call, its failure coded, as <see cref="Add"/> does.
+    /// </summary>
+    /// <param name="arguments">The row's arguments, of their parameters' types.</param>
+    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    internal void AddResolved(scoped in SqlArguments arguments)
+    {
+        var function = _function!;
         if (function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && arguments.HasNull)
         {
             return;

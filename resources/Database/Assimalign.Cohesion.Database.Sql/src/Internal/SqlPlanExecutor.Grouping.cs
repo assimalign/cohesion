@@ -147,19 +147,19 @@ internal sealed partial class SqlPlanExecutor
         switch (arguments.Length)
         {
             case 0:
-                state.Add(new SqlArguments([], context));
+                state.AddResolved(new SqlArguments([], context));
                 return;
             case 1:
                 // The shape of every standard-library aggregate but COUNT(*): one value, no buffer.
                 SqlValue value = default;
                 EvaluateArguments(aggregate, evaluator, row, new Span<SqlValue>(ref value));
-                state.Add(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context));
+                state.AddResolved(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context));
                 return;
             case <= SqlValueBuffer.Length:
                 SqlValueBuffer buffer = default;
                 Span<SqlValue> values = buffer[..arguments.Length];
                 EvaluateArguments(aggregate, evaluator, row, values);
-                state.Add(new SqlArguments(values, context));
+                state.AddResolved(new SqlArguments(values, context));
                 return;
             default:
                 AddRowPooled(state, aggregate, collation, evaluator, row, cancellationToken);
@@ -175,7 +175,7 @@ internal sealed partial class SqlPlanExecutor
         {
             Span<SqlValue> values = rented.AsSpan(0, aggregate.Arguments.Length);
             EvaluateArguments(aggregate, evaluator, row, values);
-            state.Add(new SqlArguments(values, new SqlFunctionContext(aggregate.Database, collation, cancellationToken)));
+            state.AddResolved(new SqlArguments(values, new SqlFunctionContext(aggregate.Database, collation, cancellationToken)));
         }
         finally
         {
