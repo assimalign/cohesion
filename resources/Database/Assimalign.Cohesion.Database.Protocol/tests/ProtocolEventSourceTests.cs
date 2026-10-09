@@ -68,7 +68,9 @@ public sealed class ProtocolEventSourceTests
     public async Task FrameTrace_FramesThroughChannel_ShouldReportEachFrameOnce()
     {
         // Arrange: the channel's reader and writer decorate the stream ones, so a frame passes two
-        // public members on its way to the transport and must still be reported once.
+        // public members on its way to the transport and must still be reported once. Frames carry
+        // no identifier to filter on, so the assertion takes the source's whole list: it relies on
+        // this collection running alone, in the non-parallel phase.
         using var stream = new MemoryStream();
         using var recorder = new EventSourceRecorder(ProtocolEventSource.Log, EventLevel.Verbose, ProtocolEventSource.Keywords.Frames);
 
@@ -138,8 +140,8 @@ public sealed class ProtocolEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - ProtocolEventSource: Should report a frame whose transport completes asynchronously once")]
     public async Task FrameTrace_AsynchronousTransport_ShouldReportEachFrameOnce()
     {
-        // Arrange: a stream that yields before every read and write, so the reader and writer take
-        // the traced asynchronous path instead of the synchronous one.
+        // Arrange: a stream that yields before every read and write, so the stream reader's and
+        // writer's cores complete asynchronously and write the trace from their continuations.
         using var stream = new YieldingStream();
         using var recorder = new EventSourceRecorder(ProtocolEventSource.Log, EventLevel.Verbose, ProtocolEventSource.Keywords.Frames);
 
@@ -164,12 +166,14 @@ public sealed class ProtocolEventSourceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - ProtocolEventSource: The frame reader allocates no more than its stream core while nobody listens")]
-    public async Task ReadFrameAsync_NoListener_ShouldAllocateNoMoreThanItsCore()
+    public void ReadFrameAsync_NoListener_ShouldAllocateNoMoreThanItsCore()
     {
         // Arrange: empty-payload frames over a memory stream complete synchronously and allocate no
-        // payload. The baseline is the stream reader's own core, called through a delegate, so the
-        // check holds in Debug, where the core's async state machines are objects, and in Release,
-        // where both measure zero.
+        // payload. Every call is measured on this thread without an await, and Completed throws
+        // when one did not complete synchronously, so no continuation can move the work to another
+        // thread the measurement does not see. The baseline is the stream reader's own core, which
+        // writes the frame trace, called through a delegate: the public member adds nothing to it.
+        // In Debug the core's async state machine is an object; in Release both measure zero.
         const int frames = 1_000;
         ProtocolEventSource.Log.IsEnabled().ShouldBeFalse("A listener from another test is still attached.");
         using var stream = new MemoryStream(EmptyFrames(2 * (frames + 100)), writable: false);
@@ -179,22 +183,22 @@ public sealed class ProtocolEventSourceTests
             .CreateDelegate<Func<CancellationToken, ValueTask<ProtocolFrame?>>>(reader);
         for (int index = 0; index < 100; index++)
         {
-            (await reader.ReadFrameAsync()).ShouldNotBeNull();
-            (await core(CancellationToken.None)).ShouldNotBeNull();
+            Completed(reader.ReadFrameAsync()).ShouldNotBeNull();
+            Completed(core(CancellationToken.None)).ShouldNotBeNull();
         }
 
         // Act
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < frames; index++)
         {
-            _ = await core(CancellationToken.None);
+            _ = Completed(core(CancellationToken.None));
         }
 
         long coreAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
         before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < frames; index++)
         {
-            _ = await reader.ReadFrameAsync();
+            _ = Completed(reader.ReadFrameAsync());
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -208,10 +212,10 @@ public sealed class ProtocolEventSourceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - ProtocolEventSource: The frame writer allocates no more than its stream core while nobody listens")]
-    public async Task WriteFrameAsync_NoListener_ShouldAllocateNoMoreThanItsCore()
+    public void WriteFrameAsync_NoListener_ShouldAllocateNoMoreThanItsCore()
     {
-        // Arrange: a memory stream with room for every frame, so the stream never grows; the
-        // baseline is the stream writer's own core, as for the reader.
+        // Arrange: a memory stream with room for every frame, so the stream never grows; measured
+        // synchronously against the stream writer's own core, as for the reader.
         const int frames = 1_000;
         ProtocolEventSource.Log.IsEnabled().ShouldBeFalse("A listener from another test is still attached.");
         using var stream = new MemoryStream(ProtocolFrameHeader.Size * 2 * (frames + 100));
@@ -222,22 +226,22 @@ public sealed class ProtocolEventSourceTests
         var frame = new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty);
         for (int index = 0; index < 100; index++)
         {
-            await writer.WriteFrameAsync(frame);
-            await core(frame, CancellationToken.None);
+            Completed(writer.WriteFrameAsync(frame));
+            Completed(core(frame, CancellationToken.None));
         }
 
         // Act
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < frames; index++)
         {
-            await core(frame, CancellationToken.None);
+            Completed(core(frame, CancellationToken.None));
         }
 
         long coreAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
         before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < frames; index++)
         {
-            await writer.WriteFrameAsync(frame);
+            Completed(writer.WriteFrameAsync(frame));
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -248,6 +252,33 @@ public sealed class ProtocolEventSourceTests
 #if !DEBUG
         allocated.ShouldBe(0L);
 #endif
+    }
+
+    /// <summary>
+    /// Returns the result of a call that completed synchronously, and throws when it did not: an
+    /// allocation delta read on this thread only measures work that stayed on it.
+    /// </summary>
+    private static T Completed<T>(ValueTask<T> pending)
+    {
+        if (!pending.IsCompletedSuccessfully)
+        {
+            throw new InvalidOperationException("The measured call did not complete synchronously; its allocations are not on this thread.");
+        }
+
+        return pending.Result;
+    }
+
+    /// <summary>
+    /// Ends a call that completed synchronously, and throws when it did not.
+    /// </summary>
+    private static void Completed(ValueTask pending)
+    {
+        if (!pending.IsCompletedSuccessfully)
+        {
+            throw new InvalidOperationException("The measured call did not complete synchronously; its allocations are not on this thread.");
+        }
+
+        pending.GetAwaiter().GetResult();
     }
 
     private static byte[] EmptyFrames(int count)

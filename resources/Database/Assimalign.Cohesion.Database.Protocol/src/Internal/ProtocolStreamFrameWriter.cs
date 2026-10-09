@@ -9,6 +9,13 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// Writes frames to a stream: header then payload, flushed on demand so callers
 /// batch small frames (logical values) into one transport write.
 /// </summary>
+/// <remarks>
+/// This is the writer that touches the transport, so it is the one that writes each frame it wrote
+/// to the <c>Assimalign.Cohesion.Database.Protocol</c> event source (<c>FrameWritten</c>, under the
+/// <c>Frames</c> keyword): every other writer decorates one of these through its public member, so
+/// each wire frame is reported once. The core is already asynchronous, so the trace adds one
+/// enabled check per frame and nothing else while no listener takes it.
+/// </remarks>
 internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
 {
     private readonly Stream _stream;
@@ -33,6 +40,8 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
         {
             await _stream.WriteAsync(frame.Payload, cancellationToken).ConfigureAwait(false);
         }
+
+        ProtocolEventSource.Log.FrameWritten(frame.Type, frame.Payload.Length);
     }
 
     /// <inheritdoc />

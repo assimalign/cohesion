@@ -139,29 +139,33 @@ message type and payload length, never its payload.
 | 1 | `FrameRead` | Verbose | `Frames` | `messageType` (the `ProtocolMessageType` name, or its number for a model identifier), `payloadLength` |
 | 2 | `FrameWritten` | Verbose | `Frames` | `messageType`, `payloadLength` |
 
-**The public members write the events, for the stream leaf only.** `ReadFrameAsync` and
-`WriteFrameAsync` write them, so the trace follows the NVI rule, but only when the reader or writer
-is the stream one `Create` returns. Every other leaf in the table above decorates a stream leaf
-through its public member, so writing at every layer would report one wire frame two or three
-times (a client's response passes the client decorator, the channel's family reader and the stream
-reader). A frame is reported once, where it crosses the transport. A frame the channel's family
-check refuses on read was still read from the transport and is reported; one it refuses on write
-never reaches the transport and is not reported. An application's own leaf over another transport
-is not traced. `FrameRead` follows a non-null frame; the clean end of the stream writes nothing.
-`FrameWritten` follows a completed write, before any flush.
+**The stream leaves write the events, from their cores.** `ProtocolStreamFrameReader` and
+`ProtocolStreamFrameWriter`, the leaves `Create` returns, are the only ones that touch the
+transport, so they write `FrameRead` and `FrameWritten` at the end of `ReadFrameCoreAsync` and
+`WriteFrameCoreAsync`. Every other leaf in the table above decorates a stream leaf through its
+public member, so writing at every layer would report one wire frame two or three times (a
+client's response passes the client decorator, the channel's family reader and the stream reader);
+written in the stream cores, a frame is reported once, where it crosses the transport, and the
+public bases carry no tracing and no check of their own type. A frame the channel's family check
+refuses on read was still read from the transport and is reported; one it refuses on write never
+reaches the transport and is not reported. An application's own leaf over another transport is not
+traced. `FrameRead` follows a complete frame; the clean end of the stream writes nothing, and nor
+does a truncated or oversized frame, which the core refuses. `FrameWritten` follows a completed
+write, before any flush.
 
-**The trace costs nothing while nobody takes it.** The public member checks
-`IsEnabled(Verbose, Frames)` and returns the core's task unchanged when it is off. When it is on, a
-core that completed synchronously is reported at once; otherwise a static wrapper on a pooling
-builder (`PoolingAsyncValueTaskMethodBuilder`) awaits it and reports the frame. No counters: the
-SQL server writes one frame per result row, and a process-wide count updated per frame by every
-session would be a contention point. Frame failures (`ProtocolException`) are not events here: the
-server session or the client that catches one reports it, with its session or connection.
+**The trace costs nothing while nobody takes it.** The stream cores are already asynchronous
+methods, so the trace adds one `IsEnabled(Verbose, Frames)` check per frame and no wrapper, task
+or allocation; the public members return the core's task unchanged. No counters: the SQL server
+writes one frame per result row, and a process-wide count updated per frame by every session would
+be a contention point. Frame failures (`ProtocolException`) are not events here: the server
+session or the client that catches one reports it, with its session or connection.
 
 `ProtocolEventSourceTests` checks the name, the strict manifest, one event per frame through a
 `ProtocolChannel` (and through a transport that completes asynchronously), nothing without the
 keyword, and that the reader and writer allocate no more than their stream cores while nobody
-listens (zero bytes per frame in Release).
+listens (zero bytes per frame in Release). The allocation tests measure every call without an
+await and fail if one did not complete synchronously, so the per-thread allocation count cannot
+miss work that moved to another thread.
 
 ## Shared exchange and payloads
 
