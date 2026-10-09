@@ -198,10 +198,10 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
             {
                 snapshotPin = await BeginSnapshotPinAsync(transaction.Context, cancellationToken).ConfigureAwait(false);
 
-                // Pinned after the snapshot pin began, so the pin's floor is at or below the
-                // command's (#1363).
-                var statementContext = snapshotPin is null ? transaction.Context : transaction.Context.PinStatementSnapshot();
-                var scope = new KeyValueStatementContext(statementContext, _coordinator);
+                // The scope captures the command's snapshot after the pin began, so the pin's floor
+                // is at or below the command's (#1363). It runs under the transaction's own context,
+                // as the Sql session's statements do.
+                var scope = new KeyValueStatementContext(transaction.Context, _coordinator);
                 return await _executor.ExecuteAsync(command, scope, cancellationToken).ConfigureAwait(false);
             }
             catch (TransactionDeadlockException exception)
@@ -274,9 +274,8 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
 
     /// <summary>
     /// Begins the snapshot pin of a command in a <see cref="IsolationLevel.ReadCommitted"/>
-    /// transaction: a snapshot transaction of its own, begun before the command pins its view
-    /// (<see cref="TransactionContext.PinStatementSnapshot"/>), as the Documents, Graph and Blob
-    /// operations begin theirs.
+    /// transaction: a snapshot transaction of its own, begun before the command captures its
+    /// snapshot, as the Documents, Graph and Blob operations begin theirs.
     /// </summary>
     /// <param name="transaction">The explicit transaction's context.</param>
     /// <param name="cancellationToken">Observed by the begin.</param>
@@ -284,12 +283,13 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
     /// <remarks>
     /// The version purge reclaims below the transaction manager's prune bound, to which a
     /// read-committed transaction adds only its own sequence: its snapshot is captured afresh on
-    /// every access. The command's view keeps the floor of the moment it was pinned, which can be
-    /// lower, because a writer that began before this transaction was still in flight then. Once
-    /// that writer commits, nothing but this pin keeps the purge from reclaiming the versions it
-    /// tombstoned while the command still reads them, which would drop those keys from a scan or
+    /// every access. The command's snapshot keeps the floor of the moment it was captured, which
+    /// can be lower, because a writer that began before this transaction was still in flight then.
+    /// Once that writer commits, nothing but this pin keeps the purge from reclaiming the versions
+    /// it tombstoned while the command still reads them, which would drop those keys from a scan or
     /// read a replaced key as absent. The pin's snapshot is captured first, so its floor is at or
-    /// below the view's (#1363).
+    /// below the command's (#1363). The pin only holds the bound: the command still runs under the
+    /// transaction's own context, as a Sql statement does.
     /// </remarks>
     private async ValueTask<TransactionContext?> BeginSnapshotPinAsync(TransactionContext transaction, CancellationToken cancellationToken)
         => transaction.IsolationLevel == IsolationLevel.ReadCommitted

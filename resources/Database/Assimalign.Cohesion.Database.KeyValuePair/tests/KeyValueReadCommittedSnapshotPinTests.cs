@@ -17,13 +17,14 @@ using static KeyValueTestHarness;
 
 /// <summary>
 /// The snapshot pin of a command in a read-committed transaction (#1363). The command reads
-/// through a view of the snapshot captured when it started, and that view can keep a floor below
-/// every active sequence: a writer that began before the transaction was still in flight then. A
+/// through the snapshot captured when it started, and that snapshot can keep a floor below every
+/// active sequence: a writer that began before the transaction was still in flight then. A
 /// read-committed transaction holds the version purge's bound only at its own sequence, so once
 /// that writer committed, a purge pass reclaimed the versions it tombstoned while the command still
 /// had to read them: a scan skipped those keys, and a write that waited for a key's lock found no
-/// version of the key at all. The session now begins a snapshot transaction before it pins the view
-/// and ends it with the command, as the Documents, Graph and Blob operations do.
+/// version of the key at all. The session now begins a snapshot transaction before the command
+/// captures its snapshot and ends it with the command, as the Documents, Graph and Blob operations
+/// do; the command itself still runs under the transaction's own context.
 /// </summary>
 public sealed class KeyValueReadCommittedSnapshotPinTests
 {

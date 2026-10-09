@@ -157,4 +157,71 @@ public class LockManagerTests
         error.Message.ShouldStartWith($"Transaction {_t2} ended while it waited", Case.Sensitive);
         locks.TryAcquire(_t3, resource, LockMode.Exclusive).ShouldBeTrue();
     }
+
+    /// <summary>
+    /// A release visits only the owner's own resources (#1363 review): it frees what the owner
+    /// held and wakes the waiters there, and leaves every other owner's grants and queued requests
+    /// as they are.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: ReleaseAll frees only the owner's resources and wakes their waiters")]
+    public async Task ReleaseAll_OwnerAmongOthers_ShouldFreeOnlyItsResourcesAndWakeTheirWaiters()
+    {
+        // Arrange: T1 holds A, T2 holds B, and T3 waits for each of them.
+        var locks = LockManager.Create();
+        var resourceA = LockResource.Entry(6, 1);
+        var resourceB = LockResource.Entry(6, 2);
+        await locks.AcquireAsync(_t1, resourceA, LockMode.Exclusive);
+        await locks.AcquireAsync(_t2, resourceB, LockMode.Exclusive);
+        var waitingForA = locks.AcquireAsync(_t3, resourceA, LockMode.Shared).AsTask();
+        var waitingForB = locks.AcquireAsync(_t3, resourceB, LockMode.Shared).AsTask();
+
+        // Act
+        locks.ReleaseAll(_t1);
+        await waitingForA.WaitAsync(TimeSpan.FromSeconds(5));
+        bool bStillWaiting = !waitingForB.IsCompleted;
+        bool bStillHeld = !locks.TryAcquire(new TransactionSequence(4), resourceB, LockMode.Shared);
+        locks.ReleaseAll(_t2);
+        await waitingForB.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t3);
+
+        // Assert: T2's grant and T3's request for B outlived T1's release; once everyone released,
+        // both resources are free.
+        bStillWaiting.ShouldBeTrue();
+        bStillHeld.ShouldBeTrue();
+        locks.TryAcquire(new TransactionSequence(4), resourceA, LockMode.Exclusive).ShouldBeTrue();
+        locks.TryAcquire(new TransactionSequence(4), resourceB, LockMode.Exclusive).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The owner's resources are its grants and its queued requests, whatever became of them: a
+    /// canceled wait and a grant made after an earlier release are both released by the owner's
+    /// next release (#1363 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: ReleaseAll frees a grant made after an earlier release and survives a canceled wait")]
+    public async Task ReleaseAll_AfterACanceledWaitAndALateGrant_ShouldFreeEverything()
+    {
+        // Arrange: T2 waits for T1's resource and cancels; T2 holds a second resource.
+        var locks = LockManager.Create();
+        var resourceA = LockResource.Entry(7, 1);
+        var resourceB = LockResource.Entry(7, 2);
+        await locks.AcquireAsync(_t1, resourceA, LockMode.Exclusive);
+        await locks.AcquireAsync(_t2, resourceB, LockMode.Exclusive);
+        using var cancellation = new CancellationTokenSource();
+        var canceled = locks.AcquireAsync(_t2, resourceA, LockMode.Exclusive, cancellation.Token).AsTask();
+        cancellation.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await canceled.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Act: T1 releases, then is granted A again after its release, and releases again; T2
+        // releases.
+        locks.ReleaseAll(_t1);
+        locks.TryAcquire(_t1, resourceA, LockMode.Exclusive).ShouldBeTrue();
+        bool aHeldByTheLateGrant = !locks.TryAcquire(_t3, resourceA, LockMode.Shared);
+        locks.ReleaseAll(_t1);
+        locks.ReleaseAll(_t2);
+
+        // Assert
+        aHeldByTheLateGrant.ShouldBeTrue();
+        locks.TryAcquire(_t3, resourceA, LockMode.Exclusive).ShouldBeTrue();
+        locks.TryAcquire(_t3, resourceB, LockMode.Exclusive).ShouldBeTrue();
+    }
 }

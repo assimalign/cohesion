@@ -283,8 +283,15 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
         lock (_sync)
         {
-            _ledger.Remove(writer.Value, out entries);
-            _prunable.RemoveAll(version => version.Deleter == writer.Value);
+            // Only a writer with a ledger can have tombstones to forget, and a transaction that wrote
+            // nothing (a read-committed statement's snapshot pin, #1363) must not pay a scan of every
+            // committed tombstone the purge has not reclaimed yet. Committed writers alone enter the
+            // prunable set (OnCommitted, ScrubRecovered), and a deferred undo's retry re-adds its
+            // ledger before it runs again.
+            if (_ledger.Remove(writer.Value, out entries))
+            {
+                _prunable.RemoveAll(version => version.Deleter == writer.Value);
+            }
         }
 
         if (entries is null || entries.Count == 0)

@@ -1061,8 +1061,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   locks release. Auto-commit statements ride a one-statement manager
   transaction, so visibility semantics never fork. Isolation: `Snapshot`
   (default) fixes the statement snapshot at begin, `ReadCommitted` re-captures
-  per statement, and the statement reads through a view of that capture whose
-  floor a snapshot pin holds until the statement ends
+  per statement, after the session begins a snapshot pin that holds that
+  capture's floor until the statement ends
   ([Read-committed statement pins](#read-committed-statement-pins-1363));
   `Serializable` is **rejected** until conflict detection
   exists (never run weaker than requested). Kernel aborts surface wrapped in
@@ -2378,31 +2378,48 @@ four independently shippable steps:
    stricter than the issue's advisory `OldestActive` alone, which can reclaim
    a version a live snapshot with an older minimum still needs (the
    pinned-snapshot test is the proof). Because the bound never reads a
-   statement-local view, a read-committed statement keeps its view's floor
-   through a snapshot transaction of its own (#1363, below).
+   statement-local snapshot, a read-committed statement keeps its snapshot's
+   floor through a snapshot transaction of its own (#1363, below).
 
 ### Read-committed statement pins (#1363)
 
-A statement in a `ReadCommitted` explicit transaction reads through one view
-of the snapshot captured when it starts (`TransactionContext.PinStatementSnapshot`,
-handed to `SqlStatementContext` as the statement's transaction). The view's floor
-can sit below every active sequence: a writer that began before the reader's
-transaction was still in flight at the capture, so the view must keep seeing the
-versions that writer tombstones. The transaction manager's prune bound counts a
+A statement in a `ReadCommitted` explicit transaction reads through the snapshot
+`SqlStatementContext` captures once when it starts. That snapshot's floor can sit
+below every active sequence: a writer that began before the reader's transaction
+was still in flight at the capture, so the statement must keep seeing the versions
+that writer tombstones. The transaction manager's prune bound counts a
 read-committed transaction only at its own sequence (`Database.Transactions`
 DESIGN.md, the prune bound), so once that writer committed, nothing held the
-bound at the view's floor: a purge pass reclaimed those versions while the
+bound at the statement's floor: a purge pass reclaimed those versions while the
 statement still had to reach them, and the statement returned fewer rows than its
 snapshot holds.
 
 `SqlDatabaseSession` therefore begins a snapshot transaction on the coordinator
-before it pins the view, and rolls it back when the statement ends, on every path:
-completion, a failed statement, a deadlock or conflict, cancellation. Beginning
-the pin first makes its floor at or below the view's. The Documents, Graph and
-Blob operations pin the same way; a snapshot transaction, and an auto-commit
-statement (which runs at `Snapshot`), needs no pin, because the manager tracks its
-fixed snapshot. On an offline database the pin is left to the reopen's recovery,
-as a failed auto-commit context is.
+before it builds the statement context, and rolls it back when the statement ends,
+on every path: completion, a failed statement, a deadlock or conflict,
+cancellation. Beginning the pin first makes its floor at or below the statement's,
+and at or below that of any snapshot the transaction's context captures later in
+the statement. The Documents, Graph and Blob operations pin the same way; a
+snapshot transaction, and an auto-commit statement (which runs at `Snapshot`),
+needs no pin, because the manager tracks its fixed snapshot. On an offline
+database the pin is left to the reopen's recovery, as a failed auto-commit context
+is.
+
+The pin only holds the bound: the statement still runs under the transaction's own
+context, never a `TransactionContext.PinStatementSnapshot` view. Phase two reads
+that context's snapshot afresh where a write waited for a lock. A cascade that
+waited for a child row's writer reaches the child version that writer committed
+(the latest-state constraint read) and removes its index entries through
+`BTreeIndex.DeleteAsync`, which matches the entry by the context's snapshot. The
+first cut of #1363 handed the statement a pinned view as its transaction, so that
+match ran through the statement's older snapshot, found nothing, and left the
+deleted child's primary-key entry live: the child's key could never be inserted
+again. `SqlReadCommittedSnapshotPinTests` pins that case
+(`Cascade_WaitsForAChildWriter_ShouldRemoveTheChildsIndexEntries`). The same
+cascade at `Snapshot` isolation still leaves the entry live, because the
+transaction's snapshot is fixed there too; that is older than #1363 and tracked
+separately (a first-updater-wins conflict, or an index delete that matches by key,
+reference and liveness once the row's exclusive lock is held).
 
 The probe that found it ran one statement per read-committed transaction from four
 readers (a scan, an index seek, an index join and a nested-loop join over 120 rows
@@ -2416,14 +2433,32 @@ lost none; with the pin it lost none in two 30-second runs (about 60,000
 statements). `SqlReadCommittedSnapshotPinTests` keeps
 the probe as a two-second guard (`COHESION_DATABASE_RC_PROBE_SECONDS` lengthens it)
 and reproduces the race deterministically: a join takes its table intent locks
-after the statement captured its view, so a table lock holds it there while the
-older writer commits and a purge pass runs. Before the fix that join returned two
-of the three rows its snapshot holds.
+after the statement captured its snapshot, so a table lock holds it there while
+the older writer commits and a purge pass runs. Before the fix that join returned
+two of the three rows its snapshot holds. The guard can also trip, rarely, on an
+older physical race between the purge and a latch-free scan of the same page
+(a `StorageCorruptionException` "Slotted page N is malformed", or a record the scan
+skips as undecodable), which loses rows at `Snapshot` isolation too and does not
+involve the pin: the #1363 review saw it about once in 150,000 probe statements
+under a heavier load, and never in 30 consecutive two-second guard runs. It is
+tracked separately.
 
 The pin costs a kernel begin and an abort record per read-committed statement, and
 it moves the kernel transaction counters: each pin counts as a begun and a
 rolled-back transaction, as it already did in Documents, Graph and Blob. Keeping
-pins out of those rates waits on #1351.
+pins out of those rates waits on #1351. On the in-memory engine (Release, one
+process per run at high priority on four pinned cores, four alternating pairs,
+median of seven rounds of 2,000 statements) a read-committed primary-key seek took
+32.8 µs before the pin and 36.3 µs with it. The first cut's pin also cost time in
+proportion to the database's history: its rollback scanned every committed
+tombstone the purge had not reclaimed yet, and the lock manager's release walked
+its whole table. With one earlier transaction's 50,000 or 200,000 deleted rows
+still unreclaimed, that seek took 104 and 468 µs. A rollback now searches the
+tombstones only for a writer with a ledger, and a release visits only the owner's
+own locks (`Database.Transactions` DESIGN.md, the version store and the lock
+manager), so the seek takes 34 and 15 µs against 32 and 20 µs before the pin. An
+auto-commit seek, which paid the lock-table walk before #1363 too (96 and 321 µs),
+takes 35 and 16 µs.
 
 ## Non-goals (current cut)
 

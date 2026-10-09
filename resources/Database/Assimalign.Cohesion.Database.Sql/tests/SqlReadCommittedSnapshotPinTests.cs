@@ -17,13 +17,14 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// The snapshot pin of a statement in a read-committed transaction (#1363). The statement reads
-/// through a view of the snapshot captured when it started, and that view can keep a floor below
-/// every active sequence: a writer that began before the transaction was still in flight then. A
+/// through the snapshot captured when it started, and that snapshot can keep a floor below every
+/// active sequence: a writer that began before the transaction was still in flight then. A
 /// read-committed transaction holds the version purge's bound only at its own sequence, so once
 /// that writer committed, a purge pass reclaimed the versions it tombstoned while the statement
 /// still had to read them, and the statement returned fewer rows than its snapshot holds. The
-/// session now begins a snapshot transaction before it pins the view and ends it with the
-/// statement, as the Documents, Graph and Blob operations do.
+/// session now begins a snapshot transaction before the statement captures its snapshot and ends
+/// it with the statement, as the Documents, Graph and Blob operations do; the statement itself
+/// still runs under the transaction's own context.
 /// </summary>
 public sealed class SqlReadCommittedSnapshotPinTests
 {
@@ -83,6 +84,50 @@ public sealed class SqlReadCommittedSnapshotPinTests
         openAfter.ShouldBe(openBefore - 2);
         prunedAfterTheStatement.ShouldBe(1);
         refreshed.ShouldBe(["1,1", "3,3"]);
+    }
+
+    /// <summary>
+    /// The pin only holds the purge back: the statement still runs under the transaction's own
+    /// context. A read-committed cascade that waited for a child writer reaches the child version
+    /// that writer committed, which is newer than the statement's snapshot, and removes that
+    /// version's index entries through the transaction's context, whose snapshot is captured afresh.
+    /// When the session handed the statement a pinned view as its transaction, the index delete
+    /// matched nothing through the view's older snapshot and left the deleted child's primary-key
+    /// entry live, so the child's key could never be inserted again (#1363 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Read committed: A cascade that waited for a child writer removes the child's index entries (#1363)")]
+    public async Task Cascade_WaitsForAChildWriter_ShouldRemoveTheChildsIndexEntries()
+    {
+        // Arrange: the child writer holds a shared lock on the parent row its child references, and
+        // the deleter's read-committed transaction begins while it is in flight.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var setup = await database.CreateSessionAsync();
+        await using var writerSession = await database.CreateSessionAsync();
+        await using var deleterSession = await database.CreateSessionAsync();
+        await setup.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT, CONSTRAINT fk_c FOREIGN KEY(pid) REFERENCES p(id) ON DELETE CASCADE)", cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1)", cancellationToken: TestTimeout.Token());
+        var writer = await writerSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        await writerSession.ExecuteAsync("UPDATE c SET pid = pid WHERE id = 10", cancellationToken: TestTimeout.Token());
+        var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.ReadCommitted, TestTimeout.Token());
+
+        // Act: the cascade waits for the parent row while the child writer commits.
+        var pending = deleterSession.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token()).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+        await writer.CommitAsync(TestTimeout.Token());
+        var deleted = await pending;
+        await deleter.CommitAsync(TestTimeout.Token());
+        var children = await RowsAsync(setup, "SELECT id FROM c");
+        await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
+        var reinserted = await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1)", cancellationToken: TestTimeout.Token());
+
+        // Assert: the cascade deleted the child and its primary-key entry, so the key is free again.
+        deleted.AffectedCount.ShouldBe(1);
+        children.ShouldBeEmpty();
+        reinserted.AffectedCount.ShouldBe(1);
+        (await RowsAsync(setup, "SELECT id, pid FROM c")).ShouldBe(["10,1"]);
     }
 
     /// <summary>
