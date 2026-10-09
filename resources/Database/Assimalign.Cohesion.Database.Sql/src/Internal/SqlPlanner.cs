@@ -101,9 +101,7 @@ internal sealed partial class SqlPlanner
             throw new DatabaseException("Aggregate functions are not allowed in JOIN ON.");
         }
 
-        if (select.GroupBy.Count > 0 || select.Having is not null
-            || select.Columns.Any(column => ContainsAggregate(column.Expression))
-            || select.OrderBy.Any(order => ContainsAggregate(order.Expression)))
+        if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
         {
             return PlanGroup(select, table, systemView, columns, bindings, evaluator);
         }
@@ -457,7 +455,7 @@ internal sealed partial class SqlPlanner
         bool columnOnLeft = true)
     {
         // A comparand that calls a volatile function can change between the plan and a row.
-        if (ReferencesAnyColumn(comparand) || ContainsVolatileCall(comparand, ScopelessEvaluator))
+        if (ReferencesAnyColumn(comparand) || ContainsVolatileCall(comparand))
         {
             return;
         }
@@ -1169,7 +1167,33 @@ internal sealed partial class SqlPlanner
     private static bool IsNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
         or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.Null;
 
+    /// <summary>Whether a projection or an ordering key of a SELECT calls an aggregate, which makes the SELECT a grouping.</summary>
+    private bool ProjectsOrOrdersByAggregate(SqlSelectExpression select)
+    {
+        for (int index = 0; index < select.Columns.Count; index++)
+        {
+            if (ContainsAggregate(select.Columns[index].Expression))
+            {
+                return true;
+            }
+        }
+        for (int index = 0; index < select.OrderBy.Count; index++)
+        {
+            if (ContainsAggregate(select.OrderBy[index].Expression))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Whether an expression calls an aggregate of the engine's catalog, outside a subquery.</summary>
+    /// <remarks>
+    /// The children are walked by index where they are a list, as every operand list and a leaf's
+    /// empty sequence are: an instance method passed as a predicate would allocate a delegate on
+    /// every call, which an INSERT of parameters pays once per value.
+    /// </remarks>
     private bool ContainsAggregate(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -1178,21 +1202,44 @@ internal sealed partial class SqlPlanner
             return true;
         }
 
-        return Children(expression).Any(ContainsAggregate);
+        var children = Children(expression);
+        if (children is IReadOnlyList<SqlExpression> list)
+        {
+            for (int index = 0; index < list.Count; index++)
+            {
+                if (ContainsAggregate(list[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        foreach (var child in children)
+        {
+            if (ContainsAggregate(child))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// Whether an expression calls a <see cref="SqlFunctionVolatility.Volatile"/> function, outside a
-    /// subquery: its value can change between the plan and a row, so it never bounds an index seek.
+    /// Whether an expression calls a <see cref="SqlFunctionVolatility.Volatile"/> function, or one
+    /// that does not resolve, outside a subquery: its value can change between the plan and a row,
+    /// so it never bounds an index seek.
     /// </summary>
-    private bool ContainsVolatileCall(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    private bool ContainsVolatileCall(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlFunctionCallExpression call)
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             try
             {
-                if (evaluator.ResolveFunction(call) is { Volatility: SqlFunctionVolatility.Volatile })
+                if (ScopelessEvaluator.ResolveFunction(call) is not { Volatility: not SqlFunctionVolatility.Volatile })
                 {
                     return true;
                 }
@@ -1203,7 +1250,15 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        return Children(expression).Any(child => ContainsVolatileCall(child, evaluator));
+        foreach (var child in Children(expression))
+        {
+            if (ContainsVolatileCall(child))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Finds conversions even when wrapped in an unsupported DDL default expression.</summary>
