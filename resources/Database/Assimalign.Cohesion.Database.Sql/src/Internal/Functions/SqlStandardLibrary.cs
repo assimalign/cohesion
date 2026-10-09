@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -65,6 +66,25 @@ internal static class SqlStandardLibrary
     /// <param name="function">The function.</param>
     /// <returns><see langword="true"/> for a standard-library leaf.</returns>
     internal static bool Contains(SqlFunction function) => Array.IndexOf(_functions, function) >= 0;
+
+    /// <summary>Whether a name is a built-in's, ignoring case.</summary>
+    /// <param name="name">The name as written.</param>
+    /// <returns><see langword="true"/> when the standard library registers a function of the name.</returns>
+    internal static bool IsStandardName(string name)
+    {
+        foreach (var function in _functions)
+        {
+            if (string.Equals(function.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The special forms, which are grammar and never catalog functions: <c>COALESCE</c>, <c>NULLIF</c>, <c>CASE</c>, <c>CAST</c>, <c>EXTRACT</c>.</summary>
+    internal static IReadOnlyList<string> SpecialForms { get; } = Array.AsReadOnly(_specialForms);
 
     /// <summary>Whether a call names <c>COALESCE</c>.</summary>
     /// <param name="name">The name as written.</param>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -186,32 +187,9 @@ internal sealed class SqlBoundTableCache
 
             string subject = $"CHECK constraint '{constraint.Name}' on table '{tableName}'";
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
-            int[] ordinals;
-            SqlBoundExpression bound;
             try
             {
-                // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind. The
-                // bound tree is what every write to this version evaluates, so a write resolves no
-                // column, function or collation of the predicate again.
-                bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, Functions);
-                ordinals = ColumnOrdinals(table, predicate);
-            }
-            catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)
-            {
-                // Not damage: DDL before #1189 did not match calls against their signatures, so a
-                // format-4 catalog can hold such a predicate, which never had a value. Format 4 is
-                // unreleased and carries no such definition forward (#1152); the open fails, coded.
-                throw new DatabaseException(
-                    $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
-                    $"arguments the function does not accept ({exception.Message}). {SqlPersistedExpression.UncheckedCallHint}",
-                    exception);
-            }
-            catch (DatabaseException exception)
-            {
-                throw new DatabaseException(
-                    $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' does not bind to the table " +
-                    $"({exception.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
-                    exception);
+                checks.Add(BindCheck(table, constraint, predicate, subject));
             }
             catch (InsufficientExecutionStackException exception)
             {
@@ -220,8 +198,6 @@ internal sealed class SqlBoundTableCache
                 // definition, so whichever caller asked, the open or a statement, handles it.
                 throw SqlPersistedExpression.OutOfStack(subject, exception);
             }
-
-            checks.Add(new SqlBoundCheck(constraint, predicate, ordinals, bound));
         }
 
         var defaults = new SqlBoundExpression?[table.Columns.Count];
@@ -237,6 +213,152 @@ internal sealed class SqlBoundTableCache
         }
 
         return new SqlBoundTable(table, checks.ToArray(), defaults);
+    }
+
+    /// <summary>
+    /// Binds one persisted CHECK: its tree when every call resolves, or, when a call names a function
+    /// the engine's catalog does not resolve, an unresolved binding that fails each write with
+    /// <c>COHSQLE009</c> (owner decision 65). Anything else that does not bind is a damaged catalog.
+    /// </summary>
+    /// <exception cref="DatabaseException">The predicate does not bind and no call explains it.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
+    private SqlBoundCheck BindCheck(SqlCatalogTable table, SqlCatalogConstraint constraint, SqlExpression predicate, string subject)
+    {
+        DatabaseException failure;
+        try
+        {
+            // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind. The bound
+            // tree is what every write to this version evaluates, so a write resolves no column,
+            // function or collation of the predicate again.
+            var bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation, Functions);
+            return new SqlBoundCheck(constraint, predicate, ColumnOrdinals(table, predicate), bound);
+        }
+        catch (DatabaseException exception)
+        {
+            failure = exception;
+        }
+
+        // A call the engine's catalog does not resolve is an application change, not damage: the
+        // predicate binds as unresolved, the table opens and its reads proceed, and each write that
+        // would evaluate the predicate fails with COHSQLE009. Looked for only once binding failed, so
+        // a predicate that binds costs nothing more.
+        if (FindUnresolvedCall(table, predicate, subject) is { } unresolved)
+        {
+            return new SqlBoundCheck(constraint, predicate, ColumnOrdinals(table, predicate),
+                new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(unresolved)), unresolved);
+        }
+
+        if (failure is SqlEvaluationException { Code: SqlEvaluationException.FunctionSignatureMismatchCode })
+        {
+            // Not damage: DDL before #1189 did not match calls against their signatures, so a
+            // format-4 catalog can hold such a predicate, which never had a value. Format 4 is
+            // unreleased and carries no such definition forward (#1152); the open fails, coded.
+            throw new DatabaseException(
+                $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
+                $"arguments the function does not accept ({failure.Message}). {SqlPersistedExpression.UncheckedCallHint}",
+                failure);
+        }
+
+        throw new DatabaseException(
+            $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' does not bind to the table " +
+            $"({failure.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
+            failure);
+    }
+
+    /// <summary>
+    /// Finds the first call of a persisted predicate, its arguments before itself, that names a
+    /// function the engine's catalog does not resolve: a name it does not register, a name it
+    /// registers as an aggregate, or a registered name none of whose overloads, or more than one,
+    /// accepts the call. A standard-library name always resolves to a built-in, so a call of one that
+    /// does not resolve is left to the binder's own error (#1189).
+    /// </summary>
+    /// <returns>The unresolved call, or null when every call resolves.</returns>
+    /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
+    private SqlUnresolvedDefinition? FindUnresolvedCall(SqlCatalogTable table, SqlExpression predicate, string subject)
+    {
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions);
+        return Find(predicate);
+
+        SqlUnresolvedDefinition? Find(SqlExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            foreach (var child in SqlPlanner.Children(expression))
+            {
+                if (Find(child) is { } found)
+                {
+                    return found;
+                }
+            }
+
+            if (expression is not SqlFunctionCallExpression call || SqlStandardLibrary.IsCoalesce(call.FunctionName) ||
+                Unresolved(call) is not { } reason)
+            {
+                return null;
+            }
+
+            var signature = new StringBuilder(call.FunctionName).Append('(');
+            for (int index = 0; index < call.Arguments.Count; index++)
+            {
+                signature.Append(index == 0 ? string.Empty : ", ").Append(call.Arguments[index] is SqlStarExpression
+                    ? "*"
+                    : SqlType.NameOf(scope.StaticTypeOf(call.Arguments[index])));
+            }
+
+            return new SqlUnresolvedDefinition(subject, signature.Append(')').ToString(), reason);
+        }
+
+        string? Unresolved(SqlFunctionCallExpression call)
+        {
+            if (!Functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+            {
+                return "which this engine does not register";
+            }
+            if (SqlStandardLibrary.IsStandardName(call.FunctionName))
+            {
+                return null;
+            }
+            if (overloads[0].Kind != SqlFunctionKind.Scalar)
+            {
+                return "which this engine registers as an aggregate";
+            }
+
+            try
+            {
+                scope.ResolveFunction(call);
+                return null;
+            }
+            catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.AmbiguousFunctionCallCode)
+            {
+                return $"which more than one overload this engine registers accepts equally well ({exception.Message})";
+            }
+            catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)
+            {
+                return $"which no overload this engine registers accepts ({exception.Message})";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds the first persisted definition of the database, in catalog order, that calls a function
+    /// the engine does not resolve: what an engine build verifies for a database it declares
+    /// (provisioning step 6, owner decision 65), binding every table version it has not bound yet.
+    /// </summary>
+    /// <returns>The first unresolved definition, or null when every definition binds.</returns>
+    /// <exception cref="DatabaseException">A persisted definition of a table does not load.</exception>
+    internal SqlUnresolvedDefinition? FindUnresolved()
+    {
+        foreach (var table in _catalog.Tables)
+        {
+            foreach (var check in Get(table).Checks)
+            {
+                if (check.Unresolved is { } unresolved)
+                {
+                    return unresolved;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static int[] ColumnOrdinals(SqlCatalogTable table, SqlExpression predicate)

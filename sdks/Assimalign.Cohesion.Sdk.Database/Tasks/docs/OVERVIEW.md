@@ -33,7 +33,10 @@ the parameter of `sql.AddDatabase("<name>", database => ...)`, with an inline la
 a helper method that receives the `SqlDatabaseBuilder` works at run time but fails the build
 (`COHDBSDK102`); declare a reusable schema as a `SqlSchema.Create(...)` value instead. A database
 name is unique across every engine of the project, and a schema principal or custom type fails
-the build (`COHDBSDK108`), because every SQL engine build refuses it. Every declared database gets
+the build (`COHDBSDK108`), because every SQL engine build refuses it. A table's
+`table.Check("ck_name", "LENGTH(Name) > 0")` is read as two string constants; the SDK does not
+parse the SQL and does not see the engine's registered functions, so a CHECK that calls one
+compiles here and the engine's build validates it before touching a file. Every declared database gets
 its own canonical schema document,
 `$(IntermediateOutputPath)cohesion/database/<database>.schema.json`, and its lowercase SHA-256
 hash, `<database>.schema.sha256`, listed in the directory's `schemas.manifest`. The directory can

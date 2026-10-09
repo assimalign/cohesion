@@ -39,6 +39,7 @@ internal sealed record SqlSchemaType(
 /// <param name="PrimaryKey">The primary-key member name.</param>
 /// <param name="Indexes">The indexed member names.</param>
 /// <param name="References">The declared references.</param>
+/// <param name="Checks">The declared CHECK constraints, in declaration order.</param>
 internal sealed record SqlSchemaTable(
     string Name,
     Type RowType,
@@ -46,12 +47,18 @@ internal sealed record SqlSchemaTable(
     IReadOnlyList<SqlSchemaColumn> ColumnDefinitions,
     string? PrimaryKey,
     IReadOnlyList<string> Indexes,
-    IReadOnlyList<SqlSchemaReference> References);
+    IReadOnlyList<SqlSchemaReference> References,
+    IReadOnlyList<SqlSchemaCheck> Checks);
 
 /// <summary>A table reference.</summary>
 /// <param name="Member">The foreign-key member name.</param>
 /// <param name="TargetType">The referenced table row type.</param>
 internal sealed record SqlSchemaReference(string Member, Type TargetType);
+
+/// <summary>A CHECK constraint, its predicate SQL text as the author wrote it.</summary>
+/// <param name="Name">The constraint name.</param>
+/// <param name="Sql">The predicate's SQL text.</param>
+internal sealed record SqlSchemaCheck(string Name, string Sql);
 
 /// <summary>A typed column selected from a schema row type.</summary>
 /// <param name="Name">The column name.</param>

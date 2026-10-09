@@ -137,22 +137,46 @@ internal sealed partial class SqlPlanner
 
         if (expression is SqlFunctionCallExpression call)
         {
-            CheckCall(call);
+            CheckCall(call, _functions.Catalog);
+        }
+    }
+
+    /// <summary>
+    /// Checks every call of an expression no statement carries yet, a compiled schema's declared
+    /// CHECK, as the planner checks a statement's calls: an unknown name, and a count no overload
+    /// accepts (<c>COHSQLE006</c>), fail here, so the engine's build reports them as the DDL would.
+    /// </summary>
+    /// <param name="expression">The expression.</param>
+    /// <param name="catalog">The engine's function catalog.</param>
+    /// <exception cref="DatabaseException">The expression calls an unknown function.</exception>
+    /// <exception cref="SqlEvaluationException">A call's argument count matches no overload (<c>COHSQLE006</c>).</exception>
+    internal static void ValidateDeclaredCalls(SqlExpression expression, SqlFunctionCatalog catalog)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        foreach (var child in Children(expression))
+        {
+            ValidateDeclaredCalls(child, catalog);
+        }
+
+        if (expression is SqlFunctionCallExpression call)
+        {
+            CheckCall(call, catalog);
         }
     }
 
     /// <summary>Checks one call's name and argument count against the engine's function catalog.</summary>
     /// <param name="call">The call.</param>
+    /// <param name="catalog">The engine's function catalog.</param>
     /// <exception cref="DatabaseException">The name is unknown.</exception>
     /// <exception cref="SqlEvaluationException">No overload accepts the call's argument count (<c>COHSQLE006</c>).</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void CheckCall(SqlFunctionCallExpression call)
+    private static void CheckCall(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
         if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             SqlExpressionEvaluator.CheckCoalesce(call);
         }
-        else if (_functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+        else if (catalog.TryGetOverloads(call.FunctionName, out var overloads))
         {
             SqlFunctionResolver.CheckArity(call.FunctionName, overloads, call.Arguments);
         }

@@ -78,6 +78,16 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// </summary>
     internal const string AmbiguousFunctionCallCode = "COHSQLE008";
 
+    /// <summary>
+    /// A persisted definition calls a function the engine that opened the database does not
+    /// register, or no longer resolves (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises
+    /// when a function's implementation is missing at use). The database opens and reads proceed;
+    /// a write that would evaluate the definition fails with this code, naming the function, the
+    /// table and the constraint, and an engine build that declares the database fails with it
+    /// (owner decisions 65 and 71 of 2026-10-09).
+    /// </summary>
+    internal const string UnregisteredFunctionCode = "COHSQLE009";
+
     private readonly string _detail;
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
@@ -133,6 +143,15 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal static SqlEvaluationException AmbiguousFunctionCall(string functionName, string given, string candidates)
         => new(AmbiguousFunctionCallCode,
             $"Function call '{functionName}({given})' is ambiguous: {candidates} accept it equally well. Cast an argument to choose one.",
+            null);
+
+    /// <summary>Creates the failure of a write that would evaluate a persisted definition whose function does not resolve.</summary>
+    /// <param name="definition">The definition and the call that does not resolve.</param>
+    /// <returns>The coded failure (<c>COHSQLE009</c>).</returns>
+    internal static SqlEvaluationException UnregisteredFunction(SqlUnresolvedDefinition definition)
+        => new(UnregisteredFunctionCode,
+            $"{definition.Describe()}, so the constraint cannot be evaluated and the write is refused. " +
+            "Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.",
             null);
 
     /// <summary>Creates the division-by-zero failure for a <c>/</c> or <c>%</c> operator.</summary>

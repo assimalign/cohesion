@@ -177,6 +177,34 @@ internal static class SqlSchemaCompiler
                     Array.AsReadOnly([target.PrimaryKey])));
             }
 
+            // A CHECK keeps its author's SQL text; the engine that applies the schema parses and
+            // binds it. Its columns are the predicate's, which this package does not parse, so the
+            // advisory column list stays empty, as a table-level SQL CHECK's does. A table's
+            // constraints and indexes share one namespace in the SQL catalog.
+            foreach (SqlSchemaCheck check in table.Checks)
+            {
+                bool namesIndex = string.Equals(primaryKey?.Name, check.Name, StringComparison.OrdinalIgnoreCase) ||
+                    indexes.Any(index => string.Equals(index.Name, check.Name, StringComparison.OrdinalIgnoreCase));
+                if (namesIndex || !constraintNames.Add(check.Name))
+                {
+                    errors.Add(Error(
+                        SqlSchemaValidationErrorCode.DuplicateDeclaration,
+                        $"{table.Name}.{check.Name}",
+                        namesIndex
+                            ? "The constraint name is the name of the table's primary key or one of its indexes."
+                            : "The constraint name is declared more than once."));
+                    continue;
+                }
+
+                constraints.Add(new CompiledSchemaConstraint(
+                    check.Name,
+                    CompiledSchemaConstraintKind.Check,
+                    Array.Empty<string>(),
+                    null,
+                    Array.Empty<string>(),
+                    new CompiledSchemaExpression(check.Sql)));
+            }
+
             result.Add(new CompiledSchemaTable(
                 table.Name,
                 TypeId(table.RowType),

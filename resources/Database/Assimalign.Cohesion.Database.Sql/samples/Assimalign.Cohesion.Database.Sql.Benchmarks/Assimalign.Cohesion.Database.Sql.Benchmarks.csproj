@@ -20,6 +20,13 @@
 		<IsPackable>false</IsPackable>
 		<PublishAot>true</PublishAot>
 	</PropertyGroup>
+	<!--
+	    A baseline before phase E2 has no function ABI: -p:SqlBenchmarkBaseline=true compiles out the
+	    cases that register functions (Q4, Q5, Q7R, Q8C), so the same harness measures both trees.
+	-->
+	<PropertyGroup Condition="'$(SqlBenchmarkBaseline)' == 'true'">
+		<DefineConstants>$(DefineConstants);SQL_BENCHMARK_BASELINE</DefineConstants>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 	</ItemGroup>

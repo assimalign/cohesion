@@ -15,7 +15,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <param name="ColumnOrdinals">The distinct column ordinals the predicate references, in first-use order.</param>
 /// <param name="Bound">
 /// The predicate bound to the table version's columns, once (<see cref="SqlExpressionEvaluator.Bind(SqlExpression)"/>).
-/// Every session writing the version evaluates this one tree, which is immutable.
+/// Every session writing the version evaluates this one tree, which is immutable. For an unresolved
+/// predicate, a failure that raises <c>COHSQLE009</c> whatever the row.
+/// </param>
+/// <param name="Unresolved">
+/// The call the predicate makes that the engine's function catalog does not resolve, when the
+/// predicate is bound as unresolved (owner decision 65); null for a predicate that binds.
 /// </param>
 internal sealed record SqlBoundCheck(SqlCatalogConstraint Constraint, SqlExpression Predicate, IReadOnlyList<int> ColumnOrdinals,
-    SqlBoundExpression Bound);
+    SqlBoundExpression Bound, SqlUnresolvedDefinition? Unresolved = null);

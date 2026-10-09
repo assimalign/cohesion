@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Sql.AotSample</RootNamespace>
+		<!--
+		    The NativeAOT guard for the SQL engine's function ABI (DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md
+		    phase E2): it registers typed scalar functions of every Create arity, a typed aggregate, a
+		    hand-written scalar and aggregate leaf, and a strict and a non-strict function, declares a
+		    schema whose table.Check calls one, runs them in process and over the wire (Sql.Client on the
+		    in-memory driver), and prints a smoke result; it exits 1 when a check fails. Two layers, as
+		    the IdentityModel AotSample has them: the trim and AOT analyzer diagnostics are errors in
+		    this project's own compilation, and the published binary is run:
+
+		        dotnet publish resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.AotSample/Assimalign.Cohesion.Database.Sql.AotSample.csproj -c Release -r win-arm64
+
+		    Use the publishing host's RID, from a short path, with the Visual Studio installer directory
+		    on PATH (ILC runs vswhere to find the linker). CI publishes and runs it for linux-x64
+		    (.github/workflows/resource-database.yml). PublishAot is set here, not on the command line:
+		    a global -p:PublishAot=true reaches the netstandard2.0 analyzers in the reference graph and
+		    fails them with NETSDK1207. A harness, not a library: never packed, and outside the resource
+		    guards by its samples/ path.
+		-->
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<PublishAot>true</PublishAot>
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+	</ItemGroup>
+</Project>

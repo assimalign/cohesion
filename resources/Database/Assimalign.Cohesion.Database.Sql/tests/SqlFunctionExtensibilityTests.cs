@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// argument count and type once per statement, folded when immutable over constants, short-circuited
 /// when strict, admitted in a CHECK only when immutable, and coded <c>COHSQLE007</c> when they throw.
 /// </summary>
-public sealed class SqlFunctionExtensibilityTests
+public sealed partial class SqlFunctionExtensibilityTests
 {
     private const string FunctionSignatureMismatch = "COHSQLE006";
     private const string FunctionFailed = "COHSQLE007";
@@ -532,7 +532,7 @@ public sealed class SqlFunctionExtensibilityTests
         Should.Throw<ArgumentException>(() => clamp.Invoke(new SqlArguments([SqlValue.FromInt64(1), SqlValue.FromInt64(2)])));
     }
 
-    private static async Task<SqlDatabaseEngine> BuildAsync(Action<SqlFunctionCollection> register, string? rootPath = null)
+    private static async Task<SqlDatabaseEngine> BuildAsync(Action<SqlFunctionCollection> register, string? rootPath = null, string? declare = null)
     {
         var builder = SqlDatabaseEngine.CreateBuilder("sql-functions");
         if (rootPath is not null)
@@ -541,6 +541,11 @@ public sealed class SqlFunctionExtensibilityTests
         }
 
         register(builder.Functions);
+        if (declare is not null)
+        {
+            builder.AddDatabase(declare);
+        }
+
         return await builder.BuildAsync();
     }
 

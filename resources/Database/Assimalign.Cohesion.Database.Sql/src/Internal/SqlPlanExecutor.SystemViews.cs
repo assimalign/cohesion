@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -19,7 +20,11 @@ internal sealed partial class SqlPlanExecutor
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
-        foreach (var values in EnumerateSystemViewRows(plan.View, statement, cancellationToken))
+        // The function catalog is the engine's, frozen at its build: no catalog snapshot describes it.
+        var rows = plan.View.Name == SqlSystemViews.FunctionsView
+            ? EnumerateFunctionRows(_definitions.Functions.Catalog)
+            : EnumerateSystemViewRows(plan.View, statement, cancellationToken);
+        foreach (var values in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
             statement.Metrics.RecordsExamined++;
@@ -190,6 +195,54 @@ internal sealed partial class SqlPlanExecutor
                 default:
                     throw new DatabaseException($"System view '{view.Schema}.{view.Name}' is not executable.");
             }
+        }
+    }
+
+    /// <summary>
+    /// The rows of <c>COHESION_SCHEMA.FUNCTIONS</c>: every function of the engine's catalog, one row
+    /// per overload in registration order (the standard library first), then the special forms,
+    /// which are grammar and have no signature (owner decision 66 of 2026-10-09).
+    /// </summary>
+    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog)
+    {
+        foreach (var function in catalog)
+        {
+            var types = new StringBuilder();
+            var parameters = function.Parameters;
+            for (int index = 0; index < parameters.Count; index++)
+            {
+                types.Append(index == 0 ? string.Empty : ", ").Append(parameters[index].Name);
+            }
+            if (function.VariadicParameter is { } variadic)
+            {
+                types.Append(parameters.Count == 0 ? string.Empty : ", ").Append(variadic.Name).Append(" ...");
+            }
+            else if (parameters.Count == 0 && function.Kind == SqlFunctionKind.Aggregate)
+            {
+                types.Append('*'); // a parameterless aggregate is called as name(*), as COUNT(*) is
+            }
+
+            yield return
+            [
+                function.Name,
+                function.Kind == SqlFunctionKind.Scalar ? "SCALAR" : "AGGREGATE",
+                types.ToString(),
+                (long)parameters.Count,
+                function.ReturnType.Name,
+                function.Volatility switch
+                {
+                    SqlFunctionVolatility.Immutable => "IMMUTABLE",
+                    SqlFunctionVolatility.Stable => "STABLE",
+                    _ => "VOLATILE",
+                },
+                function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput ? "RETURNS NULL ON NULL INPUT" : "CALLED ON NULL INPUT",
+                SqlStandardLibrary.Contains(function) ? "YES" : "NO",
+            ];
+        }
+
+        foreach (string form in SqlStandardLibrary.SpecialForms)
+        {
+            yield return [form, "SPECIAL FORM", null, null, null, null, null, "YES"];
         }
     }
 

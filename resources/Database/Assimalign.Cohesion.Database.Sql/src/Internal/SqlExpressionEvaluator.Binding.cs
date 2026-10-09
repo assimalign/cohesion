@@ -271,7 +271,27 @@ internal sealed partial class SqlExpressionEvaluator
 
         var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation);
         collation = CollationOf(unary, [operandCollation]);
-        return new SqlBoundUnary(unary.Operator, operand);
+        var bound = new SqlBoundUnary(unary.Operator, operand);
+
+        // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
+        // -5 (doNegate, src/backend/parser/gram.y): computed once here, so an immutable call over it
+        // folds too (ABS(-5)). One that fails is kept, and fails only when a row reaches it, as before.
+        return unary.Operator is SqlUnaryOperator.Negate or SqlUnaryOperator.Plus && operand.Kind == SqlBoundExpressionKind.Constant
+            ? FoldSign(bound)
+            : bound;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression FoldSign(SqlBoundUnary sign)
+    {
+        try
+        {
+            return new SqlBoundConstant(Evaluate(sign, []));
+        }
+        catch (Exception exception) when (IsDeferrable(exception))
+        {
+            return sign;
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

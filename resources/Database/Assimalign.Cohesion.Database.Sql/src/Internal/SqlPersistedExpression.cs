@@ -238,15 +238,43 @@ internal static class SqlPersistedExpression
         }
     }
 
+    /// <summary>
+    /// Parses the SQL text of a declared, not yet stored, definition (a compiled schema's
+    /// <c>table.Check(name, sql)</c>) under the engine's own nesting limit, as the DDL that applies it
+    /// will: it must be exactly one scalar expression, so no text can close the constraint's
+    /// parentheses and declare more than the schema shows.
+    /// </summary>
+    /// <param name="text">The declared text, as its author wrote it.</param>
+    /// <param name="parserOptions">The engine's parser options.</param>
+    /// <returns>The expression tree.</returns>
+    /// <exception cref="DatabaseException">The text is not exactly one SQL expression.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The calling thread has too little stack left to parse the text.</exception>
+    internal static SqlExpression ParseDeclaration(string text, SqlQueryParserOptions parserOptions)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (!TryParse(text, out var expression, out string? problem, out bool outOfStack, parserOptions))
+        {
+            if (outOfStack)
+            {
+                throw new InsufficientExecutionStackException("Reading the declared SQL text needs more stack than the thread has left.");
+            }
+
+            throw new DatabaseException($"its SQL text '{text}' is not exactly one SQL expression ({problem}).");
+        }
+
+        return expression;
+    }
+
     private static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression,
-        out string? problem, out bool outOfStack)
+        out string? problem, out bool outOfStack, SqlQueryParserOptions? parserOptions = null)
     {
         expression = null;
         // Read at the highest nesting limit any engine can be configured with (#1151). The limit
         // decides which statements an engine accepts, not which databases it can open: a
         // definition a DDL stored under one engine's limit opens under every other, and canonical
-        // text never nests deeper than the declaration the DDL accepted.
-        var statement = new SqlQueryParser(SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
+        // text never nests deeper than the declaration the DDL accepted. A declaration not yet
+        // stored is read under the engine's own limit instead, as its DDL will be.
+        var statement = new SqlQueryParser(parserOptions ?? SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         outOfStack = error?.Code == ParserOutOfStackCode;
         if (error is not null)

@@ -90,9 +90,23 @@ rendering of the parsed predicate in the catalog and compares the live catalog w
 a schema by that rendering, so reapplying an unchanged schema is a no-op whatever
 the predicate's spelling. Its optional `Columns`
 list is advisory and is not part of check equivalence, because table-level SQL
-checks derive their dependencies from the expression. The frozen
-retained table builder has no check declaration member yet (`table.Check(name, sql)` arrives in
-E2); callers construct the compiled check model directly.
+checks derive their dependencies from the expression.
+
+**`table.Check(name, sql)` (E2 part 2, owner decision 64).** The retained table builder
+declares a CHECK as a name and SQL text: `SqlTableBuilder<TRow>.Check(string name, string
+sql)`, both non-blank. The compiler lowers it to a `CompiledSchemaConstraintKind.Check`
+constraint whose `Expression.CanonicalText` is the text exactly as written and whose
+`Columns` list is empty, in the `cohesion/database-schema/v2` document (no format change: the
+v2 record already carried compiled checks). A CHECK's name shares the table's constraint
+and index name space, as in the SQL catalog: a name another constraint, the primary key
+(`PK_<table>`) or an index (`IX_<table>_<member>`) already has is `DuplicateDeclaration`.
+This package does not parse SQL, so it neither validates the predicate nor knows which
+functions exist: the SQL engine's build parses the text as exactly one expression and binds
+it to its frozen function catalog and the table's declared columns before it touches any
+file, refusing an unknown column or function, a call no overload accepts, or a function that
+is not `IMMUTABLE` (`COHSQLP001`). The arguments are meant to be constant strings, so the
+`Sdk.Database` build task extracts the same constraint without running the program and its
+document and hash equal the runtime compiler's.
 
 **Concrete types (concrete-types plan, phase 4, §6.7).** Until phase 4 the declaration
 surface was fifteen public interfaces: `ISqlSchema`, the four builder contracts

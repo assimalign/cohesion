@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -20,24 +21,46 @@ namespace Assimalign.Cohesion.Database.Sql.Benchmarks;
 /// (<see cref="GC.GetAllocatedBytesForCurrentThread"/>).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Only public API is used, so the same file builds against any tree that has the engine; that
-/// is how a baseline commit and a phase branch are measured with one harness. Q7's CHECK calls the
-/// built-in <c>LENGTH</c> and <c>ABS</c>: registered functions arrive with phase E2, which adds
-/// the registered-function variant of the case.
+/// is how a baseline commit and a phase branch are measured with one harness. The cases that need
+/// the E2 function ABI (Q4, Q5, Q7R and Q8C) are compiled out when the project is built with
+/// <c>-p:SqlBenchmarkBaseline=true</c>, for a baseline before E2.
+/// </para>
+/// <para>
+/// Q4 is Q1 with a registered <c>Create&lt;string, string&gt;</c> function in place of <c>UPPER</c>;
+/// Q5L and Q5T call the same function as a hand-written leaf and as a typed <c>Create</c> leaf; Q6
+/// projects <c>ABS(-5)</c>, a call folded at plan time, beside its control Q6C, which projects the
+/// constant; Q7R is Q7 with an immutable registered function in the CHECK; Q8 is an engine build over
+/// an already-applied 50-table schema in a file-backed root, timed per build, and Q8C the same schema
+/// with a CHECK over a registered function on every table.
+/// </para>
 /// </remarks>
 internal static class Program
 {
     private const string Q1 = "SELECT UPPER(name), ABS(id), LENGTH(name) FROM t";
     private const string Q2 = "SELECT id FROM t WHERE ABS(id) > 10";
     private const string Q3 = "SELECT g, COUNT(*), SUM(v), AVG(v), MIN(s), MAX(s) FROM t GROUP BY g";
+    private const string Q4 = "SELECT upper_r(name), ABS(id), LENGTH(name) FROM t";
+    private const string Q5L = "SELECT upper_leaf(name) FROM t";
+    private const string Q5T = "SELECT upper_r(name) FROM t";
+    private const string Q6 = "SELECT id, ABS(-5) FROM t";
+    private const string Q6C = "SELECT id, 5 FROM t";
     private const string Q7Insert = "INSERT INTO {0} (id, name, v) VALUES (@id, @name, @v)";
+    private const string Q7Check = "LENGTH(name) > 0 AND ABS(v) < 1000000000";
+    private const string Q7RCheck = "has_text(name) AND ABS(v) < 1000000000";
 
     private static async Task<int> Main(string[] args)
     {
         int rows = 100_000;
         int iterations = 5;
         string label = "run";
-        var cases = new HashSet<string>(["Q1", "Q2", "Q3", "Q7"], StringComparer.OrdinalIgnoreCase);
+#if SQL_BENCHMARK_BASELINE
+        var cases = new HashSet<string>(["Q1", "Q2", "Q3", "Q6", "Q6C", "Q7", "Q8"], StringComparer.OrdinalIgnoreCase);
+#else
+        var cases = new HashSet<string>(["Q1", "Q2", "Q3", "Q4", "Q5L", "Q5T", "Q6", "Q6C", "Q7", "Q7R", "Q8", "Q8C"],
+            StringComparer.OrdinalIgnoreCase);
+#endif
         for (int index = 0; index < args.Length - 1; index++)
         {
             switch (args[index])
@@ -60,26 +83,108 @@ internal static class Program
         Console.WriteLine($"label={label} rows={rows} iterations={iterations} aot={!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported} " +
             $"gc={(System.Runtime.GCSettings.IsServerGC ? "server" : "workstation")} os={Environment.OSVersion.VersionString} cpus={Environment.ProcessorCount}");
 
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-benchmark" });
-        var database = await engine.CreateDatabaseAsync("benchmark");
-        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await LoadAsync(session, rows);
-
-        foreach (var (name, sql) in new[] { ("Q1", Q1), ("Q2", Q2), ("Q3", Q3) })
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-benchmark");
+#if !SQL_BENCHMARK_BASELINE
+        RegisterFunctions(builder.Functions);
+#endif
+        await using (var engine = await builder.BuildAsync())
         {
-            if (cases.Contains(name))
+            var database = await engine.CreateDatabaseAsync("benchmark");
+            await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+            await LoadAsync(session, rows);
+
+            foreach (var (name, sql) in new[] { ("Q1", Q1), ("Q2", Q2), ("Q3", Q3), ("Q4", Q4), ("Q5L", Q5L), ("Q5T", Q5T), ("Q6", Q6), ("Q6C", Q6C) })
             {
-                Report(name, "row", await MeasureAsync(iterations, () => QueryAsync(session, sql, rows)));
+                if (cases.Contains(name))
+                {
+                    Report(name, "row", await MeasureAsync(iterations, () => QueryAsync(session, sql, rows)));
+                }
+            }
+
+            foreach (var (name, check) in new[] { ("Q7", Q7Check), ("Q7R", Q7RCheck) })
+            {
+                if (cases.Contains(name))
+                {
+                    int table = 0;
+                    Report(name, "statement", await MeasureAsync(iterations, () => InsertAsync(session, $"{name}_{table++}", check, rows)));
+                }
             }
         }
 
-        if (cases.Contains("Q7"))
+        foreach (var (name, checks) in new[] { ("Q8", false), ("Q8C", true) })
         {
-            int table = 0;
-            Report("Q7", "statement", await MeasureAsync(iterations, () => InsertAsync(session, $"q7_{table++}", rows)));
+            if (cases.Contains(name))
+            {
+                Report(name, "build", await MeasureBuildsAsync(iterations, checks));
+            }
         }
 
         return 0;
+    }
+
+#if !SQL_BENCHMARK_BASELINE
+    /// <summary>
+    /// The registered functions Q4, Q5, Q7R and Q8C call: <c>upper_r</c> as a typed
+    /// <c>Create&lt;string, string&gt;</c> leaf and <c>upper_leaf</c> as a hand-written leaf doing the same
+    /// work as the built-in <c>UPPER</c> over text, and <c>has_text</c> for the CHECKs.
+    /// </summary>
+    private static void RegisterFunctions(SqlFunctionCollection functions)
+        => functions
+            .Add(SqlScalarFunction.Create("upper_r", static (string text) => text.ToUpperInvariant(), SqlFunctionVolatility.Immutable))
+            .Add(new UpperLeafFunction())
+            .Add(SqlScalarFunction.Create("has_text", static (string text) => text.Length > 0, SqlFunctionVolatility.Immutable));
+
+    /// <summary>Q5L's hand-written leaf: <c>upper_leaf(TEXT)</c>, the same work as <c>upper_r</c>.</summary>
+    private sealed class UpperLeafFunction : SqlScalarFunction
+    {
+        public UpperLeafFunction()
+            : base("upper_leaf", [SqlType.Text], SqlType.Text, SqlFunctionVolatility.Immutable)
+        {
+        }
+
+        protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
+            => SqlValue.FromString(arguments.GetString(0).ToUpperInvariant());
+    }
+#endif
+
+    /// <summary>
+    /// Q8 and Q8C: an engine build over a file-backed root whose 50-table schema is already applied,
+    /// so each build compiles the schema, creates the engine, opens and recovers the database, skips
+    /// the applied schema and returns. The first build applies the schema and is not measured; the
+    /// engine's disposal is outside the timed region.
+    /// </summary>
+    private static async Task<IReadOnlyList<Sample>> MeasureBuildsAsync(int iterations, bool checks)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-benchmark-q8", Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var first = await Q8Schema.CreateBuilder(root, checks).BuildAsync())
+            {
+            }
+
+            return await MeasureAsync(iterations, async () =>
+            {
+                SqlDatabaseEngine? engine = null;
+                var (elapsed, cpu, threadBytes, processBytes, hopped) = await TimeAsync(async () =>
+                {
+                    engine = await Q8Schema.CreateBuilder(root, checks).BuildAsync();
+                });
+
+                await engine!.DisposeAsync();
+                return new Sample(elapsed, cpu, threadBytes, processBytes, 1, hopped, Q8Schema.Tables);
+            });
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best effort: a scratch directory under the temp folder.
+            }
+        }
     }
 
     /// <summary>Fills <c>t</c>: ids straddle zero, 1,000 groups, a decimal and a string per row.</summary>
@@ -132,12 +237,15 @@ internal static class Program
         return new Sample(elapsed, cpu, threadBytes, processBytes, rows, hopped, count);
     }
 
-    /// <summary>Q7: one autocommitted INSERT per row into a fresh table whose CHECK calls LENGTH and ABS.</summary>
-    private static async Task<Sample> InsertAsync(SqlDatabaseSession session, string table, int rows)
+    /// <summary>
+    /// Q7 and Q7R: one autocommitted INSERT per row into a fresh table whose CHECK calls the built-in
+    /// LENGTH and ABS (Q7), or the registered immutable <c>has_text</c> and ABS (Q7R).
+    /// </summary>
+    private static async Task<Sample> InsertAsync(SqlDatabaseSession session, string table, string check, int rows)
     {
         await ExecuteAsync(session,
             $"CREATE TABLE {table} (id BIGINT NOT NULL, name VARCHAR(32) NOT NULL, v BIGINT, " +
-            $"CONSTRAINT ck_{table} CHECK (LENGTH(name) > 0 AND ABS(v) < 1000000000))");
+            $"CONSTRAINT ck_{table} CHECK ({check}))");
 
         // Every value is created before the clock starts, so the harness allocates nothing per statement.
         string sql = string.Format(CultureInfo.InvariantCulture, Q7Insert, table);

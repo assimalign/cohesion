@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -50,17 +51,22 @@ internal sealed class SqlDeclaredDatabase
     /// <summary>
     /// Compiles one database declaration and refuses what the engine cannot provision, before any
     /// file is touched (phase 3 of the build): a schema that does not compile, or declares a
-    /// principal (owner decision 58 of 2026-10-09) or a custom type. Binding a declared CHECK or
-    /// DEFAULT to the engine's function and type catalog joins this phase when the typed schema
-    /// can declare one (E2).
+    /// principal (owner decision 58 of 2026-10-09) or a custom type, or a CHECK that does not bind
+    /// to the engine's frozen function catalog: one that is not exactly one predicate, names an
+    /// unknown column or function, calls a function with arguments no overload accepts, or calls a
+    /// function that is not immutable (owner decision 64).
     /// </summary>
     /// <param name="engineName">The engine's name, for the message.</param>
     /// <param name="declaration">The database's declaration.</param>
+    /// <param name="functions">The engine's frozen function catalog (phase 2).</param>
+    /// <param name="parserOptions">The engine's parser options, which its DDL will parse the CHECK with.</param>
     /// <returns>The compiled declaration.</returns>
     /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>COHSQLP001</c>).</exception>
-    internal static SqlDeclaredDatabase Compile(string engineName, SqlDatabaseBuilder declaration)
+    internal static SqlDeclaredDatabase Compile(string engineName, SqlDatabaseBuilder declaration, SqlFunctionCatalog functions,
+        SqlQueryParserOptions parserOptions)
     {
         SqlCompiledSchema? compiled = null;
+        Collation collation = declaration.DefaultCollation ?? Collation.Binary;
         if (declaration.DeclaredSchema is { } schema)
         {
             try
@@ -76,11 +82,20 @@ internal sealed class SqlDeclaredDatabase
             {
                 throw Refuse(engineName, declaration.Name, $"its schema declares {unsupported}.", inner: null);
             }
+
+            try
+            {
+                SqlSchemaProvisioner.BindDeclaredChecks(compiled, collation, new SqlFunctionEnvironment(functions, declaration.Name), parserOptions);
+            }
+            catch (DatabaseException invalid)
+            {
+                throw Refuse(engineName, declaration.Name, invalid.Message, invalid);
+            }
         }
 
         return new SqlDeclaredDatabase(
             declaration.Name,
-            declaration.DefaultCollation ?? Collation.Binary,
+            collation,
             declaration.Provisioning,
             compiled);
     }
@@ -112,14 +127,26 @@ internal sealed class SqlDeclaredDatabase
                 "persisted in it and cannot change: declare the collation the database has, or move its data to a new database.");
         }
 
-        if (Schema is null)
+        if (Schema is not null)
         {
-            return;
+            _result = Mode == SqlProvisioningMode.Verify
+                ? await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false)
+                : await database.ApplySchemaAsync(Schema, cancellationToken).ConfigureAwait(false);
         }
 
-        _result = Mode == SqlProvisioningMode.Verify
-            ? await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false)
-            : await database.ApplySchemaAsync(Schema, cancellationToken).ConfigureAwait(false);
+        // Step 6 (owner decision 65): every persisted definition binds to the engine's catalog. A
+        // CHECK that calls a function this engine does not register opens, and fails each write;
+        // for a database the engine declares, the application that declares it removed the
+        // function, so its build fails before it accepts work.
+        if (database.Definitions.FindUnresolved() is { } unresolved)
+        {
+            throw new SqlSchemaMigrationException(
+                $"{SqlEvaluationException.UnregisteredFunctionCode}: SQL engine '{engine.Name}', database '{Name}': {unresolved.Describe()}. " +
+                "The engine declares this database, so its build fails before the engine accepts work: register the function on the " +
+                "engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint through an engine that does not declare " +
+                "the database.",
+                SqlEvaluationException.UnregisteredFunction(unresolved));
+        }
     }
 
     private async ValueTask<SqlDatabase> OpenOrCreateAsync(SqlDatabaseEngine engine, CancellationToken cancellationToken)
