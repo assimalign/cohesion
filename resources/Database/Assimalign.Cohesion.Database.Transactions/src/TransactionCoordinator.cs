@@ -812,9 +812,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
     /// aborted writer whose undo previously failed, then prunes versions below
-    /// the safe bound — the minimum snapshot floor of every open transaction
-    /// (a long-running snapshot pins its view), or the manager's oldest-active
-    /// bound when idle.
+    /// the safe bound — the minimum snapshot floor of every active transaction
+    /// (a long-running snapshot pins its view), or the next sequence when idle.
     /// </summary>
     /// <param name="cancellationToken">
     /// Cancels the pass between writers and prune batches; a rolled-back writer's
@@ -892,17 +891,24 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Computes the prune bound no live or future snapshot can see below: the
-    /// minimum <see cref="TransactionSnapshot.Minimum"/> across open
-    /// transactions, or <see cref="TransactionManager.OldestActive"/> when
-    /// none are open. The manager's bound alone is NOT safe under load: a live
-    /// snapshot can hold a <em>lower</em> minimum than the oldest active
-    /// sequence (it captured while an older, since-committed transaction was
-    /// still in flight) and must keep seeing versions that transaction's
-    /// tombstones would otherwise free.
+    /// manager's <see cref="TransactionManager.PruneBound"/>, the minimum of every
+    /// active sequence and of every active transaction's begin-snapshot
+    /// <see cref="TransactionSnapshot.Minimum"/>, taken atomically with
+    /// <see cref="TransactionManager.BeginAsync"/>. The oldest active sequence alone
+    /// is NOT safe under load: a live snapshot can hold a <em>lower</em> minimum
+    /// (it captured while an older, since-committed transaction was still in
+    /// flight) and must keep seeing versions that transaction's tombstones would
+    /// otherwise free.
     /// </summary>
+    /// <remarks>
+    /// The open transactions this coordinator tracks are not enough on their own: one
+    /// joins them only after the manager began it, and a pass in between would prune
+    /// below its snapshot's minimum (#1342 review). They are still folded in, which
+    /// covers one the manager already ended while its statement still reads.
+    /// </remarks>
     private TransactionSequence GetSafePruneBound()
     {
-        var bound = _manager.OldestActive;
+        var bound = _manager.PruneBound;
 
         // After a reopen the fresh manager's idle bound trails the storage's
         // sequence namespace; the recovered floor is a proven ceiling over

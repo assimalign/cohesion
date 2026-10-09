@@ -265,9 +265,15 @@ public sealed class TransactionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the oldest transaction sequence still active, below which every
-    /// version is decided and version chains may be pruned.
+    /// Gets the oldest transaction sequence still active, below which every version is decided.
     /// </summary>
+    /// <remarks>
+    /// This is not a safe prune bound on its own: a snapshot can hold a lower
+    /// <see cref="TransactionSnapshot.Minimum"/> than every active sequence, because it was
+    /// captured while an older transaction, since ended, was still in flight, and it must keep
+    /// seeing the versions that transaction's tombstones would otherwise free. The version purge
+    /// prunes below <see cref="PruneBound"/>.
+    /// </remarks>
     public TransactionSequence OldestActive
     {
         get
@@ -289,6 +295,58 @@ public sealed class TransactionManager : IAsyncDisposable
                 }
 
                 return new TransactionSequence(oldest);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the bound below which no snapshot of an active transaction, and no future snapshot,
+    /// can see a version: the lowest of every active transaction's sequence and the
+    /// <see cref="TransactionSnapshot.Minimum"/> of the snapshot it began with, or the next
+    /// sequence when none is active.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is computed under the lock that <see cref="BeginAsync"/> holds while it assigns a
+    /// sequence, captures the snapshot and enters the active table, so it covers a transaction
+    /// from the moment its snapshot exists. A bound that read only <see cref="OldestActive"/> and
+    /// left the snapshot minimums to a later registration missed a transaction begun in between:
+    /// a purge in that window reclaimed a version its snapshot still saw, and the version read as
+    /// absent (#1342 review). A future snapshot's minimum is at or above the bound, because every
+    /// sequence it can find in flight is active now or assigned later.
+    /// </para>
+    /// <para>
+    /// The begin snapshot, not the current one, is what covers a read-committed transaction: its
+    /// statement views pin snapshots the manager does not track, and each of them has a minimum at
+    /// or above the begin snapshot's (<see cref="TransactionContext.BeginSnapshot"/>).
+    /// PostgreSQL's horizon is the same minimum, over every backend's xid and xmin read under the
+    /// proc-array lock (<c>src/backend/storage/ipc/procarray.c:1731-1750</c>, <c>ComputeXidHorizons</c>).
+    /// </para>
+    /// </remarks>
+    internal TransactionSequence PruneBound
+    {
+        get
+        {
+            lock (_sync)
+            {
+                var bound = new TransactionSequence(_lastSequence + 1);
+
+                foreach (var (sequence, context) in _active)
+                {
+                    if (sequence < bound.Value)
+                    {
+                        bound = new TransactionSequence(sequence);
+                    }
+
+                    var minimum = context.BeginSnapshot.Minimum;
+
+                    if (minimum < bound)
+                    {
+                        bound = minimum;
+                    }
+                }
+
+                return bound;
             }
         }
     }

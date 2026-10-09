@@ -97,6 +97,16 @@ public sealed class TransactionContext
     internal TransactionManager Manager => _manager;
 
     /// <summary>
+    /// Gets the snapshot fixed when the manager began the transaction (a statement view's pinned
+    /// snapshot). Every snapshot the transaction captures later, and every statement view pinned
+    /// from it, has a <see cref="TransactionSnapshot.Minimum"/> at or above this one's: a sequence
+    /// active then is still active or has ended, and one assigned since is higher than the
+    /// transaction's own. The manager's prune bound reads it, so a read-committed transaction's
+    /// statement views stay covered while their transaction is active.
+    /// </summary>
+    internal TransactionSnapshot BeginSnapshot => _beginSnapshot;
+
+    /// <summary>
     /// Gets whether this context is a statement view (<see cref="PinStatementSnapshot"/>) rather
     /// than the context the manager began. A manager ends only its own contexts, never a view.
     /// </summary>

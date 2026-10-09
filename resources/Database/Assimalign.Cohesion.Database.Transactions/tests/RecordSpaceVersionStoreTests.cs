@@ -330,6 +330,87 @@ public class RecordSpaceVersionStoreTests
         await coordinator.RollbackAsync(writer, CancellationToken.None);
     }
 
+    /// <summary>
+    /// A transaction the manager has begun is covered by the prune bound from the moment its
+    /// snapshot exists. Before the fix the bound started from the oldest active sequence and was
+    /// lowered only by the coordinator's open transactions, which a new transaction joins after the
+    /// manager began it: a purge in between reclaimed a version the new snapshot still saw. The
+    /// reader here is begun on the manager alone, which is that window's state, held open.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a snapshot the manager began, not yet tracked by the coordinator, keeps the version it sees")]
+    public async Task Prune_SnapshotBegunOnTheManagerAlone_ShouldKeepTheVersionItSees()
+    {
+        // Arrange: a version tombstoned by a writer still in flight when the reader begins, then
+        // the writer commits.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        ulong packed = await TombstoneOneVersion(storage, coordinator, deleter);
+        var reader = await coordinator.Manager.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+
+        // Act
+        long pruned = coordinator.RunVersionPurgePass(CancellationToken.None);
+        var seen = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, reader.Snapshot);
+        await coordinator.Manager.CommitAsync(reader, CancellationToken.None);
+        long prunedAfterTheReader = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert: the reader saw the deleter in flight, so the version stayed until it ended.
+        reader.Snapshot.Minimum.ShouldBe(deleter.Sequence);
+        pruned.ShouldBe(0);
+        seen.HasValue.ShouldBeTrue();
+        prunedAfterTheReader.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A read-committed statement pins a snapshot the manager does not track, and the transaction's
+    /// own snapshot moves on with every access. Before the fix the bound read only the latter, so a
+    /// purge during the statement reclaimed a version its pinned snapshot still saw.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a read-committed statement's pinned snapshot keeps the version it sees")]
+    public async Task Prune_ReadCommittedStatementView_ShouldKeepTheVersionItsSnapshotSees()
+    {
+        // Arrange: the statement pins its snapshot while the deleter is in flight; the deleter
+        // then commits, so the transaction's own snapshot no longer sees the version.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        ulong packed = await TombstoneOneVersion(storage, coordinator, deleter);
+        var reader = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+        var statement = reader.PinStatementSnapshot();
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+
+        // Act
+        long pruned = coordinator.RunVersionPurgePass(CancellationToken.None);
+        var seen = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, statement.Snapshot);
+        var seenByTheTransaction = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, reader.Snapshot);
+        await coordinator.CommitAsync(reader, CancellationToken.None);
+        long prunedAfterTheReader = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        statement.Snapshot.Minimum.ShouldBe(deleter.Sequence);
+        pruned.ShouldBe(0);
+        seen.HasValue.ShouldBeTrue();
+        seenByTheTransaction.HasValue.ShouldBeFalse();
+        prunedAfterTheReader.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// Writes one version, visible to every snapshot, that <paramref name="deleter"/> tombstones,
+    /// and returns its packed location.
+    /// </summary>
+    private static async Task<ulong> TombstoneOneVersion(RecordStorage storage, TransactionCoordinator coordinator, TransactionContext deleter)
+    {
+        (PageId PageId, int SlotIndex) location = default;
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            location = storage.Insert(bracket, Stamped(TransactionSequence.None, deleter.Sequence, 5));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, CancellationToken.None);
+        return storage.PackLocation(location.PageId, location.SlotIndex);
+    }
+
     private static byte[] Malform(RecordStorage storage, (PageId PageId, int SlotIndex) location)
     {
         using var handle = storage.PageManager.GetPage(location.PageId);

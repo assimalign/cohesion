@@ -95,8 +95,11 @@ stable storage; only then does it leave the table and release its locks as a set
 commit whose record cannot be written aborts, ending the transaction the way a
 rollback does (state `Faulted`; see "Ending a transaction" below), and surfaces
 `TransactionAbortedException`. A commit whose record was written but whose durable
-flush failed is different, and is described next. `OldestActive` is the
-pruning bound: `min(active)` or `lastAssigned + 1` when idle. A manager rejects a
+flush failed is different, and is described next. `OldestActive` is
+`min(active)`, or `lastAssigned + 1` when idle. It is not a pruning bound on its own: the
+internal `PruneBound` also takes the minimum of every active transaction's begin snapshot,
+under the lock the begin holds while it captures that snapshot ("Shared per-database
+composition", below). A manager rejects a
 context begun on a different manager instance (identity check, not just type check).
 
 ### A commit record that was written but not made durable
@@ -475,7 +478,7 @@ work items under #862). The integration kept this package exactly as shaped:
   timer (#910): it retries the undo of rolled-back writers whose inline undo
   failed, releasing each writer once its undo completes (#1226, "Ending a
   transaction" above), and `PruneAsync` below the safe snapshot bound — the minimum
-  snapshot floor across open transactions, not `OldestActive` alone, which
+  snapshot floor across active transactions, not `OldestActive` alone, which
   can trail a live snapshot's view (see the Sql DESIGN.md for the recorded
   bound decision). With that, all four §3.8 steps are implemented.
 
@@ -764,10 +767,28 @@ journal it reads is a `StorageJournal` (the `IStorageJournal` interface, and wit
 `ReadAll` fallback for custom journals, is gone). Only sequence classification survives
 iteration; physical page-image payloads are not retained.
 
-The safe prune bound starts at `max(manager.OldestActive, recoveredSequenceFloor)`
+The safe prune bound starts at `max(manager.PruneBound, recoveredSequenceFloor)`
 and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
 while an older writer was active can retain a floor below the current oldest
-active transaction, so using only the manager's bound would reclaim visible data.
+active transaction, so using only the oldest active sequence would reclaim visible data.
+`PruneBound` is the minimum of every active sequence and every active transaction's
+begin-snapshot `Minimum`, read under the manager lock that `BeginAsync` holds while it
+assigns the sequence, captures the snapshot and enters the active table, so it covers a
+transaction from the moment its snapshot exists. The bound used to start from
+`OldestActive` and take snapshot floors only from the coordinator's open contexts, which a
+transaction joins after the manager's begin returns. A purge pass in that window pruned
+below the new snapshot's floor: the reader then found neither the reclaimed version nor its
+successor, whose writer it saw in flight, and read an existing record as absent. An
+adversarial probe (six readers looking documents up, one writer, a purge loop, 20 seconds)
+read 121 of 5.7 million existing documents as absent with the old bound and none of about
+four million, in each of two runs, with this one
+(`Prune_SnapshotBegunOnTheManagerAlone_ShouldKeepTheVersionItSees` reproduces the window's
+state deterministically). The begin snapshot, rather than the current one, is what covers a
+read-committed transaction: its `Snapshot` is captured afresh on every access, but a statement
+view it pinned (`PinStatementSnapshot`) keeps an older floor the manager does not track, and
+every such floor is at or above the begin snapshot's. A read-committed transaction therefore
+holds the bound at its begin-time floor until it ends, which is stricter than PostgreSQL's
+per-statement `xmin` and is the price of not tracking statement views.
 The purge pass retries failed abort undo before pruning, exactly as before. A retry that
 fails again no longer ends the pass: the pass still prunes, and rethrows the retry's
 failure at its end. A writer still deferred stays in the active table, so the bound never
