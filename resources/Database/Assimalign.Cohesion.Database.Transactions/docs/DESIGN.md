@@ -40,7 +40,10 @@ interface since phase 2 of the concrete-types program
   transaction's id, sequence, isolation level and state, and fixes the snapshot at the call.
   Documents, Graph and Blob pin one per read-committed operation, so every metadata lookup and
   every chunk read of the statement makes one visibility decision; each used to carry an
-  identical private decorator for it. The view keys brackets and stamps by the shared sequence,
+  identical private decorator for it. Sql and KeyValuePair take no view: their statement
+  context captures the snapshot once and the statement runs under the transaction's own
+  context, because phase two must re-read that context's fresh snapshot where a write waited
+  for a lock (a Sql cascade's index deletes, #1363 review). The view keys brackets and stamps by the shared sequence,
   and a manager refuses to commit or roll back a view. The end claim and the apply admission
   live on the transaction's own context only; a view forwards them, so an apply admitted
   through a view is one the transaction's end waits for.
@@ -404,6 +407,22 @@ requests with `TransactionAbortedException` and `TryAcquire` returns false, exce
 resource it already holds in a mode at least as strong, which changes nothing for anyone
 else. No public member was added for it.
 
+**Release visits only the owner's resources (#1363 review).** Beside the table, the lock
+manager lists every resource each owner was granted or queued for, and `ReleaseAll` and
+`AbandonPending` walk that list instead of the whole table. Waking waiters only there loses
+nothing: a grant depends on the modes held, never on the queue, so no waiter elsewhere becomes
+grantable when an owner leaves. Before, every transaction end enumerated the table under the
+lock manager's lock, so its cost grew with every other transaction's locks and with the
+table's high-water mark (a dictionary enumerates every slot it ever used): after one
+transaction deleted 200,000 keys or rows, every later end paid for 200,000 slots with the table
+empty. An auto-commit KeyValuePair `GET` took 158 µs and a Sql primary-key seek 321 µs then,
+and 2.1 and 16 µs with the owner's list (in-memory engine, Release, four alternating process
+pairs pinned to the same cores); with an empty history the two are equal within noise. A resource stays
+listed after the owner's wait for it was canceled; the release then finds no grant or request
+of the owner there. PostgreSQL's `LockReleaseAll` likewise walks the backend's own lock table
+and proc-lock lists, never the shared table (`src/backend/storage/lmgr/lock.c:2338`, `:2377`,
+`:2511-2540`).
+
 **One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
 internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal
 `DefaultLockManager` it fronted are gone, so every manager has `AbandonPending` (before, a
@@ -517,7 +536,12 @@ can leave stale ledger entries; they stay harmless because the store reads a
 ledger location with `Storage.TryReadRecord`, which reports a reclaimed location
 (a deleted or reverted slot, a freed page, a page reallocated as a non-data page)
 as nothing to do, and the stamp rechecks reject a location another writer reused.
-Committed tombstones enter the prunable set. Pruning requires
+Committed tombstones enter the prunable set. Only committed writers enter it, so a
+rollback searches the set for the writer's tombstones only when the writer has a
+ledger: a transaction that wrote nothing, such as a read-committed statement's
+snapshot pin, ends without a scan of every tombstone the purge has not reclaimed
+yet, which cost each pin's end time in proportion to that backlog (#1363 review).
+Pruning requires
 `deleter < safeBound` and rechecks the current deleter before deleting. Index
 undo stays in recorded order, including its original accounting semantics.
 
@@ -786,13 +810,36 @@ four million, in each of two runs, with this one
 state deterministically). A read-committed transaction adds only its sequence: its
 `Snapshot` is captured afresh on every access, so between statements it holds the bound no
 further back than itself, as a PostgreSQL backend resets its `xmin` once it holds no snapshot
-(`src/backend/utils/time/snapmgr.c:937-955`). A read-committed statement view
-(`PinStatementSnapshot`) keeps the floor of the moment it was pinned, which the manager does
-not track, so a statement that must keep it while older writers commit pins it with a
-snapshot transaction of its own, begun before the view: the Documents, Graph and Blob
-operations do (`BlobReadCommittedTests` holds both halves: the pin keeps the version while
-the stream is open, and the next pass reclaims it once the stream ends, with the
-read-committed transaction still active).
+(`src/backend/utils/time/snapmgr.c:937-955`). A read-committed statement's snapshot keeps the
+floor of the moment it was captured, which the manager does not track: a statement view
+(`PinStatementSnapshot`) in the Documents, Graph and Blob operations, the snapshot the
+statement context captures once in Sql statements and KeyValuePair commands. So every such
+statement pins its floor with a snapshot transaction of its own, begun before the capture and
+rolled back when the statement ends, on every path. Beginning the pin first is what makes it
+sufficient: every sequence active at the capture and older than the pin was already active at
+the pin's, so the pin's floor is at or below the statement's, and at or below that of any
+snapshot the transaction's own context captures later in the statement. The pin only holds the
+bound; the statement does not read through it. A
+PostgreSQL backend keeps a running statement's floor the same way: `SnapshotResetXmin` leaves
+the backend's `xmin` alone while a snapshot is active and otherwise holds it at the oldest
+registered snapshot (`snapmgr.c:941-954`), so the horizon cannot pass a statement still
+reading. `BlobReadCommittedTests` holds both halves: the pin
+keeps the version while the stream is open, and the next pass reclaims it once the stream
+ends, with the read-committed transaction still active.
+
+Sql and KeyValuePair took no pin until #1363, and lost rows exactly this way: a writer that
+began before the reader's transaction was in flight when the statement captured its snapshot,
+committed while the statement read, and a purge pass then reclaimed the versions it had
+tombstoned before the statement reached them. An adversarial probe (one statement per
+read-committed transaction from four readers, two writers replacing and deleting rows in
+snapshot transactions held open for up to two milliseconds, a purge loop) lost 6,332, 5,406 and
+4,278 rows in 3,505, 3,062 and 2,411 of 32,000 to 37,000 Sql statements in three 30-second runs,
+all in scans and joins, and 2,149, 2,240 and 1,536 keys in 630, 668 and 434 KeyValuePair scans;
+point reads, whose window between capture and read is far shorter, lost one key in about 516,000
+and no row. With the purge loop stopped it lost none, and with the pin it lost none in two
+30-second runs of each model (about 60,000 Sql statements, 41,000 scans and 331,000 point reads)
+(`SqlReadCommittedSnapshotPinTests`, `KeyValueReadCommittedSnapshotPinTests`).
+
 The purge pass retries failed abort undo before pruning, exactly as before. A retry that
 fails again no longer ends the pass: the pass still prunes, and rethrows the retry's
 failure at its end. A writer still deferred stays in the active table, so the bound never
@@ -839,10 +886,11 @@ catalog: `docs/programs/DATABASE_EVENT_SOURCES_PLAN.md` §4.3). Every engine mod
 database's kernel through `TransactionCoordinator`, so the one source covers the transactions of
 all five engines. The explicit transaction a session runs is the root's
 (`Assimalign.Cohesion.Database`); the events here are the kernel transactions: one under each
-explicit transaction, one per autocommit statement, and, in Blob, Graph and Documents, one
-snapshot pin per statement of a `ReadCommitted` explicit transaction, which always ends rolled
-back (`BlobOperation`, `GraphOperation` and `DocumentOperation` begin it at `Snapshot` and end it
-with `RollbackAsync`). The same read in Sql or KeyValuePair ends as a commit. The conventions
+explicit transaction, one per autocommit statement, and, in every model, one snapshot pin per
+statement of a `ReadCommitted` explicit transaction, which always ends rolled back
+(`BlobOperation`, `GraphOperation`, `DocumentOperation`, `SqlDatabaseSession` and
+`KeyValueDatabaseSession` begin it at `Snapshot` and end it with `RollbackAsync`; Sql and
+KeyValuePair since #1363). The conventions
 every Database source shares (failure payloads, `Start`/`Stop` endings) are in the area's
 [`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
@@ -931,7 +979,7 @@ reads exact values.
 | `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync`); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
 | `transactions-per-second` | rate | the gauge's +1 |
 | `commits-per-second` | rate | the gauge's −1 of a context that ended `Committed` (an unconfirmed commit included) |
-| `rollbacks-per-second` | rate | the gauge's −1 of any other end: a rollback, an aborted commit, a disposal's abort, and the Blob, Graph and Documents snapshot pins of `ReadCommitted` statements, which always end rolled back (so this rate includes read traffic in those three models) |
+| `rollbacks-per-second` | rate | the gauge's −1 of any other end: a rollback, an aborted commit, a disposal's abort, and the snapshot pins of `ReadCommitted` statements, which always end rolled back (so this rate includes read traffic in every model; Sql and KeyValuePair since #1363) |
 | `total-deadlocks` | total | each deadlock victim (event 6) |
 | `lock-waits-per-second` | rate | each queued request (event 7) |
 

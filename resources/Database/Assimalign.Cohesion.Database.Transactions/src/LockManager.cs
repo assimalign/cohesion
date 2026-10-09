@@ -48,6 +48,15 @@ public sealed class LockManager
     };
 
     private readonly Dictionary<LockResource, LockEntry> _table = new();
+
+    // Every resource an owner was granted or queued for, so its release and AbandonPending visit
+    // only the owner's entries instead of enumerating the whole table, which cost every transaction
+    // end time in proportion to every other transaction's locks and to the table's high-water mark
+    // (#1363 review). PostgreSQL's LockReleaseAll walks the backend's own lock table and proc-lock
+    // lists the same way, never the shared table (src/backend/storage/lmgr/lock.c:2338, :2377,
+    // :2511-2540). A resource stays listed after a canceled wait; the release then finds no grant
+    // or request of the owner there.
+    private readonly Dictionary<ulong, HashSet<LockResource>> _owned = new();
     private readonly Dictionary<ulong, HashSet<ulong>> _waitFor = new();
 
     // Owners whose transaction ended while their grants stay held (AbandonPending), until
@@ -217,7 +226,7 @@ public sealed class LockManager
                     $"Transaction {owner} has ended; its request for {mode} on {resource} was refused.");
             }
 
-            if (TryGrantLocked(entry, owner.Value, mode))
+            if (TryGrantLocked(resource, entry, owner.Value, mode))
             {
                 return;
             }
@@ -235,6 +244,7 @@ public sealed class LockManager
             {
                 waiter = new Waiter(owner.Value, mode);
                 entry.Waiters.Add(waiter);
+                TrackLocked(owner.Value, resource);
             }
         }
 
@@ -307,7 +317,7 @@ public sealed class LockManager
                 return false;
             }
 
-            return TryGrantLocked(entry, owner.Value, mode);
+            return TryGrantLocked(resource, entry, owner.Value, mode);
         }
     }
 
@@ -353,7 +363,7 @@ public sealed class LockManager
     /// <param name="owner">The transaction whose locks are released.</param>
     internal void ReleaseAllUnfiltered(TransactionSequence owner)
     {
-        List<Waiter> granted = new();
+        List<Waiter>? granted = null;
         List<(LockResource Resource, Waiter Waiter)>? ended = null;
 
         lock (_sync)
@@ -361,56 +371,56 @@ public sealed class LockManager
             RemoveWaitEdgesLocked(owner.Value);
             _abandoned.Remove(owner.Value);
 
-            List<LockResource>? empty = null;
-
-            foreach (var (resource, entry) in _table)
+            // Only the owner's entries can change: a grant depends on the modes held, never on the
+            // queue, so no waiter elsewhere becomes grantable when this owner leaves.
+            if (_owned.Remove(owner.Value, out var resources))
             {
-                entry.Granted.Remove(owner.Value);
-
-                for (int i = entry.Waiters.Count - 1; i >= 0; i--)
+                foreach (var resource in resources)
                 {
-                    if (entry.Waiters[i].Owner == owner.Value)
+                    if (!_table.TryGetValue(resource, out var entry))
                     {
-                        (ended ??= new()).Add((resource, entry.Waiters[i]));
-                        entry.Waiters.RemoveAt(i);
+                        continue;
                     }
-                }
 
-                // Wake compatible waiters in FIFO order.
-                for (int i = 0; i < entry.Waiters.Count;)
-                {
-                    var waiter = entry.Waiters[i];
+                    entry.Granted.Remove(owner.Value);
 
-                    if (TryGrantLocked(entry, waiter.Owner, waiter.Mode))
+                    for (int i = entry.Waiters.Count - 1; i >= 0; i--)
                     {
-                        entry.Waiters.RemoveAt(i);
-                        RemoveWaitEdgesLocked(waiter.Owner);
-                        granted.Add(waiter);
+                        if (entry.Waiters[i].Owner == owner.Value)
+                        {
+                            (ended ??= new()).Add((resource, entry.Waiters[i]));
+                            entry.Waiters.RemoveAt(i);
+                        }
                     }
-                    else
+
+                    // Wake compatible waiters in FIFO order.
+                    for (int i = 0; i < entry.Waiters.Count;)
                     {
-                        i++;
+                        var waiter = entry.Waiters[i];
+
+                        if (TryGrantLocked(resource, entry, waiter.Owner, waiter.Mode))
+                        {
+                            entry.Waiters.RemoveAt(i);
+                            RemoveWaitEdgesLocked(waiter.Owner);
+                            (granted ??= new()).Add(waiter);
+                        }
+                        else
+                        {
+                            i++;
+                        }
                     }
-                }
 
-                if (entry.Granted.Count == 0 && entry.Waiters.Count == 0)
-                {
-                    (empty ??= new List<LockResource>()).Add(resource);
-                }
-            }
-
-            if (empty is not null)
-            {
-                foreach (var resource in empty)
-                {
-                    _table.Remove(resource);
+                    RemoveIfUnusedLocked(resource, entry);
                 }
             }
         }
 
-        foreach (var waiter in granted)
+        if (granted is not null)
         {
-            waiter.Completion.TrySetResult();
+            foreach (var waiter in granted)
+            {
+                waiter.Completion.TrySetResult();
+            }
         }
 
         FailEnded(owner, ended);
@@ -446,14 +456,22 @@ public sealed class LockManager
             _abandoned.Add(owner.Value);
             RemoveWaitEdgesLocked(owner.Value);
 
-            foreach (var (resource, entry) in _table)
+            if (_owned.TryGetValue(owner.Value, out var resources))
             {
-                for (int i = entry.Waiters.Count - 1; i >= 0; i--)
+                foreach (var resource in resources)
                 {
-                    if (entry.Waiters[i].Owner == owner.Value)
+                    if (!_table.TryGetValue(resource, out var entry))
                     {
-                        (ended ??= new()).Add((resource, entry.Waiters[i]));
-                        entry.Waiters.RemoveAt(i);
+                        continue;
+                    }
+
+                    for (int i = entry.Waiters.Count - 1; i >= 0; i--)
+                    {
+                        if (entry.Waiters[i].Owner == owner.Value)
+                        {
+                            (ended ??= new()).Add((resource, entry.Waiters[i]));
+                            entry.Waiters.RemoveAt(i);
+                        }
                     }
                 }
             }
@@ -523,9 +541,10 @@ public sealed class LockManager
 
     /// <summary>
     /// Grants when the requested mode is compatible with every mode held by other
-    /// owners (an owner's own grants never block it — upgrades are supported).
+    /// owners (an owner's own grants never block it — upgrades are supported). A first grant of
+    /// the resource to the owner lists it among the owner's resources.
     /// </summary>
-    private static bool TryGrantLocked(LockEntry entry, ulong owner, LockMode mode)
+    private bool TryGrantLocked(LockResource resource, LockEntry entry, ulong owner, LockMode mode)
     {
         foreach (var (holder, heldMode) in entry.Granted)
         {
@@ -551,9 +570,24 @@ public sealed class LockManager
         else
         {
             entry.Granted[owner] = mode;
+            TrackLocked(owner, resource);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Lists a resource the owner was granted or queued for, for its release.
+    /// </summary>
+    private void TrackLocked(ulong owner, LockResource resource)
+    {
+        if (!_owned.TryGetValue(owner, out var resources))
+        {
+            resources = new HashSet<LockResource>();
+            _owned[owner] = resources;
+        }
+
+        resources.Add(resource);
     }
 
     private static int Strength(LockMode mode) => mode switch

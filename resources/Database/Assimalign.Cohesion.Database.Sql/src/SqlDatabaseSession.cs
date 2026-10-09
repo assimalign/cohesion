@@ -320,12 +320,20 @@ public sealed class SqlDatabaseSession : DatabaseSession
                         "DDL requires auto-commit mode because the catalog does not enlist in session transactions.");
                 }
 
-                var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
-                    _database.Name.ToString(), transaction.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
-                _lastStatementMetrics = scope.Metrics;
+                TransactionContext? snapshotPin = null;
 
                 try
                 {
+                    snapshotPin = await BeginSnapshotPinAsync(transaction.Context, cancellationToken).ConfigureAwait(false);
+
+                    // The scope captures the statement's snapshot after the pin began, so the pin's
+                    // floor is at or below the statement's (#1363). It runs under the transaction's own
+                    // context, not a pinned view: phase two re-reads that context's snapshot where it
+                    // must see writers that committed while the statement waited for a lock (a
+                    // cascade's index deletes).
+                    var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
+                        _database.Name.ToString(), transaction.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
+                    _lastStatementMetrics = scope.Metrics;
                     return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
                 catch (TransactionDeadlockException exception)
@@ -338,6 +346,10 @@ public sealed class SqlDatabaseSession : DatabaseSession
                 catch (TransactionAbortedException exception)
                 {
                     throw new DatabaseTransactionAbortedException(exception.Message, exception);
+                }
+                finally
+                {
+                    await ReleaseSnapshotPinAsync(snapshotPin).ConfigureAwait(false);
                 }
             }
             finally
@@ -387,6 +399,53 @@ public sealed class SqlDatabaseSession : DatabaseSession
         {
             await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Begins the snapshot pin of a statement in a <see cref="IsolationLevel.ReadCommitted"/>
+    /// transaction: a snapshot transaction of its own, begun before the statement captures its
+    /// snapshot, as the Documents, Graph and Blob operations begin theirs.
+    /// </summary>
+    /// <param name="transaction">The explicit transaction's context.</param>
+    /// <param name="cancellationToken">Observed by the begin.</param>
+    /// <returns>The pin, or null when the transaction's snapshot is fixed at its begin.</returns>
+    /// <remarks>
+    /// <para>
+    /// The version purge reclaims below the transaction manager's prune bound, to which a
+    /// read-committed transaction adds only its own sequence: its snapshot is captured afresh on
+    /// every access. The statement's snapshot keeps the floor of the moment it was captured, which
+    /// can be lower, because a writer that began before this transaction was still in flight then.
+    /// Once that writer commits, nothing but this pin keeps the purge from reclaiming the versions
+    /// it tombstoned while the statement still reads them, which would drop those rows from the
+    /// statement's result. The pin's snapshot is captured first, so its floor is at or below the
+    /// statement's, and at or below that of any snapshot the transaction's context captures later
+    /// in the statement (#1363).
+    /// </para>
+    /// <para>
+    /// The pin only holds the bound. The statement still runs under the transaction's own context,
+    /// never a <see cref="TransactionContext.PinStatementSnapshot"/> view: a cascade that waited
+    /// for a child row's writer removes the child's index entries through that context's fresh
+    /// snapshot, which sees the writer's committed version, where the statement's older snapshot
+    /// matches nothing and leaves the deleted child's unique entry live.
+    /// </para>
+    /// </remarks>
+    private async ValueTask<TransactionContext?> BeginSnapshotPinAsync(TransactionContext transaction, CancellationToken cancellationToken)
+        => transaction.IsolationLevel == IsolationLevel.ReadCommitted
+            ? await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false)
+            : null;
+
+    /// <summary>
+    /// Ends a statement's snapshot pin, on every path out of the statement. It always ends rolled
+    /// back, with no token: it wrote nothing. On an offline database it touches nothing (#1243),
+    /// and the reopen's recovery aborts it, as it does the auto-commit context below.
+    /// </summary>
+    /// <param name="snapshotPin">The pin, or null when the statement has none.</param>
+    private async ValueTask ReleaseSnapshotPinAsync(TransactionContext? snapshotPin)
+    {
+        if (snapshotPin?.State == TransactionState.Active && !_database.IsOffline)
+        {
+            await _coordinator.RollbackAsync(snapshotPin, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

@@ -259,8 +259,8 @@ Keywords: `Transactions = 0x1`, `Locks = 0x2`, `Checkpoints = 0x4`, `Purge = 0x8
 Counters: `current-transactions` (gauge; `_openContexts` add `TransactionCoordinator.cs:361`, the
 removing call in `UntrackEnded` `:948`, which `BeginAsync` also runs for a context the manager's
 disposal already ended), `transactions-per-second`, `commits-per-second`, `rollbacks-per-second`
-(rollbacks and aborts, and the Blob, Graph and Documents snapshot pins of `ReadCommitted`
-statements, which always end rolled back), `total-deadlocks`, `lock-waits-per-second`. The begin
+(rollbacks and aborts, and every model's snapshot pins of `ReadCommitted` statements, Sql and
+KeyValuePair since #1363, which always end rolled back), `total-deadlocks`, `lock-waits-per-second`. The begin
 and end paths already take the manager's lock and append a journal record, so the `Interlocked`
 update is noise beside them; the transaction counters move once at a kernel transaction's begin
 and once at its end, so once per autocommit statement, and never per row or per frame.

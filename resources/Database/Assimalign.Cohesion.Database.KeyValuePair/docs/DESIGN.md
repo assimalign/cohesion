@@ -125,7 +125,10 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   `Database.Transactions.TransactionCoordinator` (manager + lock manager + record-space
   version store + gated journal-bound log, one sequence namespace with storage),
   explicit transactions and auto-commit both ride manager contexts, `Snapshot`
-  default / `ReadCommitted` per-command refresh / `Serializable` rejected,
+  default / `ReadCommitted` per-command refresh (each command captures its snapshot
+  after the session begins a snapshot pin that holds that capture's floor until the
+  command ends; see
+  [Read-committed command pins](#read-committed-command-pins-1363)) / `Serializable` rejected,
   rollback is logical through the ledger, recovery classifies + scrubs record
   space and primary index at open. Kernel aborts are wrapped in the root's
   exceptions at the session boundary (the area error policy). A failed command
@@ -231,6 +234,62 @@ a different contract from Graph, Documents and Blob, deliberately:
 
 `KeyValueTransactionFailureTests` covers the in-process cases, and `KeyValueLifecycleTests` the
 transaction ending under a running command.
+
+## Read-committed command pins (#1363)
+
+A command in a `ReadCommitted` explicit transaction reads through the snapshot
+`KeyValueStatementContext` captures once when it starts. That snapshot's floor can sit below every
+active sequence: a writer that began before the reader's transaction was still in flight at the
+capture, so the command must keep seeing the versions that writer tombstones. The transaction
+manager's prune bound counts a read-committed transaction only at its own sequence
+([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md), the
+prune bound), so once that writer committed, nothing held the bound at the command's floor, and
+a purge pass reclaimed those versions while the command still had to read them:
+
+- a `SCAN` skipped the keys behind them;
+- a `PUT` or `DELETE` resolves its key through that snapshot after it waited for the key's lock,
+  so it found no version of a key that exists: a `DELETE` reported nothing to delete instead of
+  the older writer's change as a conflict (first-updater-wins), and a `PUT` conditional on an
+  etag reported a miss.
+
+`KeyValueDatabaseSession` therefore begins a snapshot transaction on the coordinator before it
+builds the command context, and rolls it back when the command ends, on every path: completion,
+a failed command, a conflict or deadlock, cancellation. Beginning the pin first makes its floor
+at or below the command's. The Documents, Graph and Blob operations and the Sql statements pin
+the same way; a snapshot transaction, and an auto-commit command (which runs at `Snapshot`),
+needs no pin, because the manager tracks its fixed snapshot. On an offline database the pin is
+left to the reopen's recovery. The pin only holds the bound: the command still runs under the
+transaction's own context, not a `TransactionContext.PinStatementSnapshot` view, as a Sql
+statement does (the Sql DESIGN.md's read-committed statement pins say why a view breaks a Sql
+cascade's index deletes).
+
+The probe that found it ran one command per read-committed transaction from four readers (a full
+scan of 400 keys, or eight point reads), two writers replacing and deleting keys in snapshot
+transactions held open for up to two milliseconds, and a purge loop. Three 30-second runs lost
+2,149, 2,240 and 1,536 keys in 630, 668 and 434 of 17,000 to 30,000 scans per run; point reads,
+whose window between capture and read is far shorter, lost one key in about 516,000. With the
+purge loop stopped it lost none; with the pin it lost none in two 30-second runs (about 41,000
+scans and 331,000 point reads).
+`KeyValueReadCommittedSnapshotPinTests` keeps the probe as a two-second guard
+(`COHESION_DATABASE_RC_PROBE_SECONDS` lengthens it) and reproduces the race deterministically with
+the `DELETE` above, held at the key's lock while the older writer commits and a purge pass runs.
+
+The pin costs a kernel begin and an abort record per read-committed command: about 1.5 to 2 µs
+on a `GET` of one key on the in-memory engine (Release, one process per run at high priority on
+four pinned cores, four alternating pairs, median of seven rounds of 20,000 reads; base 1.4 to
+3.2 µs, with the pin 3.2 to 5.3 µs). The first cut's pin also cost time in proportion to the
+database's history, because its rollback scanned every committed tombstone the purge had not
+reclaimed yet and the lock manager's release walked its whole table. With one earlier
+transaction's 50,000 or 200,000 deleted keys still unreclaimed, a read-committed `GET` took 60
+and 265 µs. A rollback now searches the tombstones only for a writer with a ledger, and a
+release visits only the owner's own locks
+([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md), the
+version store and the lock manager), so the same `GET` takes 3.5 and 3.2 µs; an auto-commit
+`GET`, which paid the lock-table walk before #1363 too (38 and 158 µs), takes 2.9 and 2.1 µs.
+Each pin also counts as a begun and a rolled-back kernel transaction in the transaction counters,
+as in Documents, Graph and Blob. Keeping pins out of those rates waits on #1351. A cheaper
+mechanism for all five models, a statement-snapshot registration in the transaction manager with
+no kernel transaction behind it, is a recorded follow-up.
 
 ## The text seam (docs/COMMANDS.md — the grammar contract)
 
