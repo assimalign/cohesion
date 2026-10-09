@@ -4,6 +4,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +14,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
@@ -471,7 +474,8 @@ public sealed class SqlDatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should allocate nothing on any write while nobody listens")]
     public async Task Writes_NoListener_ShouldAllocateNothing()
     {
-        // Arrange: a disabled source (a disposed listener leaves it enabled until a disable command).
+        // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
+        // disable below is redundant but harmless.
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = UniqueEngineName() });
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
@@ -507,6 +511,79 @@ public sealed class SqlDatabaseEventSourceTests
         log.SessionClosed(session, SqlDatabaseEventSource.CloseReason.Terminated, timestamp);
         log.SessionsAborted(engine, 1, TimeSpan.FromSeconds(1));
         return timestamp;
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should close a session whose peer reset its TCP connection with a transport reason, not a fault")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionClosed_PeerResetsTcpConnection_ShouldReportATransportReasonAndNoFault(bool whileServerWrites)
+    {
+        // Arrange: a real TCP listener; the in-memory driver cannot reset a connection.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName });
+        await engine.CreateDatabaseAsync(ServerTestHarness.DatabaseName);
+        TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
+        await server.StartAsync(TestTimeout.Token());
+
+        // Act: the peer completes its handshake, then resets the connection: while the session idles
+        // in its ready loop, or while the server's pong writes fill the socket buffers the peer
+        // never drains, so the reset fails a send the pump is blocked in.
+        using (Socket socket = await TcpResetPeer.ConnectReadyAsync(listener.EndPoint, ServerTestHarness.DatabaseName, TestTimeout.Token()))
+        {
+            Task? flood = whileServerWrites ? TcpResetPeer.FloodPingsAsync(socket, 4_000_000) : null;
+            if (flood is not null)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+
+            TcpResetPeer.Reset(socket);
+            if (flood is not null)
+            {
+                // Whether the kernel took the whole flood before the reset does not matter.
+                await Record.ExceptionAsync(() => flood);
+            }
+        }
+
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        var closed = await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault. The
+        // TCP driver reports a reset its receive sees as the stream's end, so an idle session
+        // closes as PeerClosed; a reset that fails a send closes it as TransportFailed.
+        string seen = string.Join("; ", recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventName + "(" + string.Join(", ", e.Payload!.Skip(1)) + ")"));
+        recorder.Events.Where(e => IsFor(e, 7, sessionId)).ShouldBeEmpty("The pump reported the reset as a fault: " + seen);
+        ((string)closed.Payload![1]!).ShouldBeOneOf(["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"], seen);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should close a session once and restore the gauge when its connection's disposal throws")]
+    public async Task SessionClosed_ConnectionDisposalThrows_ShouldStillCloseOnceAndRestoreTheGauge()
+    {
+        // Arrange: every accepted connection throws from its disposal.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var inner = new InMemoryConnectionListener();
+        var listener = new DisposeFailingConnectionListener(inner);
+        await using var harness = await ServerTestHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        long currentBefore = SqlDatabaseEventSource.Log.CurrentServerSessions;
+
+        // Act: a session that terminates cleanly, whose cleanup then meets the failing disposal.
+        await using (var client = new ProtocolTestClient(await inner.CreateFactory().ConnectAsync(inner.EndPoint, TestTimeout.Token())))
+        {
+            await client.HandshakeAsync();
+            await client.SendAsync(ProtocolMessageType.Terminate);
+            Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+            await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+            await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
+
+            // Assert: the session left the server once, whatever its disposal threw.
+            recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("Terminated");
+        }
+
+        SqlDatabaseEventSource.Log.CurrentServerSessions.ShouldBe(currentBefore);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
     private static string UniqueEngineName() => "sql-events-" + Guid.NewGuid().ToString("N");

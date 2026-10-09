@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -137,16 +138,14 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (OperationCanceledException)
         {
             // Aborted, connection closed, or stop signaled mid-frame.
-            _closeReason = GraphDatabaseEventSource.CloseReason.Canceled;
+            _closeReason = GraphDatabaseEventSource.CloseReason.Cancelled;
         }
-        catch (ConnectionAbortedException)
+        catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
-            _closeReason = GraphDatabaseEventSource.CloseReason.ConnectionAborted;
-        }
-        catch (IOException)
-        {
-            // The transport failed under the pump; nothing to report to the peer.
-            _closeReason = GraphDatabaseEventSource.CloseReason.TransportFailed;
+            // The transport failed under the pump: a peer that hung up or reset the connection, or
+            // the shutdown's abort. An expected outcome (plan D9), which SessionClosed's reason
+            // carries; nothing is reported to the peer.
+            _closeReason = reason;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -619,6 +618,25 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         GraphDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
         return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
     }
+
+    /// <summary>
+    /// Classifies a failure that reached the pump as the transport's, and names the close reason it
+    /// gives the session; null for anything else, which stays a fault. The four model servers carry
+    /// identical copies (plan D2). A reset reaches the pump as the TCP driver's raw
+    /// <see cref="SocketException"/> or a <see cref="ConnectionException"/>, neither of which is an
+    /// <see cref="IOException"/>; a stream that wraps one in an <see cref="IOException"/> is still
+    /// the transport's. A bare <see cref="IOException"/> is not: it can be the storage device's.
+    /// </summary>
+    /// <param name="exception">What reached the pump.</param>
+    /// <returns><c>ConnectionAborted</c>, <c>TransportFailed</c>, or null.</returns>
+    private static string? TransportCloseReason(Exception exception) => exception switch
+    {
+        ConnectionAbortedException => GraphDatabaseEventSource.CloseReason.ConnectionAborted,
+        ConnectionException => GraphDatabaseEventSource.CloseReason.TransportFailed,
+        SocketException => GraphDatabaseEventSource.CloseReason.TransportFailed,
+        IOException { InnerException: SocketException or ConnectionException } => GraphDatabaseEventSource.CloseReason.TransportFailed,
+        _ => null,
+    };
 
     private async ValueTask CleanupAsync()
     {

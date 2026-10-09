@@ -797,13 +797,27 @@ Blob servers write events 1-9 with the same ids, names and payloads from their o
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
-`ProtocolViolation`, `Canceled` (aborted, its connection closed, or the stop arrived mid-frame),
+`ProtocolViolation`, `Cancelled` (aborted, its connection closed, or the stop arrived mid-frame),
 `ConnectionAborted`, `TransportFailed`, `Faulted`, or `Unknown` (an out-of-memory failure, which
 the pump does not catch). The handshake refuses with `ProtocolViolation` a first frame that is
 not Startup and an answer that is not AuthenticateResponse, with `UnsupportedVersion`,
 `DatabaseNotFound` and `AuthenticationFailed`, and with `Unavailable` an offline database
 (#1243). `SessionFaulted` is the catch-all that used to leave only an internal-error frame; the
 handshake timeout and the session-close failure were silent before.
+
+**A peer that hangs up is not a fault** (plan D9). A transport failure from the peer's side
+reaches the pump as the TCP driver's raw `SocketException`, a `ConnectionException`
+(`ConnectionResetException`, `ConnectionAbortedException`), or an `IOException` that wraps one.
+The four servers classify it with one rule, in identical private copies (`TransportCloseReason`,
+plan D2), and close the session with `TransportFailed` or `ConnectionAborted`, writing no
+`SessionFaulted` and no error frame. A bare `IOException` stays a fault: it can be the storage
+device's. The TCP driver reports a reset its receive sees as the end of the stream, so a session
+idle in its ready loop that the peer resets closes as `PeerClosed`; a reset that fails a send the
+pump is blocked in raises the raw `SocketException`, which was a `SessionFaulted` (Error) before
+this rule. **A session leaves the server once**: its cleanup releases its resources in a `try`
+and completes the session with the server in the `finally`, so a disposal that throws, which
+still propagates, neither leaves `current-server-sessions` raised nor skips `SessionClosed`, and
+its `MaxSessions` slot is freed.
 
 Counters, maintained whether or not anyone listens and updated on accept, rejection and close
 only, never per frame or row: `current-server-sessions` (gauge: up when the accept loop
@@ -819,5 +833,7 @@ a payload before authentication, and a frame may hold 16 MB, so the handshake's 
 manifest, the gauge's return, the counters, that no write allocates while nobody listens, and
 events 1-7 and 9 once each with their payloads over real sessions on the in-memory driver: every
 handshake refusal code, a timeout at a read and inside the authenticator, and the bound on an
-oversized startup. `SessionCleanupFailed` is covered only by the allocation check: no test double
-makes a session's resource fail to dispose yet.
+oversized startup; a peer that resets its TCP connection while its session idles and while the
+server writes (a transport reason, never `SessionFaulted`); and a connection whose disposal throws
+(`SessionClosed` once, the gauge restored). `SessionCleanupFailed` is covered only by the
+allocation check: no test double makes the session's own close fail yet.

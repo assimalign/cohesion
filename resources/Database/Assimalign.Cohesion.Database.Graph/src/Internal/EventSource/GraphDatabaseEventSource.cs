@@ -35,8 +35,8 @@ internal sealed class GraphDatabaseEventSource : EventSource
 {
     public static readonly GraphDatabaseEventSource Log = new();
 
-    // The longest name (database, principal) and text (a refusal's detail, a violation, a parse
-    // diagnostic) a payload carries. Each can quote what a peer sent, before authentication too,
+    // The longest name (database, principal) and text (a refusal's detail, a violation) a payload
+    // carries. Each can quote what a peer sent, before authentication too,
     // and a frame may hold 16 MB, so a longer value is cut and marked (event-source.md rule 11:
     // bounded payloads).
     private const int MaxNameLength = 256;
@@ -89,7 +89,7 @@ internal sealed class GraphDatabaseEventSource : EventSource
         public const string ProtocolViolation = "ProtocolViolation";
 
         /// <summary>The session was aborted, its connection closed, or the stop arrived mid-frame.</summary>
-        public const string Canceled = "Canceled";
+        public const string Cancelled = "Cancelled";
 
         /// <summary>The connection was aborted under the session.</summary>
         public const string ConnectionAborted = "ConnectionAborted";
@@ -299,13 +299,14 @@ internal sealed class GraphDatabaseEventSource : EventSource
     /// closes; written only for a recovery whose start was written.
     /// </summary>
     /// <param name="database">The database.</param>
+    /// <param name="succeeded">False when the recovery threw: the stop is written with <c>Error</c>.</param>
     /// <param name="startTimestamp">The timestamp <see cref="IndexRecoveryStart(DatabaseName, int)"/> returned.</param>
     [NonEvent]
-    public void IndexRecoveryStop(DatabaseName database, long startTimestamp)
+    public void IndexRecoveryStop(DatabaseName database, bool succeeded, long startTimestamp)
     {
         if (startTimestamp != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            IndexRecoveryStop(database.ToString(), Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            IndexRecoveryStop(database.ToString(), succeeded ? "Success" : "Error", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
 
@@ -315,13 +316,21 @@ internal sealed class GraphDatabaseEventSource : EventSource
     /// </summary>
     /// <param name="session">The server session that received the statement.</param>
     /// <param name="database">The session's database.</param>
-    /// <param name="exception">The parse or validation failure; it propagates unchanged. Its message is written cut to 1024 characters.</param>
+    /// <param name="exception">
+    /// The parse or validation failure; it propagates unchanged. Written by its code (an offline
+    /// refusal's; empty otherwise) and its type only: a parse error quotes the token it stopped at
+    /// (the area's failure rule).
+    /// </param>
     [NonEvent]
     public void StatementParseFailed(DatabaseServerSession session, DatabaseName database, Exception exception)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            StatementParseFailed(session.Id, database.ToString(), exception.GetType().FullName ?? exception.GetType().Name, Bound(exception.Message, MaxTextLength));
+            StatementParseFailed(
+                session.Id,
+                database.ToString(),
+                exception is DatabaseOfflineException offline ? offline.Code : string.Empty,
+                exception.GetType().FullName ?? exception.GetType().Name);
         }
     }
 
@@ -365,13 +374,13 @@ internal sealed class GraphDatabaseEventSource : EventSource
     private void IndexRecoveryStart(string database, int abortedWriters)
         => WriteEvent(10, database, abortedWriters);
 
-    [Event(11, Level = EventLevel.Informational, Message = "Database '{0}' ended its index recovery after {1} ms.")]
-    private void IndexRecoveryStop(string database, double durationMilliseconds)
-        => WriteEvent(11, database, durationMilliseconds);
+    [Event(11, Level = EventLevel.Informational, Message = "Database '{0}' ended its index recovery {1} after {2} ms.")]
+    private void IndexRecoveryStop(string database, string status, double durationMilliseconds)
+        => WriteEvent(11, database, status, durationMilliseconds);
 
-    [Event(12, Level = EventLevel.Error, Message = "A statement session {0} received for database '{1}' failed to parse: {2}: {3}")]
-    private void StatementParseFailed(Guid sessionId, string database, string exceptionType, string exceptionMessage)
-        => WriteEvent(12, sessionId, database, exceptionType, exceptionMessage);
+    [Event(12, Level = EventLevel.Error, Message = "A statement session {0} received for database '{1}' failed to parse: code '{2}', exception '{3}'.")]
+    private void StatementParseFailed(Guid sessionId, string database, string code, string exceptionType)
+        => WriteEvent(12, sessionId, database, code, exceptionType);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

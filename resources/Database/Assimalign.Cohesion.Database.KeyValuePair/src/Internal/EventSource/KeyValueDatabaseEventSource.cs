@@ -86,7 +86,7 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
         public const string ProtocolViolation = "ProtocolViolation";
 
         /// <summary>The session was aborted, its connection closed, or the stop arrived mid-frame.</summary>
-        public const string Canceled = "Canceled";
+        public const string Cancelled = "Cancelled";
 
         /// <summary>The connection was aborted under the session.</summary>
         public const string ConnectionAborted = "ConnectionAborted";

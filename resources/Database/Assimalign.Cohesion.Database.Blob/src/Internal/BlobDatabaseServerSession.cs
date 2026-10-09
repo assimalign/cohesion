@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.Tracing;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -136,16 +137,14 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         catch (OperationCanceledException)
         {
             // Aborted, connection closed, or stop signaled mid-frame.
-            _closeReason = BlobDatabaseEventSource.CloseReason.Canceled;
+            _closeReason = BlobDatabaseEventSource.CloseReason.Cancelled;
         }
-        catch (ConnectionAbortedException)
+        catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
-            _closeReason = BlobDatabaseEventSource.CloseReason.ConnectionAborted;
-        }
-        catch (IOException)
-        {
-            // The transport failed under the pump; nothing to report to the peer.
-            _closeReason = BlobDatabaseEventSource.CloseReason.TransportFailed;
+            // The transport failed under the pump: a peer that hung up or reset the connection, or
+            // the shutdown's abort. An expected outcome (plan D9), which SessionClosed's reason
+            // carries; nothing is reported to the peer.
+            _closeReason = reason;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -440,30 +439,29 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             // boundary or partially consumed content is returned to the connection pool. The
             // teardown ends the session's transaction; a host-opened one is aborted first, so the
             // host's commit names this failure whenever it runs (#1225).
-            if (exception is ConnectionException)
+            // An offline database (#1243) refuses every exchange with its coded reason.
+            var code = exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
+            if (TransportCloseReason(exception) is { } transportReason)
             {
-                // The connection was aborted or reset under the exchange: a peer that hung up, or
-                // the shutdown's abort, which SessionsAborted reports. An expected outcome, which
-                // SessionClosed's reason carries as the pump's own catches do (plan D9). An
-                // IOException is still reported: it can be the storage device's, not the peer's.
-                _closeReason = exception is ConnectionAbortedException
-                    ? BlobDatabaseEventSource.CloseReason.ConnectionAborted
-                    : BlobDatabaseEventSource.CloseReason.TransportFailed;
+                // The transport failed under the exchange: a peer that hung up or reset the
+                // connection, or the shutdown's abort, which SessionsAborted reports. An expected
+                // outcome, which SessionClosed's reason carries as the pump's own catches do (plan
+                // D9), classified by the pump's own rule. A bare IOException is still reported: it
+                // can be the storage device's, not the peer's.
+                _closeReason = transportReason;
             }
             else
             {
                 _closeReason = BlobDatabaseEventSource.CloseReason.ExchangeFailed;
-                if (BlobDatabaseEventSource.Log.IsEnabled(EventLevel.Warning, EventKeywords.None))
+                if (BlobDatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
                 {
                     // The request is read back from its frame only while the event is on, and in a
                     // synchronous helper, so the exchange's state machine gains no field.
-                    ReportTransferFailed(frame, exception);
+                    ReportTransferFailed(frame, code, exception);
                 }
             }
 
             await AbortHostTransactionAsync(exception).ConfigureAwait(false);
-            // An offline database (#1243) refuses every exchange with its coded reason.
-            var code = exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
             await TryWriteErrorAsync(code, exception.Message).ConfigureAwait(false);
             return false;
         }
@@ -653,61 +651,55 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
     }
 
     /// <summary>
-    /// Writes a failed exchange's <c>TransferFailed</c> event with the container and the blob (a
-    /// list's prefix) its request named: the event writes the container and redacts the blob's
-    /// quoted name from the failure's message.
+    /// Writes a failed exchange's <c>TransferFailed</c> event with the container its request named
+    /// and the code of the error frame the session sends; the blob's name is never read.
     /// </summary>
-    private void ReportTransferFailed(ProtocolFrame frame, Exception exception)
-    {
-        (string container, string blob) = DescribeRequest(frame);
-        BlobDatabaseEventSource.Log.TransferFailed(this, container, blob, exception);
-    }
+    private void ReportTransferFailed(ProtocolFrame frame, ProtocolErrorCode code, Exception exception)
+        => BlobDatabaseEventSource.Log.TransferFailed(this, DescribeContainer(frame), code, exception);
 
     /// <summary>
-    /// Reads the container and the blob (a list's prefix) a failed exchange named from the request
-    /// frame the exchange decoded: the exchange keeps no copy of its own. A frame that no longer
-    /// decodes gives empty names rather than a second failure.
+    /// Reads the container a failed exchange named from the request frame the exchange decoded:
+    /// the exchange keeps no copy of its own. A frame that no longer decodes gives an empty name
+    /// rather than a second failure.
     /// </summary>
-    private static (string Container, string Blob) DescribeRequest(ProtocolFrame frame)
+    private static string DescribeContainer(ProtocolFrame frame)
     {
         try
         {
-            switch ((BlobProtocolMessageType)frame.Type)
+            return (BlobProtocolMessageType)frame.Type switch
             {
-                case BlobProtocolMessageType.Write:
-                {
-                    BlobWriteMessage request = BlobWriteMessage.Decode(frame.Payload.Span);
-                    return (request.Container, request.Name);
-                }
-                case BlobProtocolMessageType.Read:
-                {
-                    BlobReadMessage request = BlobReadMessage.Decode(frame.Payload.Span);
-                    return (request.Container, request.Name);
-                }
-                case BlobProtocolMessageType.Delete:
-                {
-                    BlobDeleteMessage request = BlobDeleteMessage.Decode(frame.Payload.Span);
-                    return (request.Container, request.Name);
-                }
-                case BlobProtocolMessageType.GetProperties:
-                {
-                    BlobGetPropertiesMessage request = BlobGetPropertiesMessage.Decode(frame.Payload.Span);
-                    return (request.Container, request.Name);
-                }
-                case BlobProtocolMessageType.List:
-                {
-                    BlobListMessage request = BlobListMessage.Decode(frame.Payload.Span);
-                    return (request.Container, request.Prefix);
-                }
-                default:
-                    return (string.Empty, string.Empty);
-            }
+                BlobProtocolMessageType.Write => BlobWriteMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.Read => BlobReadMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.Delete => BlobDeleteMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.GetProperties => BlobGetPropertiesMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.List => BlobListMessage.Decode(frame.Payload.Span).Container,
+                _ => string.Empty,
+            };
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            return (string.Empty, string.Empty);
+            return string.Empty;
         }
     }
+
+    /// <summary>
+    /// Classifies a failure that reached the pump as the transport's, and names the close reason it
+    /// gives the session; null for anything else, which stays a fault. The four model servers carry
+    /// identical copies (plan D2). A reset reaches the pump as the TCP driver's raw
+    /// <see cref="SocketException"/> or a <see cref="ConnectionException"/>, neither of which is an
+    /// <see cref="IOException"/>; a stream that wraps one in an <see cref="IOException"/> is still
+    /// the transport's. A bare <see cref="IOException"/> is not: it can be the storage device's.
+    /// </summary>
+    /// <param name="exception">What reached the pump.</param>
+    /// <returns><c>ConnectionAborted</c>, <c>TransportFailed</c>, or null.</returns>
+    private static string? TransportCloseReason(Exception exception) => exception switch
+    {
+        ConnectionAbortedException => BlobDatabaseEventSource.CloseReason.ConnectionAborted,
+        ConnectionException => BlobDatabaseEventSource.CloseReason.TransportFailed,
+        SocketException => BlobDatabaseEventSource.CloseReason.TransportFailed,
+        IOException { InnerException: SocketException or ConnectionException } => BlobDatabaseEventSource.CloseReason.TransportFailed,
+        _ => null,
+    };
 
     private async ValueTask CleanupAsync()
     {

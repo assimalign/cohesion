@@ -1064,18 +1064,32 @@ four servers.
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
 | 10 | `IndexRecoveryStart` | Informational | — | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
-| 11 | `IndexRecoveryStop` | Informational | — | `database`, `durationMilliseconds` (written when the recovery ends, whether it recovered the indexes or threw) |
-| 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `exceptionType`, `exceptionMessage` (cut to 1024 characters) |
+| 11 | `IndexRecoveryStop` | Informational | — | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
+| 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (an offline refusal's model code; empty otherwise), `exceptionType` |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
-`ProtocolViolation`, `Canceled` (aborted, its connection closed, or the stop arrived mid-frame),
+`ProtocolViolation`, `Cancelled` (aborted, its connection closed, or the stop arrived mid-frame),
 `ConnectionAborted`, `TransportFailed`, `Faulted`, or `Unknown` (an out-of-memory failure, which
 the pump does not catch). The handshake refuses with `ProtocolViolation` a first frame that is
 not Startup and an answer that is not AuthenticateResponse, with `UnsupportedVersion`,
 `DatabaseNotFound` and `AuthenticationFailed`, and with `Unavailable` an offline database
 (#1243). `SessionFaulted` is the catch-all that used to leave only an internal-error frame; the
 handshake timeout and the session-close failures were silent before.
+
+**A peer that hangs up is not a fault** (plan D9). A transport failure from the peer's side
+reaches the pump as the TCP driver's raw `SocketException`, a `ConnectionException`
+(`ConnectionResetException`, `ConnectionAbortedException`), or an `IOException` that wraps one.
+The four servers classify it with one rule, in identical private copies (`TransportCloseReason`,
+plan D2), and close the session with `TransportFailed` or `ConnectionAborted`, writing no
+`SessionFaulted` and no error frame. A bare `IOException` stays a fault: it can be the storage
+device's. The TCP driver reports a reset its receive sees as the end of the stream, so a session
+idle in its ready loop that the peer resets closes as `PeerClosed`; a reset that fails a send the
+pump is blocked in raises the raw `SocketException`, which was a `SessionFaulted` (Error) before
+this rule. **A session leaves the server once**: its cleanup releases its resources in a `try`
+and completes the session with the server in the `finally`, so a disposal that throws, which
+still propagates, neither leaves `current-server-sessions` raised nor skips `SessionClosed`, and
+its `MaxSessions` slot is freed.
 
 Every open of an existing database writes `IndexRecoveryStart` and `IndexRecoveryStop` around
 `GraphStore.RecoverIndexesAsync`, from the constructor that recovers it; a create writes neither.
@@ -1101,16 +1115,19 @@ registers a session, down when the session's completion removes it), `total-serv
 Every write sits behind `IsEnabled(level, keywords)`; a session reads its start timestamp only
 while `SessionClosed` is on, and a recovery reads its own only while its start is written. No
 payload carries statement text, parameter values or authentication evidence; principal names are
-kept as identifiers. A parse failure's message is the parser's diagnostic, which quotes at most
-one character or a property name (an identifier), never a literal value. A string a peer sent can
-reach a payload before authentication, and a frame may hold 16 MB, so the handshake's `database`
-and `principal` are cut to 256 characters and a `detail`, violation or parse message to 1024,
+kept as identifiers. A parse failure is written by its code and type only, never its message (the
+area's failure rule, `docs/resources/Database/DESIGN.md`, "Diagnostics"): the parser's diagnostic
+quotes the token it stopped at. A string a peer sent can reach a payload before authentication,
+and a frame may hold 16 MB, so the handshake's `database` and `principal` are cut to 256
+characters and a `detail` or violation message to 1024,
 marked with `...` (event-source.md rule 11). `GraphDatabaseEventSourceTests` checks the name,
 the strict manifest, the gauge's return, the counters, that no write allocates while nobody
 listens, events 1-7 and 9 once each with their payloads over real sessions on the in-memory
 driver (every handshake refusal code, a timeout at a read and inside the authenticator, the
-bound on an oversized startup), a reopen with an aborted writer, and a GQL syntax error over the
-wire (event 12 once) and in process (not at all). Not yet driven by a real operation:
-`SessionCleanupFailed` (no test double makes a session's resource fail to dispose) and a
-recovery that throws; and the wire test's "root event 28 not written" holds trivially until the
-root source's statement events (batch B1) merge.
+bound on an oversized startup), a reopen with an aborted writer (a `Success` stop), a GQL syntax
+error over the wire (event 12 once, by code and type; the root's `StatementStart` and
+`StatementFailed` not at all for that session) and in process (the root's `StatementFailed` once,
+event 12 not at all), and a peer that resets its TCP connection while its session idles and while
+the server writes (a transport reason, never `SessionFaulted`). Not yet driven by a real
+operation: `SessionCleanupFailed` (no test double makes the session's own close fail) and a
+recovery that throws.

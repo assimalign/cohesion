@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -138,16 +139,14 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         catch (OperationCanceledException)
         {
             // Aborted, connection closed, or stop signaled mid-frame.
-            _closeReason = KeyValueDatabaseEventSource.CloseReason.Canceled;
+            _closeReason = KeyValueDatabaseEventSource.CloseReason.Cancelled;
         }
-        catch (ConnectionAbortedException)
+        catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
-            _closeReason = KeyValueDatabaseEventSource.CloseReason.ConnectionAborted;
-        }
-        catch (IOException)
-        {
-            // The transport failed under the pump; nothing to report to the peer.
-            _closeReason = KeyValueDatabaseEventSource.CloseReason.TransportFailed;
+            // The transport failed under the pump: a peer that hung up or reset the connection, or
+            // the shutdown's abort. An expected outcome (plan D9), which SessionClosed's reason
+            // carries; nothing is reported to the peer.
+            _closeReason = reason;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -524,35 +523,62 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
     }
 
+    /// <summary>
+    /// Classifies a failure that reached the pump as the transport's, and names the close reason it
+    /// gives the session; null for anything else, which stays a fault. The four model servers carry
+    /// identical copies (plan D2). A reset reaches the pump as the TCP driver's raw
+    /// <see cref="SocketException"/> or a <see cref="ConnectionException"/>, neither of which is an
+    /// <see cref="IOException"/>; a stream that wraps one in an <see cref="IOException"/> is still
+    /// the transport's. A bare <see cref="IOException"/> is not: it can be the storage device's.
+    /// </summary>
+    /// <param name="exception">What reached the pump.</param>
+    /// <returns><c>ConnectionAborted</c>, <c>TransportFailed</c>, or null.</returns>
+    private static string? TransportCloseReason(Exception exception) => exception switch
+    {
+        ConnectionAbortedException => KeyValueDatabaseEventSource.CloseReason.ConnectionAborted,
+        ConnectionException => KeyValueDatabaseEventSource.CloseReason.TransportFailed,
+        SocketException => KeyValueDatabaseEventSource.CloseReason.TransportFailed,
+        IOException { InnerException: SocketException or ConnectionException } => KeyValueDatabaseEventSource.CloseReason.TransportFailed,
+        _ => null,
+    };
+
     private async ValueTask CleanupAsync()
     {
-        if (_databaseSession is not null)
+        try
         {
-            try
+            if (_databaseSession is not null)
             {
-                await _databaseSession.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await _databaseSession.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (AggregateException exception)
+                {
+                    // Session teardown must not mask the pump outcome. The root session reports every
+                    // teardown failure in one aggregate ("The session failed to close.").
+                    KeyValueDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
+                }
             }
-            catch (AggregateException exception)
+
+            if (_reader is not null)
             {
-                // Session teardown must not mask the pump outcome. The root session reports every
-                // teardown failure in one aggregate ("The session failed to close.").
-                KeyValueDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
+                await _reader.DisposeAsync().ConfigureAwait(false);
             }
-        }
 
-        if (_reader is not null)
+            if (_writer is not null)
+            {
+                await _writer.DisposeAsync().ConfigureAwait(false);
+            }
+
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
         {
-            await _reader.DisposeAsync().ConfigureAwait(false);
+            // Whatever a disposal threw, which still propagates, the session leaves the server
+            // once: its slot is freed, current-server-sessions comes down and SessionClosed is
+            // written, as the Graph and Blob sessions do.
+            _lifetimeSource.Dispose();
+            _server.OnSessionCompleted(this);
         }
-
-        if (_writer is not null)
-        {
-            await _writer.DisposeAsync().ConfigureAwait(false);
-        }
-
-        await _connection.DisposeAsync().ConfigureAwait(false);
-
-        _lifetimeSource.Dispose();
-        _server.OnSessionCompleted(this);
     }
 }

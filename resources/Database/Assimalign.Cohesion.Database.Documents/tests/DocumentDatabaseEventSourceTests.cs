@@ -100,8 +100,9 @@ public sealed class DocumentDatabaseEventSourceTests
         var stop = recorder.Events.Where(e => e.EventId == 2 && Equals(e.Payload![0], name)).ShouldHaveSingleItem();
         stop.EventName.ShouldBe("IndexRecoveryStop");
         stop.Level.ShouldBe(EventLevel.Informational);
-        stop.PayloadNames.ShouldBe(["database", "durationMilliseconds"]);
-        ((double)stop.Payload![1]!).ShouldBeGreaterThan(0);
+        stop.PayloadNames.ShouldBe(["database", "status", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe("Success");
+        ((double)stop.Payload![2]!).ShouldBeGreaterThan(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - DocumentDatabaseEventSource: Should not report a database it creates, which has nothing to recover")]
@@ -122,7 +123,8 @@ public sealed class DocumentDatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - DocumentDatabaseEventSource: Should allocate nothing and read no timestamp while nobody listens")]
     public void Writes_NoListener_ShouldAllocateNothing()
     {
-        // Arrange: a disabled source (a disposed listener leaves it enabled until a disable command).
+        // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
+        // disable below is redundant but harmless.
         var database = new DatabaseName("documents");
         using (var listener = new EventSourceRecorder(DocumentDatabaseEventSource.Log, EventLevel.Verbose))
         {
@@ -130,12 +132,12 @@ public sealed class DocumentDatabaseEventSourceTests
         }
 
         DocumentDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
-        DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1));
+        DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, true, DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1));
 
         // Act
         long before = GC.GetAllocatedBytesForCurrentThread();
         long started = DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1);
-        DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, started);
+        DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, true, started);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         // Assert
