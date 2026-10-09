@@ -86,42 +86,51 @@ internal sealed class BlobClientEventSource : EventSource
     /// <param name="connection">The connection that runs the transfer.</param>
     /// <param name="operation">The public member that runs it.</param>
     /// <param name="container">The container it addresses.</param>
+    /// <returns>Whether the start was written: only then does the transfer's end write its <c>TransferStop</c>.</returns>
     [NonEvent]
-    public void TransferStart(BlobConnection connection, string operation, string? container)
+    public bool TransferStart(BlobConnection connection, string operation, string? container)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Transfers))
+        if (!IsEnabled(EventLevel.Verbose, Keywords.Transfers))
         {
-            TransferStart(connection.Database, operation, container ?? string.Empty);
+            return false;
         }
+
+        TransferStart(connection.Database, operation, container ?? string.Empty);
+        return true;
     }
 
     /// <summary>
     /// Writes the end of a transfer on every path, the code taken from the failure the caller sees:
-    /// <c>TransferFailed</c> first for a failure, then <c>TransferStop</c> with the status.
+    /// <c>TransferFailed</c> first for a failure, then <c>TransferStop</c> with the status when the
+    /// start was written.
     /// </summary>
     /// <param name="connection">The connection that ran the transfer.</param>
     /// <param name="operation">The public member that ran it.</param>
     /// <param name="container">The container it addressed.</param>
+    /// <param name="startWritten">What <see cref="TransferStart(BlobConnection, string, string?)"/> returned.</param>
     /// <param name="failure">What the transfer threw, or <see langword="null"/> when it completed.</param>
     /// <param name="bytes">The content bytes it sent or received; zero for a metadata operation or a failure.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the transfer started.</param>
     [NonEvent]
-    public void TransferEnded(BlobConnection connection, string operation, string? container, Exception? failure, long bytes, long startTimestamp)
-        => TransferEnded(connection, operation, container, failure, failure is null ? null : GetCode(failure), bytes, startTimestamp);
+    public void TransferEnded(BlobConnection connection, string operation, string? container, bool startWritten, Exception? failure, long bytes, long startTimestamp)
+        => TransferEnded(connection, operation, container, startWritten, failure, failure is null ? null : GetCode(failure), bytes, startTimestamp);
 
     /// <summary>
     /// Writes the end of a transfer on every path: <c>TransferFailed</c> first for a failure, then
-    /// <c>TransferStop</c> with the status. A cancellation is not a failure.
+    /// <c>TransferStop</c> with the status when the start was written, as <c>System.Net.Http</c>'s
+    /// <c>RequestStop</c>. <c>TransferFailed</c> is written either way. A cancellation is not a
+    /// failure.
     /// </summary>
     /// <param name="connection">The connection that ran the transfer.</param>
     /// <param name="operation">The public member that ran it.</param>
     /// <param name="container">The container it addressed.</param>
+    /// <param name="startWritten">What <see cref="TransferStart(BlobConnection, string, string?)"/> returned.</param>
     /// <param name="failure">What the transfer threw, or <see langword="null"/> when it completed.</param>
     /// <param name="code">The wire code of the failure, or <see langword="null"/> when it has none.</param>
     /// <param name="bytes">The content bytes it sent or received; zero for a metadata operation or a failure.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the transfer started.</param>
     [NonEvent]
-    public void TransferEnded(BlobConnection connection, string operation, string? container, Exception? failure, ProtocolErrorCode? code, long bytes, long startTimestamp)
+    public void TransferEnded(BlobConnection connection, string operation, string? container, bool startWritten, Exception? failure, ProtocolErrorCode? code, long bytes, long startTimestamp)
     {
         bool failed = failure is not null and not OperationCanceledException;
         if (failed && IsEnabled(EventLevel.Error, EventKeywords.None))
@@ -135,7 +144,7 @@ internal sealed class BlobClientEventSource : EventSource
                 GetElapsedMilliseconds(startTimestamp));
         }
 
-        if (IsEnabled(EventLevel.Verbose, Keywords.Transfers))
+        if (startWritten && IsEnabled(EventLevel.Verbose, Keywords.Transfers))
         {
             string status = failure is null ? StatusSuccess : failed ? StatusError : StatusCancelled;
             TransferStop(connection.Database, operation, container ?? string.Empty, status, bytes, GetElapsedMilliseconds(startTimestamp));

@@ -782,8 +782,14 @@ public abstract class DatabaseEngineWorker
                 }
 
                 threw = thrown is not null;
-                bool succeeded = SettlePass(thrown, cancellationToken.IsCancellationRequested);
-                status = succeeded ? QueryResultStatus.Success : QueryResultStatus.Error;
+                bool cancelled = cancellationToken.IsCancellationRequested;
+                bool succeeded = SettlePass(thrown, cancelled);
+
+                // A pass that saw the engine's stop and returned stopped early, as SettlePass reads
+                // it: what it did not visit is not done, so it ends Cancelled, not Success.
+                status = !succeeded ? QueryResultStatus.Error
+                    : cancelled ? QueryResultStatus.Cancelled
+                    : QueryResultStatus.Success;
                 return succeeded;
             }
             finally

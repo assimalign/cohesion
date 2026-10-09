@@ -203,31 +203,39 @@ internal sealed class TransactionEventSource : EventSource
     }
 
     /// <summary>Counts and writes the start of a lock request's wait.</summary>
+    /// <returns>Whether the start was written: only then does the wait's end write its <c>LockWaitStop</c>.</returns>
     [NonEvent]
-    public void LockWaitStart(string database, TransactionSequence owner, LockResource resource, LockMode mode)
+    public bool LockWaitStart(string database, TransactionSequence owner, LockResource resource, LockMode mode)
     {
         Interlocked.Increment(ref _totalLockWaits);
 
-        if (IsEnabled(EventLevel.Verbose, Keywords.Locks))
+        if (!IsEnabled(EventLevel.Verbose, Keywords.Locks))
         {
-            LockWaitStart(database, (long)owner.Value, DescribeResource(resource), mode.ToString());
+            return false;
         }
+
+        LockWaitStart(database, (long)owner.Value, DescribeResource(resource), mode.ToString());
+        return true;
     }
 
     /// <summary>
     /// Writes the end of a lock request's wait, and <c>SlowLockWait</c> first when the wait lasted
-    /// at least <see cref="SlowLockWaitThresholdMilliseconds"/>.
+    /// at least <see cref="SlowLockWaitThresholdMilliseconds"/>. The stop is written only for a wait
+    /// whose start was written, as <c>System.Net.Http</c>'s <c>RequestStop</c>; <c>SlowLockWait</c> is
+    /// written either way, so a listener that attached during a long wait still learns how long it
+    /// lasted.
     /// </summary>
     /// <param name="database">The database whose lock manager the request waited in.</param>
     /// <param name="owner">The waiting transaction.</param>
     /// <param name="resource">The resource it waited for.</param>
     /// <param name="mode">The mode it requested.</param>
     /// <param name="outcome">How the wait ended: <c>Granted</c>, <c>Cancelled</c>, <c>Ended</c> or <c>Abandoned</c>.</param>
+    /// <param name="startWritten">What <see cref="LockWaitStart(string, TransactionSequence, LockResource, LockMode)"/> returned.</param>
     /// <param name="startTimestamp">The <see cref="Stopwatch.GetTimestamp"/> taken when the wait began.</param>
     [NonEvent]
-    public void LockWaitStop(string database, TransactionSequence owner, LockResource resource, LockMode mode, string outcome, long startTimestamp)
+    public void LockWaitStop(string database, TransactionSequence owner, LockResource resource, LockMode mode, string outcome, bool startWritten, long startTimestamp)
     {
-        bool stop = IsEnabled(EventLevel.Verbose, Keywords.Locks);
+        bool stop = startWritten && IsEnabled(EventLevel.Verbose, Keywords.Locks);
         bool slow = IsEnabled(EventLevel.Warning, EventKeywords.None);
         if (!stop && !slow)
         {

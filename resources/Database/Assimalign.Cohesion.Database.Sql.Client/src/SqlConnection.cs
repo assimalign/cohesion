@@ -207,7 +207,7 @@ public sealed class SqlConnection : IAsyncDisposable
         NotifyExecuting(commandText, parameterCount);
 
         long startTimestamp = Stopwatch.GetTimestamp();
-        SqlClientEventSource.Log.CommandStart(this, parameterCount);
+        bool startWritten = SqlClientEventSource.Log.CommandStart(this, parameterCount);
 
         // The command's end is written on every path, from the finally, before the observer hears
         // of it: CommandFailed and then CommandStop(Error) for a failure, CommandStop(Cancelled)
@@ -231,7 +231,7 @@ public sealed class SqlConnection : IAsyncDisposable
         }
         finally
         {
-            SqlClientEventSource.Log.CommandEnded(this, failure, result?.Rows.Count ?? -1, result?.AffectedCount ?? -1, startTimestamp);
+            SqlClientEventSource.Log.CommandEnded(this, startWritten, failure, result?.Rows.Count ?? -1, result?.AffectedCount ?? -1, startTimestamp);
         }
 
         if (translated is not null)

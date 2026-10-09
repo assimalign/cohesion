@@ -82,7 +82,13 @@ public sealed class GraphConnection : IAsyncDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var exchange = new GraphPathsExchange(statement, parameters);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
-        GraphClientEventSource.Log.QueryStart(this, QueryPathsOperation);
+        bool startWritten = GraphClientEventSource.Log.QueryStart(this, QueryPathsOperation);
+
+        // The start's activity lives in this first MoveNextAsync's execution context: the iterator
+        // runs each later MoveNextAsync, and its DisposeAsync, on its caller's context, where the
+        // activity is not current. So the end is written in the start's context, captured here
+        // only while the start was written, and QueryStop closes the activity QueryStart opened.
+        ExecutionContext? startContext = startWritten ? ExecutionContext.Capture() : null;
 
         // The query's end is written on every path, from the finally: Success once the enumeration
         // reached the server's terminal count; Error, after QueryFailed, for a failed open or read;
@@ -146,13 +152,19 @@ public sealed class GraphConnection : IAsyncDisposable
             string status = completed
                 ? GraphClientEventSource.StatusSuccess
                 : failure is null or OperationCanceledException ? GraphClientEventSource.StatusCancelled : GraphClientEventSource.StatusError;
-            GraphClientEventSource.Log.QueryEnded(
-                this,
-                QueryPathsOperation,
-                status,
-                ReferenceEquals(status, GraphClientEventSource.StatusError) ? failure : null,
-                paths,
-                startTimestamp);
+            Exception? error = ReferenceEquals(status, GraphClientEventSource.StatusError) ? failure : null;
+            if (startContext is null)
+            {
+                GraphClientEventSource.Log.QueryEnded(this, QueryPathsOperation, startWritten, status, error, paths, startTimestamp);
+            }
+            else
+            {
+                // Allocates only while the start was written.
+                ExecutionContext.Run(
+                    startContext,
+                    static state => ((PathQueryEnd)state!).Write(),
+                    new PathQueryEnd(this, status, error, paths, startTimestamp));
+            }
         }
     }
 
@@ -189,7 +201,7 @@ public sealed class GraphConnection : IAsyncDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var exchange = new GraphExecuteExchange(statement, parameters);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
-        GraphClientEventSource.Log.QueryStart(this, operation);
+        bool startWritten = GraphClientEventSource.Log.QueryStart(this, operation);
 
         // The query's end is written on every path, from the finally: QueryFailed and then
         // QueryStop(Error) for a failure, QueryStop(Cancelled) for a cancellation.
@@ -215,8 +227,18 @@ public sealed class GraphConnection : IAsyncDisposable
         }
         finally
         {
-            GraphClientEventSource.Log.QueryEnded(this, operation, failure, result?.Count ?? -1, startTimestamp);
+            GraphClientEventSource.Log.QueryEnded(this, operation, startWritten, failure, result?.Count ?? -1, startTimestamp);
         }
+    }
+
+    /// <summary>
+    /// The end of a path query whose start was written, carried into the start's execution context
+    /// so its <c>QueryStop</c> closes the activity its <c>QueryStart</c> opened.
+    /// </summary>
+    private sealed class PathQueryEnd(GraphConnection connection, string status, Exception? failure, long paths, long startTimestamp)
+    {
+        public void Write()
+            => GraphClientEventSource.Log.QueryEnded(connection, QueryPathsOperation, startWritten: true, status, failure, paths, startTimestamp);
     }
 
     private static async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, CancellationToken cancellationToken)

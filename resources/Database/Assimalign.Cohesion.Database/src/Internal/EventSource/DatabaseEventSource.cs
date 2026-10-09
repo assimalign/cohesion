@@ -570,26 +570,31 @@ internal sealed class DatabaseEventSource : EventSource
     /// </summary>
     /// <param name="session">The session.</param>
     /// <param name="request">The typed request, or null for statement text.</param>
+    /// <returns>Whether the start was written: only then does the statement's end write its <c>StatementStop</c>.</returns>
     [NonEvent]
-    public void StatementStart(DatabaseSession session, QueryRequest? request)
+    public bool StatementStart(DatabaseSession session, QueryRequest? request)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
+        if (!IsEnabled(EventLevel.Verbose, Keywords.Statements))
         {
-            StatementStart(session.Database.Name.ToString(), session.SessionNumber, GetRequestKind(request));
+            return false;
         }
+
+        StatementStart(session.Database.Name.ToString(), session.SessionNumber, GetRequestKind(request));
+        return true;
     }
 
     /// <summary>
     /// Writes the end of a statement whose core returned a result: <c>StatementFailed</c> when the
     /// result's status is <see cref="QueryResultStatus.Error"/>, <c>SlowStatement</c> when it ran at
-    /// least the threshold, and <c>StatementStop</c>.
+    /// least the threshold, and <c>StatementStop</c> when its start was written.
     /// </summary>
     /// <param name="session">The session.</param>
     /// <param name="request">The typed request, or null for statement text.</param>
     /// <param name="result">The result the core returned.</param>
+    /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, QueryRequest?)"/> returned.</param>
     /// <param name="startTimestamp">When the statement started.</param>
     [NonEvent]
-    public void StatementCompleted(DatabaseSession session, QueryRequest? request, QueryResult? result, long startTimestamp)
+    public void StatementCompleted(DatabaseSession session, QueryRequest? request, QueryResult? result, bool startWritten, long startTimestamp)
     {
         // A null result is the leaf's contract violation; its caller receives it as it is, and the
         // trace reads it as a success with no count.
@@ -609,19 +614,21 @@ internal sealed class DatabaseEventSource : EventSource
                 duration);
         }
 
-        WriteStatementEnd(session, request, status, result?.AffectedCount ?? -1, duration);
+        WriteStatementEnd(session, request, status, result?.AffectedCount ?? -1, duration, startWritten);
     }
 
     /// <summary>
     /// Writes the end of a statement whose core threw: <c>StatementFailed</c> unless it was
-    /// cancelled, <c>SlowStatement</c> when it ran at least the threshold, and <c>StatementStop</c>.
+    /// cancelled, <c>SlowStatement</c> when it ran at least the threshold, and <c>StatementStop</c>
+    /// when its start was written.
     /// </summary>
     /// <param name="session">The session.</param>
     /// <param name="request">The typed request, or null for statement text.</param>
     /// <param name="exception">What the core threw.</param>
+    /// <param name="startWritten">What <see cref="StatementStart(DatabaseSession, QueryRequest?)"/> returned.</param>
     /// <param name="startTimestamp">When the statement started.</param>
     [NonEvent]
-    public void StatementThrew(DatabaseSession session, QueryRequest? request, Exception exception, long startTimestamp)
+    public void StatementThrew(DatabaseSession session, QueryRequest? request, Exception exception, bool startWritten, long startTimestamp)
     {
         double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
         var status = QueryResultStatus.Cancelled;
@@ -642,7 +649,7 @@ internal sealed class DatabaseEventSource : EventSource
             }
         }
 
-        WriteStatementEnd(session, request, status, -1, duration);
+        WriteStatementEnd(session, request, status, -1, duration, startWritten);
     }
 
     /// <summary>
@@ -902,7 +909,7 @@ internal sealed class DatabaseEventSource : EventSource
     }
 
     [NonEvent]
-    private void WriteStatementEnd(DatabaseSession session, QueryRequest? request, QueryResultStatus status, long affectedCount, double duration)
+    private void WriteStatementEnd(DatabaseSession session, QueryRequest? request, QueryResultStatus status, long affectedCount, double duration, bool startWritten)
     {
         double threshold = Volatile.Read(ref _slowStatementThresholdMilliseconds);
         if (duration >= threshold && IsEnabled(EventLevel.Warning, EventKeywords.None))
@@ -920,8 +927,10 @@ internal sealed class DatabaseEventSource : EventSource
                 threshold);
         }
 
-        // Last, so the statement's activity closes after the events it holds.
-        if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
+        // Last, so the statement's activity closes after the events it holds; and only for a
+        // statement whose start was written, as System.Net.Http's RequestStop, so a listener that
+        // attached mid-statement sees no stop without its start.
+        if (startWritten && IsEnabled(EventLevel.Verbose, Keywords.Statements))
         {
             StatementStop(session.Database.Name.ToString(), session.SessionNumber, status.ToString(), affectedCount, duration);
         }

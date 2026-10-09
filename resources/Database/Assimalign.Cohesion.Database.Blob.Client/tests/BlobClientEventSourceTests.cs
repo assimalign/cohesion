@@ -192,6 +192,62 @@ public sealed class BlobClientEventSourceTests
         events[3].Payload![3].ShouldBe("Cancelled");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should report a failure that carries no wire code with an empty code, then an Error stop")]
+    public async Task GetPropertiesAsync_AnotherExchangeActive_ShouldWriteAnUncodedFailureThenErrorStop()
+    {
+        // Arrange: an open download, several chunks long, holds the connection's one exchange.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        byte[] content = new byte[512 * 1024];
+        Random.Shared.NextBytes(content);
+        await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
+        await connection.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token);
+        using var recorder = new BlobClientEventRecorder();
+
+        // Act
+        InvalidOperationException overlapping;
+        Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token);
+        try
+        {
+            overlapping = await Should.ThrowAsync<InvalidOperationException>(async () =>
+                await connection.GetPropertiesAsync("files", SecretName, timeout.Token));
+        }
+        finally
+        {
+            await download.DisposeAsync();
+        }
+
+        // Assert: the client's own refusal has no wire code, so the code is empty.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "app") && Equals(e.Payload?[1], "GetProperties")).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["TransferStart", "TransferFailed", "TransferStop"]);
+        events[1].PayloadNames.ShouldBe(["database", "operation", "container", "code", "exceptionType", "durationMilliseconds"]);
+        events[1].Payload![3].ShouldBe(string.Empty);
+        events[1].Payload![4].ShouldBe(typeof(InvalidOperationException).FullName);
+        events[1].Payload!.ShouldNotContain(overlapping.Message);
+        events[2].Payload![3].ShouldBe("Error");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should write a failure whose start was not written, but no TransferStop for it")]
+    public async Task TransferEnded_StartNotWritten_ShouldWriteTheFailureButNoStop()
+    {
+        // Arrange: a transfer whose start a listener that attached late never saw, beside one it saw.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
+        using var recorder = new BlobClientEventRecorder();
+        var failure = new InvalidOperationException("An exchange is already active on this connection.");
+
+        // Act
+        BlobClientEventSource.Log.TransferEnded(connection, "GetProperties", "files", startWritten: false, failure, 0, System.Diagnostics.Stopwatch.GetTimestamp());
+        BlobClientEventSource.Log.TransferEnded(connection, "GetProperties", "files", startWritten: true, failure, 0, System.Diagnostics.Stopwatch.GetTimestamp());
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        recorder.Events.Where(e => Equals(e.Payload?[0], "app")).Select(e => e.EventName)
+            .ShouldBe(["TransferFailed", "TransferFailed", "TransferStop"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should report an upload refused over an existing blob without the blob's name")]
     public async Task UploadAsync_ExistingBlobWithoutOverwrite_ShouldReportFailureWithoutName()
     {

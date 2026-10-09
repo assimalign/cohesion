@@ -277,6 +277,27 @@ public sealed class TransactionEventSourceTests
         thresholdAfterAnotherEnable.ShouldBe(TransactionEventSource.DefaultSlowLockWaitThresholdMilliseconds);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should write a slow wait whose start was not written, but no LockWaitStop for it")]
+    public void LockWaitStop_StartNotWritten_ShouldWriteTheSlowWaitButNoStop()
+    {
+        // Arrange: a 0 ms threshold, and a wait whose start a listener that attached during it never
+        // saw (System.Net.Http's RequestStop shape), beside one whose start it saw.
+        string name = UniqueName();
+        var owner = new TransactionSequence(41);
+        using var recorder = new TransactionEventRecorder(
+            EventLevel.Verbose,
+            new Dictionary<string, string?> { [TransactionEventSource.SlowLockWaitThresholdArgument] = "0" });
+
+        // Act
+        TransactionEventSource.Log.LockWaitStop(name, owner, Row, LockMode.Exclusive, "Granted", startWritten: false, Stopwatch.GetTimestamp());
+        TransactionEventSource.Log.LockWaitStop(name, owner, Row, LockMode.Exclusive, "Granted", startWritten: true, Stopwatch.GetTimestamp());
+
+        // Assert: the slow wait is reported either way, so a late listener still learns how long a
+        // wait lasted; the stop only closes a start that was written.
+        recorder.ShouldHaveNoInstrumentationError();
+        recorder.For(name).Select(e => e.EventName).ShouldBe(["SlowLockWait", "SlowLockWait", "LockWaitStop"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should restore the default slow-lock-wait threshold when the session that set it disables the source")]
     public void OnEventCommand_ThresholdSessionDisables_ShouldRestoreTheDefaultForTheRemainingSession()
     {

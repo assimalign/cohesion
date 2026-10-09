@@ -921,6 +921,47 @@ public sealed class DatabaseEventSourceTests
         Payload(events[1], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should end a pass that saw the engine's stop and returned with a Cancelled stop, and no failure")]
+    public void RunIteration_PassReturnsAfterStop_ShouldWriteACancelledStop()
+    {
+        // Arrange: a pass that sees the engine's stop and returns early without throwing, as the
+        // flush and maintenance workers do between databases.
+        string name = "event-source-" + Guid.NewGuid().ToString("N");
+        using var stop = new CancellationTokenSource();
+        var worker = new ScriptedWorker((self, pass) => stop.Cancel(), name: name);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act
+        bool succeeded = worker.RunIteration(stop.Token);
+
+        // Assert: the pass did not fail, but it stopped early, so it did not succeed either.
+        succeeded.ShouldBeTrue();
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], name)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["WorkerPassStart", "WorkerPassStop"]);
+        Payload(events[1], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write no StatementStop for a statement whose start was not written")]
+    public async Task StatementEnd_StartNotWritten_ShouldWriteTheFailureButNoStop()
+    {
+        // Arrange: a statement whose start was not written, as for a listener that attached while
+        // it ran (System.Net.Http's RequestStop shape), and one whose start was.
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        await using var session = new TestSession(new TestDatabase("unstarted", engine));
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act
+        DatabaseEventSource.Log.StatementThrew(session, null, new InvalidOperationException("boom"), startWritten: false, Stopwatch.GetTimestamp());
+        DatabaseEventSource.Log.StatementCompleted(session, null, result: null, startWritten: false, Stopwatch.GetTimestamp());
+        DatabaseEventSource.Log.StatementThrew(session, null, new InvalidOperationException("boom"), startWritten: true, Stopwatch.GetTimestamp());
+
+        // Assert: the failure is written either way; a stop only for the statement that started.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["StatementFailed", "StatementFailed", "StatementStop"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should bound a principal the peer sent at 256 characters")]
     public void Authenticate_LongPrincipal_ShouldWriteItBounded()
     {

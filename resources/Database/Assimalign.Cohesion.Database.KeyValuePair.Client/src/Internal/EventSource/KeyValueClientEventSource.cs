@@ -72,29 +72,35 @@ internal sealed class KeyValueClientEventSource : EventSource
     /// </summary>
     /// <param name="connection">The connection that runs the command.</param>
     /// <param name="parameterCount">The number of bound parameters.</param>
+    /// <returns>Whether the start was written: only then does the command's end write its <c>CommandStop</c>.</returns>
     [NonEvent]
-    public void CommandStart(KeyValueConnection connection, int parameterCount)
+    public bool CommandStart(KeyValueConnection connection, int parameterCount)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Commands))
+        if (!IsEnabled(EventLevel.Verbose, Keywords.Commands))
         {
-            CommandStart(connection.Database, parameterCount);
+            return false;
         }
+
+        CommandStart(connection.Database, parameterCount);
+        return true;
     }
 
     /// <summary>
     /// Writes the end of a command on every path: <c>CommandFailed</c> first for a failure, then
-    /// <c>CommandStop</c> with the command's status.
+    /// <c>CommandStop</c> with the command's status when its start was written, as
+    /// <c>System.Net.Http</c>'s <c>RequestStop</c>. <c>CommandFailed</c> is written either way.
     /// </summary>
     /// <param name="connection">The connection that ran the command.</param>
+    /// <param name="startWritten">What <see cref="CommandStart(KeyValueConnection, int)"/> returned.</param>
     /// <param name="failure">What the command threw, or <see langword="null"/> when it returned its result.</param>
     /// <param name="rowCount">The rows the command returned; -1 when it failed.</param>
     /// <param name="affectedCount">The entries it affected, -1 for a row-returning command or a failure.</param>
     /// <param name="startTimestamp">The timestamp taken when the command started.</param>
     [NonEvent]
-    public void CommandEnded(KeyValueConnection connection, Exception? failure, long rowCount, long affectedCount, long startTimestamp)
+    public void CommandEnded(KeyValueConnection connection, bool startWritten, Exception? failure, long rowCount, long affectedCount, long startTimestamp)
     {
         bool failed = failure is not null and not OperationCanceledException;
-        bool stop = IsEnabled(EventLevel.Verbose, Keywords.Commands);
+        bool stop = startWritten && IsEnabled(EventLevel.Verbose, Keywords.Commands);
         if (!stop && !(failed && IsEnabled(EventLevel.Error, EventKeywords.None)))
         {
             return;

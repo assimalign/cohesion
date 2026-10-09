@@ -101,7 +101,7 @@ public sealed class BlobConnection : IAsyncDisposable
     {
         EnsureOpen();
         long startTimestamp = BlobClientEventSource.Log.GetTimestamp();
-        BlobClientEventSource.Log.TransferStart(this, DownloadOperation, container);
+        bool startWritten = BlobClientEventSource.Log.TransferStart(this, DownloadOperation, container);
 
         // Until the stream opens, the transfer's end is written here, from the finally: a failure
         // (TransferFailed, then TransferStop with Error) or a cancellation. Once it opened, the
@@ -114,7 +114,7 @@ public sealed class BlobConnection : IAsyncDisposable
             try
             {
                 Stream stream = await _connection.ExecuteStreamingAsync(
-                    new BlobDownloadExchange(this, container, name, startTimestamp), cancellationToken).ConfigureAwait(false);
+                    new BlobDownloadExchange(this, container, name, startWritten, startTimestamp), cancellationToken).ConfigureAwait(false);
                 opened = true;
                 return new BlobDownloadStream(stream);
             }
@@ -132,7 +132,7 @@ public sealed class BlobConnection : IAsyncDisposable
         {
             if (!opened)
             {
-                BlobClientEventSource.Log.TransferEnded(this, DownloadOperation, container, failure, 0, startTimestamp);
+                BlobClientEventSource.Log.TransferEnded(this, DownloadOperation, container, startWritten, failure, 0, startTimestamp);
             }
         }
     }
@@ -308,7 +308,7 @@ public sealed class BlobConnection : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         long startTimestamp = BlobClientEventSource.Log.GetTimestamp();
-        BlobClientEventSource.Log.TransferStart(this, operation, container);
+        bool startWritten = BlobClientEventSource.Log.TransferStart(this, operation, container);
 
         // The transfer's end is written on every path, from the finally: TransferFailed and then
         // TransferStop(Error) for a failure, TransferStop(Cancelled) for a cancellation, which is
@@ -349,7 +349,7 @@ public sealed class BlobConnection : IAsyncDisposable
         }
         finally
         {
-            BlobClientEventSource.Log.TransferEnded(this, operation, container, failure, bytes, startTimestamp);
+            BlobClientEventSource.Log.TransferEnded(this, operation, container, startWritten, failure, bytes, startTimestamp);
         }
     }
 
@@ -505,6 +505,7 @@ public sealed class BlobConnection : IAsyncDisposable
         private readonly BlobConnection _owner;
         private readonly string _container;
         private readonly string _name;
+        private readonly bool _startWritten;
         private readonly long _startTimestamp;
         private BlobTransferStartMessage? _metadata;
 
@@ -514,13 +515,15 @@ public sealed class BlobConnection : IAsyncDisposable
         /// <param name="owner">The connection that runs the download, for its transfer events.</param>
         /// <param name="container">The container that holds the Blob to download.</param>
         /// <param name="name">The name of the Blob to download.</param>
+        /// <param name="startWritten">Whether the download's <c>TransferStart</c> was written, so its end writes the stop.</param>
         /// <param name="startTimestamp">The timestamp the event source took when the download started, or zero.</param>
-        public BlobDownloadExchange(BlobConnection owner, string container, string name, long startTimestamp)
+        public BlobDownloadExchange(BlobConnection owner, string container, string name, bool startWritten, long startTimestamp)
             : base(BlobProtocol.Family)
         {
             _owner = owner;
             _container = container;
             _name = name;
+            _startWritten = startWritten;
             _startTimestamp = startTimestamp;
         }
 
@@ -561,7 +564,7 @@ public sealed class BlobConnection : IAsyncDisposable
             }
             finally
             {
-                BlobClientEventSource.Log.TransferEnded(_owner, DownloadOperation, _container, failure, failure is null ? null : CopyFailureCode(failure), bytes, _startTimestamp);
+                BlobClientEventSource.Log.TransferEnded(_owner, DownloadOperation, _container, _startWritten, failure, failure is null ? null : CopyFailureCode(failure), bytes, _startTimestamp);
             }
         }
 

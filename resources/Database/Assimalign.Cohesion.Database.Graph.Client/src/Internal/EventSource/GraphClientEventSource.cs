@@ -81,34 +81,40 @@ internal sealed class GraphClientEventSource : EventSource
     /// </summary>
     /// <param name="connection">The connection that runs the query.</param>
     /// <param name="operation">The public member that runs it.</param>
+    /// <returns>Whether the start was written: only then does the query's end write its <c>QueryStop</c>.</returns>
     [NonEvent]
-    public void QueryStart(GraphConnection connection, string operation)
+    public bool QueryStart(GraphConnection connection, string operation)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Queries))
+        if (!IsEnabled(EventLevel.Verbose, Keywords.Queries))
         {
-            QueryStart(connection.Database, operation);
+            return false;
         }
+
+        QueryStart(connection.Database, operation);
+        return true;
     }
 
     /// <summary>
     /// Writes the end of a query on every path: <c>QueryFailed</c> first for a failure, then
-    /// <c>QueryStop</c> with the query's status.
+    /// <c>QueryStop</c> with the query's status when its start was written, as
+    /// <c>System.Net.Http</c>'s <c>RequestStop</c>. <c>QueryFailed</c> is written either way.
     /// </summary>
     /// <param name="connection">The connection that ran the query.</param>
     /// <param name="operation">The public member that ran it.</param>
+    /// <param name="startWritten">What <see cref="QueryStart(GraphConnection, string)"/> returned.</param>
     /// <param name="status"><see cref="StatusSuccess"/>, <see cref="StatusError"/> or <see cref="StatusCancelled"/>.</param>
     /// <param name="failure">The failure, for <see cref="StatusError"/>; otherwise <see langword="null"/>.</param>
     /// <param name="rowCount">The rows, or for a path query the paths, it returned or read.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the query started.</param>
     [NonEvent]
-    public void QueryEnded(GraphConnection connection, string operation, string status, Exception? failure, long rowCount, long startTimestamp)
+    public void QueryEnded(GraphConnection connection, string operation, bool startWritten, string status, Exception? failure, long rowCount, long startTimestamp)
     {
         if (failure is not null && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
             QueryFailed(connection.Database, operation, GetCode(failure), TypeName(failure), GetElapsedMilliseconds(startTimestamp));
         }
 
-        if (IsEnabled(EventLevel.Verbose, Keywords.Queries))
+        if (startWritten && IsEnabled(EventLevel.Verbose, Keywords.Queries))
         {
             QueryStop(connection.Database, operation, status, rowCount, GetElapsedMilliseconds(startTimestamp));
         }
@@ -120,23 +126,24 @@ internal sealed class GraphClientEventSource : EventSource
     /// </summary>
     /// <param name="connection">The connection that ran the query.</param>
     /// <param name="operation">The public member that ran it.</param>
+    /// <param name="startWritten">What <see cref="QueryStart(GraphConnection, string)"/> returned.</param>
     /// <param name="failure">What the query threw, or <see langword="null"/> when it completed.</param>
     /// <param name="rowCount">The rows it returned; -1 when it threw.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the query started.</param>
     [NonEvent]
-    public void QueryEnded(GraphConnection connection, string operation, Exception? failure, long rowCount, long startTimestamp)
+    public void QueryEnded(GraphConnection connection, string operation, bool startWritten, Exception? failure, long rowCount, long startTimestamp)
     {
         if (failure is null)
         {
-            QueryEnded(connection, operation, StatusSuccess, null, rowCount, startTimestamp);
+            QueryEnded(connection, operation, startWritten, StatusSuccess, null, rowCount, startTimestamp);
         }
         else if (failure is OperationCanceledException)
         {
-            QueryEnded(connection, operation, StatusCancelled, null, rowCount, startTimestamp);
+            QueryEnded(connection, operation, startWritten, StatusCancelled, null, rowCount, startTimestamp);
         }
         else
         {
-            QueryEnded(connection, operation, StatusError, failure, rowCount, startTimestamp);
+            QueryEnded(connection, operation, startWritten, StatusError, failure, rowCount, startTimestamp);
         }
     }
 

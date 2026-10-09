@@ -251,7 +251,7 @@ public sealed class LockManager
         // whether or not anyone listens (plan D5 (b)): a listener that attaches during a long
         // wait still learns how long it lasted. Start and stop are written on this flow.
         long started = Stopwatch.GetTimestamp();
-        TransactionEventSource.Log.LockWaitStart(_database, owner, resource, mode);
+        bool startWritten = TransactionEventSource.Log.LockWaitStart(_database, owner, resource, mode);
 
         try
         {
@@ -265,7 +265,7 @@ public sealed class LockManager
         {
             if (TransactionEventSource.Log.IsEnabled())
             {
-                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), started);
+                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), startWritten, started);
             }
         }
     }

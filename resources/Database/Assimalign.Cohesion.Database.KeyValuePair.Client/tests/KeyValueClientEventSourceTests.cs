@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Linq;
@@ -190,6 +191,27 @@ public sealed class KeyValueClientEventSourceTests
     /// <summary>
     /// An observer whose every hook throws.
     /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - KeyValueClientEventSource: Should write an uncoded failure with empty kind and code, and a stop only for a command whose start was written")]
+    public async Task CommandEnded_UncodedFailure_ShouldWriteEmptyCodeAndStopOnlyWhenStarted()
+    {
+        // Arrange: a failure the client raises itself (an overlapping exchange) carries no wire code.
+        await using var harness = await KeyValueClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+        using var recorder = new KeyValueClientEventRecorder();
+        var failure = new InvalidOperationException("An exchange is already active on this connection.");
+
+        // Act: one command whose start a listener that attached late never saw, and one it saw.
+        KeyValueClientEventSource.Log.CommandEnded(connection, startWritten: false, failure, -1, -1, Stopwatch.GetTimestamp());
+        KeyValueClientEventSource.Log.CommandEnded(connection, startWritten: true, failure, -1, -1, Stopwatch.GetTimestamp());
+
+        // Assert: the failure is written either way, the stop only after a written start.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], KeyValueClientTestHarness.DatabaseName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["CommandFailed", "CommandFailed", "CommandStop"]);
+        events[0].Payload!.Take(4).ShouldBe([KeyValueClientTestHarness.DatabaseName, string.Empty, string.Empty, typeof(InvalidOperationException).FullName]);
+        events[2].Payload!.Take(4).ShouldBe([KeyValueClientTestHarness.DatabaseName, "Error", -1L, -1L]);
+    }
+
     private sealed class ThrowingObserver : KeyValueClientObserver
     {
         protected internal override void OnExecuting(string commandText, int parameterCount)

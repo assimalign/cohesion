@@ -335,7 +335,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         NotifyExecuting(commandText, parameterCount);
 
         long startTimestamp = Stopwatch.GetTimestamp();
-        KeyValueClientEventSource.Log.CommandStart(this, parameterCount);
+        bool startWritten = KeyValueClientEventSource.Log.CommandStart(this, parameterCount);
 
         // The command's end is written on every path, from the finally, before the observer hears
         // of it: CommandFailed and then CommandStop(Error) for a failure, CommandStop(Cancelled)
@@ -359,7 +359,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         }
         finally
         {
-            KeyValueClientEventSource.Log.CommandEnded(this, failure, result?.Rows.Count ?? -1, result?.AffectedCount ?? -1, startTimestamp);
+            KeyValueClientEventSource.Log.CommandEnded(this, startWritten, failure, result?.Rows.Count ?? -1, result?.AffectedCount ?? -1, startTimestamp);
         }
 
         if (translated is not null)
