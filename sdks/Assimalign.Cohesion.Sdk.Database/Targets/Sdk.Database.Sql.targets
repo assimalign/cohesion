@@ -4,11 +4,16 @@
 		<_CohesionDatabaseModelCompileTarget>_CohesionCompileSqlDatabaseSchema</_CohesionDatabaseModelCompileTarget>
 	</PropertyGroup>
 
+	<!--
+		One artifact pair per declared database lands in the output directory, so the
+		set of outputs is known only to the task; the stamp, touched after a successful
+		compile, is the target's incremental output.
+	-->
 	<Target
 		Name="_CohesionCompileSqlDatabaseSchema"
 		Condition="'$(CohesionDatabaseProject)' == 'true'"
 		Inputs="@(Compile);@(ReferencePath);$(_CohesionDatabaseTaskAssembly)"
-		Outputs="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)">
+		Outputs="$(_CohesionDatabaseSchemaStamp)">
 		<CompileDatabaseSchemaTask
 			SourceFiles="@(Compile)"
 			ReferencePaths="@(ReferencePath)"
@@ -17,12 +22,7 @@
 			AssemblyName="$(AssemblyName)"
 			Model="Sql"
 			ProjectDirectory="$(MSBuildProjectDirectory)"
-			OutputPath="$(CohesionDatabaseSchemaOutputPath)"
-			HashOutputPath="$(CohesionDatabaseSchemaHashOutputPath)">
-			<Output TaskParameter="SchemaHash" PropertyName="CohesionDatabaseSchemaHash" />
-		</CompileDatabaseSchemaTask>
-		<ItemGroup>
-			<FileWrites Include="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)" />
-		</ItemGroup>
+			OutputDirectory="$(CohesionDatabaseSchemaOutputDirectory)" />
+		<Touch Files="$(_CohesionDatabaseSchemaStamp)" AlwaysCreate="true" />
 	</Target>
 </Project>

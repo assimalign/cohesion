@@ -13,15 +13,27 @@ using Microsoft.Build.Framework;
 namespace Assimalign.Cohesion.Sdk.Database.Tasks;
 
 /// <summary>
-/// Creates an ordered SQL migration and matching compiled-schema baseline.
+/// Creates an ordered SQL migration and matching compiled-schema baseline for one declared database.
 /// </summary>
 public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 {
-    /// <summary>The desired compiled schema produced by <see cref="CompileDatabaseSchemaTask"/>.</summary>
+    /// <summary>
+    /// The directory <see cref="CompileDatabaseSchemaTask"/> wrote each declared database's desired
+    /// schema to, as <c>&lt;database&gt;.schema.json</c>.
+    /// </summary>
     [Required]
-    public string SchemaModelPath { get; set; } = string.Empty;
+    public string SchemaDirectory { get; set; } = string.Empty;
 
-    /// <summary>The directory generated migration files are written to.</summary>
+    /// <summary>
+    /// The declared database the migration is for (<c>CohesionDatabaseName</c>); it compares ignoring
+    /// case, as database names do.
+    /// </summary>
+    public string DatabaseName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The root of the migration folders: a database's migrations are written to the folder under it
+    /// named for the database, so each database numbers its own.
+    /// </summary>
     [Required]
     public string MigrationsRoot { get; set; } = string.Empty;
 
@@ -96,23 +108,50 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         try
         {
             string projectDirectory = Path.GetFullPath(ProjectDirectory);
-            string schemaPath = ResolvePath(SchemaModelPath, projectDirectory);
-            if (!File.Exists(schemaPath))
+            string schemaDirectory = ResolvePath(SchemaDirectory, projectDirectory);
+            string[] declared = Directory.Exists(schemaDirectory)
+                ? Directory.EnumerateFiles(schemaDirectory, "*" + CompileDatabaseSchemaTask.SchemaFileSuffix, SearchOption.TopDirectoryOnly)
+                    .Select(static path => Path.GetFileName(path)[..^CompileDatabaseSchemaTask.SchemaFileSuffix.Length])
+                    .Order(StringComparer.Ordinal)
+                    .ToArray()
+                : [];
+            string databaseName = DatabaseName.Trim();
+            if (databaseName.Length == 0)
+            {
+                Log.LogError(
+                    null,
+                    "COHDBSDK207",
+                    null,
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "CohesionDatabaseName is required: it names the declared database the migration is for" +
+                    (declared.Length == 0 ? "." : $" (declared: {string.Join(", ", declared)})."));
+                return false;
+            }
+
+            string? declaredName = declared.FirstOrDefault(name => string.Equals(name, databaseName, StringComparison.OrdinalIgnoreCase));
+            if (declaredName is null)
             {
                 Log.LogError(
                     null,
                     "COHDBSDK203",
                     null,
-                    schemaPath,
+                    schemaDirectory,
                     0,
                     0,
                     0,
                     0,
-                    "The compiled database schema does not exist. Build the project before creating a migration.");
+                    $"The compiled schema of database '{databaseName}' does not exist" +
+                    (declared.Length == 0 ? "" : $" (declared: {string.Join(", ", declared)})") +
+                    ". Build the project before creating a migration.");
                 return false;
             }
 
-            string migrationsRoot = ResolvePath(MigrationsRoot, projectDirectory);
+            string schemaPath = Path.Combine(schemaDirectory, declaredName + CompileDatabaseSchemaTask.SchemaFileSuffix);
+            string migrationsRoot = Path.Combine(ResolvePath(MigrationsRoot, projectDirectory), declaredName);
             Directory.CreateDirectory(migrationsRoot);
             BaselineFile? latest = FindLatestBaseline(migrationsRoot);
             SqlCompiledSchema desired = SqlCompiledSchemaSerializer.Read(schemaPath);

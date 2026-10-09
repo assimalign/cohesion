@@ -15,6 +15,10 @@
 		<CohesionProjectReference
 			Include="Assimalign.Cohesion.Sdk.Database.Tasks"
 			ProjectPath="..\src\Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
+		<!-- The engine builder the SDK anchors on by metadata name (SqlDatabaseBuilder.Schema inside
+		     SqlDatabaseEngineBuilder.AddDatabase). The task itself references only Sql.Schema; the
+		     test compiles consumer sources against the real engine assembly so a rename fails here. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.Build" />

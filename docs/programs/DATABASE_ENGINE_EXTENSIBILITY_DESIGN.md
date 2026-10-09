@@ -1451,20 +1451,26 @@ Numbering continues the plan of record's table. Each line is the question, then 
     compiled records, and the SDK canonicalizer? None has ever executed. *Recommend:* delete in B1.
     > Agree
 
-    *Sql.Schema side landed in B1 part 1;* the SDK canonicalizer and extraction are part 2.
+    *Sql.Schema side landed in B1 part 1;* the SDK canonicalizer and the function, trigger and
+    extension extraction are deleted in part 2.
 58. **Principals.** Remove `Principal(...)` from the five templates in B1, and refuse schema
     principals at engine Build (before I/O) until principal and grant DDL is its own item?
     *Recommend:* yes.
     > Agree
 
-    *Engine Build refusal landed in B1 part 1* (`COHSQLP001`, before any file is touched); the
-    templates are part 2.
+    *Engine Build refusal landed in B1 part 1* (`COHSQLP001`, before any file is touched); part 2
+    removed `Principal(...)` from the five templates and the seven cohesion-examples programs, and a
+    template test now starts the generated `cohesion-database` once.
 59. **SDK artifacts and format.** One schema artifact per declared database, the inline
     `database.Schema(...)` anchor, document format `v2`, and the one-time hash change?
     *Recommend:* yes.
     > Agree
 
-    *Format `v2` and the hash change landed in B1 part 1;* the SDK artifacts and anchor are part 2.
+    *Format `v2` and the hash change landed in B1 part 1;* the SDK artifacts and anchor landed in
+    part 2: `cohesion/database/<database>.schema.json` and `.schema.sha256` per declared database,
+    `COHDBSDK101` for a database declared twice, and `CohesionDatabaseName` selecting the database a
+    migration is for, whose migrations live under `Migrations/<database>/` (that folder is part 2's
+    choice: §5.7 does not say where a second database's migrations go).
 60. **Function abstraction shape.** Abstract NVI bases plus static typed factories over `SqlValue`
     (recommended), typed generic bases over `object?`, or sealed delegate descriptors?
     *Recommend:* the first.
@@ -1511,6 +1517,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
 72. **P7.** Fold the template, SampleHost and cohesion-examples work into B1, leaving P7 the
     ApplicationModel verification and Studio's typed fields after B3? *Recommend:* yes.
     > Agree
+
+    *Landed in B1 part 2:* the five templates, the SampleHost fixture and the seven
+    cohesion-examples programs compose through `AddSql(name, sql => …)` with no cast and no
+    principal.
 73. **Revision gate.** An optional monotonic schema revision that refuses a downgrade?
     *Recommend:* not in iteration 1; the destructive gate covers the damaging cases.
     > Agree

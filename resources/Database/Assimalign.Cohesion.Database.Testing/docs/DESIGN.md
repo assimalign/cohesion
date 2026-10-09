@@ -130,7 +130,11 @@ The fixture declares its relational schema with `Database.Sql.Schema` and, since
 engine extensibility design, declares its database on the SQL engine builder
 (`sql.AddDatabase(name, database => database.Schema(...))`), whose build provisions it inside the
 application's Build, before any server accepts. The SDK analyzes that same declaration at build
-time. The fixture's move to that composition is part 2 of B1.
+time and writes `cohesion/database/sample.schema.json` with its hash. The sample E2E reads that
+artifact and, after the second gateway run stops the host, opens the fixture's data files with an
+embedded engine and applies the SDK's compiled schema: the engine must find it already applied,
+recorded under the SDK's hash, so the build-time and run-time compilers cannot drift apart
+unnoticed.
 
 ## Bootstrap identity (O35)
 
@@ -146,8 +150,9 @@ Database programs now capture `AddSql(name, sql => ...)` intent (B1 replaced the
 phase-29 `AddSql((context, engine) => ...)` shape), register the server through that engine
 builder's deferred `AddServer`, and declare the databases the engine provisions on the same
 builder. One application Build
-constructs and owns the engine and nested server; the program disposes the
-application. The standalone template still uses its ordinary local data path.
+constructs and owns the engine and nested server, with every declared database
+provisioned; the program disposes the application. The standalone template still
+uses its ordinary local data path.
 This migration changes composition only; it adds no ApplicationModel declarations,
 manifests or resource control planes. Template acceptance explicitly builds all
 five emitted Database programs because resources-only changes do not trigger the

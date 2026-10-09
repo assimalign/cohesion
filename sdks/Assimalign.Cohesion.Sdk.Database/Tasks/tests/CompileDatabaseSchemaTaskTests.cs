@@ -3,7 +3,6 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Sdk.Database.Tasks;
@@ -27,16 +26,20 @@ public class CompileDatabaseSchemaTaskTests
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "Sql", engine);
 
-        task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+        task.Execute().ShouldBeTrue(Errors(engine));
 
-        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(task.OutputPath);
+        string schemaPath = SchemaPath(task, "orders");
+        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
         schema.Format.ShouldBe(SqlCompiledSchema.CurrentFormat);
         schema.Name.ShouldBe("orders");
-        schema.Model.ShouldBe(EngineModel.Sql);
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
-        schema.Hash.ShouldBe(task.SchemaHash);
-        File.ReadAllText(task.HashOutputPath).ShouldBe(schema.Hash + "\n");
-        SqlCompiledSchemaSerializer.Serialize(schema).ShouldBe(File.ReadAllText(task.OutputPath));
+        ITaskItem item = task.Schemas.ShouldHaveSingleItem();
+        item.ItemSpec.ShouldBe("orders");
+        item.GetMetadata("Hash").ShouldBe(schema.Hash);
+        item.GetMetadata("SchemaPath").ShouldBe(schemaPath);
+        item.GetMetadata("HashPath").ShouldBe(HashPath(task, "orders"));
+        File.ReadAllText(HashPath(task, "orders")).ShouldBe(schema.Hash + "\n");
+        SqlCompiledSchemaSerializer.Serialize(schema).ShouldBe(File.ReadAllText(schemaPath));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: key-value compilation fails until its model package exists")]
@@ -54,8 +57,8 @@ public class CompileDatabaseSchemaTaskTests
             error.Code == "COHDBSDK106" &&
             error.Message != null &&
             error.Message.Contains("model-specific compiled-schema package", StringComparison.Ordinal));
-        File.Exists(task.OutputPath).ShouldBeFalse();
-        File.Exists(task.HashOutputPath).ShouldBeFalse();
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
+        task.Schemas.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: reference-pack primitives use runtime type identities")]
@@ -72,9 +75,9 @@ public class CompileDatabaseSchemaTaskTests
             engine,
             GetFrameworkReferenceAssemblyPaths());
 
-        task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+        task.Execute().ShouldBeTrue(Errors(engine));
 
-        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(task.OutputPath);
+        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(SchemaPath(task, "sample"));
         CompiledSchemaTable table = schema.Tables.ShouldHaveSingleItem();
         (string Name, DatabaseType Type)[] expectedColumns =
         [
@@ -117,23 +120,7 @@ public class CompileDatabaseSchemaTaskTests
                 table.Column(order => order.Total);
                 table.Index(order => order.Note);
             });
-            database.Function("next_order", (long orderId) => orderId + 1);
-            database.Function("constant_sum", () => 1 + 2);
-            database.Function("negative", () => -1L);
-            database.Function<long>("wide_constant", () => 1);
-            database.Function<long?, long?>("nullable_identity", value => value);
-            database.Function<decimal?, decimal?>("nullable_decimal", value => value + value);
-            database.Function<decimal, decimal>("round_decimal", value => decimal.Round(value, 2));
-            database.Function<string, string>("suffix", value => value + "!");
-            database.Function<int, string>("mixed_suffix", value => "x" + value);
-            database.Function<ParityArrayHolder, long>("first_array_value", holder => holder.Values[0]);
-            database.Trigger<ParityOrder>(SqlTriggerEvent.AfterInsert, (context, order) => context.Audit("created", order.Id));
-            database.Extension("collation", "ordinal");
-            database.Principal("app", principal =>
-            {
-                principal.Grant(SqlPermission.Read, "Orders");
-                principal.Grant(SqlPermission.Read, "next_order");
-            });
+            database.Principal("app", principal => principal.Grant(SqlPermission.Read, "Orders"));
         });
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("ParitySchema.cs");
@@ -141,30 +128,146 @@ public class CompileDatabaseSchemaTaskTests
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
 
-        task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+        task.Execute().ShouldBeTrue(Errors(engine));
 
-        File.ReadAllText(task.OutputPath).ShouldBe(SqlCompiledSchemaSerializer.Serialize(runtimeSchema));
-        task.SchemaHash.ShouldBe(runtimeSchema.Hash);
-        File.ReadAllText(task.HashOutputPath).ShouldBe(runtimeSchema.Hash + "\n");
+        File.ReadAllText(SchemaPath(task, "parity")).ShouldBe(runtimeSchema.CanonicalDocument);
+        task.Schemas.ShouldHaveSingleItem().GetMetadata("Hash").ShouldBe(runtimeSchema.Hash);
+        File.ReadAllText(HashPath(task, "parity")).ShouldBe(runtimeSchema.Hash + "\n");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: unsupported expression reports a named diagnostic")]
-    public void Execute_WithUnsupportedExpression_ShouldReportNamedDiagnostic()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: each declared database writes its own artifact, in parity with the runtime")]
+    public void Execute_WithEngineBuilderDeclarations_ShouldWriteOneArtifactPerDatabase()
+    {
+        // The runtime's SqlDatabaseBuilder.Schema(declare) is SqlSchema.Create(database name, declare).
+        SqlCompiledSchema runtimeSales = SqlSchema.Compile("sales", schema =>
+            schema.Table<SalesOrder>("orders", table =>
+            {
+                table.Key(order => order.Id);
+                table.Column(order => order.Item);
+                table.Index(order => order.Item);
+            }));
+        SqlCompiledSchema runtimeReporting = SqlSchema.Compile("reporting", schema =>
+            schema.Table<DailyTotal>("daily_totals", table => table.Key(total => total.Day)));
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, EngineBuilderSource);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeTrue(Errors(engine));
+
+        task.Schemas.Select(static item => item.ItemSpec).ShouldBe(["reporting", "sales"]);
+        File.ReadAllText(SchemaPath(task, "sales")).ShouldBe(runtimeSales.CanonicalDocument);
+        File.ReadAllText(HashPath(task, "sales")).ShouldBe(runtimeSales.Hash + "\n");
+        File.ReadAllText(SchemaPath(task, "reporting")).ShouldBe(runtimeReporting.CanonicalDocument);
+        File.ReadAllText(HashPath(task, "reporting")).ShouldBe(runtimeReporting.Hash + "\n");
+        Directory.GetFiles(task.OutputDirectory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ShouldBe(
+            ["reporting.schema.json", "reporting.schema.sha256", "sales.schema.json", "sales.schema.sha256"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a database no longer declared loses its artifacts")]
+    public void Execute_AfterDatabaseRenamed_ShouldRemoveUndeclaredArtifacts()
     {
         using var directory = new TemporaryDirectory();
-        string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, ParitySchemaSource.Replace(
-            "orderId + 1",
-            "new Random().Next() + orderId",
-            StringComparison.Ordinal));
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, EngineBuilderSource);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+        task.Execute().ShouldBeTrue(Errors(engine));
+        File.WriteAllText(directory.File("obj/cohesion/database/notes.txt"), "not an artifact");
+
+        File.WriteAllText(sourcePath, EngineBuilderSource.Replace("\"sales\"", "\"ledger\"", StringComparison.Ordinal));
+        task = CreateTask(directory, sourcePath, "Sql", engine);
+        task.Execute().ShouldBeTrue(Errors(engine));
+
+        task.Schemas.Select(static item => item.ItemSpec).ShouldBe(["ledger", "reporting"]);
+        File.Exists(SchemaPath(task, "sales")).ShouldBeFalse();
+        File.Exists(HashPath(task, "sales")).ShouldBeFalse();
+        File.Exists(SchemaPath(task, "ledger")).ShouldBeTrue();
+        File.Exists(directory.File("obj/cohesion/database/notes.txt")).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: the hosted AddSql shape declares its databases")]
+    public void Execute_WithHostedEngineVerb_ShouldReadTheEnclosingDatabaseName()
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, HostedSource);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeTrue(Errors(engine));
+
+        ITaskItem item = task.Schemas.ShouldHaveSingleItem();
+        item.ItemSpec.ShouldBe("Sample");
+        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(SchemaPath(task, "Sample"));
+        schema.Name.ShouldBe("Sample");
+        schema.Tables.ShouldHaveSingleItem().Name.ShouldBe("orders");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a database builder schema needs a constant enclosing AddDatabase name")]
+    [InlineData("""sql.AddDatabase(Names.Sales, database => database.Schema(schema => schema.Table<SalesOrder>("orders", table => table.Key(order => order.Id))));""")]
+    [InlineData("""
+        sql.AddDatabase("sales", Declare);
+        static void Declare(SqlDatabaseBuilder database)
+            => database.Schema(schema => schema.Table<SalesOrder>("orders", table => table.Key(order => order.Id)));
+        """)]
+    [InlineData("""sql.AddDatabase("sales", database => other.Schema(schema => schema.Table<SalesOrder>("orders", table => table.Key(order => order.Id))));""")]
+    public void Execute_WithUnanalyzableDatabaseName_ShouldReportNamedDiagnostic(string declaration)
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, $$"""
+            using System;
+            using Assimalign.Cohesion.Database.Sql;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+
+            public sealed record SalesOrder(long Id, string Item);
+
+            public static class Names
+            {
+                public static readonly string Sales = "sales";
+            }
+
+            public static class Program
+            {
+                public static void Configure(SqlDatabaseEngineBuilder sql, SqlDatabaseBuilder other)
+                {
+                    {{declaration}}
+                }
+            }
+            """);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
 
         task.Execute().ShouldBeFalse();
 
-        engine.Errors.ShouldContain(error => error.Code == "COHDBSDK107");
-        File.Exists(task.OutputPath).ShouldBeFalse();
-        File.Exists(task.HashOutputPath).ShouldBeFalse();
+        engine.Errors.ShouldContain(error =>
+            error.Code == "COHDBSDK102" &&
+            error.Message != null &&
+            error.Message.Contains("SqlDatabaseEngineBuilder.AddDatabase(name, configure)", StringComparison.Ordinal));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a database name that cannot name a file is refused")]
+    [InlineData("sales/eu")]
+    [InlineData("sales:eu")]
+    [InlineData("sales.")]
+    public void Execute_WithDatabaseNameUnfitForFile_ShouldFail(string name)
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, EngineBuilderSource.Replace("\"sales\"", $"\"{name}\"", StringComparison.Ordinal));
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeFalse();
+
+        engine.Errors.ShouldContain(error =>
+            error.Code == "COHDBSDK102" &&
+            error.Message != null &&
+            error.Message.Contains($"Database name '{name}' cannot name its schema artifact", StringComparison.Ordinal));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: dangling reference fails without artifacts")]
@@ -185,8 +288,7 @@ public class CompileDatabaseSchemaTaskTests
             error.Code == "COHDBSDK106" &&
             error.Message != null &&
             error.Message.Contains("undeclared table", StringComparison.Ordinal));
-        File.Exists(task.OutputPath).ShouldBeFalse();
-        File.Exists(task.HashOutputPath).ShouldBeFalse();
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: mismatched reference type fails precisely")]
@@ -207,29 +309,15 @@ public class CompileDatabaseSchemaTaskTests
             error.Code == "COHDBSDK106" &&
             error.Message != null &&
             error.Message.Contains("does not match primary key", StringComparison.Ordinal));
-        File.Exists(task.OutputPath).ShouldBeFalse();
-        File.Exists(task.HashOutputPath).ShouldBeFalse();
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: exactly one SqlSchema declaration is required")]
-    [InlineData("", 0)]
-    [InlineData("""
-        public static class SecondSchema
-        {
-            public static void Configure()
-            {
-                SqlSchema.Create("second", database => { });
-            }
-        }
-        """, 2)]
-    public void Execute_WithoutExactlyOneSchemaDeclaration_ShouldFail(string replacement, int expectedCount)
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: at least one schema declaration is required")]
+    public void Execute_WithoutSchemaDeclaration_ShouldFail()
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        string source = replacement.Length == 0
-            ? SchemaTypes
-            : SqlSchemaSource + Environment.NewLine + replacement;
-        File.WriteAllText(sourcePath, source);
+        File.WriteAllText(sourcePath, SchemaTypes);
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -238,7 +326,37 @@ public class CompileDatabaseSchemaTaskTests
         engine.Errors.ShouldContain(error =>
             error.Code == "COHDBSDK101" &&
             error.Message != null &&
-            error.Message.Contains($"found {expectedCount}", StringComparison.Ordinal));
+            error.Message.Contains("found 0", StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: one schema declaration per database name")]
+    [InlineData("""SqlSchema.Create("orders", database => { });""")]
+    [InlineData("""SqlSchema.Create("ORDERS", database => { });""")]
+    [InlineData("""sql.AddDatabase("Orders", database => database.Schema(schema => { }));""")]
+    public void Execute_WithTwoDeclarationsOfOneDatabase_ShouldFail(string second)
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, SqlSchemaSource + $$"""
+
+            public static class SecondSchema
+            {
+                public static void Configure(Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineBuilder sql)
+                {
+                    {{second}}
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeFalse();
+
+        engine.Errors.ShouldContain(error =>
+            error.Code == "COHDBSDK101" &&
+            error.Message != null &&
+            error.Message.Contains("has more than one schema declaration", StringComparison.Ordinal));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
     }
 
     private static CompileDatabaseSchemaTask CreateTask(
@@ -254,6 +372,7 @@ public class CompileDatabaseSchemaTaskTests
         string[] references = frameworkReferences
             .Append(Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Database.dll"))
             .Append(Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Database.Sql.Schema.dll"))
+            .Append(Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Database.Sql.dll"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         return new CompileDatabaseSchemaTask
@@ -265,10 +384,18 @@ public class CompileDatabaseSchemaTaskTests
             AssemblyName = typeof(CompileDatabaseSchemaTaskTests).Assembly.GetName().Name!,
             Model = model,
             ProjectDirectory = directory.Path,
-            OutputPath = directory.File("obj/database.schema.json"),
-            HashOutputPath = directory.File("obj/database.schema.sha256")
+            OutputDirectory = directory.File("obj/cohesion/database")
         };
     }
+
+    private static string SchemaPath(CompileDatabaseSchemaTask task, string database)
+        => Path.GetFullPath(Path.Combine(task.OutputDirectory, database + ".schema.json"));
+
+    private static string HashPath(CompileDatabaseSchemaTask task, string database)
+        => Path.GetFullPath(Path.Combine(task.OutputDirectory, database + ".schema.sha256"));
+
+    private static string Errors(RecordingBuildEngine engine)
+        => string.Join(Environment.NewLine, engine.Errors.Select(static error => $"{error.Code}: {error.Message}"));
 
     private static string[] GetFrameworkReferenceAssemblyPaths()
     {
@@ -311,7 +438,6 @@ public class CompileDatabaseSchemaTaskTests
                         table.References<Order>(line => line.OrderId);
                         table.Column(line => line.Total);
                     });
-                    database.Function("next_order", (long orderId) => orderId + 1);
                     database.Principal("app", principal => principal.Grant(SqlPermission.ReadWrite, "Orders", "OrderLines"));
                 });
             }
@@ -388,7 +514,7 @@ public class CompileDatabaseSchemaTaskTests
             {
                 public static void Configure()
                 {
-                        SqlSchema.Create("parity", database =>
+                    SqlSchema.Create("parity", database =>
                     {
                         database.AllowDestructiveChanges();
                         database.Type<ParityMoney>(type => type.Decimal(18, 2));
@@ -400,25 +526,84 @@ public class CompileDatabaseSchemaTaskTests
                             table.Column(order => order.Total);
                             table.Index(order => order.Note);
                         });
-                        database.Function("next_order", (long orderId) => orderId + 1);
-                        database.Function("constant_sum", () => 1 + 2);
-                        database.Function("negative", () => -1L);
-                        database.Function<long>("wide_constant", () => 1);
-                        database.Function<long?, long?>("nullable_identity", value => value);
-                        database.Function<decimal?, decimal?>("nullable_decimal", value => value + value);
-                        database.Function<decimal, decimal>("round_decimal", value => decimal.Round(value, 2));
-                        database.Function<string, string>("suffix", value => value + "!");
-                        database.Function<int, string>("mixed_suffix", value => "x" + value);
-                        database.Function<ParityArrayHolder, long>("first_array_value", holder => holder.Values[0]);
-                        database.Trigger<ParityOrder>(SqlTriggerEvent.AfterInsert, (context, order) => context.Audit("created", order.Id));
-                        database.Extension("collation", "ordinal");
-                        database.Principal("app", principal =>
-                        {
-                            principal.Grant(SqlPermission.Read, "Orders");
-                            principal.Grant(SqlPermission.Read, "next_order");
-                        });
+                        database.Principal("app", principal => principal.Grant(SqlPermission.Read, "Orders"));
                     });
                 }
+            }
+        }
+        """;
+
+    // The engine-level composition of the extensibility design (§3.1): an inline schema anchored on
+    // SqlDatabaseBuilder.Schema and a reusable SqlSchema value passed to AddDatabase(SqlSchema).
+    private const string EngineBuilderSource = """
+        using System;
+        using Assimalign.Cohesion.Database.Sql;
+        using Assimalign.Cohesion.Database.Sql.Schema;
+
+        namespace Assimalign.Cohesion.Sdk.Database.Tests
+        {
+            public sealed record SalesOrder(long Id, string Item);
+            public sealed record DailyTotal(DateOnly Day, decimal Amount);
+
+            public static class EngineProgram
+            {
+                public static SqlDatabaseEngineBuilder Configure()
+                {
+                    SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("orders-sql");
+                    sql.Options.RootPath = "data";
+                    sql.AddDatabase("sales", database =>
+                    {
+                        database.Provisioning = SqlProvisioningMode.Apply;
+                        database.Schema(schema =>
+                        {
+                            schema.Table<SalesOrder>("orders", table =>
+                            {
+                                table.Key(order => order.Id);
+                                table.Column(order => order.Item);
+                                table.Index(order => order.Item);
+                            });
+                        });
+                    });
+                    sql.AddDatabase(ReportingSchema.Declaration);
+                    sql.AddDatabase("archive");
+                    return sql;
+                }
+            }
+
+            public static class ReportingSchema
+            {
+                public static readonly SqlSchema Declaration = SqlSchema.Create("reporting", schema =>
+                    schema.Table<DailyTotal>("daily_totals", table => table.Key(total => total.Day)));
+            }
+        }
+        """;
+
+    private const string HostedSource = """
+        using System;
+        using Assimalign.Cohesion.Database;
+        using Assimalign.Cohesion.Database.Sql;
+
+        public sealed record SampleOrder(long Id, string Item);
+
+        public static class HostedProgram
+        {
+            private const string Database = "Sample";
+
+            public static void Configure(IDatabaseApplicationBuilder builder)
+            {
+                builder.AddSql("sample-sql", sql =>
+                {
+                    sql.Options.RootPath = "data";
+                    sql.AddServer(server => { });
+                    sql.AddDatabase(Database, database => database.Schema(schema =>
+                    {
+                        schema.Table<SampleOrder>("orders", table =>
+                        {
+                            table.Key(order => order.Id);
+                            table.Column(order => order.Item);
+                        });
+                    }));
+                });
             }
         }
         """;
@@ -441,3 +626,7 @@ public sealed record ParityOrder(long Id, string Note, ParityMoney Total);
 public sealed record ParityArrayHolder(long[] Values);
 
 public readonly record struct ParityMoney(decimal Amount);
+
+public sealed record SalesOrder(long Id, string Item);
+
+public sealed record DailyTotal(DateOnly Day, decimal Amount);

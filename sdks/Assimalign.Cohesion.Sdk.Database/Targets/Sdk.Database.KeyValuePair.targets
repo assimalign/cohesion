@@ -8,7 +8,7 @@
 		Name="_CohesionCompileKeyValuePairDatabaseSchema"
 		Condition="'$(CohesionDatabaseProject)' == 'true'"
 		Inputs="@(Compile);@(ReferencePath);$(_CohesionDatabaseTaskAssembly)"
-		Outputs="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)">
+		Outputs="$(_CohesionDatabaseSchemaStamp)">
 		<CompileDatabaseSchemaTask
 			SourceFiles="@(Compile)"
 			ReferencePaths="@(ReferencePath)"
@@ -17,12 +17,7 @@
 			AssemblyName="$(AssemblyName)"
 			Model="KeyValuePair"
 			ProjectDirectory="$(MSBuildProjectDirectory)"
-			OutputPath="$(CohesionDatabaseSchemaOutputPath)"
-			HashOutputPath="$(CohesionDatabaseSchemaHashOutputPath)">
-			<Output TaskParameter="SchemaHash" PropertyName="CohesionDatabaseSchemaHash" />
-		</CompileDatabaseSchemaTask>
-		<ItemGroup>
-			<FileWrites Include="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)" />
-		</ItemGroup>
+			OutputDirectory="$(CohesionDatabaseSchemaOutputDirectory)" />
+		<Touch Files="$(_CohesionDatabaseSchemaStamp)" AlwaysCreate="true" />
 	</Target>
 </Project>

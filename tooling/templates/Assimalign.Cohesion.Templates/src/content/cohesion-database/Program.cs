@@ -3,32 +3,29 @@ using System.IO;
 
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
-using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Hosting;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
-builder.AddSql((_, options) =>
+// The SQL engine, named once. Its callback runs while the application is built, so configuration
+// (appsettings.json, environment variables, --Database:DataPath=... or --Database:Endpoint=...
+// arguments) has its final values here.
+builder.AddSql("__RESOURCE_NAME__", sql =>
 {
-    options.EngineName = "__RESOURCE_NAME__";
-    options.RootPath = Path.Combine(AppContext.BaseDirectory, "data");
-    options.AddServer(engine => SqlDatabaseServer.Create(
-        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(new Uri("cohesion-db://localhost:5740"))));
-});
+    sql.Options.RootPath = builder.Configuration["Database:DataPath"] ?? Path.Combine(AppContext.BaseDirectory, "data");
+    sql.AddServer(server => server.Listen(new Uri(builder.Configuration["Database:Endpoint"] ?? "cohesion-db://localhost:5740")));
 
-SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
-{
-    database.Table<Customer>("Customers", table =>
+    // The engine's build creates the database when it does not exist and applies this schema
+    // before the server accepts its first connection.
+    sql.AddDatabase("customers", database => database.Schema(schema =>
     {
-        table.Key(customer => customer.Id);
-        table.Index(customer => customer.Email);
-    });
-    database.Principal(
-        "__RESOURCE_NAME__-api",
-        principal => principal.Grant(SqlPermission.ReadWrite, "Customers"));
+        schema.Table<Customer>("Customers", table =>
+        {
+            table.Key(customer => customer.Id);
+            table.Index(customer => customer.Email);
+        });
+    }));
 });
-
-builder.AddDatabase("__RESOURCE_NAME__", "customers", schema);
 
 await using DatabaseApplication application = builder.Build();
 await application.RunAsync();

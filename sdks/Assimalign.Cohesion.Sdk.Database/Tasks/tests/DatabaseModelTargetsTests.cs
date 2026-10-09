@@ -20,12 +20,28 @@ public class DatabaseModelTargetsTests
         using var projects = new ProjectCollection();
         Project project = LoadProject(directory, projects, "Sql");
 
-        project.GetPropertyValue("CohesionDatabaseSchemaOutputPath")
+        project.GetPropertyValue("CohesionDatabaseSchemaOutputDirectory")
             .Replace('\\', '/')
-            .ShouldBe("obj/Debug/net10.0/cohesion/database.schema.json");
-        project.GetPropertyValue("CohesionDatabaseSchemaHashOutputPath")
+            .ShouldBe("obj/Debug/net10.0/cohesion/database/");
+        project.GetPropertyValue("_CohesionDatabaseSchemaStamp")
             .Replace('\\', '/')
-            .ShouldBe("obj/Debug/net10.0/cohesion/database.schema.sha256");
+            .ShouldBe("obj/Debug/net10.0/cohesion/database.schema.stamp");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Targets: a migration names its database and reads the artifact directory")]
+    public void Evaluate_CreateMigrationTarget_ShouldPassTheDatabaseNameAndArtifactDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        using var projects = new ProjectCollection();
+        Project project = LoadProject(directory, projects, "Sql");
+
+        ProjectTaskInstance migration = project.Targets["CohesionDatabaseCreateMigration"]
+            .Children
+            .OfType<ProjectTaskInstance>()
+            .Single(task => task.Name == "CreateDatabaseMigrationTask");
+        migration.Parameters["SchemaDirectory"].ShouldBe("$(CohesionDatabaseSchemaOutputDirectory)");
+        migration.Parameters["DatabaseName"].ShouldBe("$(CohesionDatabaseName)");
+        migration.Parameters["MigrationsRoot"].ShouldBe("$(CohesionDatabaseMigrationsRoot)");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Targets: exact model imports its compile tool set")]

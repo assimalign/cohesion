@@ -120,7 +120,8 @@ canonical expression text, so the compiled hash of a schema that declares a trig
 changed with the rename (nothing has shipped), and `Table<T>(name, …)` and
 `Extension(name, …)` report a blank name with the parameter name `name`, which the former
 implementation reported as `tableName` and `extensionName`. (B1 later deleted the trigger
-context, the trigger and function declarations and `Extension`; see above.)
+context, the trigger and function declarations and `Extension`, and with them the SDK's
+canonicalizer; the SDK's parity test now declares types, tables and a principal; see above.)
 
 The package targets `net10.0`, `LangVersion=Preview`, and is AOT-compatible.
 The compiler reads statically supplied expression nodes and their type metadata;

@@ -1,6 +1,10 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -417,6 +421,92 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
     /// <returns>A task representing consumer build and manifest verification.</returns>
     [TemplateFeedFact("cohesion-database", DisplayName = "Cohesion Test [Templates] - Build: database generates only enabled manifests")]
     public Task Build_Database_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-database");
+
+    /// <summary>
+    /// Starts the generated standalone database once. Its server listens only after application
+    /// Build returns, and Build returns only after the SQL engine's build provisioned the declared
+    /// database, so an accepted connection proves the schema applied on first start.
+    /// </summary>
+    /// <returns>A task representing the build, the start and the stop of the generated program.</returns>
+    [TemplateFeedFact("cohesion-database", DisplayName = "Cohesion Test [Templates] - Run: database provisions its schema and serves on first start")]
+    public async Task Run_Database_ShouldProvisionAndServeAsync()
+    {
+        // Arrange: the private Cohesion frameworks are runtime packs, not installed frameworks, so
+        // the program runs self-contained for the host RID (the SampleHost fixture does the same).
+        const string name = "Northwind.Service";
+        string output = await _workspace.InstantiateAsync("cohesion-database", name);
+        string runtime = RuntimeInformation.RuntimeIdentifier;
+        await _workspace.BuildAsync(output, [$"-p:RuntimeIdentifier={runtime}", "-p:SelfContained=true"]);
+        string appHost = Path.Combine(output, "bin", "Debug", "net10.0", runtime, OperatingSystem.IsWindows() ? name + ".exe" : name);
+        File.Exists(appHost).ShouldBeTrue($"The self-contained build did not produce '{appHost}'.");
+        string data = Path.Combine(output, "data");
+        int port = FreeLoopbackPort();
+
+        // Act
+        var start = new ProcessStartInfo(appHost)
+        {
+            WorkingDirectory = output,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add($"--Database:Endpoint=cohesion-db://127.0.0.1:{port}");
+        start.ArgumentList.Add($"--Database:DataPath={data}");
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException($"Could not start '{appHost}'.");
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
+        bool listening = false;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            while (!listening && !process.HasExited && !timeout.IsCancellationRequested)
+            {
+                using var client = new TcpClient();
+                try
+                {
+                    await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+                    listening = true;
+                }
+                catch (SocketException)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        string log = await stdout + await stderr;
+        listening.ShouldBeTrue($"The generated database never accepted a connection on port {port}:\n{log}");
+        Directory.Exists(Path.Combine(data, "customers")).ShouldBeTrue($"The engine's build did not create database 'customers' under '{data}':\n{log}");
+        Directory.EnumerateFiles(Path.Combine(data, "customers")).ShouldNotBeEmpty();
+    }
+
+    private static int FreeLoopbackPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
 
     /// <summary>Builds the secretstore scaffold against its available package closure.</summary>
     /// <returns>A task representing consumer build and manifest verification.</returns>
