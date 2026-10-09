@@ -125,7 +125,9 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   `Database.Transactions.TransactionCoordinator` (manager + lock manager + record-space
   version store + gated journal-bound log, one sequence namespace with storage),
   explicit transactions and auto-commit both ride manager contexts, `Snapshot`
-  default / `ReadCommitted` per-command refresh / `Serializable` rejected,
+  default / `ReadCommitted` per-command refresh (each command reads through a view
+  of its capture, whose floor a snapshot pin holds until the command ends; see
+  [Read-committed command pins](#read-committed-command-pins-1363)) / `Serializable` rejected,
   rollback is logical through the ledger, recovery classifies + scrubs record
   space and primary index at open. Kernel aborts are wrapped in the root's
   exceptions at the session boundary (the area error policy). A failed command
@@ -231,6 +233,50 @@ a different contract from Graph, Documents and Blob, deliberately:
 
 `KeyValueTransactionFailureTests` covers the in-process cases, and `KeyValueLifecycleTests` the
 transaction ending under a running command.
+
+## Read-committed command pins (#1363)
+
+A command in a `ReadCommitted` explicit transaction reads through one view of the snapshot
+captured when it starts (`TransactionContext.PinStatementSnapshot`, handed to
+`KeyValueStatementContext` as the command's transaction). The view's floor can sit below every
+active sequence: a writer that began before the reader's transaction was still in flight at the
+capture, so the view must keep seeing the versions that writer tombstones. The transaction
+manager's prune bound counts a read-committed transaction only at its own sequence
+([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md), the
+prune bound), so once that writer committed, nothing held the bound at the view's floor, and a
+purge pass reclaimed those versions while the command still had to read them:
+
+- a `SCAN` skipped the keys behind them;
+- a `PUT` or `DELETE` resolves its key through the view after it waited for the key's lock, so it
+  found no version of a key that exists: a `DELETE` reported nothing to delete instead of the
+  older writer's change as a conflict (first-updater-wins), and a `PUT` conditional on an etag
+  reported a miss.
+
+`KeyValueDatabaseSession` therefore begins a snapshot transaction on the coordinator before it
+pins the view, and rolls it back when the command ends, on every path: completion, a failed
+command, a conflict or deadlock, cancellation. Beginning the pin first makes its floor at or below
+the view's. The Documents, Graph and Blob operations and the Sql statements pin the same way; a
+snapshot transaction, and an auto-commit command (which runs at `Snapshot`), needs no pin,
+because the manager tracks its fixed snapshot. On an offline database the pin is left to the
+reopen's recovery.
+
+The probe that found it ran one command per read-committed transaction from four readers (a full
+scan of 400 keys, or eight point reads), two writers replacing and deleting keys in snapshot
+transactions held open for up to two milliseconds, and a purge loop. Three 30-second runs lost
+2,149, 2,240 and 1,536 keys in 630, 668 and 434 of 17,000 to 30,000 scans per run; point reads,
+whose window between capture and read is far shorter, lost one key in about 516,000. With the
+purge loop stopped it lost none; with the pin it lost none in two 30-second runs (about 41,000
+scans and 331,000 point reads).
+`KeyValueReadCommittedSnapshotPinTests` keeps the probe as a two-second guard
+(`COHESION_DATABASE_RC_PROBE_SECONDS` lengthens it) and reproduces the race deterministically with
+the `DELETE` above, held at the key's lock while the older writer commits and a purge pass runs.
+
+The pin costs a kernel begin and an abort record per read-committed command. In an in-process,
+unpinned measurement on the in-memory engine (Release, 50,000 point reads of one key per round,
+median of seven rounds, two runs each), a read-committed `GET` went from about 2.1 µs to 3.0 to
+3.5 µs; a pin's begin and rollback alone took about 0.8 µs. Each pin also counts as a begun and a
+rolled-back kernel transaction in the transaction counters, as in Documents, Graph and Blob.
+Keeping pins out of those rates waits on #1351.
 
 ## The text seam (docs/COMMANDS.md — the grammar contract)
 

@@ -7,9 +7,13 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// under, the visibility snapshot captured once at command start, and the
 /// database's transaction coordinator (the key lock in phase one, the gated
 /// apply bracket in phase two). Under <c>IsolationLevel.ReadCommitted</c> the
-/// context's snapshot re-captures per access, so capturing here is what gives
-/// each command exactly one refreshed view; under <c>Snapshot</c> isolation the
-/// same capture returns the begin-time snapshot for every command.
+/// transaction's own context re-captures its snapshot per access, so the session
+/// hands this context a statement view instead
+/// (<c>TransactionContext.PinStatementSnapshot</c>), pinned behind a snapshot
+/// transaction it ends with the command: the view gives the command exactly one
+/// refreshed view, and the pin keeps the version purge from reclaiming what that view
+/// still sees (#1363). Under <c>Snapshot</c> isolation the same capture returns the
+/// begin-time snapshot for every command, which the transaction itself pins.
 /// </summary>
 internal readonly struct KeyValueStatementContext
 {

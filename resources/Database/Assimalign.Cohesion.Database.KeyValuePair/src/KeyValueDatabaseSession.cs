@@ -192,10 +192,16 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
                 throw transaction.CreateCommandRefusal();
             }
 
-            var scope = new KeyValueStatementContext(transaction.Context, _coordinator);
+            TransactionContext? snapshotPin = null;
 
             try
             {
+                snapshotPin = await BeginSnapshotPinAsync(transaction.Context, cancellationToken).ConfigureAwait(false);
+
+                // Pinned after the snapshot pin began, so the pin's floor is at or below the
+                // command's (#1363).
+                var statementContext = snapshotPin is null ? transaction.Context : transaction.Context.PinStatementSnapshot();
+                var scope = new KeyValueStatementContext(statementContext, _coordinator);
                 return await _executor.ExecuteAsync(command, scope, cancellationToken).ConfigureAwait(false);
             }
             catch (TransactionDeadlockException exception)
@@ -210,7 +216,14 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
             }
             finally
             {
-                transaction.EndCommand();
+                try
+                {
+                    await ReleaseSnapshotPinAsync(snapshotPin).ConfigureAwait(false);
+                }
+                finally
+                {
+                    transaction.EndCommand();
+                }
             }
         }
 
@@ -256,6 +269,44 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Begins the snapshot pin of a command in a <see cref="IsolationLevel.ReadCommitted"/>
+    /// transaction: a snapshot transaction of its own, begun before the command pins its view
+    /// (<see cref="TransactionContext.PinStatementSnapshot"/>), as the Documents, Graph and Blob
+    /// operations begin theirs.
+    /// </summary>
+    /// <param name="transaction">The explicit transaction's context.</param>
+    /// <param name="cancellationToken">Observed by the begin.</param>
+    /// <returns>The pin, or null when the transaction's snapshot is fixed at its begin.</returns>
+    /// <remarks>
+    /// The version purge reclaims below the transaction manager's prune bound, to which a
+    /// read-committed transaction adds only its own sequence: its snapshot is captured afresh on
+    /// every access. The command's view keeps the floor of the moment it was pinned, which can be
+    /// lower, because a writer that began before this transaction was still in flight then. Once
+    /// that writer commits, nothing but this pin keeps the purge from reclaiming the versions it
+    /// tombstoned while the command still reads them, which would drop those keys from a scan or
+    /// read a replaced key as absent. The pin's snapshot is captured first, so its floor is at or
+    /// below the view's (#1363).
+    /// </remarks>
+    private async ValueTask<TransactionContext?> BeginSnapshotPinAsync(TransactionContext transaction, CancellationToken cancellationToken)
+        => transaction.IsolationLevel == IsolationLevel.ReadCommitted
+            ? await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false)
+            : null;
+
+    /// <summary>
+    /// Ends a command's snapshot pin, on every path out of the command. It always ends rolled
+    /// back, with no token: it wrote nothing. On an offline database it touches nothing (#1243),
+    /// and the reopen's recovery aborts it.
+    /// </summary>
+    /// <param name="snapshotPin">The pin, or null when the command has none.</param>
+    private async ValueTask ReleaseSnapshotPinAsync(TransactionContext? snapshotPin)
+    {
+        if (snapshotPin?.State == TransactionState.Active && !_database.IsOffline)
+        {
+            await _coordinator.RollbackAsync(snapshotPin, CancellationToken.None).ConfigureAwait(false);
         }
     }
 }

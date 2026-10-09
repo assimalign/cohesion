@@ -1061,7 +1061,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   locks release. Auto-commit statements ride a one-statement manager
   transaction, so visibility semantics never fork. Isolation: `Snapshot`
   (default) fixes the statement snapshot at begin, `ReadCommitted` re-captures
-  per statement; `Serializable` is **rejected** until conflict detection
+  per statement, and the statement reads through a view of that capture whose
+  floor a snapshot pin holds until the statement ends
+  ([Read-committed statement pins](#read-committed-statement-pins-1363));
+  `Serializable` is **rejected** until conflict detection
   exists (never run weaker than requested). Kernel aborts surface wrapped in
   the root's `DatabaseTransactionAbortedException` (deadlock victims:
   `DatabaseTransactionDeadlockException` — retryable by construction, an
@@ -2374,7 +2377,53 @@ four independently shippable steps:
    every open transaction — never a statement-local view, and deliberately
    stricter than the issue's advisory `OldestActive` alone, which can reclaim
    a version a live snapshot with an older minimum still needs (the
-   pinned-snapshot test is the proof).
+   pinned-snapshot test is the proof). Because the bound never reads a
+   statement-local view, a read-committed statement keeps its view's floor
+   through a snapshot transaction of its own (#1363, below).
+
+### Read-committed statement pins (#1363)
+
+A statement in a `ReadCommitted` explicit transaction reads through one view
+of the snapshot captured when it starts (`TransactionContext.PinStatementSnapshot`,
+handed to `SqlStatementContext` as the statement's transaction). The view's floor
+can sit below every active sequence: a writer that began before the reader's
+transaction was still in flight at the capture, so the view must keep seeing the
+versions that writer tombstones. The transaction manager's prune bound counts a
+read-committed transaction only at its own sequence (`Database.Transactions`
+DESIGN.md, the prune bound), so once that writer committed, nothing held the
+bound at the view's floor: a purge pass reclaimed those versions while the
+statement still had to reach them, and the statement returned fewer rows than its
+snapshot holds.
+
+`SqlDatabaseSession` therefore begins a snapshot transaction on the coordinator
+before it pins the view, and rolls it back when the statement ends, on every path:
+completion, a failed statement, a deadlock or conflict, cancellation. Beginning
+the pin first makes its floor at or below the view's. The Documents, Graph and
+Blob operations pin the same way; a snapshot transaction, and an auto-commit
+statement (which runs at `Snapshot`), needs no pin, because the manager tracks its
+fixed snapshot. On an offline database the pin is left to the reopen's recovery,
+as a failed auto-commit context is.
+
+The probe that found it ran one statement per read-committed transaction from four
+readers (a scan, an index seek, an index join and a nested-loop join over 120 rows
+per table), two writers replacing and deleting rows in snapshot transactions held
+open for up to two milliseconds, and a purge loop. Three 30-second runs lost
+6,332, 5,406 and 4,278 rows in 3,505, 3,062 and 2,411 of 32,000 to 37,000
+statements: in scans, index joins and nested-loop joins, never in index seeks,
+whose window between capture and read is too short to hit often (the KeyValuePair
+probe's point reads lost one key in about 516,000). With the purge loop stopped it
+lost none; with the pin it lost none in two 30-second runs (about 60,000
+statements). `SqlReadCommittedSnapshotPinTests` keeps
+the probe as a two-second guard (`COHESION_DATABASE_RC_PROBE_SECONDS` lengthens it)
+and reproduces the race deterministically: a join takes its table intent locks
+after the statement captured its view, so a table lock holds it there while the
+older writer commits and a purge pass runs. Before the fix that join returned two
+of the three rows its snapshot holds.
+
+The pin costs a kernel begin and an abort record per read-committed statement, and
+it moves the kernel transaction counters: each pin counts as a begun and a
+rolled-back transaction, as it already did in Documents, Graph and Blob. Keeping
+pins out of those rates waits on #1351.
 
 ## Non-goals (current cut)
 

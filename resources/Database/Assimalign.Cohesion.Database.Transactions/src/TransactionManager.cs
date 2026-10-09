@@ -324,7 +324,8 @@ public sealed class TransactionManager : IAsyncDisposable
     /// resets its xmin once it holds no snapshot (<c>src/backend/utils/time/snapmgr.c:937-955</c>,
     /// <c>SnapshotResetXmin</c>). A read-committed statement that
     /// must keep its floor while older writers commit pins it with a snapshot transaction of its
-    /// own, begun before it pins the statement view (the Documents, Graph and Blob operations).
+    /// own, begun before it pins the statement view (the Documents, Graph and Blob operations, Sql
+    /// statements and KeyValuePair commands, #1363).
     /// </para>
     /// </remarks>
     internal TransactionSequence PruneBound
