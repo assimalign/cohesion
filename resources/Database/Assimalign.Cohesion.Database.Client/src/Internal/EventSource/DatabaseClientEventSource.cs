@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Protocol;
+
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
 /// <summary>
@@ -24,6 +26,12 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 /// is counted once when the pool hands the connection out and once when the rental is returned,
 /// which keeps <c>current-rented-connections</c> exact. Endpoints and database names are written;
 /// connection strings, credentials and statement text never are.
+/// </para>
+/// <para>
+/// A statement-level server error can quote user data the core cannot recognize: a key, a blob name
+/// or a fragment of the statement. <c>ExchangeFailed</c> therefore writes the exception's message
+/// only for the transport and protocol codes, and leaves the server's statement-level message to the
+/// model client's own failure event, which removes the user data that client knows of (plan D8).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Client")]
@@ -210,9 +218,23 @@ internal sealed class DatabaseClientEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            ExchangeFailed(connection.Database, exception.Code.ToString(), exception.Message);
+            ExchangeFailed(connection.Database, exception.Code.ToString(), GetExchangeFailureMessage(exception));
         }
     }
+
+    /// <summary>
+    /// The message an exchange failure writes. The client raises only
+    /// <see cref="ProtocolErrorCode.Internal"/> and <see cref="ProtocolErrorCode.ProtocolViolation"/>
+    /// itself, and a server sends those codes with fixed protocol text, so their message is written.
+    /// Every other code carries the server's statement-level message, which can quote a key, a blob
+    /// name or a fragment of the statement; it is written as an empty string.
+    /// </summary>
+    /// <param name="exception">The coded failure.</param>
+    /// <returns>The message to write.</returns>
+    private static string GetExchangeFailureMessage(DatabaseClientException exception)
+        => exception.Code is ProtocolErrorCode.Internal or ProtocolErrorCode.ProtocolViolation
+            ? exception.Message
+            : string.Empty;
 
     /// <summary>
     /// Writes a download whose broken rental could not be returned after the download failed.

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 
@@ -19,13 +20,18 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 /// </para>
 /// <para>
 /// A command writes its database, parameter count, row and affected counts, error kind and wire
-/// code; never its command text, keys or values (plan D8). No counters: a process-wide count
+/// code; never its command text, keys or values (plan D8). A failure also writes the server's
+/// message, which names a conflicting key in hexadecimal, so <c>CommandFailed</c> replaces the
+/// hexadecimal form of the command's byte parameters in it. No counters: a process-wide count
 /// updated per command would be a contention point (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.KeyValuePair.Client")]
 internal sealed class KeyValueClientEventSource : EventSource
 {
+    /// <summary>The text that stands for a key's or a value's bytes in a written failure message.</summary>
+    internal const string RedactedValue = "<redacted>";
+
     public static readonly KeyValueClientEventSource Log = new();
 
     private KeyValueClientEventSource()
@@ -76,9 +82,11 @@ internal sealed class KeyValueClientEventSource : EventSource
     /// </summary>
     /// <param name="connection">The connection that ran the command.</param>
     /// <param name="exception">The failure the command throws.</param>
+    /// <param name="parameters">The command's bound parameters, whose bytes are removed from the written message.</param>
     /// <param name="startTimestamp">The timestamp taken when the command started.</param>
     [NonEvent]
-    public void CommandFailed(KeyValueConnection connection, KeyValueClientException exception, long startTimestamp)
+    public void CommandFailed(KeyValueConnection connection, KeyValueClientException exception,
+        IReadOnlyDictionary<string, object?>? parameters, long startTimestamp)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
@@ -86,7 +94,7 @@ internal sealed class KeyValueClientEventSource : EventSource
                 connection.Database,
                 exception.Kind.ToString(),
                 exception.Code.ToString(),
-                exception.Message,
+                RedactParameters(exception.Message, parameters),
                 Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
@@ -121,4 +129,32 @@ internal sealed class KeyValueClientEventSource : EventSource
     [Event(4, Level = EventLevel.Warning, Message = "The key-value client observer's {1} hook threw on a command on '{0}': {2}: {3}. The command's outcome is unchanged.")]
     private void ObserverFailed(string database, string callback, string exceptionType, string exceptionMessage)
         => WriteEvent(4, database, callback, exceptionType, exceptionMessage);
+
+    /// <summary>
+    /// Removes a command's key and value bytes from a failure's message. The server names a key in
+    /// hexadecimal in some of its messages (a write-write conflict names the key it lost), and keys
+    /// and values may be user data (plan D8), so the hexadecimal form of every byte parameter the
+    /// command bound is replaced. A parameter longer than half the message cannot occur in it and is
+    /// skipped, so a large value is never encoded.
+    /// </summary>
+    /// <param name="message">The failure's message.</param>
+    /// <param name="parameters">The command's bound parameters, or <see langword="null"/>.</param>
+    /// <returns>The message without the parameters' bytes.</returns>
+    private static string RedactParameters(string message, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (parameters is null)
+        {
+            return message;
+        }
+
+        foreach (object? value in parameters.Values)
+        {
+            if (value is byte[] { Length: > 0 } bytes && bytes.Length <= message.Length / 2)
+            {
+                message = message.Replace(Convert.ToHexString(bytes), RedactedValue, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return message;
+    }
 }

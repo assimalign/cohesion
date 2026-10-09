@@ -110,11 +110,22 @@ reported as such and not as the Query it runs. A path query stops when its enume
 server's terminal count, and fails on a coded failure of the initial response or of any later read.
 Its start and stop are written by different steps of the enumerator, so an activity-tracking tool
 sees the stop on the consumer's flow rather than nested under the start; an enumeration disposed
-early, like a cancellation, writes neither stop nor failure. Statement text and parameter values
-are never written. Timestamps are taken only while a listener takes the source. No counters.
+early, like a cancellation, writes neither stop nor failure. Only a coded failure
+(`DatabaseClientException`) ends a start with event 3: a cancellation, which is how a timeout
+surfaces, or an uncoded exception (an overlapping exchange, a disposed connection) leaves the
+start without a stop or a failure, and because event 3 is not a stop, an activity-tracking tool
+leaves a failed query's activity open. Pairing every start with a stop, and moving the path
+query's pair off the enumerator, are owner decisions on the event-source plan's catalog.
+
+The statement text and the parameter values are not written, but event 3's `exceptionMessage` is
+the server's text, and a GQL parse error's can quote a fragment of the statement. The client cannot
+tell such a fragment from the rest of the message; the shared core's `ExchangeFailed` writes no
+statement-level server message at all, and whether event 3 may carry it is owner question Q3 of the
+plan. Timestamps are taken only while a listener takes the source. No counters.
 
 `GraphClientEventSourceTests` checks the name, the strict manifest, and one event per query of each
-member, a refused statement included, with its payload and without statement text.
+member, a refused statement included, with its payload and no statement text outside the refusal's
+server message.
 
 ## Concrete types (concrete-types plan, phase 5, #1261)
 

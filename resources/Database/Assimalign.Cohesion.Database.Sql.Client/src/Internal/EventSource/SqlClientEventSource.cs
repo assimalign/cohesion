@@ -17,8 +17,9 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 /// </para>
 /// <para>
 /// A command writes its database, parameter count, row and affected counts, error kind and wire
-/// code; never its statement text or parameter values (plan D8). No counters: a process-wide count
-/// updated per command would be a contention point (plan D6).
+/// code; never its statement text or parameter values (plan D8). A failure also writes the server's
+/// message, which for a parse error can quote a fragment of the statement (plan owner question Q3).
+/// No counters: a process-wide count updated per command would be a contention point (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Sql.Client")]

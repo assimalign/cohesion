@@ -348,7 +348,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         catch (DatabaseClientException exception)
         {
             KeyValueClientException translated = KeyValueClientException.FromClientException(exception);
-            KeyValueClientEventSource.Log.CommandFailed(this, translated, startTimestamp);
+            KeyValueClientEventSource.Log.CommandFailed(this, translated, parameters, startTimestamp);
             NotifyFailed(commandText, translated, Stopwatch.GetElapsedTime(startTimestamp));
             throw translated;
         }

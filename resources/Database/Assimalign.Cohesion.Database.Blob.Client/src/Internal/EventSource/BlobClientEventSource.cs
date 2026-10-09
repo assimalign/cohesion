@@ -23,12 +23,17 @@ namespace Assimalign.Cohesion.Database.Blob.Client.Internal;
 /// received, and zero for the metadata operations. A download stops when its last chunk is verified,
 /// which can be after <see cref="BlobConnection.DownloadAsync"/> returned its stream. Container names
 /// are identifiers and are written; blob names may be user data and are never written, nor is any
-/// content (plan D8). No counters (plan D6).
+/// content (plan D8). The server names the blob in some of its failure messages, so
+/// <c>TransferFailed</c> replaces the transfer's blob name in the message it writes. No counters
+/// (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Blob.Client")]
 internal sealed class BlobClientEventSource : EventSource
 {
+    /// <summary>The text that stands for a blob's name in a written failure message.</summary>
+    internal const string RedactedName = "<redacted>";
+
     public static readonly BlobClientEventSource Log = new();
 
     private BlobClientEventSource()
@@ -90,15 +95,16 @@ internal sealed class BlobClientEventSource : EventSource
     /// <param name="connection">The connection that ran the transfer.</param>
     /// <param name="operation">The public member that ran it.</param>
     /// <param name="container">The container it addressed.</param>
+    /// <param name="name">The blob it addressed, removed from the written message; <see langword="null"/> for a listing.</param>
     /// <param name="code">The wire code of the failure.</param>
     /// <param name="exception">The failure.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the transfer started.</param>
     [NonEvent]
-    public void TransferFailed(BlobConnection connection, string operation, string? container, ProtocolErrorCode code, Exception exception, long startTimestamp)
+    public void TransferFailed(BlobConnection connection, string operation, string? container, string? name, ProtocolErrorCode code, Exception exception, long startTimestamp)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            TransferFailed(connection.Database, operation, container ?? string.Empty, code.ToString(), exception.Message, GetElapsedMilliseconds(startTimestamp));
+            TransferFailed(connection.Database, operation, container ?? string.Empty, code.ToString(), RedactName(exception.Message, name), GetElapsedMilliseconds(startTimestamp));
         }
     }
 
@@ -135,4 +141,16 @@ internal sealed class BlobClientEventSource : EventSource
 
     private static double GetElapsedMilliseconds(long startTimestamp)
         => startTimestamp == 0 ? 0 : Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+
+    /// <summary>
+    /// Removes a blob's name from a failure's message. The server names the blob in its own
+    /// messages (<c>Blob '…' does not exist.</c>, <c>Blob '…' already exists.</c>), and a name may
+    /// be user data (plan D8), so every occurrence is replaced; a name that also occurs in the
+    /// message's fixed text is replaced there too, which costs readability, never the name.
+    /// </summary>
+    /// <param name="message">The failure's message.</param>
+    /// <param name="name">The blob's name, or <see langword="null"/>.</param>
+    /// <returns>The message without the name.</returns>
+    private static string RedactName(string message, string? name)
+        => string.IsNullOrEmpty(name) ? message : message.Replace(name, RedactedName, StringComparison.Ordinal);
 }

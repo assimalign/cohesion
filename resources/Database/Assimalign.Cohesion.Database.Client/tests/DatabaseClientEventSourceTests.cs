@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -33,8 +34,9 @@ public class DatabaseClientEventSourceCollection
 /// <summary>
 /// The shared client core's event source against the repository's EventSource convention: a
 /// loopback client against a real SQL server reports each connection and pool transition once,
-/// a dead endpoint, a refused authentication and a protocol violation each report their failure
-/// once, and the connection gauges return to where they started.
+/// a dead endpoint, a refused authentication, a protocol violation and a download whose broken
+/// rental cannot be returned each report their failure once, and the connection gauges return to
+/// where they started.
 /// </summary>
 [Collection(nameof(DatabaseClientEventSourceCollection))]
 public sealed class DatabaseClientEventSourceTests
@@ -144,7 +146,11 @@ public sealed class DatabaseClientEventSourceTests
         exchangeFailed.EventId.ShouldBe(7);
         exchangeFailed.Level.ShouldBe(EventLevel.Verbose);
         exchangeFailed.PayloadNames.ShouldBe(["database", "code", "exceptionMessage"]);
-        exchangeFailed.Payload.ShouldBe([database, failure.Code.ToString(), failure.Message]);
+        failure.Code.ShouldNotBe(ProtocolErrorCode.Internal);
+        failure.Code.ShouldNotBe(ProtocolErrorCode.ProtocolViolation);
+        failure.Message.ShouldContain("missing_table", Case.Sensitive);
+        exchangeFailed.Payload.ShouldBe([database, failure.Code.ToString(), string.Empty],
+            "The server's statement-level message can quote the statement; the core does not write it.");
 
         var closed = events[6];
         closed.EventId.ShouldBe(3);
@@ -250,27 +256,50 @@ public sealed class DatabaseClientEventSourceTests
         events[3].Payload![1].ShouldBe(false, "A broken connection closes instead of returning to the pool.");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Client] - DatabaseClientEventSource: Should write a download's release failure with its declared payload")]
-    public void DownloadReleaseFailed_DeclaredPayload_ShouldBeWritten()
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - DatabaseClientEventSource: Should report a failed download's release failure once, from the download stream")]
+    public async Task ExecuteStreamingAsync_ReleaseFails_ShouldReportDownloadReleaseFailedOnce()
     {
-        // Arrange: the release fails only when a transport's own disposal throws, which no driver
-        // here does, so the event is written directly for its shape; DatabaseDownloadStream writes it
-        // from the catch that swallows the failure.
+        // Arrange: the scripted peer refuses the transfer before its metadata, and the transport's
+        // own disposal throws, so returning the broken rental fails inside the catch of the download
+        // stream that swallows it.
         string database = UniqueDatabase();
-        var settings = new DatabaseConnectionSettings { Database = database, Principal = "tester", EndPoint = new DnsEndPoint("localhost", DatabaseConnectionSettings.DefaultPort) };
-        var connection = new DatabaseConnection(null!, ScriptedConnectionFactory.Stalled(), settings, SqlProtocol.Family);
-        using var recorder = new EventSourceRecorder(DatabaseClientEventSource.Log, EventLevel.Warning);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = new StreamingClientTestHarness("header-error",
+            factory => new DisposeFailingConnectionFactory(factory), database);
+        using var recorder = new EventSourceRecorder(DatabaseClientEventSource.Log, EventLevel.Verbose);
+        long connectionsBefore = DatabaseClientEventSource.Log.CurrentConnections;
+        long rentedBefore = DatabaseClientEventSource.Log.CurrentRentedConnections;
 
         // Act
-        DatabaseClientEventSource.Log.DownloadReleaseFailed(connection, new IOException("the transport could not close"));
+        var exception = await Should.ThrowAsync<DatabaseClientException>(async () =>
+            await harness.Client.ExecuteStreamingAsync(StreamingClientTestHarness.CreateExchange(), timeout.Token));
 
-        // Assert
-        var released = recorder.Events.Where(e => Equals(e.Payload?[0], database)).ShouldHaveSingleItem();
-        released.EventName.ShouldBe("DownloadReleaseFailed");
+        // Assert: the caller sees the exchange's failure, and the gauges are back where they started.
+        exception.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        exception.Message.ShouldNotBeNullOrEmpty();
+        DatabaseClientEventSource.Log.CurrentConnections.ShouldBe(connectionsBefore);
+        DatabaseClientEventSource.Log.CurrentRentedConnections.ShouldBe(rentedBefore);
+
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], database)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(
+        [
+            "ConnectionOpened",
+            "ConnectionRented",
+            "ExchangeFailed",
+            "ConnectionReturned",
+            "ConnectionClosed",
+            "DownloadReleaseFailed",
+        ]);
+
+        // A statement-level server error's message is the model client's to write, not the core's.
+        events[2].Payload.ShouldBe([database, nameof(ProtocolErrorCode.ExecutionFailure), string.Empty]);
+
+        var released = events[5];
         released.EventId.ShouldBe(8);
         released.Level.ShouldBe(EventLevel.Warning);
         released.PayloadNames.ShouldBe(["database", "exceptionType", "exceptionMessage"]);
-        released.Payload.ShouldBe([database, typeof(IOException).FullName, "the transport could not close"]);
+        released.Payload.ShouldBe([database, typeof(IOException).FullName, DisposeFailingConnection.FailureMessage]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Client] - DatabaseClientEventSource: Should publish its connection counters")]
@@ -321,6 +350,58 @@ public sealed class DatabaseClientEventSourceTests
     {
         await writer.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken);
         await writer.FlushAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Dials through another factory and returns connections whose disposal throws.
+    /// </summary>
+    private sealed class DisposeFailingConnectionFactory : IConnectionFactory
+    {
+        private readonly IConnectionFactory _inner;
+
+        public DisposeFailingConnectionFactory(IConnectionFactory inner)
+        {
+            _inner = inner;
+        }
+
+        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+
+        public async ValueTask<IConnection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
+            => new DisposeFailingConnection(await _inner.ConnectAsync(endPoint, cancellationToken));
+    }
+
+    /// <summary>
+    /// A connection that closes its transport on disposal and then throws, the way a transport whose
+    /// teardown fails does.
+    /// </summary>
+    private sealed class DisposeFailingConnection : IConnection
+    {
+        public const string FailureMessage = "The transport could not close.";
+
+        private readonly IConnection _inner;
+
+        public DisposeFailingConnection(IConnection inner)
+        {
+            _inner = inner;
+        }
+
+        public PipeReader Input => _inner.Input;
+        public PipeWriter Output => _inner.Output;
+        public ConnectionId Id => _inner.Id;
+        public EndPoint? LocalEndPoint => _inner.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
+        public ConnectionDirection Direction => _inner.Direction;
+        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public ConnectionState State => _inner.State;
+        public CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+
+        public void Abort(Exception? reason = null) => _inner.Abort(reason);
+
+        public async ValueTask DisposeAsync()
+        {
+            await _inner.DisposeAsync();
+            throw new IOException(FailureMessage);
+        }
     }
 
     /// <summary>

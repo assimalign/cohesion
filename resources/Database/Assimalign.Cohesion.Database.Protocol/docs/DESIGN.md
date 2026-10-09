@@ -144,9 +144,11 @@ message type and payload length, never its payload.
 is the stream one `Create` returns. Every other leaf in the table above decorates a stream leaf
 through its public member, so writing at every layer would report one wire frame two or three
 times (a client's response passes the client decorator, the channel's family reader and the stream
-reader). A frame is reported once, where it crosses the transport; a frame a decorator refuses (the
-family check) was still read or written. `FrameRead` follows a non-null frame; the clean end of the
-stream writes nothing. `FrameWritten` follows a completed write, before any flush.
+reader). A frame is reported once, where it crosses the transport. A frame the channel's family
+check refuses on read was still read from the transport and is reported; one it refuses on write
+never reaches the transport and is not reported. An application's own leaf over another transport
+is not traced. `FrameRead` follows a non-null frame; the clean end of the stream writes nothing.
+`FrameWritten` follows a completed write, before any flush.
 
 **The trace costs nothing while nobody takes it.** The public member checks
 `IsEnabled(Verbose, Frames)` and returns the core's task unchanged when it is off. When it is on, a

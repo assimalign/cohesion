@@ -196,14 +196,25 @@ failure. Event 4 reports a failure the listing's cleanup swallows only when its 
 it: the failure the enumeration already surfaced, and the cancellation the cleanup itself causes,
 are not written.
 
+Only a coded failure (`DatabaseClientException`), or any failure of a download's copy, ends a start
+with event 3. A cancellation, which is how a timeout surfaces, or an uncoded exception before the
+copy (an overlapping exchange, a disposed connection) leaves the start without a stop or a failure,
+and because event 3 is not a stop, an activity-tracking tool leaves a failed transfer's activity
+open. Pairing every start with a stop, as `System.Net.Http`'s `RequestStart`/`RequestStop` do, is
+an owner decision on the event-source plan's catalog.
+
 Container names are identifiers and are written; blob names may be user data and are never
-written, nor is any content. Timestamps are taken only while a listener takes the source. No
-counters.
+written, nor is any content. The server names the blob in some of its failure messages
+(`Blob '…' does not exist.`, `Blob '…' already exists.`), so event 3 replaces the transfer's blob
+name in the message it writes with `<redacted>`. The shared core's `ExchangeFailed` writes no
+statement-level server message at all (Database.Client `DESIGN.md`, "Diagnostics"). Timestamps
+are taken only while a listener takes the source, and the byte count is read without boxing the
+result. No counters.
 
 `BlobClientEventSourceTests` checks the name, the strict manifest, each member's transfer once (the
-download's stop with its received bytes, and a refused download's failure), no blob name in a
-start or stop, and event 4's payload, which it writes directly because the swallowed failure cannot
-be provoked deterministically.
+download's stop with its received bytes, and a refused download's failure), an upload refused over
+an existing blob, no blob name in any event (the refusals' messages included), and event 4 from a
+scripted listing whose worker fails after the consumer stopped taking items.
 
 ## Scope and verification
 

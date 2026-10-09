@@ -68,8 +68,10 @@ authenticator and every application's.
 | 3 | `AuthenticationFailed` | Error | `authenticator`, `database`, `principal`, `exceptionType` (full name), `exceptionMessage` |
 
 A verdict is Verbose: the model server's own refused-handshake warning is the operator-facing
-record of a rejection. A core that throws is an infrastructure failure, so an Error; a cancellation
-is not a failure and writes nothing. The evidence is never written; the principal is (owner
+record of a rejection. A core that throws is an infrastructure failure, so an Error. A cancellation
+is not a failure and writes nothing, which narrows the plan's catalog ("when the core throws"): a
+server's authentication timeout cancels the core, so it leaves no Security event, and the model
+server's own handshake event is its record. The evidence is never written; the principal is (owner
 question Q4 of the event-source plan). No counters.
 
 **Nothing changes for the caller, and nothing is paid while nobody listens.** While the source is

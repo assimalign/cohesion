@@ -86,16 +86,25 @@ stop carry the `Commands` keyword (`0x1`).
 | 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
 
 Keys, values and the command text are never written, as the observers never receive key or value
-bytes. A command fails with an Error whatever its cause; a cancellation writes no failure, and a
-`MalformedResult` the typed operation raises after a completed response is not a command failure.
-Event 4 makes visible an observer failure the client swallows. No counters. The command path
-already takes the timestamp its observer receives, so the events add only `IsEnabled` checks while
-nobody listens.
+bytes. Event 3 writes the server's message, and the server names a conflicting key in hexadecimal
+(`Write-write conflict on key '…'`), so the event replaces the hexadecimal form of every byte
+parameter the command bound with `<redacted>`; the shared core's `ExchangeFailed` writes no
+statement-level server message at all (Database.Client `DESIGN.md`, "Diagnostics"). A command
+fails with an Error whatever its cause; a `MalformedResult` the typed operation raises after a
+completed response is not a command failure. Only a coded failure (`DatabaseClientException`) ends
+a start with event 3: a cancellation, which is how a timeout surfaces, or an uncoded exception (an
+overlapping exchange, a disposed connection) leaves the start without a stop or a failure, and
+because event 3 is not a stop, an activity-tracking tool leaves a failed command's activity open.
+Pairing every start with a stop is an owner decision on the event-source plan's catalog. Event 4
+makes visible an observer failure the client swallows. No counters. The command path already takes
+the timestamp its observer receives, so the events add only `IsEnabled` checks while nobody
+listens.
 
-`KeyValueClientEventSourceTests` checks the name, the strict manifest, and a put and a refused scan
-under an observer whose every hook throws: each event once, in order, with its payload, and no key,
-value or command text. The test assembly's observers override the hooks as `protected internal`,
-which the project's test-only `InternalsVisibleTo` requires (CS0507).
+`KeyValueClientEventSourceTests` checks the name, the strict manifest, a put and a refused scan
+under an observer whose every hook throws (each event once, in order, with its payload, and no
+key, value or command text), and a write-write conflict whose server message names the key, which
+neither event 3 nor the core's events write. The test assembly's observers override the hooks as
+`protected internal`, which the project's test-only `InternalsVisibleTo` requires (CS0507).
 
 ## Materialized scans, AOT, and non-goals
 

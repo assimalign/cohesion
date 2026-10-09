@@ -241,13 +241,22 @@ keyword (`0x1`).
 | 4 | `ConnectionBroken` | Warning | — | `database`, `code`, `exceptionMessage` | `MarkBroken` on an open connection: a protocol or transport failure during an exchange |
 | 5 | `ConnectionRented` | Verbose | `Pool` | `database`, `reused`, `waitedMilliseconds` (the wait for a pool slot; a new connection's dial is event 1's duration) | `RentAsync` |
 | 6 | `ConnectionReturned` | Verbose | `Pool` | `database`, `pooled` (false when the connection closes instead) | `ReturnAsync` |
-| 7 | `ExchangeFailed` | Verbose | — | `database`, `code`, `exceptionMessage` | `ExecuteAsync`, for a coded server error; the model client's own failure event is the operator-facing record |
+| 7 | `ExchangeFailed` | Verbose | — | `database`, `code`, `exceptionMessage` (empty for a statement-level code, see below) | `ExecuteAsync`, for any coded failure of an exchange: a server error, or a client-detected one. When the response was incomplete the connection does not survive, and this Verbose event is the only record of the loss; it is not reported as `ConnectionBroken`. The model client's own failure event is the operator-facing record |
 | 8 | `DownloadReleaseFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the download stream, when returning a failed download's rental fails (swallowed: the download's own failure stays the caller's) |
 
 A failure during the open is `ConnectionOpenFailed` only: a connection that never opened is not
 broken. Each failure is written by an exception filter that declines it, so it reaches the caller
 unchanged. Endpoints and database names are written; connection strings, credentials and
 statement text never are.
+
+A statement-level server error can quote user data the core cannot recognize: the key-value
+server names a conflicting key in hexadecimal, the Blob server names a missing or existing blob,
+and a parse error can quote a fragment of the statement. `ExchangeFailed` therefore writes its
+`exceptionMessage` only for the `Internal` and `ProtocolViolation` codes, which the client raises
+itself and a server sends only with fixed protocol text; for every other code it writes an empty
+string. The model client's own failure event writes the server's message, after removing the user
+data that client knows of (the Blob client's blob name, the key-value client's key and value
+bytes).
 
 Counters, created on the first enable command: `current-connections` (a connection that opened, +1
 in `OpenAsync`, −1 in its first `CloseAsync` behind an `Interlocked.Exchange` flag, because
@@ -260,8 +269,9 @@ takes the source (the pool wait only under `Pool`).
 `DatabaseClientEventSourceTests` checks the name, the strict manifest, a loopback client against a
 real SQL server (open, rent, return, re-rent, a failing statement, close: each event once, in order,
 and both gauges back where they started), a dial to a dead endpoint, a refused authentication, a
-protocol violation mid-exchange, the four counters, and event 8's payload, which it writes directly
-because no driver here fails its own disposal.
+protocol violation mid-exchange, a refused download over a transport whose disposal throws (event 8
+once, from the stream's swallowing catch, and event 7 without the server's message), and the four
+counters.
 
 ## Settings and compatibility
 

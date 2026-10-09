@@ -19,7 +19,9 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 /// <c>operation</c> names the public member: <c>Query</c>, <c>Execute</c> or <c>QueryPaths</c>. A path
 /// query stops when its enumeration reaches the server's terminal count, and <c>rowCount</c> is then
 /// the number of paths. A query writes its database, operation, row count and wire code; never its
-/// statement text or parameter values (plan D8). No counters (plan D6).
+/// statement text or parameter values (plan D8). A failure also writes the server's message, which
+/// for a parse error can quote a fragment of the statement (plan owner question Q3). No counters
+/// (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Graph.Client")]
