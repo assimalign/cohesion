@@ -22,8 +22,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task Build_WithWorkerAndServerFactories_ShouldAttachInOrderAndFreeze()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
-        builder.EngineName = "composed";
+        var builder = DocumentDatabaseEngine.CreateBuilder("composed");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         RecordingServer? server = null;
@@ -70,8 +69,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task Build_WorkersOfOneKind_ShouldPumpEachOnAThreadNamedForIt()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
-        builder.EngineName = "pumps";
+        var builder = DocumentDatabaseEngine.CreateBuilder("pumps");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         builder.AddWorker(engine => first = new RecordingWorker(engine, engine.Name + "/first"));
@@ -100,7 +98,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task Build_WorkerAndServerFactories_ShouldSeeEveryProductAttachedBeforeThem()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         RecordingServer? server = null;
@@ -155,7 +153,7 @@ public sealed class DocumentEngineCompositionTests
     public void Build_RepeatedServer_ShouldBeRefusedAndReleasedOnceByTheEngine()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         RecordingServer? server = null;
         DocumentDatabaseEngine? product = null;
         builder.AddServer(engine => server = new RecordingServer(product = engine));
@@ -174,7 +172,7 @@ public sealed class DocumentEngineCompositionTests
     public void Build_BuiltInWorkerReturned_ShouldBeRefusedAndLeftToTheEngine()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
         builder.AddWorker(engine => (product = engine).Workers[2]);
 
@@ -192,7 +190,7 @@ public sealed class DocumentEngineCompositionTests
         // Arrange
         await using var other = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "other" });
         var server = new RecordingServer(other);
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; return server; });
 
@@ -213,7 +211,7 @@ public sealed class DocumentEngineCompositionTests
         // Arrange
         await using var other = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "other" });
         var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; return server; });
 
@@ -243,8 +241,7 @@ public sealed class DocumentEngineCompositionTests
     public void Build_DuplicateWorkerName_ShouldBeRefusedAndDisposed(string duplicate)
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
-        builder.EngineName = "named";
+        var builder = DocumentDatabaseEngine.CreateBuilder("named");
         RecordingWorker? custom = null;
         RecordingWorker? worker = null;
         DocumentDatabaseEngine? product = null;
@@ -265,7 +262,7 @@ public sealed class DocumentEngineCompositionTests
     public void Build_BlankWorkerName_ShouldFailInsideTheFactory()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
         builder.AddWorker(engine => new RecordingWorker(product = engine, " "));
 
@@ -280,7 +277,7 @@ public sealed class DocumentEngineCompositionTests
     public void Build_NullProduct_ShouldDisposeTheEngine(bool worker)
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
         if (worker)
         {
@@ -295,7 +292,7 @@ public sealed class DocumentEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "A worker factory returned null." : "A server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Engine 'document-engine': a worker factory returned null." : "Engine 'document-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
@@ -308,7 +305,7 @@ public sealed class DocumentEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<DocumentDatabaseEngine>();
+        var state = new DatabaseEngineBuilderState<DocumentDatabaseEngine>("contract");
         var engine = DocumentDatabaseEngine.CreateUncomposed(new DocumentDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];
@@ -359,13 +356,32 @@ public sealed class DocumentEngineCompositionTests
     {
         // Act
         var direct = Should.Throw<ArgumentException>(() => DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = name }));
-        var builder = DocumentDatabaseEngine.CreateBuilder();
-        builder.EngineName = name;
-        var built = Should.Throw<ArgumentException>(() => builder.Build());
+        var builder = Should.Throw<ArgumentException>(() => DocumentDatabaseEngine.CreateBuilder(name));
 
-        // Assert: the document engine accepted a blank name before the root base.
+        // Assert: the document engine accepted a blank name before the root base; the builder
+        // names the engine once and refuses a blank name before anything is composed.
         direct.ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.EngineName));
-        built.ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.EngineName));
+        builder.ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Composition: an engine name changed on the builder fails the build before the engine exists")]
+    public void Build_EngineNameChanged_ShouldFailBeforeTheEngineExists()
+    {
+        // Arrange
+        var builder = DocumentDatabaseEngine.CreateBuilder("named");
+        DocumentDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        string seeded = builder.EngineName!;
+        builder.EngineName = "renamed";
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        seeded.ShouldBe("named");
+        builder.Name.ShouldBe("named");
+        failure.Message.ShouldStartWith("The engine builder for 'named' has its options' EngineName set to 'renamed'.", Case.Sensitive);
+        product.ShouldBeNull();
     }
 
     /// <summary>
@@ -377,8 +393,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task DisposeAsync_ServerFailsToClose_ShouldReportTheEngineAggregate()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
-        builder.EngineName = "closing";
+        var builder = DocumentDatabaseEngine.CreateBuilder("closing");
         RecordingServer? server = null;
         RecordingWorker? worker = null;
         builder.AddWorker(engine => worker = new RecordingWorker(engine));

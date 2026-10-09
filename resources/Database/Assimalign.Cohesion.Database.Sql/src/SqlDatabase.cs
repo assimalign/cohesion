@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -16,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <summary>
 /// A SQL-model database: relational tables and their indexes, queried and changed through the
 /// sessions it creates (<see cref="CreateSessionAsync"/>), and provisioned from a compiled schema
-/// (<see cref="DatabaseInstance.ApplySchemaAsync"/>).
+/// (<see cref="ApplySchemaAsync"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,12 +26,11 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// composition (transaction manager, lock manager, version store) every session binds to.
 /// </para>
 /// <para>
-/// <b>Schema provisioning</b> is the one capability of the root base (row 8 of the concrete-types
-/// plan): the database passes <c>supportsSchemaProvisioning: true</c> and overrides
-/// <see cref="ApplySchemaCoreAsync"/>. The hosting layer's provisioner reads
-/// <see cref="DatabaseInstance.SupportsSchemaProvisioning"/> and calls the base's
-/// <see cref="DatabaseInstance.ApplySchemaAsync"/> (phase 6, #1262, deleted the capability
-/// interface the database listed until then).
+/// <b>Schema provisioning</b> belongs to the SQL model (owner decisions 50 and 53 of 2026-10-09).
+/// The engine's builder provisions every database it declares before its build returns, through
+/// the same provisioner; <see cref="ApplySchemaAsync"/> applies a compiled schema imperatively,
+/// for tools, Studio and tests. The root <see cref="DatabaseInstance"/> base has no capability
+/// member any more.
 /// </para>
 /// <para>
 /// <b>Closed by its holder.</b> Disposing the database closes it for every session. Once the
@@ -75,7 +75,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// </param>
     internal SqlDatabase(DatabaseName name, SqlDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
         SqlCatalog catalog, bool recover)
-        : base(name, engine, supportsSchemaProvisioning: true)
+        : base(name, engine)
     {
         _engine = engine;
         _storage = storage;
@@ -519,15 +519,74 @@ public sealed class SqlDatabase : DatabaseInstance
         return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Diffs the database against a compiled schema and applies the difference: the schema's
+    /// tables, columns, keys, indexes and constraints, created and changed on a private session
+    /// that stamps them <see cref="DatabaseObjectOwner.Schema"/>-owned, then the schema's hash and
+    /// canonical document recorded in the catalog.
+    /// </summary>
+    /// <param name="schema">The desired schema; its name must be the database's.</param>
+    /// <param name="cancellationToken">Observed before anything runs and between steps.</param>
+    /// <returns>The migration result; <see cref="SqlSchemaMigrationResult.WasAlreadyApplied"/> when nothing ran.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    /// <exception cref="DatabaseObjectLockedException">
+    /// The engine's builder declared the database with another schema: the declaration owns the
+    /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
+    /// </exception>
+    /// <exception cref="SqlSchemaMigrationException">
+    /// The schema targets another database, declares what the engine has no DDL for (custom types,
+    /// principals), would adopt an ad-hoc object (<c>COHSQLP005</c>), needs a destructive step it
+    /// does not allow (<c>COHSQLP005</c>), or a step failed (<c>COHSQLP004</c>, after the completed
+    /// reversible steps were compensated).
+    /// </exception>
     /// <remarks>
-    /// The base checks disposal, a null schema and the token first; an offline database is
-    /// refused here, after them (<c>COHSQLT004</c>, #1243).
+    /// Kept public on the sealed leaf for tools, Studio and tests (owner decision 53 of
+    /// 2026-10-09). An engine's builder applies each declared database's schema through the same
+    /// provisioner while it builds. A database the builder declared with a schema accepts only that
+    /// schema here: another one would be planned away, or refused as destructive, by the engine's
+    /// next build. A database declared without a schema, and one the builder did not declare, accept
+    /// any schema. The checks run in the order the root base's members use: disposal, the schema,
+    /// the token, then the offline refusal, then the declaration.
     /// </remarks>
-    protected override ValueTask<SchemaMigrationResult> ApplySchemaCoreAsync(CompiledSchema schema, CancellationToken cancellationToken)
+    public ValueTask<SqlSchemaMigrationResult> ApplySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(schema);
+        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfOffline();
+        if (_engine.FindDeclaration(Name) is { Schema: { } declared } &&
+            !string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
+        {
+            throw new DatabaseObjectLockedException(
+                Name,
+                Name,
+                "APPLY SCHEMA",
+                $"SQL engine '{_engine.Name}' declares database '{Name}' with a schema (SqlDatabaseBuilder.Schema), so " +
+                "ApplySchemaAsync refuses another one: change the declaration and rebuild the engine instead.");
+        }
+
         return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
+    }
+
+    /// <summary>
+    /// Verifies, without running any DDL, that a compiled schema is the one applied: the recorded
+    /// hash and canonical document and the live schema-owned catalog all match it. The builder's
+    /// <see cref="SqlProvisioningMode.Verify"/> path.
+    /// </summary>
+    /// <param name="schema">The declared schema.</param>
+    /// <param name="cancellationToken">Observed before the comparison.</param>
+    /// <returns>The result, which is always already applied.</returns>
+    /// <exception cref="SqlSchemaMigrationException">The database drifted from the schema (<c>COHSQLP003</c>).</exception>
+    internal ValueTask<SqlSchemaMigrationResult> VerifySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(schema);
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOffline();
+        return _schemaProvisioner.VerifyAsync(schema, cancellationToken);
     }
 
     /// <inheritdoc />

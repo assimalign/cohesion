@@ -217,8 +217,11 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     }
 
     /// <summary>Creates a dependency-free builder for key-value options and nested worker/server factories.</summary>
+    /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
     /// <returns>A fresh builder supporting one engine construction attempt.</returns>
-    public static KeyValueDatabaseEngineBuilder CreateBuilder() => new();
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    public static KeyValueDatabaseEngineBuilder CreateBuilder(string name) => new(name);
 
     /// <summary>
     /// Creates an operational engine whose composition is still open, for the builder, which

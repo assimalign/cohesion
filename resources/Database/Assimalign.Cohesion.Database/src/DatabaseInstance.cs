@@ -5,23 +5,22 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The base of every logical database an engine manages: a shared handle that creates sessions
-/// and, for a model that supports it, applies a compiled schema.
+/// The base of every logical database an engine manages: a shared handle that creates sessions.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The name, the owning engine and the schema-provisioning capability are fixed by the protected
-/// constructor and read without a virtual call. A leaf re-exposes its typed engine with a
-/// <c>new</c> property over a typed field of its own (<c>public new SqlDatabaseEngine Engine</c>),
-/// and its typed session factory with a <c>new</c> member that awaits
-/// <see cref="CreateSessionAsync"/>, never <see cref="CreateSessionCoreAsync"/>.
+/// The name and the owning engine are fixed by the protected constructor and read without a
+/// virtual call. A leaf re-exposes its typed engine with a <c>new</c> property over a typed field
+/// of its own (<c>public new SqlDatabaseEngine Engine</c>), and its typed session factory with a
+/// <c>new</c> member that awaits <see cref="CreateSessionAsync"/>, never
+/// <see cref="CreateSessionCoreAsync"/>.
 /// </para>
 /// <para>
-/// <b>Schema provisioning is the one capability</b> (row 8 of the concrete-types plan):
-/// <see cref="SupportsSchemaProvisioning"/> is fixed at construction, and
-/// <see cref="ApplySchemaAsync"/> throws <see cref="NotSupportedException"/> while it is false. A
-/// model that provisions schemas passes <c>true</c> and overrides
-/// <see cref="ApplySchemaCoreAsync"/>.
+/// <b>No capability member</b> (owner decision 50 of 2026-10-09). The base used to carry one,
+/// schema provisioning: a <c>SupportsSchemaProvisioning</c> flag and an <c>ApplySchemaAsync</c>
+/// member over a model-agnostic compiled schema. Provisioning belongs to the model that owns the
+/// schema's shape: a SQL engine provisions the databases its builder declares while it is built,
+/// and <c>SqlDatabase.ApplySchemaAsync</c> applies a SQL compiled schema imperatively.
 /// </para>
 /// <para>
 /// <b>Disposal is idempotent and the base owns the flag</b>: the first <see cref="Dispose"/> or
@@ -43,9 +42,7 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> The leaves live in the model assemblies,
 /// so the constructor is <c>protected</c>. The name is <c>DatabaseInstance</c>, never
-/// <c>Database</c>, so code in a namespace such as <c>Acme.Database</c> can name it (D4). The
-/// hosting layer provisions a schema through <see cref="SupportsSchemaProvisioning"/> and
-/// <see cref="ApplySchemaAsync"/>, not through a capability interface (phase 6, #1262).
+/// <c>Database</c>, so code in a namespace such as <c>Acme.Database</c> can name it (D4).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
@@ -53,7 +50,6 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
 {
     private readonly DatabaseName _name;
     private readonly DatabaseEngine _engine;
-    private readonly bool _supportsSchemaProvisioning;
 
     // Completed once the first close ran to its end and the engine was told (CompleteClose). A
     // later Dispose or DisposeAsync, and an engine open that found the database closing, wait on it.
@@ -61,17 +57,13 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     private int _disposed;
 
     /// <summary>
-    /// Initializes a new database with its name, its owning engine and its capability.
+    /// Initializes a new database with its name and its owning engine.
     /// </summary>
     /// <param name="name">The name of the database.</param>
     /// <param name="engine">The engine that owns the database.</param>
-    /// <param name="supportsSchemaProvisioning">
-    /// Whether <see cref="ApplySchemaAsync"/> is supported; a leaf that passes true overrides
-    /// <see cref="ApplySchemaCoreAsync"/>.
-    /// </param>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
-    protected DatabaseInstance(DatabaseName name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)
+    protected DatabaseInstance(DatabaseName name, DatabaseEngine engine)
     {
         if (name.IsEmpty)
         {
@@ -81,7 +73,6 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(engine);
         _name = name;
         _engine = engine;
-        _supportsSchemaProvisioning = supportsSchemaProvisioning;
     }
 
     /// <summary>
@@ -93,11 +84,6 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     /// Gets the engine that owns this database.
     /// </summary>
     public DatabaseEngine Engine => _engine;
-
-    /// <summary>
-    /// Gets whether the database applies compiled schemas (<see cref="ApplySchemaAsync"/>).
-    /// </summary>
-    public bool SupportsSchemaProvisioning => _supportsSchemaProvisioning;
 
     /// <summary>
     /// Gets whether the database has been disposed: true from the moment its close starts.
@@ -127,29 +113,6 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
         return CreateSessionCoreAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Diffs the database against a compiled schema and applies the difference.
-    /// </summary>
-    /// <param name="schema">The desired schema.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The migration result.</returns>
-    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
-    /// <exception cref="NotSupportedException"><see cref="SupportsSchemaProvisioning"/> is false.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
-    public ValueTask<SchemaMigrationResult> ApplySchemaAsync(CompiledSchema schema, CancellationToken cancellationToken = default)
-    {
-        ThrowIfDisposed();
-        ArgumentNullException.ThrowIfNull(schema);
-        if (!_supportsSchemaProvisioning)
-        {
-            throw new NotSupportedException($"Database '{_name}' of the {_engine.Model} model does not apply compiled schemas.");
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        return ApplySchemaCoreAsync(schema, cancellationToken);
     }
 
     /// <summary>
@@ -215,18 +178,6 @@ public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
     /// <returns>A new session.</returns>
     protected abstract ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Applies a compiled schema on a database that supports it. The default throws
-    /// <see cref="NotSupportedException"/>: a leaf that passes <c>supportsSchemaProvisioning: true</c>
-    /// to the constructor overrides it.
-    /// </summary>
-    /// <param name="schema">The desired schema; never null.</param>
-    /// <param name="cancellationToken">Not canceled when the call starts.</param>
-    /// <returns>The migration result.</returns>
-    /// <exception cref="NotSupportedException">The leaf does not provision schemas.</exception>
-    protected virtual ValueTask<SchemaMigrationResult> ApplySchemaCoreAsync(CompiledSchema schema, CancellationToken cancellationToken)
-        => throw new NotSupportedException($"Database '{_name}' of the {_engine.Model} model does not apply compiled schemas.");
 
     /// <summary>
     /// Closes the database synchronously. Called once, by the first <see cref="Dispose"/>, unless

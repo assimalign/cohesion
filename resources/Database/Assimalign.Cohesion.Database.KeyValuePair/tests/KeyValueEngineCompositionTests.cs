@@ -21,8 +21,7 @@ public sealed class KeyValueEngineCompositionTests
     public async Task Build_WithWorkerAndServerFactories_ShouldAttachInOrderAndFreeze()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
-        builder.EngineName = "composed";
+        var builder = KeyValueDatabaseEngine.CreateBuilder("composed");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         RecordingServer? server = null;
@@ -64,7 +63,7 @@ public sealed class KeyValueEngineCompositionTests
     public async Task Build_WorkerAndServerFactories_ShouldSeeEveryProductAttachedBeforeThem()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         RecordingServer? server = null;
@@ -119,7 +118,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Build_RepeatedServer_ShouldBeRefusedAndReleasedOnceByTheEngine()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         RecordingServer? server = null;
         KeyValueDatabaseEngine? product = null;
         builder.AddServer(engine => server = new RecordingServer(product = engine));
@@ -138,7 +137,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Build_BuiltInWorkerReturned_ShouldBeRefusedAndLeftToTheEngine()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
         builder.AddWorker(engine => (product = engine).Workers[2]);
 
@@ -156,7 +155,7 @@ public sealed class KeyValueEngineCompositionTests
         // Arrange
         await using var other = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "other" });
         var server = new RecordingServer(other);
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; return server; });
 
@@ -177,7 +176,7 @@ public sealed class KeyValueEngineCompositionTests
         // Arrange
         await using var other = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "other" });
         var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; return server; });
 
@@ -199,8 +198,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Build_DuplicateWorkerName_ShouldBeRefusedAndDisposed()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
-        builder.EngineName = "named";
+        var builder = KeyValueDatabaseEngine.CreateBuilder("named");
         RecordingWorker? worker = null;
         KeyValueDatabaseEngine? product = null;
         builder.AddWorker(engine => worker = new RecordingWorker(product = engine, "NAMED/Checkpoint"));
@@ -218,7 +216,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Build_BlankWorkerName_ShouldFailInsideTheFactory()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
         builder.AddWorker(engine => new RecordingWorker(product = engine, " "));
 
@@ -233,7 +231,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Build_NullProduct_ShouldDisposeTheEngine(bool worker)
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
         if (worker)
         {
@@ -248,7 +246,7 @@ public sealed class KeyValueEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "A worker factory returned null." : "A server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Engine 'keyvalue-engine': a worker factory returned null." : "Engine 'keyvalue-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
@@ -256,7 +254,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Build_FailingFactory_ShouldDisposeEarlierProductsAndFreezeTheBuilder()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
         KeyValueDatabaseEngine? product = null;
@@ -289,7 +287,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine>();
+        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine>("contract");
         var engine = KeyValueDatabaseEngine.CreateUncomposed(new KeyValueDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];
@@ -341,7 +339,7 @@ public sealed class KeyValueEngineCompositionTests
         // Arrange
         var builder = new RecordingApplicationBuilder();
         KeyValueDatabaseEngine? product = null;
-        builder.AddKeyValue((_, engine) =>
+        builder.AddKeyValue("premature", engine =>
         {
             product = engine.Build();
             if (throwAfterBuild)
@@ -362,21 +360,41 @@ public sealed class KeyValueEngineCompositionTests
     {
         // Act
         var direct = Should.Throw<ArgumentException>(() => KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = name }));
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
-        builder.EngineName = name;
-        var built = Should.Throw<ArgumentException>(() => builder.Build());
+        var builder = Should.Throw<ArgumentException>(() => KeyValueDatabaseEngine.CreateBuilder(name));
+        var verb = Should.Throw<ArgumentException>(() => new RecordingApplicationBuilder().AddKeyValue(name, _ => { }));
+
+        // Assert: the builder and the verb name the engine once, and refuse a blank name before
+        // anything is registered.
+        direct.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.EngineName));
+        builder.ParamName.ShouldBe("name");
+        verb.ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: an engine name changed on the builder fails the build before the engine exists")]
+    public void Build_EngineNameChanged_ShouldFailBeforeTheEngineExists()
+    {
+        // Arrange
+        var builder = KeyValueDatabaseEngine.CreateBuilder("named");
+        KeyValueDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        string seeded = builder.EngineName!;
+        builder.EngineName = "renamed";
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        direct.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.EngineName));
-        built.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.EngineName));
+        seeded.ShouldBe("named");
+        builder.Name.ShouldBe("named");
+        failure.Message.ShouldStartWith("The engine builder for 'named' has its options' EngineName set to 'renamed'.", Case.Sensitive);
+        product.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a component that fails to close is reported in the engine's one aggregate, and the rest still close")]
     public async Task DisposeAsync_ServerFailsToClose_ShouldReportTheEngineAggregate()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
-        builder.EngineName = "closing";
+        var builder = KeyValueDatabaseEngine.CreateBuilder("closing");
         RecordingServer? server = null;
         RecordingWorker? worker = null;
         builder.AddWorker(engine => worker = new RecordingWorker(engine));

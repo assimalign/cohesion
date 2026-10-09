@@ -7,20 +7,29 @@ public static class KeyValueDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {
-        /// <summary>Registers key-value engine intent; construction occurs during application Build.</summary>
-        /// <param name="configure">Configures model options and nested factories against the build-time context.</param>
+        /// <summary>
+        /// Registers a key-value engine of that name; the name is reserved now, and the engine is
+        /// constructed during application Build.
+        /// </summary>
+        /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
+        /// <param name="configure">Configures model options and nested factories; invoked once during Build.</param>
         /// <returns>The application builder.</returns>
-        /// <exception cref="ArgumentNullException">The builder or callback is null.</exception>
-        public IDatabaseApplicationBuilder AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder> configure)
+        /// <exception cref="ArgumentNullException">The builder, the name or the callback is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Registration is closed, or another engine of the application has the same name.
+        /// </exception>
+        public IDatabaseApplicationBuilder AddKeyValue(string name, Action<KeyValueDatabaseEngineBuilder> configure)
         {
             ArgumentNullException.ThrowIfNull(builder);
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
             ArgumentNullException.ThrowIfNull(configure);
-            return builder.AddEngine(context =>
+            return builder.AddEngine(name, _ =>
             {
-                var engineBuilder = new KeyValueDatabaseEngineBuilder();
+                var engineBuilder = KeyValueDatabaseEngine.CreateBuilder(name);
                 try
                 {
-                    configure(context, engineBuilder);
+                    configure(engineBuilder);
                     return engineBuilder.Build();
                 }
                 catch (Exception failure) when (failure is not OutOfMemoryException)

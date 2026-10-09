@@ -585,7 +585,7 @@ public sealed class BlobWorkerResilienceTests
     {
         // Arrange
         var worker = new EscapingWorker();
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.AddWorker(_ => worker);
         await using var engine = builder.Build();
 
@@ -1058,7 +1058,7 @@ public sealed class BlobWorkerResilienceTests
     {
         // Arrange
         var defaults = new BlobDatabaseEngineOptions();
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
         builder.WorkerFailureMinimumPasses = 4;
         builder.JournalSizeLimit = 512L * 1024 * 1024;

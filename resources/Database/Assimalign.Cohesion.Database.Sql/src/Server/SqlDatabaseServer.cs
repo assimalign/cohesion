@@ -65,6 +65,9 @@ public sealed class SqlDatabaseServer : DatabaseServer
     private SqlDatabaseServer(SqlDatabaseEngine engine, SqlDatabaseServerOptions options)
         : base(engine)
     {
+        // The server keeps a copy, checked here, as the engine keeps a copy of its options (B1 of
+        // the engine extensibility design): the sessions read the limits live.
+        options = options.Snapshot();
         if (options.Listener is null)
         {
             throw new ArgumentException("A connection listener is required.", nameof(options));
@@ -85,6 +88,12 @@ public sealed class SqlDatabaseServer : DatabaseServer
     /// </summary>
     public new SqlDatabaseEngine Engine => _engine;
 
+    /// <summary>
+    /// Gets the server's own copy of the options it was created with, as
+    /// <see cref="SqlDatabaseEngine.EngineOptions"/> exposes the engine's.
+    /// </summary>
+    internal SqlDatabaseServerOptions ServerOptions => _options;
+
     /// <inheritdoc />
     public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
 
@@ -93,7 +102,10 @@ public sealed class SqlDatabaseServer : DatabaseServer
     /// is inert until <see cref="DatabaseServer.StartAsync"/> is called.
     /// </summary>
     /// <param name="engine">The SQL engine the server fronts. The composition root owns and disposes the engine.</param>
-    /// <param name="options">The composition options. Requires a configured <see cref="SqlDatabaseServerOptions.Listener"/>.</param>
+    /// <param name="options">
+    /// The composition options. Requires a configured <see cref="SqlDatabaseServerOptions.Listener"/>.
+    /// The server keeps a copy, so a later change to this object does not reach it.
+    /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>

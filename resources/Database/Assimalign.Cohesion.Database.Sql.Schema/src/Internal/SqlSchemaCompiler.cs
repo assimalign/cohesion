@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Types;
@@ -12,37 +10,24 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 /// <summary>
 /// Validates and lowers retained C# schema declarations into stable compiled schemas. Internal
 /// since phase 4 of the concrete-types plan (§6.7): the public entry points are
-/// <see cref="SqlSchema.Compile()"/> and <see cref="SqlSchema.Compile(string, Action{SqlSchemaBuilder})"/>,
-/// and only the project's tests compile for another engine model.
+/// <see cref="SqlSchema.Compile()"/> and <see cref="SqlSchema.Compile(string, Action{SqlSchemaBuilder})"/>.
 /// </summary>
 internal static class SqlSchemaCompiler
 {
-    /// <summary>Compiles a schema declaration for an engine model.</summary>
+    /// <summary>Compiles a schema declaration.</summary>
     /// <param name="declaration">The retained C# declaration.</param>
-    /// <param name="model">The declared engine model.</param>
     /// <returns>An immutable compiled schema with a deterministic content hash.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="declaration"/> is null.</exception>
-    /// <exception cref="SqlSchemaValidationException">The declaration cannot be represented by the model.</exception>
-    internal static SqlCompiledSchema Compile(SqlSchema declaration, EngineModel model = EngineModel.Sql)
+    /// <exception cref="SqlSchemaValidationException">The declaration cannot be represented in a SQL compiled schema.</exception>
+    internal static SqlCompiledSchema Compile(SqlSchema declaration)
     {
         ArgumentNullException.ThrowIfNull(declaration);
         SqlSchemaDeclaration schema = declaration.Declaration;
         var errors = new List<SqlSchemaValidationError>();
 
-        if (model != EngineModel.Sql)
-        {
-            errors.Add(Error(
-                SqlSchemaValidationErrorCode.ModelMismatch,
-                schema.Name,
-                "A SQL compiled schema must target the SQL engine model."));
-        }
-
         var customTypes = CompileTypes(schema, errors);
-        var tables = CompileTables(schema, model, customTypes, errors);
-        var functions = CompileFunctions(schema, customTypes, errors);
-        var triggers = CompileTriggers(schema, tables, errors);
-        var principals = CompilePrincipals(schema, tables, functions, errors);
-        var extensions = CompileExtensions(schema, errors);
+        var tables = CompileTables(schema, customTypes, errors);
+        var principals = CompilePrincipals(schema, tables, errors);
 
         if (errors.Count > 0)
         {
@@ -52,14 +37,10 @@ internal static class SqlSchemaCompiler
         return new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             schema.Name,
-            model,
             schema.AllowsDestructiveChanges,
             customTypes.Values.OrderBy(type => type.Name, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(table => table.Name, StringComparer.Ordinal).ToArray(),
-            functions.OrderBy(function => function.Name, StringComparer.Ordinal).ToArray(),
-            triggers.OrderBy(trigger => trigger.Name, StringComparer.Ordinal).ToArray(),
-            principals.OrderBy(principal => principal.Name, StringComparer.Ordinal).ToArray(),
-            extensions.OrderBy(extension => extension.Name, StringComparer.Ordinal).ToArray());
+            principals.OrderBy(principal => principal.Name, StringComparer.Ordinal).ToArray());
     }
 
     private static Dictionary<Type, CompiledSchemaType> CompileTypes(
@@ -95,7 +76,6 @@ internal static class SqlSchemaCompiler
 
     private static List<CompiledSchemaTable> CompileTables(
         SqlSchemaDeclaration schema,
-        EngineModel model,
         IReadOnlyDictionary<Type, CompiledSchemaType> customTypes,
         List<SqlSchemaValidationError> errors)
     {
@@ -244,7 +224,7 @@ internal static class SqlSchemaCompiler
                     source.Scale != referenced.Scale)
                 {
                     errors.Add(Error(
-                        SqlSchemaValidationErrorCode.ModelMismatch,
+                        SqlSchemaValidationErrorCode.UnsupportedType,
                         $"{table.Name}.{source.Name}",
                         $"The reference type does not match '{target.Name}.{referenced.Name}'."));
                 }
@@ -285,99 +265,14 @@ internal static class SqlSchemaCompiler
         return Array.AsReadOnly(result.ToArray());
     }
 
-    private static List<CompiledSchemaFunction> CompileFunctions(
-        SqlSchemaDeclaration schema,
-        IReadOnlyDictionary<Type, CompiledSchemaType> customTypes,
-        List<SqlSchemaValidationError> errors)
-    {
-        var result = new List<CompiledSchemaFunction>();
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (SqlSchemaFunction function in schema.Functions)
-        {
-            if (!names.Add(function.Name))
-            {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, function.Name, "The function name is declared more than once."));
-                continue;
-            }
-
-            if (!TryResolveType(function.Body.ReturnType, customTypes, out DatabaseType resultType, out string? customResult, out _, out _))
-            {
-                errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedType, function.Name, $"Function result type '{TypeId(function.Body.ReturnType)}' is not supported."));
-                continue;
-            }
-
-            var parameters = new List<CompiledSchemaParameter>();
-            bool invalidParameter = false;
-            foreach (ParameterExpression parameter in function.Body.Parameters)
-            {
-                if (!TryResolveType(parameter.Type, customTypes, out DatabaseType parameterType, out string? customParameter, out _, out _))
-                {
-                    errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedType, function.Name, $"Function parameter type '{TypeId(parameter.Type)}' is not supported."));
-                    invalidParameter = true;
-                    continue;
-                }
-
-                parameters.Add(new CompiledSchemaParameter($"arg{parameters.Count}", parameterType, customParameter));
-            }
-
-            if (invalidParameter || !TryCompileExpression(function.Name, function.Body, errors, out CompiledSchemaExpression? expression))
-            {
-                continue;
-            }
-
-            result.Add(new CompiledSchemaFunction(function.Name, parameters.AsReadOnly(), resultType, customResult, expression!));
-        }
-
-        return result;
-    }
-
-    private static List<CompiledSchemaTrigger> CompileTriggers(
-        SqlSchemaDeclaration schema,
-        IReadOnlyList<CompiledSchemaTable> tables,
-        List<SqlSchemaValidationError> errors)
-    {
-        var result = new List<CompiledSchemaTrigger>();
-        var rawTables = new Dictionary<Type, string>();
-        foreach (SqlSchemaTable table in schema.Tables)
-        {
-            rawTables.TryAdd(table.RowType, table.Name);
-        }
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (SqlSchemaTrigger trigger in schema.Triggers)
-        {
-            if (!rawTables.TryGetValue(trigger.RowType, out string? tableName) || !tables.Any(table => string.Equals(table.Name, tableName, StringComparison.OrdinalIgnoreCase)))
-            {
-                string declaration = $"{TypeId(trigger.RowType)}.{trigger.Event}";
-                errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, declaration, "The trigger target table is not declared."));
-                continue;
-            }
-
-            string name = $"TR_{tableName}_{trigger.Event}";
-            if (!names.Add(name))
-            {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, name, "The trigger is declared more than once."));
-                continue;
-            }
-
-            if (TryCompileExpression(name, trigger.Body, errors, out CompiledSchemaExpression? expression))
-            {
-                result.Add(new CompiledSchemaTrigger(name, tableName, trigger.Event, expression!));
-            }
-        }
-
-        return result;
-    }
-
     private static List<CompiledSchemaPrincipal> CompilePrincipals(
         SqlSchemaDeclaration schema,
         IReadOnlyList<CompiledSchemaTable> tables,
-        IReadOnlyList<CompiledSchemaFunction> functions,
         List<SqlSchemaValidationError> errors)
     {
         var result = new List<CompiledSchemaPrincipal>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var objects = new HashSet<string>(tables.Select(table => table.Name), StringComparer.OrdinalIgnoreCase);
-        objects.UnionWith(functions.Select(function => function.Name));
 
         foreach (SqlSchemaPrincipal principal in schema.Principals)
         {
@@ -412,45 +307,6 @@ internal static class SqlSchemaCompiler
         }
 
         return result;
-    }
-
-    private static List<CompiledSchemaExtension> CompileExtensions(
-        SqlSchemaDeclaration schema,
-        List<SqlSchemaValidationError> errors)
-    {
-        var result = new List<CompiledSchemaExtension>();
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (SqlSchemaExtension extension in schema.Extensions)
-        {
-            if (!names.Add(extension.Name))
-            {
-                errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, extension.Name, "The extension name is declared more than once."));
-                continue;
-            }
-
-            result.Add(new CompiledSchemaExtension(extension.Name, extension.Value));
-        }
-
-        return result;
-    }
-
-    private static bool TryCompileExpression(
-        string declaration,
-        LambdaExpression expression,
-        List<SqlSchemaValidationError> errors,
-        out CompiledSchemaExpression? compiled)
-    {
-        try
-        {
-            compiled = new CompiledSchemaExpression(ExpressionCanonicalizer.Canonicalize(expression));
-            return true;
-        }
-        catch (NotSupportedException exception)
-        {
-            errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedExpression, declaration, exception.Message));
-            compiled = null;
-            return false;
-        }
     }
 
     private static bool TryResolveType(
@@ -578,216 +434,5 @@ internal static class SqlSchemaCompiler
 
         // Keep array rank, jagged-array, pointer, and by-reference suffixes verbatim.
         return result.Append(']').Append(typeName[(position + 1)..]).ToString();
-    }
-
-    private sealed class ExpressionCanonicalizer
-    {
-        private readonly StringBuilder _builder = new();
-        private readonly Dictionary<ParameterExpression, string> _parameters = new();
-
-        internal static string Canonicalize(LambdaExpression expression)
-        {
-            var writer = new ExpressionCanonicalizer();
-            writer.Write(expression);
-            return writer._builder.ToString();
-        }
-
-        private void Write(Expression expression)
-        {
-            switch (expression)
-            {
-                case LambdaExpression lambda:
-                    _builder.Append("lambda<").Append(TypeId(lambda.ReturnType)).Append(">(");
-                    for (int index = 0; index < lambda.Parameters.Count; index++)
-                    {
-                        if (index > 0)
-                        {
-                            _builder.Append(',');
-                        }
-
-                        string parameterId = $"p{_parameters.Count}";
-                        _parameters[lambda.Parameters[index]] = parameterId;
-                        _builder.Append(parameterId).Append(':').Append(TypeId(lambda.Parameters[index].Type));
-                    }
-                    _builder.Append(")->");
-                    Write(lambda.Body);
-                    break;
-                case ParameterExpression parameter:
-                    _builder.Append(_parameters.TryGetValue(parameter, out string? id) ? id : throw Unsupported(expression));
-                    break;
-                case ConstantExpression constant:
-                    WriteConstant(constant);
-                    break;
-                case MemberExpression member:
-                    if (member.Expression is null)
-                    {
-                        throw Unsupported(expression);
-                    }
-
-                    _builder.Append("member<")
-                        .Append(TypeId(member.Type))
-                        .Append(">(")
-                        .Append(TypeId(member.Member.DeclaringType!))
-                        .Append('.')
-                        .Append(member.Member.Name)
-                        .Append(',');
-                    Write(member.Expression);
-                    _builder.Append(')');
-                    break;
-                case UnaryExpression unary when unary.NodeType is ExpressionType.Convert or ExpressionType.Negate or ExpressionType.Not or ExpressionType.Quote:
-                    if (unary.Method is not null && !IsAllowedMethod(unary.Method.DeclaringType))
-                    {
-                        throw Unsupported(expression);
-                    }
-
-                    _builder.Append(unary.NodeType)
-                        .Append('<').Append(TypeId(unary.Type)).Append('>')
-                        .Append("[method=").Append(MethodId(
-                            unary.Method?.DeclaringType, unary.Method?.Name, unary.Type, [unary.Operand])).Append("](");
-                    Write(unary.Operand);
-                    _builder.Append(')');
-                    break;
-                case BinaryExpression binary:
-                    if (binary.Method is not null && !IsAllowedMethod(binary.Method.DeclaringType))
-                    {
-                        throw Unsupported(expression);
-                    }
-
-                    _builder.Append(binary.NodeType)
-                        .Append('<').Append(TypeId(binary.Type)).Append('>')
-                        .Append("[method=").Append(MethodId(
-                            binary.Method?.DeclaringType, binary.Method?.Name, binary.Type, [binary.Left, binary.Right]))
-                        .Append(";lifted=").Append(binary.IsLifted ? '1' : '0')
-                        .Append(";liftedToNull=").Append(binary.IsLiftedToNull ? '1' : '0')
-                        .Append("](");
-                    Write(binary.Left);
-                    _builder.Append(',');
-                    Write(binary.Right);
-                    if (binary.Conversion is not null)
-                    {
-                        _builder.Append(',');
-                        Write(binary.Conversion);
-                    }
-                    _builder.Append(')');
-                    break;
-                case MethodCallExpression call:
-                    if (!IsAllowedMethod(call.Method.DeclaringType))
-                    {
-                        throw Unsupported(expression);
-                    }
-
-                    _builder.Append("call(").Append(MethodId(
-                        call.Method.DeclaringType, call.Method.Name, call.Type, call.Arguments));
-                    _builder.Append(',');
-                    if (call.Object is null)
-                    {
-                        _builder.Append("static");
-                    }
-                    else
-                    {
-                        Write(call.Object);
-                    }
-                    foreach (Expression argument in call.Arguments)
-                    {
-                        _builder.Append(',');
-                        Write(argument);
-                    }
-                    _builder.Append(')');
-                    break;
-                case ConditionalExpression conditional:
-                    _builder.Append("conditional(");
-                    Write(conditional.Test);
-                    _builder.Append(',');
-                    Write(conditional.IfTrue);
-                    _builder.Append(',');
-                    Write(conditional.IfFalse);
-                    _builder.Append(')');
-                    break;
-                case NewExpression created:
-                    throw Unsupported(created);
-                default:
-                    throw Unsupported(expression);
-            }
-        }
-
-        private void WriteConstant(ConstantExpression constant)
-        {
-            object? value = constant.Value;
-            if (value is null)
-            {
-                _builder.Append("null:").Append(TypeId(constant.Type));
-                return;
-            }
-
-            if (value is string text)
-            {
-                _builder.Append("string:").Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(text)));
-                return;
-            }
-
-            if (value is char character)
-            {
-                _builder.Append("char:").Append(((int)character).ToString(CultureInfo.InvariantCulture));
-                return;
-            }
-
-            if (value is bool boolean)
-            {
-                _builder.Append(boolean ? "bool:true" : "bool:false");
-                return;
-            }
-
-            if (value.GetType().IsEnum)
-            {
-                _builder.Append("enum:").Append(TypeId(value.GetType())).Append(':').Append(Convert.ToInt64(value, CultureInfo.InvariantCulture));
-                return;
-            }
-
-            if (value is IFormattable formattable && value is not DateTime && value is not DateTimeOffset)
-            {
-                _builder.Append("value:").Append(TypeId(value.GetType())).Append(':').Append(formattable.ToString(null, CultureInfo.InvariantCulture));
-                return;
-            }
-
-            throw Unsupported(constant);
-        }
-
-        private static bool IsAllowedMethod(Type? declaringType)
-        {
-            return declaringType == typeof(SqlTriggerContext)
-                || declaringType == typeof(string)
-                || declaringType == typeof(Math)
-                || declaringType == typeof(MathF)
-                || declaringType == typeof(decimal)
-                || declaringType == typeof(Convert);
-        }
-
-        private static string MethodId(
-            Type? declaringType,
-            string? methodName,
-            Type resultType,
-            IReadOnlyList<Expression> arguments)
-        {
-            if (declaringType is null)
-            {
-                return "none";
-            }
-
-            var builder = new StringBuilder()
-                .Append(TypeId(declaringType))
-                .Append('.')
-                .Append(methodName);
-
-            // The caller already supplied the complete typed expression. Its argument and
-            // result nodes identify the signature without reflection-based member discovery.
-            builder.Append('(')
-                .AppendJoin(',', arguments.Select(argument => TypeId(argument.Type)))
-                .Append(")->")
-                .Append(TypeId(resultType));
-            return builder.ToString();
-        }
-
-        private static NotSupportedException Unsupported(Expression expression)
-            => new($"Expression node '{expression.NodeType}' with CLR type '{TypeId(expression.Type)}' is not deterministic schema syntax.");
     }
 }

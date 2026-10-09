@@ -17,7 +17,7 @@ surface. Child roots never reference the root.
 
 ## Phase 29 composition contract (current)
 
-The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(DatabaseEngine)`, owned `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`, and one-shot `Build()`. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine (`IReadOnlyList<DatabaseEngine> Engines`), nested servers (`IReadOnlyList<DatabaseServer> Servers`), and ordinal `GetEngine(name)` lookup, which returns the root base; the static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine` (`Extensions/DatabaseApplicationContextExtensions.cs`) returns a model's engine typed, refusing an engine of another type with `InvalidOperationException`. These three are three of the area's five kept interfaces (`database-area.md`); since phase 6 of the concrete-types plan (#1262) they name the root bases, and every other root interface is deleted. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
+The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(DatabaseEngine)`, owned and named `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, and one-shot `Build()`. The owned overload names the engine as its first argument, so the hosting layer reserves the name, and refuses a duplicate, when a model verb registers the engine, before any factory runs (owner decision 52 of 2026-10-09): a model's factory can open and provision databases, which a duplicate engine must never reach. The nameless factory overload is deleted. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine (`IReadOnlyList<DatabaseEngine> Engines`), nested servers (`IReadOnlyList<DatabaseServer> Servers`), and ordinal `GetEngine(name)` lookup, which returns the root base; the static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine` (`Extensions/DatabaseApplicationContextExtensions.cs`) returns a model's engine typed, refusing an engine of another type with `InvalidOperationException`. These three are three of the area's five kept interfaces (`database-area.md`); since phase 6 of the concrete-types plan (#1262) they name the root bases, and every other root interface is deleted. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
 
 Each model ships a sealed engine builder (`SqlDatabaseEngineBuilder` and its siblings) with typed `AddWorker(Func<TEngine, DatabaseEngineWorker>)` and `AddServer(Func<TEngine, DatabaseServer>)`; the former root `IDatabaseEngineBuilder` they implemented is deleted (row 6 of the plan). Shared construction/rollback source is owned in this project's `shared/` (`DatabaseEngineBuilderState<TEngine>`) and compiled by each model through `CohesionSharedSource`. No separate generic application composition algorithm consumes arbitrary model options. The 2026-10-02 ruling that omitted typed worker/server factory overloads is superseded (D5): since step P4.0 the shared build state is typed over each model's engine, and since phase 4 each model's sealed builder offers typed `AddWorker` and `AddServer` ("Root bases", below).
 
@@ -53,7 +53,7 @@ the root keeps only `IDatabaseApplication`, `IDatabaseApplicationBuilder` and
 | Base | Replaced (deleted in phase 6) | The leaf supplies | The base owns |
 |---|---|---|---|
 | `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), forgetting a database a holder closed (`ForgetClosedDatabaseCore`), `OfflineDatabases`, an offline database's storage error (`GetOfflineErrorCore`), taking a database offline it gave up on (`TakeDatabaseOfflineCore`, owner decision 25), and closing its databases (`DisposeAsyncCore`) | name and model, the worker failure window, its minimum of passes and the clock that measures it (owner decision 42), the worker and server inventories, attach and its freeze, the worker pump, the state fold and its per-database part (`HasFailingWorker`, `HasEngineWideFailure`, owner decision 42), the disposal order, the open's wait for a holder's close, giving up on a database for its workers |
-| `DatabaseInstance` | `IDatabase`, `IDatabaseSchemaProvisioner` | the session core, disposal cores, and the schema core when it provisions | name, engine, the schema-provisioning capability, the disposed flag, the close's completion and the engine notice it sends |
+| `DatabaseInstance` | `IDatabase`, `IDatabaseSchemaProvisioner` | the session core and disposal cores | name, engine, the disposed flag, the close's completion and the engine notice it sends (no capability member since owner decision 50 of 2026-10-09) |
 | `DatabaseSession` | `IDatabaseSession` | the begin and execute cores, and ending its running operations | state, the session's transaction, the one "already active" check, the operation hold, the teardown order |
 | `DatabaseTransaction` | `IDatabaseTransaction` | the kernel state, commit and rollback cores with their own exception translation, the offline refusal, the coded aborted error | identity and isolation level, the end gate and the whole end state machine |
 | `DatabaseServer` | `IDatabaseServer`, `IDatabaseServerContext` | start and stop cores, and `Sessions` | the engine (the context's `Engine`), the lifecycle state machine |
@@ -74,10 +74,11 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   engine, a session's database, a server's engine) are base fields; a leaf re-exposes them typed
   with `new` over a typed field of its own, and re-exposes a typed async factory with a `new`
   member that awaits the base's public member, never its core. The only `protected virtual`
-  members are the two cases rule 4 allows here: the optional-capability core
-  `DatabaseInstance.ApplySchemaCoreAsync` (throws `NotSupportedException` by default, paired with
-  `SupportsSchemaProvisioning`) and lifecycle hooks (the session's and transaction's empty
-  `DisposeAsyncCore`, the worker's `WaitForTrigger` and its empty `DisposeAsyncCore`).
+  members are lifecycle hooks, one of the cases rule 4 allows (the session's and transaction's
+  empty `DisposeAsyncCore`, the worker's `WaitForTrigger` and its empty `DisposeAsyncCore`). The
+  optional-capability case is unused: `DatabaseInstance` had one capability, schema provisioning
+  (`SupportsSchemaProvisioning` over a virtual `ApplySchemaCoreAsync`), which owner decision 50 of
+  2026-10-09 deleted with the root's schema types.
 - **Engine composition is attached, then frozen** (§6.5 of the plan). A leaf's constructor attaches
   its built-in workers and its build path attaches the composed workers and servers through the
   protected, non-virtual `AttachWorker` and `AttachServer`, then calls `CompleteComposition()`;
@@ -686,19 +687,18 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   alternative — a builder type in the hosting module — would force every model
   package that wants a registration verb to reference the composition surface,
   which is precisely what the hosting-isolation rule forbids.
-- **Model-specific schemas belong to their model family** (MVP features A1–A4,
-  2026-09-17). `CompiledSchema` is an abstract model-agnostic identity carrying
-  `Format`, `Name`, `Model`, `AllowsDestructiveChanges`, and the model's canonical
-  document. The root computes SHA-256 over that document without inspecting its
-  shape. `DatabaseInstance.ApplySchemaAsync`, behind the `SupportsSchemaProvisioning` flag, is
-  the common apply seam (the `IDatabaseSchemaProvisioner` interface until phase 6), returning
-  the readonly `SchemaMigrationResult` value (`FromHash`, `ToHash`,
-  `OperationCount`, `WasAlreadyApplied`). Relational declarations, builders,
-  validation, serialization, and migration planning moved to the thin
-  `Database.Sql.Schema` package, which build tooling can consume without the SQL
-  engine or network stack. The former root schema's collection shape was removed;
-  the document model will define its own vocabulary in its own model family.
-  If another model needs a different shape, it does not belong in this root.
+- **Schemas and their provisioning belong to the model** (owner decisions 49 to 51 of
+  2026-10-09, B1 of `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). The root holds no
+  schema type. It used to carry a model-agnostic `CompiledSchema` identity (format, name, engine
+  model, canonical document and its hash), a `SchemaMigrationResult` value, and a
+  `DatabaseInstance` capability (`SupportsSchemaProvisioning`, `ApplySchemaAsync`) that a hosting
+  service called before servers accepted. Only the SQL model ever provisioned, so the capability
+  was a SQL seam wearing a root name. Now `Database.Sql.Schema` owns the declaration, its
+  compilation, the canonical document and hash, the migration planner and
+  `SqlSchemaMigrationResult`; `Database.Sql` owns applying them, through the databases its engine
+  builder declares (provisioned before the engine's build returns) and the typed
+  `SqlDatabase.ApplySchemaAsync`. Another model that provisions declares its own shape in its own
+  family; it does not belong in this root.
 - **Object ownership separates code-first provisioning from ad-hoc statements.**
   `DatabaseObjectOwner.Adhoc` objects remain fully mutable through session
   statements. `DatabaseObjectOwner.Schema` objects can change only through schema
@@ -707,7 +707,13 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   `OwningSchema`, and the operation. `OwningSchema` is provisioning identity,
   distinct from any model-specific namespace such as a SQL table's `Schema`.
   Model catalogs persist ownership and model engines enforce it. Neither the
-  ownership contract nor the exception requires a relational object shape.
+  ownership contract nor the exception requires a relational object shape, and four model
+  catalogs (Blob, Documents, Graph, Sql) persist it, which is shared behavior the root keeps
+  (owner decision 51): `DatabaseObjectOwner` sits in the `src` root (moved out of
+  `Provisioning/`, namespace unchanged) beside `DatabaseObjectLockedException`. A second
+  constructor takes the message, for an owner that is not a compiled schema and a remedy the
+  standard "alter the schema" text would get wrong: the SQL engine's declared database, which its
+  builder's declaration owns (owner decision 56), uses it for `DROP DATABASE` and `APPLY SCHEMA`.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain
@@ -962,9 +968,8 @@ root, and the root may expose no public entry point into this internal source
 (`.claude/rules/event-source.md`, rule 2). The hosting module's source reports the application's
 reopen of such a database (`Assimalign.Cohesion.Database.Hosting`, owner decision 22).
 
-Not instrumented here: schema provisioning (`DatabaseInstance.ApplySchemaAsync`, `Provisioning/`),
-which leaves the root in the owner's redesign; its events go with the code into the model (the
-plan's §5).
+Not instrumented here: schema provisioning, which left the root for the SQL model (owner decision
+50); its events are the SQL source's (the engine extensibility design's §8).
 
 ## AOT posture
 

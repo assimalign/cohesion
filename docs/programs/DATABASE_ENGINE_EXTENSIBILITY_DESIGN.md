@@ -1251,6 +1251,15 @@ machine has no Linux leg.
   Q6 costs nothing per row.
 - B1: Q8 no slower than today's `ApplyAsync` no-op on the same schema. B2: Q8's provisioning phase
   under 1 ms.
+
+  *B1 as measured (JIT, Release, win-arm64, best of 5 after a warm-up, two alternating rounds on a
+  shared machine; E1's NativeAOT harness was not yet available).* Read literally the gate compares
+  a whole engine Build (compile, create, open with recovery, skip) with an apply that is only the
+  skip, so it can never hold; the owner decides which reading it means. Like for like, B1's engine
+  Build took 11.7 to 19.0 ms against 18.7 to 33.6 ms for the startup path at `27db14c7` (compile,
+  `Create`, `OpenDatabaseAsync`, `ApplySchemaAsync` no-op), and B1's no-op apply alone took
+  0.56 to 0.82 ms against 0.92 to 1.86 ms, because the canonical document and hash are computed
+  once. The NativeAOT run waits for E1's harness.
 - Row representation (`SqlValue[]` rows) is considered only if a NativeAOT profile of Q1 and Q3
   shows the result box among the top three costs.
 
@@ -1349,6 +1358,9 @@ Numbering continues the plan of record's table. Each line is the question, then 
 
     >My Decision: I'm fine with at `Build`/`BuildAsync`. However, this may be due to my ignorance, but I am concerned that when we start implementing the ability to run schema migrations. A database that could have a terabyte of data could take a while and I am wondering if the engine build could hang up the host at all.
 
+    *Landed in B1 part 1:* the SQL engine's `Build`/`BuildAsync` provisions its declared databases;
+    49a below is not implemented.
+
     **49a (proposed 2026-10-09, awaiting the owner; lands in B2).** The concern holds. [Certain]
     Four of the planner's operations cost time in proportion to the table: `AddIndex` and
     `AddConstraint` on a populated table scan every row (an index also builds its whole tree), and
@@ -1381,9 +1393,14 @@ Numbering continues the plan of record's table. Each line is the question, then 
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence
     to "`DatabaseInstance` has no capability member", recorded in O34a? *Recommend:* yes.
     > Agree with recommendation
+
+    *Landed in B1 part 1:* the capability, `CompiledSchema` and `SchemaMigrationResult` are deleted;
+    the rule-4 sentence and O34a wait for the main session.
 51. **Ownership vocabulary.** Keep `DatabaseObjectOwner` and `DatabaseObjectLockedException` in the
     root (four catalogs persist them), moving the file out of `Provisioning/`? *Recommend:* keep.
     > Agree
+
+    *Landed in B1 part 1:* `DatabaseObjectOwner` moved to `Database/src/`, namespace unchanged.
 52. **Builder shape.** Three levels; the engine name a mandatory first argument of every model verb
     and of `CreateBuilder(name)`; the root seam's nameless `AddEngine` replaced by
     `AddEngine(name, factory)`; the model-verb callback loses `IDatabaseApplicationContext`?
@@ -1413,30 +1430,67 @@ Numbering continues the plan of record's table. Each line is the question, then 
       owner asked for. Code that needs the container uses the lower-level
       `builder.AddEngine(name, context => …)`, whose build context carries the built
       `ServiceProvider`.
+
+    *Landed in B1 part 1:* the root seam is `AddEngine(name, factory)`, Hosting reserves the name at
+    registration, the five verbs take `(string name, Action<XEngineBuilder>)`, and every
+    `CreateBuilder` takes the name.
 53. **Imperative apply.** Keep `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)` public for tools,
     Studio and tests? *Recommend:* keep, on the sealed leaf.
     > Agree
+
+    *Landed in B1 part 1.*
 54. **Legacy registration paths.** Delete `DatabaseApplicationOptions.Engines`, `.Servers` and
     `.Services`, the options constructor and `CreateBuilder(DatabaseApplicationOptions)`?
     *Recommend:* yes, one path per kind of thing.
     > Agree
+
+    *Landed in B1 part 1* (the public `new DatabaseApplicationBuilder(options)` stays, for host
+    settings only).
 55. **Provisioning modes.** `Apply` (default) and `Verify` only? *Recommend:* yes; `Verify` is
     opt-in per database, not per environment.
     > Agree
+
+    *Landed in B1 part 1* (`Verify` also refuses a missing database instead of creating it).
 56. **Declared databases.** Refuse `DropDatabaseAsync` of a declared database, and refuse an
     existing database whose collation differs from the declared one? *Recommend:* refuse both.
     > Agree
+
+    *Landed in B1 part 1* (`COHSQLP002` for the collation; an unset declaration means `Binary`).
+    The B1 review extended the ownership to the imperative path: `SqlDatabase.ApplySchemaAsync`
+    refuses another schema than the one a declared database is declared with
+    (`DatabaseObjectLockedException`, operation `APPLY SCHEMA`), because the engine's next build would
+    plan it away or refuse it as destructive; and the drop refusal names the engine and says to
+    remove the declaration first.
 57. **Schema lambdas.** Delete `SqlSchemaBuilder.Function<…>`, `Trigger<…>` and `Extension`, their
     compiled records, and the SDK canonicalizer? None has ever executed. *Recommend:* delete in B1.
     > Agree
+
+    *Sql.Schema side landed in B1 part 1;* the SDK canonicalizer and the function, trigger and
+    extension extraction are deleted in part 2.
 58. **Principals.** Remove `Principal(...)` from the five templates in B1, and refuse schema
     principals at engine Build (before I/O) until principal and grant DDL is its own item?
     *Recommend:* yes.
     > Agree
+
+    *Engine Build refusal landed in B1 part 1* (`COHSQLP001`, before any file is touched); part 2
+    removed `Principal(...)` from the five templates and the seven cohesion-examples programs, and a
+    template test now starts the generated `cohesion-database` once. The B1 review moved the
+    refusal to the build for SDK projects: `Sdk.Database` reports `COHDBSDK108` at a
+    `SqlSchemaBuilder.Principal` or `Type<T>` call, instead of writing an artifact the engine then
+    refuses on the first start.
 59. **SDK artifacts and format.** One schema artifact per declared database, the inline
     `database.Schema(...)` anchor, document format `v2`, and the one-time hash change?
     *Recommend:* yes.
     > Agree
+
+    *Format `v2` and the hash change landed in B1 part 1;* the SDK artifacts and anchor landed in
+    part 2: `cohesion/database/<database>.schema.json` and `.schema.sha256` per declared database,
+    `COHDBSDK101` for a database declared twice, and `CohesionDatabaseName` selecting the database a
+    migration is for, whose migrations live under `Migrations/<database>/` (that folder is part 2's
+    choice: §5.7 does not say where a second database's migrations go). The B1 review made a
+    `schemas.manifest` beside the artifacts the record of which files the SDK owns and the compile
+    target's incremental output (a deleted or foreign artifact no longer goes unnoticed or gets
+    deleted), and `CohesionDatabaseName` optional when a project declares exactly one database.
 60. **Function abstraction shape.** Abstract NVI bases plus static typed factories over `SqlValue`
     (recommended), typed generic bases over `object?`, or sealed delegate descriptors?
     *Recommend:* the first.
@@ -1483,6 +1537,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
 72. **P7.** Fold the template, SampleHost and cohesion-examples work into B1, leaving P7 the
     ApplicationModel verification and Studio's typed fields after B3? *Recommend:* yes.
     > Agree
+
+    *Landed in B1 part 2:* the five templates, the SampleHost fixture and the seven
+    cohesion-examples programs compose through `AddSql(name, sql => …)` with no cast and no
+    principal.
 73. **Revision gate.** An optional monotonic schema revision that refuses a downgrade?
     *Recommend:* not in iteration 1; the destructive gate covers the damaging cases.
     > Agree

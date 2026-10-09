@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 internal sealed class RecordingWorker : DatabaseEngineWorker
 {
     private readonly ManualResetEventSlim _started = new();
+    private Thread? _pumpThread;
     private string? _threadName;
     private int _passes;
     private int _disposals;
@@ -36,6 +37,9 @@ internal sealed class RecordingWorker : DatabaseEngineWorker
     /// <summary>Gets the name of the thread the first pass ran on, or null before it ran.</summary>
     public string? ThreadName => Volatile.Read(ref _threadName);
 
+    /// <summary>Gets the thread the first pass ran on, the worker's pump, or null before it ran.</summary>
+    public Thread? PumpThread => Volatile.Read(ref _pumpThread);
+
     /// <summary>Gets the number of passes that ran.</summary>
     public int Passes => Volatile.Read(ref _passes);
 
@@ -53,6 +57,7 @@ internal sealed class RecordingWorker : DatabaseEngineWorker
     protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         Interlocked.CompareExchange(ref _threadName, Thread.CurrentThread.Name, null);
+        Interlocked.CompareExchange(ref _pumpThread, Thread.CurrentThread, null);
         Interlocked.Increment(ref _passes);
         _started.Set();
     }

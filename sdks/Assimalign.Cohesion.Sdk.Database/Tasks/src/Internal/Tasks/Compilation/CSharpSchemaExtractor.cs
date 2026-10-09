@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -12,15 +11,33 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Assimalign.Cohesion.Sdk.Database.Tasks.Internal;
 
 /// <summary>
-/// Reads the deliberately small, analyzable Database schema DSL from consumer C#.
-/// It never emits or invokes the consumer assembly.
+/// Reads the deliberately small, analyzable Database schema DSL from consumer C#: one schema
+/// declaration per database. It never emits or invokes the consumer assembly.
 /// </summary>
+/// <remarks>
+/// Two anchors declare a database's schema, both recognized by metadata name (the task references
+/// only <c>Database.Sql.Schema</c>, so the engine types are names, not symbols it links against):
+/// <list type="bullet">
+/// <item><c>SqlSchema.Create(name, configure)</c> or <c>SqlSchema.Compile(name, configure)</c>, the
+/// database named by the constant first argument;</item>
+/// <item><c>SqlDatabaseBuilder.Schema(declare)</c>, the database named by the constant first argument
+/// of the <c>SqlDatabaseEngineBuilder.AddDatabase(name, configure)</c> whose callback parameter
+/// receives the call.</item>
+/// </list>
+/// </remarks>
 internal sealed class CSharpSchemaExtractor
 {
+    private const string schemaType = "Assimalign.Cohesion.Database.Sql.Schema.SqlSchema";
     private const string schemaBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaBuilder";
     private const string tableBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<TRow>";
     private const string typeBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTypeBuilder";
     private const string principalBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlPrincipalBuilder";
+    private const string databaseBuilderType = "Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder";
+    private const string engineBuilderType = "Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineBuilder";
+
+    // Characters no artifact file name may carry on any build host. The engine stores a database
+    // under a directory of its name, so a name that fails here cannot name a database on disk either.
+    private static readonly char[] _invalidFileNameCharacters = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
 
     private static readonly SymbolDisplayFormat _typeDisplayFormat = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
@@ -42,7 +59,16 @@ internal sealed class CSharpSchemaExtractor
         _report = report ?? throw new ArgumentNullException(nameof(report));
     }
 
-    public SchemaSourceModel? Extract(
+    /// <summary>
+    /// Extracts every database's schema declaration from the consumer sources.
+    /// </summary>
+    /// <param name="sourcePaths">The consumer C# source files.</param>
+    /// <param name="referencePaths">The compiler reference assemblies.</param>
+    /// <param name="assemblyName">The consumer assembly's simple name.</param>
+    /// <param name="languageVersion">The consumer's C# language version.</param>
+    /// <param name="defineConstants">The consumer's preprocessor constants.</param>
+    /// <returns>One model per declared database in ordinal name order, or null after a reported error.</returns>
+    public IReadOnlyList<SchemaSourceModel>? Extract(
         IReadOnlyList<string> sourcePaths,
         IReadOnlyList<string> referencePaths,
         string assemblyName,
@@ -102,52 +128,206 @@ internal sealed class CSharpSchemaExtractor
                 deterministic: true,
                 nullableContextOptions: NullableContextOptions.Enable));
 
-        var calls = new List<(InvocationExpressionSyntax Invocation, IMethodSymbol Method, SemanticModel SemanticModel)>();
+        var declarations = new List<SchemaDeclaration>();
         foreach (SyntaxTree syntaxTree in syntaxTrees)
         {
             SemanticModel semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: true);
             foreach (InvocationExpressionSyntax invocation in syntaxTree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 IMethodSymbol? method = ResolveMethod(semanticModel, invocation);
-                if (method is not null && IsSchemaDeclaration(method))
+                if (method is null)
                 {
-                    calls.Add((invocation, method, semanticModel));
+                    continue;
+                }
+
+                if (IsSchemaFactory(method))
+                {
+                    declarations.Add(new SchemaDeclaration(invocation, method, semanticModel, IsDatabaseBuilderSchema: false));
+                }
+                else if (IsDatabaseBuilderSchema(method))
+                {
+                    declarations.Add(new SchemaDeclaration(invocation, method, semanticModel, IsDatabaseBuilderSchema: true));
                 }
             }
         }
 
-        if (calls.Count != 1)
+        if (declarations.Count == 0)
         {
-            Location? location = calls.Count > 0 ? calls[0].Invocation.GetLocation() : null;
             Error(
                 "COHDBSDK101",
-                $"Database schema compilation requires exactly one SqlSchema.Create(name, configure) or SqlSchema.Compile(name, configure) declaration; found {calls.Count}.",
-                location);
+                "Database schema compilation requires at least one schema declaration: SqlSchema.Create(name, configure), " +
+                "SqlSchema.Compile(name, configure), or SqlDatabaseBuilder.Schema(declare) inside " +
+                "SqlDatabaseEngineBuilder.AddDatabase(name, configure); found 0.",
+                location: null);
             return null;
         }
 
-        (InvocationExpressionSyntax schemaDeclaration, IMethodSymbol schemaDeclarationMethod, SemanticModel model) = calls[0];
-        ExpressionSyntax? nameExpression = GetArgument(schemaDeclaration, schemaDeclarationMethod, "name", 0);
+        var schemas = new List<SchemaSourceModel>();
+        var declaredAt = new Dictionary<string, Location>(StringComparer.OrdinalIgnoreCase);
+        foreach (SchemaDeclaration declaration in declarations)
+        {
+            (string? name, LambdaExpressionSyntax? configure) = declaration.IsDatabaseBuilderSchema
+                ? ReadDatabaseBuilderSchema(declaration)
+                : ReadSchemaFactory(declaration);
+            if (name is not null && !ValidateDatabaseName(name, declaration, declaredAt))
+            {
+                name = null;
+            }
+
+            if (configure is null)
+            {
+                continue;
+            }
+
+            SchemaSourceModel schema = ExtractSchema(name ?? string.Empty, declaration.Model, configure);
+            if (name is not null)
+            {
+                schemas.Add(schema);
+            }
+        }
+
+        if (_hasErrors)
+        {
+            return null;
+        }
+
+        return schemas.OrderBy(static schema => schema.Name, StringComparer.Ordinal).ToArray();
+    }
+
+    private (string? Name, LambdaExpressionSyntax? Configure) ReadSchemaFactory(SchemaDeclaration declaration)
+    {
+        (InvocationExpressionSyntax invocation, IMethodSymbol method, SemanticModel model, _) = declaration;
+        ExpressionSyntax? nameExpression = GetArgument(invocation, method, "name", 0);
         string? name = nameExpression is null ? null : ConstantString(model, nameExpression);
         if (string.IsNullOrWhiteSpace(name))
         {
-            Error("COHDBSDK102", $"SqlSchema.{schemaDeclarationMethod.Name} name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
+            Error("COHDBSDK102", $"SqlSchema.{method.Name} name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? invocation.GetLocation());
+            name = null;
         }
 
-        ExpressionSyntax? configureExpression = GetArgument(schemaDeclaration, schemaDeclarationMethod, "configure", 1);
+        ExpressionSyntax? configureExpression = GetArgument(invocation, method, "configure", 1);
         LambdaExpressionSyntax? configure = UnwrapLambda(configureExpression);
         if (configure is null)
         {
-            Error("COHDBSDK103", $"SqlSchema.{schemaDeclarationMethod.Name} configuration must be an inline lambda so the build can analyze it without executing Program.Main.", configureExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
+            Error("COHDBSDK103", $"SqlSchema.{method.Name} configuration must be an inline lambda so the build can analyze it without executing Program.Main.", configureExpression?.GetLocation() ?? invocation.GetLocation());
+        }
+
+        return (name, configure);
+    }
+
+    private (string? Name, LambdaExpressionSyntax? Configure) ReadDatabaseBuilderSchema(SchemaDeclaration declaration)
+    {
+        (InvocationExpressionSyntax invocation, IMethodSymbol method, SemanticModel model, _) = declaration;
+        string? name = EnclosingDatabaseName(model, invocation);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            Error(
+                "COHDBSDK102",
+                "SqlDatabaseBuilder.Schema(declare) must be called on the callback parameter of " +
+                "SqlDatabaseEngineBuilder.AddDatabase(name, configure), and that name must be a non-empty compile-time " +
+                "string constant, so the build can name the database without executing Program.Main.",
+                invocation.GetLocation());
+            name = null;
+        }
+
+        ExpressionSyntax? declareExpression = GetArgument(invocation, method, "declare", 0);
+        LambdaExpressionSyntax? configure = UnwrapLambda(declareExpression);
+        if (configure is null)
+        {
+            Error("COHDBSDK103", "SqlDatabaseBuilder.Schema declaration must be an inline lambda so the build can analyze it without executing Program.Main.", declareExpression?.GetLocation() ?? invocation.GetLocation());
+        }
+
+        return (name, configure);
+    }
+
+    // The database a SqlDatabaseBuilder.Schema(declare) call declares: the call's receiver must be
+    // the parameter of a lambda passed to SqlDatabaseEngineBuilder.AddDatabase(name, configure).
+    private static string? EnclosingDatabaseName(SemanticModel model, InvocationExpressionSyntax invocation)
+    {
+        if (invocation.Expression is not MemberAccessExpressionSyntax { Expression: ExpressionSyntax receiver } ||
+            model.GetSymbolInfo(receiver).Symbol is not IParameterSymbol parameter)
+        {
             return null;
         }
 
+        for (SyntaxNode? node = invocation.Parent; node is not null; node = node.Parent)
+        {
+            if (node is not LambdaExpressionSyntax lambda || !DeclaresParameter(model, lambda, parameter))
+            {
+                continue;
+            }
+
+            SyntaxNode? argument = lambda.Parent;
+            while (argument is ParenthesizedExpressionSyntax)
+            {
+                argument = argument.Parent;
+            }
+
+            if (argument is not ArgumentSyntax { Parent: ArgumentListSyntax { Parent: InvocationExpressionSyntax outer } } ||
+                ResolveMethod(model, outer) is not { } outerMethod ||
+                !IsAddDatabase(outerMethod))
+            {
+                return null;
+            }
+
+            ExpressionSyntax? nameExpression = GetArgument(outer, outerMethod, "name", 0);
+            return nameExpression is null ? null : ConstantString(model, nameExpression);
+        }
+
+        return null;
+    }
+
+    private static bool DeclaresParameter(SemanticModel model, LambdaExpressionSyntax lambda, IParameterSymbol parameter)
+    {
+        if (lambda is SimpleLambdaExpressionSyntax simple)
+        {
+            return SymbolEqualityComparer.Default.Equals(model.GetDeclaredSymbol(simple.Parameter), parameter);
+        }
+
+        return lambda is ParenthesizedLambdaExpressionSyntax parenthesized &&
+            parenthesized.ParameterList.Parameters.Any(candidate =>
+                SymbolEqualityComparer.Default.Equals(model.GetDeclaredSymbol(candidate), parameter));
+    }
+
+    private bool ValidateDatabaseName(string name, SchemaDeclaration declaration, Dictionary<string, Location> declaredAt)
+    {
+        Location location = declaration.Invocation.GetLocation();
+        if (name.IndexOfAny(_invalidFileNameCharacters) >= 0 ||
+            name.Any(char.IsControl) ||
+            name is "." or ".." ||
+            name.EndsWith('.') ||
+            name.EndsWith(' '))
+        {
+            Error(
+                "COHDBSDK102",
+                $"Database name '{name}' cannot name its schema artifact '{name}.schema.json': a database name cannot contain " +
+                "'\\', '/', ':', '*', '?', '\"', '<', '>', '|' or a control character, or end with '.' or a space.",
+                location);
+            return false;
+        }
+
+        if (declaredAt.TryGetValue(name, out Location? first))
+        {
+            FileLinePositionSpan span = first.GetLineSpan();
+            Error(
+                "COHDBSDK101",
+                $"Database '{name}' has more than one schema declaration; the first is at {span.Path}({span.StartLinePosition.Line + 1}). " +
+                "A database has exactly one: SqlSchema.Create(name, configure), SqlSchema.Compile(name, configure), or " +
+                "SqlDatabaseBuilder.Schema(declare). The SDK writes one artifact per database name, so a name is unique " +
+                "across every engine of the project, and names compare ignoring case.",
+                location);
+            return false;
+        }
+
+        declaredAt.Add(name, location);
+        return true;
+    }
+
+    private SchemaSourceModel ExtractSchema(string name, SemanticModel model, LambdaExpressionSyntax configure)
+    {
         var types = new List<SchemaTypeSource>();
         var tables = new List<SchemaTableSource>();
-        var functions = new List<SchemaFunctionSource>();
-        var triggers = new List<SchemaTriggerSource>();
         var principals = new List<SchemaPrincipalSource>();
-        var extensions = new List<SchemaExtensionSource>();
         bool allowsDestructiveChanges = false;
 
         foreach (InvocationExpressionSyntax invocation in configure.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
@@ -164,21 +344,14 @@ internal sealed class CSharpSchemaExtractor
                     allowsDestructiveChanges = true;
                     break;
                 case "Type":
+                    ReportUnprovisionable(method, invocation);
                     types.Add(ExtractType(model, invocation, method));
                     break;
                 case "Table":
                     tables.Add(ExtractTable(model, invocation, method));
                     break;
-                case "Extension":
-                    extensions.Add(ExtractExtension(model, invocation, method));
-                    break;
-                case "Function":
-                    functions.Add(ExtractFunction(model, invocation, method));
-                    break;
-                case "Trigger":
-                    triggers.Add(ExtractTrigger(model, invocation, method));
-                    break;
                 case "Principal":
+                    ReportUnprovisionable(method, invocation);
                     principals.Add(ExtractPrincipal(model, invocation, method));
                     break;
                 default:
@@ -190,27 +363,29 @@ internal sealed class CSharpSchemaExtractor
         ValidateUnique(types.Select(static item => item.TypeName), "type", configure.GetLocation());
         ValidateUnique(tables.Select(static item => item.RowType), "table", configure.GetLocation());
         ValidateUnique(tables.Select(static item => item.Name), "table name", configure.GetLocation());
-        ValidateUnique(functions.Select(static item => item.Name), "function", configure.GetLocation());
         ValidateUnique(principals.Select(static item => item.Name), "principal", configure.GetLocation());
-        ValidateUnique(extensions.Select(static item => item.Name), "extension", configure.GetLocation());
         ValidateTables(types, tables, configure.GetLocation());
-        ValidateTriggers(tables, triggers, configure.GetLocation());
-        ValidateGrants(tables, functions, principals, configure.GetLocation());
-
-        if (_hasErrors || name is null)
-        {
-            return null;
-        }
+        ValidateGrants(tables, principals, configure.GetLocation());
 
         return new SchemaSourceModel(
             name,
             allowsDestructiveChanges,
             types.OrderBy(static item => item.TypeName, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
-            functions.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
-            triggers.OrderBy(static item => item.RowType, StringComparer.Ordinal).ThenBy(static item => item.Event, StringComparer.Ordinal).ToArray(),
-            principals.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
-            extensions.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray());
+            principals.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray());
+    }
+
+    // A declaration every SQL engine build refuses before it touches a file (COHSQLP001, owner
+    // decision 58 of 2026-10-09) fails the project's build instead of its first start. It is still
+    // extracted, so the other checks do not report what its absence would cause.
+    private void ReportUnprovisionable(IMethodSymbol method, InvocationExpressionSyntax invocation)
+    {
+        Error(
+            "COHDBSDK108",
+            $"SqlSchemaBuilder.{method.Name} declares what no SQL engine can provision yet: every engine build refuses it " +
+            "before touching any file (COHSQLP001, owner decision 58). Remove it; principals, grants and custom types " +
+            "wait for their DDL.",
+            invocation.GetLocation());
     }
 
     private SchemaTypeSource ExtractType(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
@@ -339,68 +514,6 @@ internal sealed class CSharpSchemaExtractor
             references.OrderBy(static item => item.Member, StringComparer.Ordinal).ThenBy(static item => item.TargetType, StringComparer.Ordinal).ToArray());
     }
 
-    private SchemaExtensionSource ExtractExtension(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
-    {
-        ExpressionSyntax? nameExpression = GetArgument(invocation, method, "name", 0);
-        ExpressionSyntax? valueExpression = GetArgument(invocation, method, "value", 1);
-        string? name = nameExpression is null ? null : ConstantString(model, nameExpression);
-        string? value = valueExpression is null ? null : ConstantString(model, valueExpression);
-        if (string.IsNullOrWhiteSpace(name) || value is null)
-        {
-            Error("COHDBSDK104", "Schema extension name and value must be compile-time string constants, and the name cannot be empty.", invocation.GetLocation());
-        }
-        return new SchemaExtensionSource(name ?? string.Empty, value ?? string.Empty);
-    }
-
-    private SchemaFunctionSource ExtractFunction(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
-    {
-        ExpressionSyntax? nameExpression = GetArgument(invocation, method, "name", 0);
-        string? name = nameExpression is null ? null : ConstantString(model, nameExpression);
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            Error("COHDBSDK102", "Function name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? invocation.GetLocation());
-            name = string.Empty;
-        }
-
-        ExpressionSyntax? bodyExpression = GetArgument(invocation, method, "body", 1);
-        LambdaExpressionSyntax? body = UnwrapLambda(bodyExpression);
-        if (body is null)
-        {
-            Error("COHDBSDK103", $"Function '{name}' body must be an inline expression lambda.", bodyExpression?.GetLocation() ?? invocation.GetLocation());
-            return new SchemaFunctionSource(name, [], TypeName(method.TypeArguments.Last()), string.Empty);
-        }
-
-        ImmutableArray<IParameterSymbol> delegateParameters = DelegateInvoke(method.Parameters.Last().Type)?.Parameters ?? [];
-        var parameters = delegateParameters
-            .Select((parameter, index) => new SchemaParameterSource($"arg{index}", TypeName(UnderlyingType(parameter.Type))))
-            .ToArray();
-        ITypeSymbol declaredReturnType = DelegateInvoke(method.Parameters.Last().Type)?.ReturnType ?? method.TypeArguments.Last();
-        string returnType = TypeName(UnderlyingType(declaredReturnType));
-        return new SchemaFunctionSource(name, parameters, returnType, CanonicalExpression(model, body, name));
-    }
-
-    private SchemaTriggerSource ExtractTrigger(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
-    {
-        ExpressionSyntax? eventExpression = GetArgument(invocation, method, "triggerEvent", 0);
-        string eventName = EnumMemberName(model, eventExpression) ?? string.Empty;
-        if (eventName.Length == 0)
-        {
-            Error("COHDBSDK104", "Trigger event must be a named SqlTriggerEvent constant.", eventExpression?.GetLocation() ?? invocation.GetLocation());
-        }
-
-        ExpressionSyntax? bodyExpression = GetArgument(invocation, method, "body", 1);
-        LambdaExpressionSyntax? body = UnwrapLambda(bodyExpression);
-        if (body is null)
-        {
-            Error("COHDBSDK103", "Trigger body must be an inline expression lambda.", bodyExpression?.GetLocation() ?? invocation.GetLocation());
-        }
-
-        return new SchemaTriggerSource(
-            TypeName(method.TypeArguments.Single()),
-            eventName,
-            body is null ? string.Empty : CanonicalExpression(model, body, $"{TypeName(method.TypeArguments.Single())}.{eventName}"));
-    }
-
     private SchemaPrincipalSource ExtractPrincipal(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
     {
         ExpressionSyntax? nameExpression = GetArgument(invocation, method, "name", 0);
@@ -516,33 +629,22 @@ internal sealed class CSharpSchemaExtractor
             {
                 if (!IsBuiltInType(column.TypeName) && !declaredTypes.Contains(column.TypeName))
                 {
-                    Error("COHDBSDK106", $"Column '{table.Name}.{column.Name}' uses unknown schema type '{column.TypeName}'. Declare it with database.Type<T>(...).", location);
+                    Error(
+                        "COHDBSDK106",
+                        $"Column '{table.Name}.{column.Name}' has type '{column.TypeName}', which is not a SQL column type " +
+                        "(bool, an integer or floating-point type, decimal, string, Guid, a date or time type, TimeSpan or byte[]).",
+                        location);
                 }
             }
         }
     }
 
-    private void ValidateTriggers(
-        IReadOnlyList<SchemaTableSource> tables,
-        IReadOnlyList<SchemaTriggerSource> triggers,
-        Location location)
-    {
-        var tableTypes = tables.Select(static item => item.RowType).ToHashSet(StringComparer.Ordinal);
-        foreach (SchemaTriggerSource trigger in triggers.Where(trigger => !tableTypes.Contains(trigger.RowType)))
-        {
-            Error("COHDBSDK106", $"Trigger target type '{trigger.RowType}' is not a declared table.", location);
-        }
-    }
-
     private void ValidateGrants(
         IReadOnlyList<SchemaTableSource> tables,
-        IReadOnlyList<SchemaFunctionSource> functions,
         IReadOnlyList<SchemaPrincipalSource> principals,
         Location location)
     {
-        var objects = tables.Select(static item => item.Name)
-            .Concat(functions.Select(static item => item.Name))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var objects = tables.Select(static item => item.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (SchemaPrincipalSource principal in principals)
         {
             foreach (string grantedObject in principal.Grants.SelectMany(static grant => grant.Objects).Where(item => !objects.Contains(item)))
@@ -560,9 +662,8 @@ internal sealed class CSharpSchemaExtractor
         }
     }
 
-    private static bool IsNullable(ITypeSymbol type, NullableAnnotation annotation)
+    private static bool IsNullable(ITypeSymbol type)
     {
-        _ = annotation;
         return type.IsReferenceType ||
             type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
     }
@@ -618,13 +719,7 @@ internal sealed class CSharpSchemaExtractor
             IFieldSymbol field => field.Type,
             _ => throw new InvalidOperationException()
         };
-        NullableAnnotation annotation = symbol switch
-        {
-            IPropertySymbol property => property.NullableAnnotation,
-            IFieldSymbol field => field.NullableAnnotation,
-            _ => NullableAnnotation.None
-        };
-        return new SchemaColumnSource(symbol.Name, TypeName(UnderlyingType(type)), IsNullable(type, annotation));
+        return new SchemaColumnSource(symbol.Name, TypeName(UnderlyingType(type)), IsNullable(type));
     }
 
     private static IMethodSymbol? DelegateInvoke(ITypeSymbol type)
@@ -634,22 +729,6 @@ internal sealed class CSharpSchemaExtractor
             type = expression.TypeArguments[0];
         }
         return (type as INamedTypeSymbol)?.DelegateInvokeMethod;
-    }
-
-    private string CanonicalExpression(SemanticModel model, LambdaExpressionSyntax lambda, string declaration)
-    {
-        try
-        {
-            return CSharpExpressionCanonicalizer.Canonicalize(model, lambda);
-        }
-        catch (NotSupportedException exception)
-        {
-            Error(
-                "COHDBSDK107",
-                $"Expression '{declaration}' cannot be compiled as deterministic schema syntax: {exception.Message}",
-                lambda.GetLocation());
-            return string.Empty;
-        }
     }
 
     private static string? EnumMemberName(SemanticModel model, ExpressionSyntax? expression)
@@ -704,15 +783,37 @@ internal sealed class CSharpSchemaExtractor
         return info.Symbol as IMethodSymbol ?? info.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
     }
 
-    private static bool IsSchemaDeclaration(IMethodSymbol method)
+    // SqlSchema.Create(name, configure) or SqlSchema.Compile(name, configure).
+    private static bool IsSchemaFactory(IMethodSymbol method)
     {
-        if (method.Name is not ("Create" or "Compile") ||
-            !IsOnNamedType(method, "Assimalign.Cohesion.Database.Sql.Schema.SqlSchema") ||
-            method.Parameters.Length != 2)
-        {
-            return false;
-        }
-        IMethodSymbol? configure = DelegateInvoke(method.Parameters[1].Type);
+        return method.Name is "Create" or "Compile" &&
+            method.Parameters.Length == 2 &&
+            IsOnNamedType(method, schemaType) &&
+            IsSchemaBuilderCallback(method.Parameters[1].Type);
+    }
+
+    // SqlDatabaseBuilder.Schema(Action<SqlSchemaBuilder> declare); its Schema(SqlSchema) overload
+    // takes a value whose own SqlSchema.Create is the anchor.
+    private static bool IsDatabaseBuilderSchema(IMethodSymbol method)
+    {
+        return method.Name == "Schema" &&
+            method.Parameters.Length == 1 &&
+            IsOnNamedType(method, databaseBuilderType) &&
+            IsSchemaBuilderCallback(method.Parameters[0].Type);
+    }
+
+    // SqlDatabaseEngineBuilder.AddDatabase(string name, Action<SqlDatabaseBuilder>? configure).
+    private static bool IsAddDatabase(IMethodSymbol method)
+    {
+        return method.Name == "AddDatabase" &&
+            method.Parameters.Length == 2 &&
+            method.Parameters[0].Type.SpecialType == SpecialType.System_String &&
+            IsOnNamedType(method, engineBuilderType);
+    }
+
+    private static bool IsSchemaBuilderCallback(ITypeSymbol type)
+    {
+        IMethodSymbol? configure = DelegateInvoke(type);
         return configure?.Parameters.Length == 1 &&
             string.Equals(DisplayTypeName(configure.Parameters[0].Type), schemaBuilderType, StringComparison.Ordinal);
     }
@@ -763,4 +864,10 @@ internal sealed class CSharpSchemaExtractor
             span.IsValid ? span.StartLinePosition.Line + 1 : 0,
             span.IsValid ? span.StartLinePosition.Character + 1 : 0));
     }
+
+    private sealed record SchemaDeclaration(
+        InvocationExpressionSyntax Invocation,
+        IMethodSymbol Method,
+        SemanticModel Model,
+        bool IsDatabaseBuilderSchema);
 }

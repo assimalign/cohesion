@@ -20,7 +20,7 @@ keys order by unsigned lexicographic byte comparison.
 - `KeyValueDatabaseEngine` + `KeyValueDatabaseEngineOptions` — the data machine:
   create → use → dispose, engine-owned background workers, two file sets per
   database (`<name>` + `<name>.catalog`). `KeyValueDatabaseEngineBuilder` (from
-  `CreateBuilder()` or the `AddKeyValue` verb) composes typed worker and server
+  `CreateBuilder(name)` or the `AddKeyValue(name, ...)` verb) composes typed worker and server
   factories.
 - `KeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
   etag-conditional writes); `KeyValueDatabaseSession` and

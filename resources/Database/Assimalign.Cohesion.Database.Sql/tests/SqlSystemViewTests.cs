@@ -27,11 +27,11 @@ public sealed class SqlSystemViewTests
         // Arrange
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("app");
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false,
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false,
             [], [new CompiledSchemaTable("managed", "Tests.Managed",
                 [new("id", DatabaseType.Int32, false), new("label", DatabaseType.String, true)],
                 new CompiledSchemaKey("pk_managed", ["id"]),
-                [new CompiledSchemaIndex("ix_managed_label", ["label"])], [])], [], [], [], []);
+                [new CompiledSchemaIndex("ix_managed_label", ["label"])], [])], []);
         await database.ApplySchemaAsync(schema);
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE adhoc (id INT PRIMARY KEY, label VARCHAR(20))");

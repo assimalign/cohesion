@@ -495,7 +495,7 @@ public sealed class DocumentWorkerResilienceTests
     {
         // Arrange
         var worker = new EscapingWorker();
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         builder.AddWorker(_ => worker);
         await using var engine = builder.Build();
 
@@ -1091,7 +1091,7 @@ public sealed class DocumentWorkerResilienceTests
     {
         // Arrange
         var defaults = new DocumentDatabaseEngineOptions();
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
         builder.WorkerFailureMinimumPasses = 4;
         builder.JournalSizeLimit = 512L * 1024 * 1024;

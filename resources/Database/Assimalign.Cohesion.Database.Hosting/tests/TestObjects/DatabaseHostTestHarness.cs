@@ -44,9 +44,14 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
     /// data machine — operational from creation — so seeding happens here, before
     /// the application (and therefore the endpoint) ever starts.
     /// </summary>
-    public static async Task<DatabaseHostTestHarness> CreateAsync(Action<DatabaseApplicationOptions>? configure = null)
+    public static async Task<DatabaseHostTestHarness> CreateAsync(Action<DatabaseApplicationBuilder>? configure = null)
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-host-e2e" });
+        // The engine owns its server: the model creates it from the options the builder configures.
+        var listener = new InMemoryConnectionListener();
+        var engine = await SqlDatabaseEngine.CreateBuilder("sql-host-e2e")
+            .AddServer(server => server.Listener = listener)
+            .BuildAsync();
+        var server = (SqlDatabaseServer)engine.Servers[0];
 
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 
@@ -56,14 +61,11 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
             await session.ExecuteAsync("INSERT INTO users (id, name) VALUES (1, 'ada'), (2, 'grace')");
         }
 
-        var listener = new InMemoryConnectionListener();
-        var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        builder.AddEngine(engine);
+        configure?.Invoke(builder);
 
-        var options = new DatabaseApplicationOptions();
-        options.Servers.Add(server);
-        configure?.Invoke(options);
-
-        var application = new DatabaseApplication(options);
+        var application = builder.Build();
 
         var client = DatabaseClient.Create(new DatabaseClientOptions
         {

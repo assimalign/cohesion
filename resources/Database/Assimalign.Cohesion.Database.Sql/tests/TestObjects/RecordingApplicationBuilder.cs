@@ -8,16 +8,21 @@ internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 {
     public List<Func<IDatabaseApplicationContext, DatabaseEngine>> Factories { get; } = [];
 
+    /// <summary>Gets the engine names, reserved in registration order.</summary>
+    public List<string> Names { get; } = [];
+
     public IDatabaseApplicationBuilder AddEngine(DatabaseEngine engine)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        return AddEngine(_ => engine);
+        return AddEngine(engine.Name, _ => engine);
     }
 
-    public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
+    public IDatabaseApplicationBuilder AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine> factory)
     {
-        ArgumentNullException.ThrowIfNull(configure);
-        Factories.Add(configure);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(factory);
+        Names.Add(name);
+        Factories.Add(factory);
         return this;
     }
 

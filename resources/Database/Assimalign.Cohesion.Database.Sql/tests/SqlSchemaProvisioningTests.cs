@@ -47,8 +47,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using (var engine = CreateEngine())
         {
             SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-            database.SupportsSchemaProvisioning.ShouldBeTrue();
-            SchemaMigrationResult result = await database.ApplySchemaAsync(schema);
+            SqlSchemaMigrationResult result = await database.ApplySchemaAsync(schema);
 
             result.FromHash.ShouldBeNull();
             result.ToHash.ShouldBe(schema.Hash);
@@ -65,8 +64,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using (var reopenedEngine = CreateEngine())
         {
             SqlDatabase reopened = await reopenedEngine.OpenDatabaseAsync("orders");
-            reopened.SupportsSchemaProvisioning.ShouldBeTrue();
-            SchemaMigrationResult result = await reopened.ApplySchemaAsync(schema);
+            SqlSchemaMigrationResult result = await reopened.ApplySchemaAsync(schema);
 
             result.FromHash.ShouldBe(schema.Hash);
             result.ToHash.ShouldBe(schema.Hash);
@@ -81,7 +79,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             []);
@@ -95,7 +92,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             [new CompiledSchemaIndex("ix_orders_note", ["note"])]);
 
         // Act
-        SchemaMigrationResult result = await database.ApplySchemaAsync(desired);
+        SqlSchemaMigrationResult result = await database.ApplySchemaAsync(desired);
 
         // Assert
         result.FromHash.ShouldBe(initial.Hash);
@@ -117,7 +114,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // duplicate live values after the preceding ADD COLUMN has completed.
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [],
@@ -155,7 +151,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             ],
             [],
             hasPrimaryKey: false);
-        SchemaMigrationResult retry = await database.ApplySchemaAsync(valid);
+        SqlSchemaMigrationResult retry = await database.ApplySchemaAsync(valid);
         retry.OperationCount.ShouldBe(1);
     }
 
@@ -165,7 +161,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
@@ -180,7 +175,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         }
 
         // Act
-        SchemaMigrationResult result = await database.ApplySchemaAsync(schema);
+        SqlSchemaMigrationResult result = await database.ApplySchemaAsync(schema);
 
         // Assert
         result.WasAlreadyApplied.ShouldBeFalse();
@@ -197,7 +192,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             []);
@@ -207,7 +201,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await instance.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(schema.Hash, "not-json"));
 
         // Act
-        SchemaMigrationResult result = await database.ApplySchemaAsync(schema);
+        SqlSchemaMigrationResult result = await database.ApplySchemaAsync(schema);
 
         // Assert
         result.WasAlreadyApplied.ShouldBeFalse();
@@ -222,14 +216,13 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: true)],
             []);
 
         // Act
-        SchemaMigrationResult first = await database.ApplySchemaAsync(schema);
-        SchemaMigrationResult second = await database.ApplySchemaAsync(schema);
+        SqlSchemaMigrationResult first = await database.ApplySchemaAsync(schema);
+        SqlSchemaMigrationResult second = await database.ApplySchemaAsync(schema);
 
         // Assert
         first.OperationCount.ShouldBe(1);
@@ -246,7 +239,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
@@ -257,8 +249,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await database.ApplySchemaAsync(initial);
 
         // Act
-        SchemaMigrationResult casingUpdate = await database.ApplySchemaAsync(desired);
-        SchemaMigrationResult repeated = await database.ApplySchemaAsync(desired);
+        SqlSchemaMigrationResult casingUpdate = await database.ApplySchemaAsync(desired);
+        SqlSchemaMigrationResult repeated = await database.ApplySchemaAsync(desired);
 
         // Assert
         desired.Hash.ShouldNotBe(initial.Hash);
@@ -319,7 +311,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
     {
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
@@ -473,7 +464,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
     {
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         await database.ApplySchemaAsync(OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
@@ -491,8 +481,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Removing declared indexes keeps the primary key's enforcing tree.
         catalog.GetIndexes(table.ObjectId).ShouldHaveSingleItem().IsPrimaryKey.ShouldBeTrue();
 
-        var empty = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", EngineModel.Sql,
-            allowsDestructiveChanges: true, [], [], [], [], [], []);
+        var empty = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders",
+            allowsDestructiveChanges: true, [], [], []);
         (await database.ApplySchemaAsync(empty)).OperationCount.ShouldBe(1);
         catalog.Tables.ShouldBeEmpty();
         (await database.ApplySchemaAsync(empty)).WasAlreadyApplied.ShouldBeTrue();
@@ -505,7 +495,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         await using SqlDatabaseSession session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE scratch (id BIGINT);");
-        database.SupportsSchemaProvisioning.ShouldBeTrue();
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false)], []);
         await database.ApplySchemaAsync(initial);
@@ -566,7 +555,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         => new(
             SqlCompiledSchema.CurrentFormat,
             "orders",
-            EngineModel.Sql,
             allowsDestructiveChanges,
             Array.Empty<CompiledSchemaType>(),
             [new CompiledSchemaTable(
@@ -576,8 +564,5 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
                 hasPrimaryKey ? new CompiledSchemaKey($"pk_{tableName}", [columns[0].Name]) : null,
                 indexes,
                 Array.Empty<CompiledSchemaConstraint>())],
-            Array.Empty<CompiledSchemaFunction>(),
-            Array.Empty<CompiledSchemaTrigger>(),
-            Array.Empty<CompiledSchemaPrincipal>(),
-            Array.Empty<CompiledSchemaExtension>());
+            Array.Empty<CompiledSchemaPrincipal>());
 }

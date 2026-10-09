@@ -36,14 +36,30 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class KeyValueDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState<KeyValueDatabaseEngine> _state = new();
+    private readonly DatabaseEngineBuilderState<KeyValueDatabaseEngine> _state;
     private readonly KeyValueDatabaseEngineOptions _options = new();
 
-    internal KeyValueDatabaseEngineBuilder()
+    /// <summary>Initializes a builder for the engine of that name.</summary>
+    /// <param name="name">The engine name, which <see cref="EngineName"/> starts as.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    internal KeyValueDatabaseEngineBuilder(string name)
     {
+        _state = new(name);
+        _options.EngineName = name;
     }
 
-    /// <summary>Gets or sets the logical engine name; null selects <c>keyvalue-engine</c>.</summary>
+    /// <summary>
+    /// Gets the engine name: the first argument of <c>AddKeyValue</c> or
+    /// <see cref="KeyValueDatabaseEngine.CreateBuilder(string)"/>, written once (owner decision 52 of
+    /// 2026-10-09).
+    /// </summary>
+    public string Name => _state.Name;
+
+    /// <summary>
+    /// Gets or sets the logical engine name; it starts as <see cref="Name"/>, and <see cref="Build"/>
+    /// refuses any other value. It leaves the builder when the options lose the name.
+    /// </summary>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     public string? EngineName
     {
@@ -201,14 +217,16 @@ public sealed class KeyValueDatabaseEngineBuilder
     /// <summary>Freezes composition and constructs the engine, its workers and its servers.</summary>
     /// <returns>The operational engine, whose servers remain stopped until application startup.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A build was already attempted; a factory returned null; or the engine refused a product (a
-    /// duplicate worker name, a product returned twice, a server that fronts another engine).
+    /// A build was already attempted; <see cref="EngineName"/> is not <see cref="Name"/>; a factory
+    /// returned null; or the engine refused a product (a duplicate worker name, a product returned
+    /// twice, a server that fronts another engine).
     /// </exception>
     /// <exception cref="ArgumentException">An option is invalid (see <see cref="KeyValueDatabaseEngine.Create"/>).</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
     public KeyValueDatabaseEngine Build()
     {
         _state.BeginBuild();
+        _state.ThrowIfRenamed(_options.EngineName);
         var engine = KeyValueDatabaseEngine.CreateUncomposed(_options);
         return _state.Complete(engine, engine.Compose, KeyValueDatabaseEngine.ReleaseRefusedWorkerAsync);
     }

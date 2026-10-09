@@ -22,10 +22,20 @@ shared storage, with DDL flowing through the relational catalog
   catalog; SQL cannot switch databases or manage the server. Conformance tests
   keep identically named tables in two databases isolated and reject attempts
   to select another database or create/drop databases through a session.
-- **Compiled-schema provisioning** — `SqlDatabase.ApplySchemaAsync` diffs a validated
-  `CompiledSchema`, renders deterministic table/column/index DDL into parsed
-  `SqlQueryRequest`s, compensates completed reversible steps on failure, and
-  records the canonical document/hash only after live-catalog convergence.
+- **Declared databases and provisioning** — `SqlDatabaseEngine.CreateBuilder(name)` (or the
+  `AddSql(name, sql => ...)` verb) declares the databases the engine owns
+  (`sql.AddDatabase("sales", database => database.Schema(...))`, `sql.AddDatabase(schema)`), each
+  with its default collation and `SqlProvisioningMode` (`Apply` or `Verify`). `BuildAsync` (and
+  `Build`, which bridges it) compiles every declaration before any file is touched, creates and
+  composes the engine, then opens or creates and provisions each declared database before it
+  returns; a failure disposes the engine, and a canceled build throws `OperationCanceledException`.
+  The engine refuses to drop a declared database. `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)`
+  applies a schema imperatively, except another schema than its declaration's to a declared
+  database. Both diff the validated `SqlCompiledSchema`, render deterministic table/column/index DDL
+  into parsed `SqlQueryRequest`s, compensate completed reversible steps on failure, and record the
+  canonical document/hash only after live-catalog convergence. Failures lead with `COHSQLP001` to
+  `005`, and a `Verify` drift names the first object that differs. A server keeps a copy of its
+  options, as the engine does.
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned rule-based and executed against table scans: `SELECT` with `WHERE`,
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;
@@ -78,25 +88,35 @@ await session.ExecuteAsync(SqlQueryRequest.FromSql(
 ### Registering on a database application
 
 `AddSql` captures engine intent through the area root's dependency-free builder
-contract. The application builds and owns the engine; its optional server belongs
-to that engine. The callback and nested factory execute during Build:
+contract, under the engine name it reserves at the call. The application builds and owns
+the engine; its declared databases are provisioned while it is built, and its optional
+server belongs to it. The callback and nested factories execute during Build:
 
 ```csharp
-builder.AddSql((context, engine) =>
+builder.AddSql("orders", sql =>
 {
-    engine.EngineName = "orders";
-    engine.RootPath = dataDirectory;
-    engine.Durability = StorageCommitDurability.Grouped;
-    engine.ExpressionNestingLimit = 512; // optional; 256 by default, 32..4096
-    engine.AddServer(databaseEngine =>
+    sql.Options.RootPath = dataDirectory;
+    sql.Options.Durability = StorageCommitDurability.Grouped;
+    sql.Options.ExpressionNestingLimit = 512; // optional; 256 by default, 32..4096
+    sql.AddDatabase("sales", database =>
     {
-        var options = new SqlDatabaseServerOptions();
-        options.Listen(new Uri("tcp://127.0.0.1:5439"));
-        return SqlDatabaseServer.Create(databaseEngine, options);
+        database.DefaultCollation = Collation.CaseInsensitive;   // Binary when unset
+        database.Schema(schema => schema.Table<Order>("orders", table => table.Key(order => order.Id)));
     });
+    sql.AddServer(server => server.Listen(new Uri("tcp://127.0.0.1:5439")));
 });
 await using var application = builder.Build();
 SqlDatabaseEngine orders = application.Context.GetEngine<SqlDatabaseEngine>("orders");
+```
+
+Without a host, the same builder provisions while it builds:
+
+```csharp
+SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("local");
+sql.Options.RootPath = dataDirectory;
+sql.AddDatabase(SalesSchema.Declaration);                        // a reusable SqlSchema value
+await using SqlDatabaseEngine engine = await sql.BuildAsync(cancellationToken);
+SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken);
 ```
 
 The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded

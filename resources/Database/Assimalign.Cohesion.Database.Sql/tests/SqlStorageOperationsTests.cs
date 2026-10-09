@@ -705,11 +705,11 @@ public sealed class SqlStorageOperationsTests
     public async Task CreateBuilder_StorageOptions_ShouldReachTheBuiltEngine()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        long defaultPool = builder.BufferPoolCapacity;
-        long defaultSize = builder.CheckpointJournalSize;
-        builder.BufferPoolCapacity = 2 * 1024 * 1024;
-        builder.CheckpointJournalSize = 8 * 1024 * 1024;
+        var builder = SqlDatabaseEngine.CreateBuilder("storage-options");
+        long defaultPool = builder.Options.BufferPoolCapacity;
+        long defaultSize = builder.Options.CheckpointJournalSize;
+        builder.Options.BufferPoolCapacity = 2 * 1024 * 1024;
+        builder.Options.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
         await using var engine = builder.Build();

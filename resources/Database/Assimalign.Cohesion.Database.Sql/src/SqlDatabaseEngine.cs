@@ -42,6 +42,14 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <see cref="EngineState.Running"/> and its server keeps serving its other databases.
 /// </para>
 /// <para>
+/// <b>Declared databases</b> (B1 of the engine extensibility design). An engine built through
+/// <see cref="CreateBuilder(string)"/> has opened or created, and provisioned, every database its
+/// builder declared (<see cref="SqlDatabaseEngineBuilder.AddDatabase(string, Action{SqlDatabaseBuilder}?)"/>)
+/// before the build returns. The declaration owns each of them, so
+/// <see cref="DatabaseEngine.DropDatabaseAsync"/> refuses it with
+/// <see cref="DatabaseObjectLockedException"/> (owner decision 56 of 2026-10-09).
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
 /// <see cref="DatabaseEngine"/>: the base owns the name, the model, the worker pumps, the
 /// state fold, the composition attach and freeze, the argument and disposed checks of every
@@ -71,6 +79,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
     private SqlStorage[] _storageSnapshot = [];
     private SqlDatabase[] _instanceSnapshot = [];
+
+    // The databases the builder declared (owner decision 56): set once, before they are provisioned.
+    private SqlDeclaredDatabase[] _declaredDatabases = Array.Empty<SqlDeclaredDatabase>();
 
     /// <summary>
     /// The storage-name suffix of the dedicated catalog file set each database owns.
@@ -201,10 +212,18 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <summary>
     /// Creates a new SQL database engine from options. The engine is operational —
     /// background workers running — when this method returns, and its composition is
-    /// complete: it takes no further worker or server.
+    /// complete: it takes no further worker or server, and it declares no database.
     /// </summary>
-    /// <param name="options">Engine creation options.</param>
+    /// <param name="options">
+    /// Engine creation options. The engine keeps a copy, so a later change to
+    /// <paramref name="options"/> does not reach it.
+    /// </param>
     /// <returns>A new engine instance.</returns>
+    /// <remarks>
+    /// The standard-library path for embedded code and tests that need no declared database and no
+    /// factory-built product. <see cref="CreateBuilder(string)"/> composes workers and servers and
+    /// provisions the databases it declares before its build returns.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">
     /// <see cref="SqlDatabaseEngineOptions.EngineName"/> is empty or white space.
@@ -224,22 +243,50 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </exception>
     public static SqlDatabaseEngine Create(SqlDatabaseEngineOptions options)
     {
-        var engine = CreateUncomposed(options);
+        ArgumentNullException.ThrowIfNull(options);
+
+        // The engine keeps a copy (B1 of the engine extensibility design): its write-back worker
+        // reads the batch size on every pass, so a caller's later change used to reach it.
+        var engine = CreateUncomposed(options.Snapshot());
         engine.CompleteComposition();
         return engine;
     }
 
-    /// <summary>Creates a dependency-free builder for SQL options and nested worker/server factories.</summary>
+    /// <summary>
+    /// Creates a dependency-free builder for the SQL engine of that name: its options, the databases
+    /// it declares, and its nested worker and server factories.
+    /// </summary>
+    /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
     /// <returns>A fresh builder supporting one engine construction attempt.</returns>
-    public static SqlDatabaseEngineBuilder CreateBuilder() => new();
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    public static SqlDatabaseEngineBuilder CreateBuilder(string name) => new(name);
 
     /// <summary>
     /// Creates an operational engine whose composition is still open, for the builder, which
     /// attaches the products of its factories through <see cref="Compose"/>.
     /// </summary>
-    /// <param name="options">Engine creation options.</param>
+    /// <param name="options">
+    /// Engine creation options, already a copy the caller does not change again
+    /// (<see cref="SqlDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
+    /// </param>
     /// <returns>A new engine instance.</returns>
     internal static SqlDatabaseEngine CreateUncomposed(SqlDatabaseEngineOptions options)
+    {
+        ValidateOptions(options);
+        return new SqlDatabaseEngine(options);
+    }
+
+    /// <summary>
+    /// Checks the options an engine is created from, before anything is created: the checks of
+    /// <see cref="Create"/>, which the builder also makes first, before it compiles its declared
+    /// databases (phase 1 of its build).
+    /// </summary>
+    /// <param name="options">The options.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">See <see cref="Create"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">See <see cref="Create"/>.</exception>
+    internal static void ValidateOptions(SqlDatabaseEngineOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -270,7 +317,49 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         // wake cadence, so it must be positive, and a monitor wait takes no longer timeout.
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero, nameof(options.GroupCommitWindow));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(options.GroupCommitWindow, Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow, nameof(options.GroupCommitWindow));
-        return new SqlDatabaseEngine(options);
+    }
+
+    /// <summary>
+    /// Gets the databases the engine's builder declared, in declaration order, each with the
+    /// outcome of its provisioning once it ran; empty for an engine <see cref="Create"/> made.
+    /// </summary>
+    internal IReadOnlyList<SqlDeclaredDatabase> DeclaredDatabases => Volatile.Read(ref _declaredDatabases);
+
+    /// <summary>
+    /// Records the databases the builder declared, before it provisions them (phase 6 of its
+    /// build): from then on <see cref="DatabaseEngine.DropDatabaseAsync"/> refuses each of them
+    /// (owner decision 56 of 2026-10-09).
+    /// </summary>
+    /// <param name="declarations">The declared databases, in declaration order.</param>
+    /// <exception cref="InvalidOperationException">The engine already declares databases.</exception>
+    internal void Declare(SqlDeclaredDatabase[] declarations)
+    {
+        ArgumentNullException.ThrowIfNull(declarations);
+        var none = Array.Empty<SqlDeclaredDatabase>();
+        if (!ReferenceEquals(Interlocked.CompareExchange(ref _declaredDatabases, declarations, none), none))
+        {
+            throw new InvalidOperationException($"SQL engine '{Name}' already declares its databases.");
+        }
+    }
+
+    /// <summary>
+    /// Finds the declaration of a database the engine's builder declared: the declaration owns it
+    /// at the database level, so dropping it, and applying another schema to it imperatively, are
+    /// refused like an ad-hoc change to a schema-owned object (owner decision 56 of 2026-10-09).
+    /// </summary>
+    /// <param name="name">The database name; database names compare ignoring case.</param>
+    /// <returns>The declaration, or null when the builder did not declare the database.</returns>
+    internal SqlDeclaredDatabase? FindDeclaration(DatabaseName name)
+    {
+        foreach (var declared in DeclaredDatabases)
+        {
+            if (declared.Name == name)
+            {
+                return declared;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -583,8 +672,22 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
     /// <inheritdoc />
+    /// <exception cref="DatabaseObjectLockedException">
+    /// The engine's builder declared the database (owner decision 56 of 2026-10-09): the declaration
+    /// owns it, so it leaves only when the declaration does.
+    /// </exception>
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
+        if (FindDeclaration(name) is { } declared)
+        {
+            throw new DatabaseObjectLockedException(
+                declared.Name,
+                declared.Name,
+                "DROP DATABASE",
+                $"SQL engine '{Name}' declares database '{declared.Name}' (SqlDatabaseEngineBuilder.AddDatabase), so " +
+                "DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.");
+        }
+
         lock (_syncRoot)
         {
             ThrowIfDisposed();

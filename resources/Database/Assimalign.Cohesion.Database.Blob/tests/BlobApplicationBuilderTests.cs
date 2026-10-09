@@ -22,15 +22,15 @@ public sealed class BlobApplicationBuilderTests
         var builder = new RecordingBuilder();
         var context = new RecordingContext();
         int configured = 0;
-        builder.AddBlob((actualContext, options) =>
+        builder.AddBlob("registered", options =>
         {
-            actualContext.ShouldBeSameAs(context);
             configured++;
-            options.EngineName = "registered";
+            options.Name.ShouldBe("registered");
             options.Durability = StorageCommitDurability.Grouped;
         }).ShouldBeSameAs(builder);
 
         configured.ShouldBe(0);
+        builder.Name.ShouldBe("registered");
         await using var engine = builder.Factory.ShouldNotBeNull()(context);
         configured.ShouldBe(1);
         engine.Name.ShouldBe("registered");
@@ -46,7 +46,7 @@ public sealed class BlobApplicationBuilderTests
     {
         var builder = new RecordingBuilder(reject: true);
         bool configured = false;
-        Should.Throw<InvalidOperationException>(() => builder.AddBlob((_, _) => configured = true))
+        Should.Throw<InvalidOperationException>(() => builder.AddBlob("refused", _ => configured = true))
             .Message.ShouldBe("Registration refused.");
         configured.ShouldBeFalse();
     }
@@ -54,8 +54,7 @@ public sealed class BlobApplicationBuilderTests
     [Fact]
     public void Build_ShouldAttachDeferredComponentsAndOwnTheirLifetime()
     {
-        var builder = BlobDatabaseEngine.CreateBuilder();
-        builder.EngineName = "composed";
+        var builder = BlobDatabaseEngine.CreateBuilder("composed");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
         builder.AddWorker(engine => worker = new RecordingWorker(engine, engine.Name + "/custom"));
@@ -83,7 +82,7 @@ public sealed class BlobApplicationBuilderTests
     [Fact]
     public void FailedServerFactory_ShouldDisposeEarlierComponentsAndFreezeBuilder()
     {
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
         BlobDatabaseEngine? product = null;
@@ -108,7 +107,7 @@ public sealed class BlobApplicationBuilderTests
     [InlineData(false)]
     public void NullComponentFactoryProduct_ShouldDisposeEngine(bool worker)
     {
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         BlobDatabaseEngine? product = null;
         if (worker)
         {
@@ -128,7 +127,7 @@ public sealed class BlobApplicationBuilderTests
     {
         using var other = BlobDatabaseEngine.Create(new());
         var server = new RecordingServer(other);
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.AddServer(_ => server);
         Should.Throw<InvalidOperationException>(() => builder.Build()).Message.ShouldContain("owning engine");
         server.Stops.ShouldBe(1);
@@ -145,7 +144,7 @@ public sealed class BlobApplicationBuilderTests
         {
             using var strategy = new RecordingStorageStrategy(directory);
             strategy.CreateStorage(new DatabaseName("existing"), StorageCommitDurability.Synchronous).Dispose();
-            var builder = BlobDatabaseEngine.CreateBuilder();
+            var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
             builder.StorageStrategy = strategy;
             builder.RootPath = FileSystemPath.Parse(ignoredRoot);
             builder.Durability = StorageCommitDurability.Synchronous;
@@ -189,7 +188,7 @@ public sealed class BlobApplicationBuilderTests
     {
         var builder = new RecordingBuilder();
         BlobDatabaseEngine? product = null;
-        builder.AddBlob((_, engine) =>
+        builder.AddBlob("premature", engine =>
         {
             product = engine.Build();
             if (throwAfterBuild) { throw new InvalidOperationException("Configuration failed."); }
@@ -213,11 +212,13 @@ public sealed class BlobApplicationBuilderTests
         }
 
         internal Func<IDatabaseApplicationContext, DatabaseEngine>? Factory { get; private set; }
+        internal string? Name { get; private set; }
         public IDatabaseApplicationBuilder AddEngine(DatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
-        public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
+        public IDatabaseApplicationBuilder AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine> factory)
         {
             if (_reject) { throw new InvalidOperationException("Registration refused."); }
-            Factory = configure;
+            Name = name;
+            Factory = factory;
             return this;
         }
         public IDatabaseApplication Build() => throw new NotSupportedException();

@@ -45,14 +45,14 @@ public sealed class DatabaseWorkerHealthTests
         // Arrange: a SQL engine with a guided worker the test drives pass by pass, beside its
         // built-in workers.
         ReportingWorker? registered = null;
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = "sql";
+        var builder = SqlDatabaseEngine.CreateBuilder("sql");
         builder.AddWorker(_ => registered = new ReportingWorker("sql/probe", DatabaseEngineWorkerKind.Checkpoint));
         await using var engine = builder.Build();
         var worker = registered.ShouldNotBeNull();
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
         HealthContribution before = await application.Context.CheckAsync(CancellationToken.None);
 
         // Act: the worker's pass fails for the database, and the engine base folds it as Faulted.
@@ -99,8 +99,9 @@ public sealed class DatabaseWorkerHealthTests
         // header write does.
         var engine = new RecordingEngine("sql");
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
 
         // Act
         engine.Offline = ["app"];
@@ -139,8 +140,7 @@ public sealed class DatabaseWorkerHealthTests
         var token = deadline.Token;
         var listener = new InMemoryConnectionListener();
         ReportingWorker? registered = null;
-        var builder = BlobDatabaseEngine.CreateBuilder();
-        builder.EngineName = "blob";
+        var builder = BlobDatabaseEngine.CreateBuilder("blob");
         builder.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(_ => registered = new ReportingWorker("blob/probe", DatabaseEngineWorkerKind.Checkpoint, "failing"));
         builder.AddServer(built => BlobDatabaseServer.Create(built, new() { Listener = listener }));
@@ -154,8 +154,9 @@ public sealed class DatabaseWorkerHealthTests
         }
 
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
 
         // Act: the worker fails on "failing"; the application starts the engine's server.
         worker.Failure = new IOException("Injected page write failure");

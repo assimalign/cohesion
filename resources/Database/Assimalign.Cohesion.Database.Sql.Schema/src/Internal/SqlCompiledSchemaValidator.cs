@@ -22,23 +22,13 @@ internal static class SqlCompiledSchemaValidator
         }
 
         RequireName(schema.Name, "schema.name", errors);
-        if (schema.Model != EngineModel.Sql)
-        {
-            Add(errors, SqlSchemaValidationErrorCode.ModelMismatch, "schema.model",
-                $"Engine model '{schema.Model}' cannot own a SQL compiled schema.");
-        }
 
         Dictionary<string, CompiledSchemaType> types = ValidateTypes(schema.Types, errors);
         Dictionary<string, CompiledSchemaTable> tables = CollectTables(schema.Tables, errors);
         Dictionary<CompiledSchemaTable, Dictionary<string, CompiledSchemaColumn>> tableColumns =
             ValidateTables(schema.Tables, types, errors);
         ValidateTableConstraints(schema.Tables, tables, tableColumns, errors);
-
-        Dictionary<string, CompiledSchemaFunction> functions =
-            ValidateFunctions(schema.Functions, types, errors);
-        ValidateTriggers(schema.Triggers, tables, errors);
-        ValidatePrincipals(schema.Principals, tables, functions, errors);
-        ValidateExtensions(schema.Extensions, errors);
+        ValidatePrincipals(schema.Principals, tables, errors);
 
         if (errors.Count > 0)
         {
@@ -261,100 +251,9 @@ internal static class SqlCompiledSchemaValidator
         }
     }
 
-    private static Dictionary<string, CompiledSchemaFunction> ValidateFunctions(
-        IReadOnlyList<CompiledSchemaFunction> declarations,
-        IReadOnlyDictionary<string, CompiledSchemaType> types,
-        List<SqlSchemaValidationError> errors)
-    {
-        var result = new Dictionary<string, CompiledSchemaFunction>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < declarations.Count; index++)
-        {
-            CompiledSchemaFunction? function = declarations[index];
-            string path = NamedPath("functions", function?.Name, index);
-            if (function is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The function entry cannot be null.");
-                continue;
-            }
-
-            if (RequireName(function.Name, path, errors) && !result.TryAdd(function.Name, function))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The function name is declared more than once.");
-            }
-
-            ValidateTypeReference(function.ResultType, function.CustomResultType, types, $"{path}.resultType", errors);
-            var parameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int parameterIndex = 0; parameterIndex < function.Parameters.Count; parameterIndex++)
-            {
-                CompiledSchemaParameter? parameter = function.Parameters[parameterIndex];
-                string parameterPath = NamedPath($"{path}.parameters", parameter?.Name, parameterIndex);
-                if (parameter is null)
-                {
-                    Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, parameterPath,
-                        "The function parameter cannot be null.");
-                    continue;
-                }
-
-                if (RequireName(parameter.Name, parameterPath, errors) && !parameterNames.Add(parameter.Name))
-                {
-                    Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, parameterPath,
-                        "The function parameter name is declared more than once.");
-                }
-
-                ValidateTypeReference(parameter.Type, parameter.CustomType, types, $"{parameterPath}.type", errors);
-            }
-
-            ValidateExpression(function.Body, $"{path}.body", errors);
-        }
-
-        return result;
-    }
-
-    private static void ValidateTriggers(
-        IReadOnlyList<CompiledSchemaTrigger> declarations,
-        IReadOnlyDictionary<string, CompiledSchemaTable> tables,
-        List<SqlSchemaValidationError> errors)
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < declarations.Count; index++)
-        {
-            CompiledSchemaTrigger? trigger = declarations[index];
-            string path = NamedPath("triggers", trigger?.Name, index);
-            if (trigger is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The trigger entry cannot be null.");
-                continue;
-            }
-
-            if (RequireName(trigger.Name, path, errors) && !names.Add(trigger.Name))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The trigger name is declared more than once.");
-            }
-
-            if (!RequireName(trigger.Table, $"{path}.table", errors) || !tables.ContainsKey(trigger.Table))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.UnknownReference, $"{path}.table",
-                    $"Trigger table '{trigger.Table}' is not declared.");
-            }
-
-            if (!Enum.IsDefined(trigger.Event))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.event",
-                    $"Trigger event '{trigger.Event}' is not defined.");
-            }
-
-            ValidateExpression(trigger.Body, $"{path}.body", errors);
-        }
-    }
-
     private static void ValidatePrincipals(
         IReadOnlyList<CompiledSchemaPrincipal> declarations,
         IReadOnlyDictionary<string, CompiledSchemaTable> tables,
-        IReadOnlyDictionary<string, CompiledSchemaFunction> functions,
         List<SqlSchemaValidationError> errors)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -419,44 +318,13 @@ internal static class SqlCompiledSchemaValidator
                             $"{objectPath}.{objectName}", "The grant names the same object more than once.");
                     }
 
-                    if (!tables.ContainsKey(objectName!) &&
-                        !functions.ContainsKey(objectName!))
+                    if (!tables.ContainsKey(objectName!))
                     {
                         Add(errors, SqlSchemaValidationErrorCode.UnknownReference,
                             $"{objectPath}.{objectName}", "The granted schema object is not declared.");
                     }
                 }
 
-            }
-        }
-    }
-
-    private static void ValidateExtensions(
-        IReadOnlyList<CompiledSchemaExtension> declarations,
-        List<SqlSchemaValidationError> errors)
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < declarations.Count; index++)
-        {
-            CompiledSchemaExtension? extension = declarations[index];
-            string path = NamedPath("extensions", extension?.Name, index);
-            if (extension is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The extension entry cannot be null.");
-                continue;
-            }
-
-            if (RequireName(extension.Name, path, errors) && !names.Add(extension.Name))
-            {
-                Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The extension name is declared more than once.");
-            }
-
-            if (extension.Value is null)
-            {
-                Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{path}.value",
-                    "The extension value cannot be null.");
             }
         }
     }

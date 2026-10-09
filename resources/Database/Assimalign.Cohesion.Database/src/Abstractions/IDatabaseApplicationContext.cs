@@ -16,7 +16,7 @@ public interface IDatabaseApplicationContext
     /// <summary>Gets all distinct engines in composition order.</summary>
     IReadOnlyList<DatabaseEngine> Engines { get; }
 
-    /// <summary>Gets servers flattened from engines, followed by legacy borrowed server inputs.</summary>
+    /// <summary>Gets the servers flattened from the engines, in engine order.</summary>
     IReadOnlyList<DatabaseServer> Servers { get; }
 
     /// <summary>Retrieves a borrowed engine by its ordinal name.</summary>

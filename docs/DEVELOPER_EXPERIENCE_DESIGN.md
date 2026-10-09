@@ -109,34 +109,26 @@ Rules that do not move: (1) a runtime never references `ApplicationModel`; a man
 
 ```csharp
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);         // an ordinary builder; honors the ambient ResourceContext and the registered control plane because the opt-in generated them
-builder.AddSql((_, o) =>
+builder.AddSql("orders-sql", sql =>                                                   // the engine, named once (B1, owner decision 52 of 2026-10-09)
 {
-    o.EngineName = "orders-sql";
-    o.RootPath   = Resource.Mounts.Data;                                                // Resource.g.cs: typed accessors over ResourceRuntime.Current (COHESION_* out-of-process; set per invocation in-process)
-    o.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
-    o.AddServer(engine => SqlDatabaseServer.Create(
-        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
+    sql.Options.RootPath   = Resource.Mounts.Data.Path;                                // Resource.g.cs: typed accessors over ResourceRuntime.Current (COHESION_* out-of-process; set per invocation in-process)
+    sql.Options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
+    sql.AddServer(server => server.Listen(Resource.Endpoints.Db));                     // the model creates the server
+    sql.AddDatabase("orders", database => database.Schema(schema =>                    // the schema is code; the engine's build provisions it
+    {
+        schema.Table<Order>(table => { table.Key(o => o.Id); table.Column(o => o.Total); table.Index(o => o.CustomerId); });   // every stored member is declared
+        schema.Table<OrderLine>(table => { table.Key(l => l.Id); table.Column(l => l.Quantity); table.Column(l => l.UnitPrice); table.References<Order>(l => l.OrderId); });
+    }));
 });
 
-builder.AddDatabase("orders-sql", "orders", database =>                              // the schema is code
-{
-    database.Type<Money>(type => type.Decimal(18, 2));                                  // custom type
-    database.Table<Order>(table => { table.Key(o => o.Id); table.Index(o => o.CustomerId); });
-    database.Table<OrderLine>(table => { table.Key(l => l.Id); table.References<Order>(l => l.OrderId); });
-    database.Function("order_total", (long orderId) => Sql.Sum<OrderLine>(l => l.Quantity * l.UnitPrice, l => l.OrderId == orderId));
-    database.Trigger<Order>(TriggerEvent.AfterInsert, (transaction, row) => transaction.Audit("order.placed", row.Id));
-    database.Principal("appa-api", principal => principal.Grant(Permission.ReadWrite, "Orders", "OrderLines"));   // database-scoped identity
-});
+await using var app = builder.Build();                                                 // engines built, declared databases provisioned
+await app.RunAsync();                                                                  // the server accepts only now; the `admin` control plane is started by the opt-in, never by a verb
 
-await using var app = builder.Build();
-await app.RunAsync();                                                                  // provisioning runs before the server accepts; the `admin` control plane is started by the opt-in, never by a verb
-
-record Order(long Id, long CustomerId, Money Total);                                    // the types the schema is built from follow the statements
-record OrderLine(long Id, long OrderId, int Quantity, Money UnitPrice);
-readonly record struct Money(decimal Amount);
+record Order(long Id, long CustomerId, decimal Total);                                 // the types the schema is built from follow the statements
+record OrderLine(long Id, long OrderId, int Quantity, decimal UnitPrice);
 ```
 
-The csproj carries the opt-in and only what the gateway must know; everything the database *is* — tables, indexes, constraints, custom types, functions, triggers, principals — is C# through the Database builder in `Program.cs`, and schema compile/migrations (#857–#859) operate on that model. There is no `AddAdminEndpoint` in user code: the `admin` endpoint is the Database default control plane, wired by the opt-in (§4.2.3). **The Database builder API shown is illustrative: the Database area owns it, exactly as IdentityHub owns its user-flow pipeline, Rezolvr its zone API and SecretStore its policy API. This document prescribes none of them (R3).** With the opt-in enabled the same project is still the two-person-company database: one executable, in-process-capable, deployable as-is. Set it to `disabled` and it is a plain .NET database executable — no manifest, no `Resource.*`, no diagnostics — that no gateway can reference (COHSDK001) but that any gateway can still launch opaquely with `AddExecutable(path, …)`.
+The csproj carries the opt-in and only what the gateway must know; everything the database *is* — tables, indexes, constraints — is C# on the SQL engine builder in `Program.cs`, whose build provisions it, and schema compile/migrations (#857–#859) operate on that model (the engine extensibility design, `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`, adds engine-registered functions and domains, and refuses schema principals until their DDL exists). There is no `AddAdminEndpoint` in user code: the `admin` endpoint is the Database default control plane, wired by the opt-in (§4.2.3). **The Database builder API shown is illustrative: the Database area owns it, exactly as IdentityHub owns its user-flow pipeline, Rezolvr its zone API and SecretStore its policy API. This document prescribes none of them (R3).** With the opt-in enabled the same project is still the two-person-company database: one executable, in-process-capable, deployable as-is. Set it to `disabled` and it is a plain .NET database executable — no manifest, no `Resource.*`, no diagnostics — that no gateway can reference (COHSDK001) but that any gateway can still launch opaquely with `AddExecutable(path, …)`.
 
 **4.2.2 `Example.AppA.Api` — composed:**
 

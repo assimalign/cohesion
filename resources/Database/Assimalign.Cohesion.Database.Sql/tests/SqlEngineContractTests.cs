@@ -55,7 +55,6 @@ public sealed class SqlEngineContractTests
         // Assert
         opened.ShouldBeSameAs(created);
         collated.Engine.ShouldBeSameAs(engine);
-        created.SupportsSchemaProvisioning.ShouldBeTrue();
         names.ShouldBe(["orders", "people"], ignoreOrder: true);
         typedFound.ShouldBeTrue();
         lookedUp.ShouldBeSameAs(created);

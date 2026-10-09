@@ -190,7 +190,7 @@ public sealed class GraphStorageOperationsTests
     public async Task CreateBuilder_StorageOptions_ShouldReachTheBuiltEngine()
     {
         // Arrange
-        var builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         long defaultPool = builder.BufferPoolCapacity;
         long defaultSize = builder.CheckpointJournalSize;
         builder.BufferPoolCapacity = 2 * 1024 * 1024;

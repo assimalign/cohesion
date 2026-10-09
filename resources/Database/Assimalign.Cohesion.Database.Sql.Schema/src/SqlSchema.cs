@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The declaration is opaque. Its tables, types, functions, triggers, principals and extensions
-/// are internal records the compiler reads; the public result of a declaration is the
+/// The declaration is opaque. Its tables, types and principals are internal records the compiler
+/// reads; the public result of a declaration is the
 /// <see cref="SqlCompiledSchema"/> that <see cref="Compile()"/> returns. Most applications call
 /// <see cref="Compile(string, Action{SqlSchemaBuilder})"/>, which declares and compiles in one step.
 /// </para>
@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// constructor. It replaced the static <c>SqlSchema</c> factory, whose <c>Create</c> returned the
 /// <c>ISqlSchema</c> interface over positional records, and the public static
 /// <c>SqlSchemaCompiler</c>, which is now internal: a public positional record cannot close its
-/// primary constructor or its <c>with</c> clone, so the nine declaration records stay internal
+/// primary constructor or its <c>with</c> clone, so the declaration records stay internal
 /// behind this type. The <c>Sdk.Database</c> extractor finds <see cref="Create"/> and
 /// <see cref="Compile(string, Action{SqlSchemaBuilder})"/> calls by this type's name, which a
 /// non-static class keeps.
@@ -54,7 +54,7 @@ public sealed class SqlSchema
     /// </summary>
     /// <returns>The validated, immutable compiled schema, with a deterministic content hash.</returns>
     /// <exception cref="SqlSchemaValidationException">The declaration is not valid.</exception>
-    public SqlCompiledSchema Compile() => SqlSchemaCompiler.Compile(this, EngineModel.Sql);
+    public SqlCompiledSchema Compile() => SqlSchemaCompiler.Compile(this);
 
     /// <summary>
     /// Declares and compiles a SQL schema in one step. Equivalent to calling

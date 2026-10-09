@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -68,39 +67,6 @@ internal static class CompiledSchemaSourceWriter
                 constraints));
         }
 
-        CompiledSchemaFunction[] functions = source.Functions
-            .Select(function =>
-            {
-                (DatabaseType resultType, string? customResult, _, _) = ResolveType(function.ReturnType, customTypes);
-                CompiledSchemaParameter[] parameters = function.Parameters
-                    .Select(parameter =>
-                    {
-                        (DatabaseType type, string? custom, _, _) = ResolveType(parameter.TypeName, customTypes);
-                        return new CompiledSchemaParameter(parameter.Name, type, custom);
-                    })
-                    .ToArray();
-                return new CompiledSchemaFunction(
-                    function.Name,
-                    parameters,
-                    resultType,
-                    customResult,
-                    new CompiledSchemaExpression(function.Expression));
-            })
-            .ToArray();
-
-        CompiledSchemaTrigger[] triggers = source.Triggers
-            .Select(trigger =>
-            {
-                SchemaTableSource table = tablesByRowType[trigger.RowType];
-                SqlTriggerEvent triggerEvent = Enum.Parse<SqlTriggerEvent>(trigger.Event, ignoreCase: false);
-                return new CompiledSchemaTrigger(
-                    $"TR_{table.Name}_{triggerEvent}",
-                    table.Name,
-                    triggerEvent,
-                    new CompiledSchemaExpression(trigger.Expression));
-            })
-            .ToArray();
-
         CompiledSchemaPrincipal[] principals = source.Principals
             .Select(principal => new CompiledSchemaPrincipal(
                 principal.Name,
@@ -119,17 +85,10 @@ internal static class CompiledSchemaSourceWriter
         return new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             source.Name,
-            EngineModel.Sql,
             source.AllowsDestructiveChanges,
             customTypes.Values.OrderBy(static type => type.Name, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(static table => table.Name, StringComparer.Ordinal).ToArray(),
-            functions.OrderBy(static function => function.Name, StringComparer.Ordinal).ToArray(),
-            triggers.OrderBy(static trigger => trigger.Name, StringComparer.Ordinal).ToArray(),
-            principals.OrderBy(static principal => principal.Name, StringComparer.Ordinal).ToArray(),
-            source.Extensions
-                .OrderBy(static extension => extension.Name, StringComparer.Ordinal)
-                .Select(static extension => new CompiledSchemaExtension(extension.Name, extension.Value))
-                .ToArray());
+            principals.OrderBy(static principal => principal.Name, StringComparer.Ordinal).ToArray());
     }
 
     private static (DatabaseType Type, string? CustomType, int? Precision, int? Scale) ResolveType(

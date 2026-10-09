@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq.Expressions;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
@@ -14,19 +13,13 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 /// <param name="AllowsDestructiveChanges">Whether migration planning may include destructive operations.</param>
 /// <param name="Types">The declared custom types.</param>
 /// <param name="Tables">The declared tables.</param>
-/// <param name="Functions">The declared functions.</param>
-/// <param name="Triggers">The declared triggers.</param>
 /// <param name="Principals">The declared database principals.</param>
-/// <param name="Extensions">The model-specific extension values.</param>
 /// <param name="Name">The logical database name.</param>
 internal sealed record SqlSchemaDeclaration(
     bool AllowsDestructiveChanges,
     IReadOnlyList<SqlSchemaType> Types,
     IReadOnlyList<SqlSchemaTable> Tables,
-    IReadOnlyList<SqlSchemaFunction> Functions,
-    IReadOnlyList<SqlSchemaTrigger> Triggers,
     IReadOnlyList<SqlSchemaPrincipal> Principals,
-    IReadOnlyList<SqlSchemaExtension> Extensions,
     string Name);
 
 /// <summary>A custom type declaration.</summary>
@@ -65,25 +58,6 @@ internal sealed record SqlSchemaReference(string Member, Type TargetType);
 /// <param name="ClrType">The declared CLR value type.</param>
 /// <param name="IsNullable">Whether null values are permitted.</param>
 internal sealed record SqlSchemaColumn(string Name, Type ClrType, bool IsNullable);
-
-/// <summary>A model-specific schema extension.</summary>
-/// <param name="Name">The extension name.</param>
-/// <param name="Value">The canonical extension value.</param>
-internal sealed record SqlSchemaExtension(string Name, string Value);
-
-/// <summary>A database function declaration.</summary>
-/// <param name="Name">The function name.</param>
-/// <param name="Body">The expression body retained for schema compilation.</param>
-internal sealed record SqlSchemaFunction(string Name, LambdaExpression Body);
-
-/// <summary>A database trigger declaration.</summary>
-/// <param name="RowType">The target table row type.</param>
-/// <param name="Event">The event that invokes the trigger.</param>
-/// <param name="Body">The expression body retained for schema compilation.</param>
-internal sealed record SqlSchemaTrigger(
-    Type RowType,
-    SqlTriggerEvent Event,
-    LambdaExpression Body);
 
 /// <summary>A database principal declaration.</summary>
 /// <param name="Name">The principal name.</param>

@@ -498,7 +498,7 @@ public sealed class SqlWorkerResilienceTests
     {
         // Arrange
         var worker = new EscapingWorker();
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("escaping-worker");
         builder.AddWorker(_ => worker);
         await using var engine = builder.Build();
 
@@ -926,10 +926,10 @@ public sealed class SqlWorkerResilienceTests
     {
         // Arrange
         var defaults = new SqlDatabaseEngineOptions();
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
-        builder.WorkerFailureMinimumPasses = 4;
-        builder.JournalSizeLimit = 512L * 1024 * 1024;
+        var builder = SqlDatabaseEngine.CreateBuilder("worker-limits");
+        builder.Options.WorkerFailureWindow = TimeSpan.FromSeconds(30);
+        builder.Options.WorkerFailureMinimumPasses = 4;
+        builder.Options.JournalSizeLimit = 512L * 1024 * 1024;
 
         // Act
         await using var engine = SqlDatabaseEngine.Create(new());

@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -127,12 +126,11 @@ public static class SqlCompiledSchemaSerializer
 
     /// <summary>Computes the deterministic lowercase SHA-256 content hash.</summary>
     /// <param name="schema">The schema whose canonical document is hashed.</param>
-    /// <returns>A 64-character lowercase hexadecimal hash.</returns>
+    /// <returns>A 64-character lowercase hexadecimal hash: the schema's <see cref="SqlCompiledSchema.Hash"/>.</returns>
     public static string ComputeHash(SqlCompiledSchema schema)
     {
         ArgumentNullException.ThrowIfNull(schema);
-        byte[] bytes = Encoding.UTF8.GetBytes(Serialize(schema));
-        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        return schema.Hash;
     }
 
 }
