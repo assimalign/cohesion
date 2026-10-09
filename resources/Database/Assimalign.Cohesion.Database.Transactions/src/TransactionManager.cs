@@ -302,8 +302,8 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <summary>
     /// Gets the bound below which no snapshot of an active transaction, and no future snapshot,
     /// can see a version: the lowest of every active transaction's sequence and the
-    /// <see cref="TransactionSnapshot.Minimum"/> of the snapshot it began with, or the next
-    /// sequence when none is active.
+    /// <see cref="TransactionSnapshot.Minimum"/> of every snapshot or serializable transaction's
+    /// fixed snapshot, or the next sequence when none is active.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -313,14 +313,18 @@ public sealed class TransactionManager : IAsyncDisposable
     /// left the snapshot minimums to a later registration missed a transaction begun in between:
     /// a purge in that window reclaimed a version its snapshot still saw, and the version read as
     /// absent (#1342 review). A future snapshot's minimum is at or above the bound, because every
-    /// sequence it can find in flight is active now or assigned later.
+    /// sequence it can find in flight is active now or assigned later. PostgreSQL's horizon is the
+    /// same minimum, over every backend's xid and xmin read under the proc-array lock
+    /// (<c>src/backend/storage/ipc/procarray.c:1731-1750</c>, <c>ComputeXidHorizons</c>).
     /// </para>
     /// <para>
-    /// The begin snapshot, not the current one, is what covers a read-committed transaction: its
-    /// statement views pin snapshots the manager does not track, and each of them has a minimum at
-    /// or above the begin snapshot's (<see cref="TransactionContext.BeginSnapshot"/>).
-    /// PostgreSQL's horizon is the same minimum, over every backend's xid and xmin read under the
-    /// proc-array lock (<c>src/backend/storage/ipc/procarray.c:1731-1750</c>, <c>ComputeXidHorizons</c>).
+    /// A read-committed transaction adds only its sequence: its snapshot is captured afresh on
+    /// every access, with a minimum no lower than the active sequences counted here, so between
+    /// statements it holds the bound no further back than its own sequence, as a PostgreSQL backend
+    /// resets its xmin once it holds no snapshot (<c>src/backend/utils/time/snapmgr.c:937-955</c>,
+    /// <c>SnapshotResetXmin</c>). A read-committed statement that
+    /// must keep its floor while older writers commit pins it with a snapshot transaction of its
+    /// own, begun before it pins the statement view (the Documents, Graph and Blob operations).
     /// </para>
     /// </remarks>
     internal TransactionSequence PruneBound
@@ -338,7 +342,14 @@ public sealed class TransactionManager : IAsyncDisposable
                         bound = new TransactionSequence(sequence);
                     }
 
-                    var minimum = context.BeginSnapshot.Minimum;
+                    if (context.IsolationLevel == IsolationLevel.ReadCommitted)
+                    {
+                        continue;
+                    }
+
+                    // Fixed at begin for snapshot and serializable isolation, so reading it here
+                    // captures nothing.
+                    var minimum = context.Snapshot.Minimum;
 
                     if (minimum < bound)
                     {

@@ -363,36 +363,40 @@ public class RecordSpaceVersionStoreTests
     }
 
     /// <summary>
-    /// A read-committed statement pins a snapshot the manager does not track, and the transaction's
-    /// own snapshot moves on with every access. Before the fix the bound read only the latter, so a
-    /// purge during the statement reclaimed a version its pinned snapshot still saw.
+    /// A read-committed transaction holds the bound at its own sequence between statements, not at
+    /// the floor it began with: its snapshot is captured afresh on every access. A statement that
+    /// must keep an older floor pins it with a snapshot transaction of its own, which the bound
+    /// covers from its begin.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a read-committed statement's pinned snapshot keeps the version it sees")]
-    public async Task Prune_ReadCommittedStatementView_ShouldKeepTheVersionItsSnapshotSees()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a read-committed transaction holds the bound only through a statement's snapshot pin")]
+    public async Task Prune_ReadCommittedTransaction_ShouldHoldTheBoundOnlyThroughAStatementPin()
     {
-        // Arrange: the statement pins its snapshot while the deleter is in flight; the deleter
-        // then commits, so the transaction's own snapshot no longer sees the version.
+        // Arrange: the read-committed reader begins while the deleter is in flight, and its
+        // statement pins its floor with a snapshot transaction begun first, as the Documents,
+        // Graph and Blob operations do; then the deleter commits.
         using var storage = new RecordStorage();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         ulong packed = await TombstoneOneVersion(storage, coordinator, deleter);
         var reader = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+        var pin = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         var statement = reader.PinStatementSnapshot();
         await coordinator.CommitAsync(deleter, CancellationToken.None);
 
         // Act
-        long pruned = coordinator.RunVersionPurgePass(CancellationToken.None);
-        var seen = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, statement.Snapshot);
-        var seenByTheTransaction = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, reader.Snapshot);
-        await coordinator.CommitAsync(reader, CancellationToken.None);
-        long prunedAfterTheReader = coordinator.RunVersionPurgePass(CancellationToken.None);
+        long prunedDuringTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
+        var seenByTheStatement = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, statement.Snapshot);
+        await coordinator.CommitAsync(pin, CancellationToken.None);
+        long prunedAfterTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
 
-        // Assert
+        // Assert: the statement kept its version; once it ended, the still-active read-committed
+        // transaction did not hold the bound back at its begin-time floor.
         statement.Snapshot.Minimum.ShouldBe(deleter.Sequence);
-        pruned.ShouldBe(0);
-        seen.HasValue.ShouldBeTrue();
-        seenByTheTransaction.HasValue.ShouldBeFalse();
-        prunedAfterTheReader.ShouldBe(1);
+        prunedDuringTheStatement.ShouldBe(0);
+        seenByTheStatement.HasValue.ShouldBeTrue();
+        prunedAfterTheStatement.ShouldBe(1);
+        reader.State.ShouldBe(TransactionState.Active);
+        await coordinator.CommitAsync(reader, CancellationToken.None);
     }
 
     /// <summary>

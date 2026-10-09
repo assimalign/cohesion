@@ -97,9 +97,9 @@ rollback does (state `Faulted`; see "Ending a transaction" below), and surfaces
 `TransactionAbortedException`. A commit whose record was written but whose durable
 flush failed is different, and is described next. `OldestActive` is
 `min(active)`, or `lastAssigned + 1` when idle. It is not a pruning bound on its own: the
-internal `PruneBound` also takes the minimum of every active transaction's begin snapshot,
-under the lock the begin holds while it captures that snapshot ("Shared per-database
-composition", below). A manager rejects a
+internal `PruneBound` also takes the minimum of every active snapshot or serializable
+transaction's snapshot, under the lock the begin holds while it captures that snapshot
+("Shared per-database composition", below). A manager rejects a
 context begun on a different manager instance (identity check, not just type check).
 
 ### A commit record that was written but not made durable
@@ -771,8 +771,8 @@ The safe prune bound starts at `max(manager.PruneBound, recoveredSequenceFloor)`
 and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
 while an older writer was active can retain a floor below the current oldest
 active transaction, so using only the oldest active sequence would reclaim visible data.
-`PruneBound` is the minimum of every active sequence and every active transaction's
-begin-snapshot `Minimum`, read under the manager lock that `BeginAsync` holds while it
+`PruneBound` is the minimum of every active sequence and every active snapshot or
+serializable transaction's snapshot `Minimum`, read under the manager lock that `BeginAsync` holds while it
 assigns the sequence, captures the snapshot and enters the active table, so it covers a
 transaction from the moment its snapshot exists. The bound used to start from
 `OldestActive` and take snapshot floors only from the coordinator's open contexts, which a
@@ -783,12 +783,16 @@ adversarial probe (six readers looking documents up, one writer, a purge loop, 2
 read 121 of 5.7 million existing documents as absent with the old bound and none of about
 four million, in each of two runs, with this one
 (`Prune_SnapshotBegunOnTheManagerAlone_ShouldKeepTheVersionItSees` reproduces the window's
-state deterministically). The begin snapshot, rather than the current one, is what covers a
-read-committed transaction: its `Snapshot` is captured afresh on every access, but a statement
-view it pinned (`PinStatementSnapshot`) keeps an older floor the manager does not track, and
-every such floor is at or above the begin snapshot's. A read-committed transaction therefore
-holds the bound at its begin-time floor until it ends, which is stricter than PostgreSQL's
-per-statement `xmin` and is the price of not tracking statement views.
+state deterministically). A read-committed transaction adds only its sequence: its
+`Snapshot` is captured afresh on every access, so between statements it holds the bound no
+further back than itself, as a PostgreSQL backend resets its `xmin` once it holds no snapshot
+(`src/backend/utils/time/snapmgr.c:937-955`). A read-committed statement view
+(`PinStatementSnapshot`) keeps the floor of the moment it was pinned, which the manager does
+not track, so a statement that must keep it while older writers commit pins it with a
+snapshot transaction of its own, begun before the view: the Documents, Graph and Blob
+operations do (`BlobReadCommittedTests` holds both halves: the pin keeps the version while
+the stream is open, and the next pass reclaims it once the stream ends, with the
+read-committed transaction still active).
 The purge pass retries failed abort undo before pruning, exactly as before. A retry that
 fails again no longer ends the pass: the pass still prunes, and rethrows the retry's
 failure at its end. A writer still deferred stays in the active table, so the bound never

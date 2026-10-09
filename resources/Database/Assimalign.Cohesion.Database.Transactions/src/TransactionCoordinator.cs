@@ -892,7 +892,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Computes the prune bound no live or future snapshot can see below: the
     /// manager's <see cref="TransactionManager.PruneBound"/>, the minimum of every
-    /// active sequence and of every active transaction's begin-snapshot
+    /// active sequence and of every active snapshot or serializable transaction's
     /// <see cref="TransactionSnapshot.Minimum"/>, taken atomically with
     /// <see cref="TransactionManager.BeginAsync"/>. The oldest active sequence alone
     /// is NOT safe under load: a live snapshot can hold a <em>lower</em> minimum
