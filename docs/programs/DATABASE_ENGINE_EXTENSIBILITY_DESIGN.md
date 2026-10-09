@@ -1180,7 +1180,7 @@ KeyValuePair, Graph and Blob client suites, Studio `--smoke`, the templates.
 **E1: the engine-owned bound expression tree.** Internal; no API change. `SqlPlanner*`,
 `SqlExpressionEvaluator`, `SqlPlanExecutor*`, `SqlBoundTableCache`, `SqlPersistedExpression`.
 *Gates:* every Sql suite unchanged (depth, grouping, CHECK, persisted definitions, subqueries); the
-NativeAOT statement benchmark at or above the `eec49a27` baseline with no added bytes per row (§10).
+NativeAOT statement benchmark at or above the `27db14c7` baseline with no added bytes per row (§10).
 
 **E2: the function ABI, with the built-ins on it.** §4.2 to §4.7 and §4.10; `table.Check` in
 Sql.Schema and the SDK; a `sys.functions` view. *Gates:* every Sql and Sql.Language suite, retargeting
@@ -1239,10 +1239,18 @@ a 100k-row table for statements and a 50-table schema for provisioning.
 | Q7 | 100k INSERTs into a table whose CHECK calls an `Immutable` registered function |
 | Q8 | engine Build over an already-applied 50-table schema |
 
-**Method.** Baseline `eec49a27` against the phase branch, same flags; best-of-5 medians at statement
+**Method.** Baseline `eec49a27` (E1: `27db14c7`) against the phase branch, same flags; best-of-5 medians at statement
 level reported as ranges; bytes per row from `GC.GetAllocatedBytesForCurrentThread`. win-arm64
 locally (short path, Visual Studio installer directory on PATH); linux-x64 in CI only, since this
 machine has no Linux leg.
+
+**E1 results** (2026-10-09, win-arm64 NativeAOT, four pinned alternating process pairs, median of
+per-process medians, baseline `27db14c7` to E1): Q1 1,694 to 1,305 ns/row (-23%), Q2 1,574 to 1,094
+(-31%), Q3 1,991 to 1,570 (-21%), Q7 13,445 to 12,018 ns/statement (-11%); bytes per row or statement
+1,076.6 to 1,015.6, 1,252.6 to 927.6, 1,257.1 to 1,041.8 and 17,087 to 14,719. Q7 uses built-in
+`LENGTH` and `ABS` until E2 registers functions. The table is in `Database.Sql/docs/DESIGN.md`,
+"Bound expressions (E1)"; the harness is `Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks`.
+E2's 5% budget is measured against these numbers.
 
 **Gates.**
 

@@ -274,8 +274,9 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   Moving them into the container needs the provider to continue-and-aggregate first. Its
   `Services` registry (reflection-free options, closed registrations) and its ownership of the
   built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine(DatabaseEngine)`
-  and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)` shims still forward to the
-  private engine registry rather than to `Services`.
+  and `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)` shims still
+  forward to the private engine registry rather than to `Services`, which reserves each engine
+  name at registration (owner decision 52 of 2026-10-09).
 
 ## What every area is expected to provide
 

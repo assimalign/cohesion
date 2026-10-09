@@ -51,7 +51,7 @@ only these.
 | Interface | Project | Why it stays |
 |---|---|---|
 | `IDatabaseApplication` | Database (root) | The cross-area composition seam fixed by O34 for all 18 areas. `DatabaseApplication` already derives from `Host<DatabaseApplicationContext>`, and C# has single inheritance. |
-| `IDatabaseApplicationBuilder` | Database (root) | Same seam. Root verbs are explicit-interface shims (`resource-areas.md`). Only its signatures are retyped (`AddEngine(DatabaseEngine)`). |
+| `IDatabaseApplicationBuilder` | Database (root) | Same seam. Root verbs are explicit-interface shims (`resource-areas.md`). Only its signatures are retyped: `AddEngine(DatabaseEngine)` and `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, whose name the hosting layer reserves at registration (owner decision 52 of 2026-10-09). |
 | `IDatabaseApplicationContext` | Database (root) | Same seam. `DatabaseApplicationContext` already derives from `HostContext`. |
 | `IDatabaseResourceDescriptor` | Database.ApplicationModel | The 17-area `I<Area>ResourceDescriptor` pattern. It extends the library-owned `IResourceCommandDescriptor`. It is orchestration, not an engine model. |
 | `IDatabaseApplicationTestFactory` | Database.Testing | Parity with Web.Testing's `IWebApplicationTestFactory`. It is the test-harness surface, not an engine model. |
@@ -104,8 +104,10 @@ contracts in this sense and stay.
    - the `Core` of an optional capability paired with a public `Supports*` flag. The flag
      defaults to `false`, the public member throws `NotSupportedException` while it is `false`,
      and the `Core`'s default body throws `NotSupportedException` too.
-     `DatabaseInstance.SupportsSchemaProvisioning` is the only capability member allowed on
-     `DatabaseInstance`.
+     `DatabaseInstance` has no capability member (owner decision 50 of 2026-10-09, O34a):
+     schema provisioning, its one capability until then, belongs to the SQL model, which
+     provisions the databases its engine builder declares and applies a schema through
+     `SqlDatabase.ApplySchemaAsync`.
    - a lifecycle hook behind a non-virtual public member, such as `DisposeAsyncCore` behind
      `DisposeAsync`, or a worker's trigger wait behind `Run`.
    - an observer hook. Observer hooks are `protected internal virtual` with empty bodies, so the
@@ -187,8 +189,8 @@ step 4). The plan lists them:
 ```
 
 Every other sealed leaf needs no marker of its own, because this file covers it. An existing
-public abstract type that keeps no interface twin and is only tightened (`QueryRow`,
-`CompiledSchema`) carries none. Every PR in the series carries the line
+public abstract type that keeps no interface twin and is only tightened (`QueryRow`)
+carries none. Every PR in the series carries the line
 `Deviates from interface-first (database-area.md)` in its change summary.
 
 ## How this relates to the other rules
