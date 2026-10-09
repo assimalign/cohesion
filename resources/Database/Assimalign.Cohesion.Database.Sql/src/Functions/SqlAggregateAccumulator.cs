@@ -67,19 +67,29 @@ public abstract class SqlAggregateAccumulator
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
     internal void AddResolved(scoped in SqlArguments arguments)
     {
-        var function = _function!;
-        if (function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && arguments.HasNull)
+        if (_function!.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && arguments.HasNull)
         {
             return;
         }
 
+        AddCoded(in arguments);
+    }
+
+    /// <summary>
+    /// Adds a row the strict rule admits: the one <see cref="AddCore"/> call, its failure coded. The
+    /// engine calls it directly for a one-argument aggregate, having skipped a NULL row itself.
+    /// </summary>
+    /// <param name="arguments">The row's arguments, of their parameters' types.</param>
+    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    internal void AddCoded(scoped in SqlArguments arguments)
+    {
         try
         {
             AddCore(in arguments);
         }
         catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
         {
-            throw SqlEvaluationException.FunctionFailed(function.Name, exception);
+            throw SqlEvaluationException.FunctionFailed(_function!.Name, exception);
         }
     }
 

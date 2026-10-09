@@ -143,17 +143,27 @@ internal sealed partial class SqlPlanExecutor
         SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
     {
         var arguments = aggregate.Arguments;
+        if (arguments.Length == 1)
+        {
+            // The shape of every standard-library aggregate but COUNT(*): one value, no buffer, and
+            // a strict aggregate's NULL row skipped before anything is converted.
+            object? argument = evaluator.Evaluate(arguments[0], row);
+            if (argument is null && aggregate.Function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput)
+            {
+                return;
+            }
+
+            var single = ConvertArgument(aggregate, 0, argument);
+            state.AddCoded(new SqlArguments(new ReadOnlySpan<SqlValue>(in single),
+                new SqlFunctionContext(aggregate.Database, collation, cancellationToken)));
+            return;
+        }
+
         var context = new SqlFunctionContext(aggregate.Database, collation, cancellationToken);
         switch (arguments.Length)
         {
             case 0:
                 state.AddResolved(new SqlArguments([], context));
-                return;
-            case 1:
-                // The shape of every standard-library aggregate but COUNT(*): one value, no buffer.
-                SqlValue value = default;
-                EvaluateArguments(aggregate, evaluator, row, new Span<SqlValue>(ref value));
-                state.AddResolved(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context));
                 return;
             case <= SqlValueBuffer.Length:
                 SqlValueBuffer buffer = default;
@@ -186,15 +196,24 @@ internal sealed partial class SqlPlanExecutor
     private static void EvaluateArguments(SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator, object?[] row, Span<SqlValue> values)
     {
         var arguments = aggregate.Arguments;
-        var targets = aggregate.Targets;
         for (int i = 0; i < values.Length; i++)
         {
-            var value = SqlValue.FromObject(evaluator.Evaluate(arguments[i], row));
+            values[i] = ConvertArgument(aggregate, i, evaluator.Evaluate(arguments[i], row));
+        }
+    }
+
+    /// <summary>Converts one evaluated argument to the value ABI, widened to its parameter's type.</summary>
+    private static SqlValue ConvertArgument(SqlGroupAggregate aggregate, int index, object? argument)
+    {
+        var value = SqlValue.FromObject(argument);
+        var targets = aggregate.Targets;
+        return targets is null || targets[index] == DatabaseType.Null ? value : Coerce(aggregate, index, value, targets[index]);
+
+        static SqlValue Coerce(SqlGroupAggregate aggregate, int index, SqlValue value, DatabaseType target)
+        {
             try
             {
-                values[i] = targets is null || targets[i] == DatabaseType.Null
-                    ? value
-                    : SqlFunctionResolver.Coerce(value, targets[i], aggregate.Function, i);
+                return SqlFunctionResolver.Coerce(value, target, aggregate.Function, index);
             }
             catch (ArithmeticException exception)
             {
