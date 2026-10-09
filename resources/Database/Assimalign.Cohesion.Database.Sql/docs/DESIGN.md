@@ -327,11 +327,13 @@ flowchart LR
 - **Evaluation.** `SqlBoundCall` holds the overload, its bound arguments, each argument's
   conversion target (null when every parameter is a pseudo-type), the call's collation
   and the database. Per row the evaluator evaluates every argument (one stays in the
-  recursive frame; more go to a 4-slot inline buffer of objects), then a non-inlined
-  helper converts them into an `[InlineArray(4)]` `SqlValue` buffer (a pooled array past
-  four), widening each to its parameter's type, and makes one `Invoke`. A strict
-  function over a NULL argument returns NULL without a call. The result boxes once into
-  the row, as a built-in's always did.
+  recursive frame; more go to a 4-slot inline buffer of objects), returns NULL without a
+  call when the function is strict and a value is NULL, then a non-inlined helper converts
+  the values (one into a single `SqlValue`, more into an `[InlineArray(4)]` buffer, a
+  pooled array past four), widening each to its parameter's type, and makes one call of
+  the core through the internal `InvokeResolved`, which codes failures as the public
+  `Invoke` does but skips the count the planner matched. The result boxes once into the
+  row, as a built-in's always did.
 - **Exceptions.** Whatever a core throws other than `OperationCanceledException`,
   `InsufficientExecutionStackException`, `OutOfMemoryException` or a `DatabaseException`
   becomes `COHSQLE007` (`Function 'clamp' failed: ...`, SQLSTATE 38000), the original as
@@ -350,9 +352,10 @@ flowchart LR
   pseudo-type, so `SUM(text)` is `COHSQLE006` while planning). `SqlGroupAggregate` carries
   the overload, its bound arguments (none for `name(*)`) and conversion targets; the
   grouping executor creates one accumulator per group per aggregate call through
-  `CreateAccumulator`, adds each row through the non-virtual `Add` (a strict aggregate
-  skips a row with a NULL argument) and calls `Finish` once per group, the implicit
-  empty group included. A projected `COUNT` is non-nullable because its function says so
+  `CreateAccumulator`, adds each row (a strict aggregate skips a row with a NULL
+  argument, a one-argument one before converting anything) through the internal
+  `AddResolved`/`AddCoded`, the public `Add` without the checks the planner already
+  made, and calls `Finish` once per group, the implicit empty group included. A projected `COUNT` is non-nullable because its function says so
   (`IsNeverNull`), not because of its name.
 - **Where a call may appear.** A CHECK resolves each call in the engine's catalog: an
   aggregate or a name outside it is `Function '<name>' is not supported in CHECK.`, and DDL
@@ -390,6 +393,27 @@ function still fails its database's open (decision 65 makes it `COHSQLE009` at w
 and engine Build verifies a declared database's definitions); `sys.functions`;
 `table.Check` in `Sql.Schema` and its SDK extraction; the NativeAOT guard sample; and
 the context's transaction timestamp. Domains and casts are E3, SQL-defined functions E4.
+
+**Measurement (part 1, a quick check; part 2 measures in full).** The E1 harness, NativeAOT
+win-arm64, eight alternating process pairs pinned to cores 8 to 11 against `ff07eb5a`,
+median of the per-process medians, on a shared machine whose load spread single processes
+by up to 25%. Q1, Q2 and Q7 were run twice on the same call path (Q7 once), Q3 once after
+its last change:
+
+| Case | `ff07eb5a` ns | E2 ns | Change | Bytes per row or statement |
+| --- | --- | --- | --- | --- |
+| Q1 | 1,289 / 1,274 | 1,326 / 1,415 | +2.9% / +11% | 1,015.6 → 1,015.6 |
+| Q2 | 1,208 / 1,100 | 1,236 / 1,121 | +2.3% / +1.9% | 927.6 → 927.6 |
+| Q3 | 1,472 | 1,522 | +3.4% | 1,041.8 → 1,040.4 |
+| Q7 | 12,246 | 12,780 | +4.4% | 14,719 → 14,743 |
+
+Q1's second run is the noisy one: the lower half of its processes is within 5% of the
+baseline's. Bytes per row do not grow; Q3's fall, because a group's accumulators are one
+array and five objects instead of a LINQ projection. Q7 grows by 24 bytes per statement,
+the planner's and the binding scope's new fields (the function environment and the
+cancellation token). A first version that passed an instance method as a LINQ predicate
+in the planner's aggregate check allocated a delegate per checked value (168 bytes per Q7
+statement); the checks walk their children by index instead.
 
 ## Compiled-schema provisioning
 
