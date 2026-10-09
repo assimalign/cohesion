@@ -947,11 +947,11 @@ four servers.
 | 10 | `DatabaseRefused` | Warning | — | `sessionId`, `database` (cut to 256 characters), `phase` (`Handshake` or `Exchange`), `detail` (the refusal, led by `COHDBB003`; cut to 1024 characters) |
 | 11 | `EngineRefused` | Warning | — | `engineName`, `phase` (`Accept`, `Handshake` or `Exchange`), `state` (the `EngineState` name) |
 | 12 | `HostTransactionAbortFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
-| 13 | `TransferFailed` | Warning | — | `sessionId`, `container` (cut to 256 characters), `exceptionType`, `exceptionMessage` (the blob's quoted name redacted to `'<blob>'`; cut to 1024 characters) |
+| 13 | `TransferFailed` | Error | — | `sessionId`, `container` (cut to 256 characters), `code` (the error frame's `ProtocolErrorCode`: `ExecutionFailure`, or `Unavailable` for an offline database; empty for the guarded stream, which sends none), `exceptionType` |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
-`ProtocolViolation`, `Canceled` (aborted, its connection closed, or the stop arrived mid-frame),
+`ProtocolViolation`, `Cancelled` (aborted, its connection closed, or the stop arrived mid-frame),
 `ConnectionAborted`, `TransportFailed`, `Faulted`, `ExchangeRefused` (an exchange refused for the
 engine's or the database's state), `ExchangeFailed`, or `Unknown` (an out-of-memory failure,
 which the pump does not catch). The handshake refuses with `ProtocolViolation` a first frame that
@@ -962,19 +962,34 @@ every database, a database a failing worker refuses (owner decision 42) and an o
 `EngineRefused` beside `SessionRejected` at the accept and beside `HandshakeRefused` at the
 handshake, `DatabaseRefused` beside `HandshakeRefused`.
 
+**A peer that hangs up is not a fault** (plan D9). A transport failure from the peer's side
+reaches the pump as the TCP driver's raw `SocketException`, a `ConnectionException`
+(`ConnectionResetException`, `ConnectionAbortedException`), or an `IOException` that wraps one.
+The four servers classify it with one rule, in identical private copies (`TransportCloseReason`,
+plan D2), and close the session with `TransportFailed` or `ConnectionAborted`, writing no
+`SessionFaulted` and no error frame. A bare `IOException` stays a fault: it can be the storage
+device's. The TCP driver reports a reset its receive sees as the end of the stream, so a session
+idle in its ready loop that the peer resets closes as `PeerClosed`; a reset that fails a send the
+pump is blocked in raises the raw `SocketException`, which was a `SessionFaulted` (Error) before
+this rule. **A session leaves the server once**: its cleanup releases its resources in a `try`
+and completes the session with the server in the `finally`, so a disposal that throws, which
+still propagates, neither leaves `current-server-sessions` raised nor skips `SessionClosed`, and
+its `MaxSessions` slot is freed.
+
 `TransferFailed` is written once for each exchange the server ends over a failure, with the
 container its request named (the server reads it back from the request frame only while the
 event is on), and by the guarded stream when it swallows its completion's failure after a read
 already failed; the stream serves in-process readers too and knows neither, so it writes an
 empty `sessionId` and `container`, and a failed wire read writes both. An exchange the
-connection's abort or reset ends (`ConnectionException`: a peer that hung up, or the shutdown's
+transport ends (the pump's rule: a peer that hung up or reset the connection, or the shutdown's
 abort, which `SessionsAborted` reports) writes no `TransferFailed`; `SessionClosed` carries
-`ConnectionAborted` or `TransportFailed` instead, as for the pump's own catches (plan D9). An
-`IOException` is still reported: inside an exchange it can be the storage device's, not the
-peer's. No payload carries a blob name, which may be user data (plan D8, owner question Q3): the
-engine's messages quote one (`Blob 'x' does not exist.`, `Blob 'x' already exists.`), so
-`TransferFailed` replaces every quoted occurrence of the request's blob name, or of a list's
-prefix, with `'<blob>'` before it writes the message; the client's error frame still carries the
+`ConnectionAborted` or `TransportFailed` instead (plan D9). A bare `IOException` is still
+reported: inside an exchange it can be the storage device's, not the peer's. It is an Error, as
+every record of a failed operation is (plan D3): the exchange ends the session. No payload
+carries a blob name, which may be user data (plan D8, owner question Q3): the engine's messages
+quote one (`Blob 'x' does not exist.`, `Blob 'x' already exists.`), so `TransferFailed` writes the
+code and the exception's type only, never the message (the area's failure rule,
+`docs/resources/Database/DESIGN.md`, "Diagnostics"); the client's error frame still carries the
 engine's message unchanged. `HostTransactionAbortFailed` and `SessionCleanupFailed` report
 failures the session swallows; `SessionFaulted` is the catch-all that used to leave only an
 internal-error frame.
@@ -987,14 +1002,16 @@ registers a session, down when the session's completion removes it), `total-serv
 Every write sits behind `IsEnabled(level, keywords)`, and a session reads its start timestamp
 only while `SessionClosed` is on. A string a peer sent can reach a payload before
 authentication, and a frame may hold 16 MB, so the handshake's `database` and `principal` and a
-transfer's `container` are cut to 256 characters and a `detail`, violation or transfer message to
-1024, marked with `...` (event-source.md rule 11). `BlobDatabaseEventSourceTests` checks the
+transfer's `container` are cut to 256 characters and a `detail` or violation message to 1024, marked with `...` (event-source.md rule 11). `BlobDatabaseEventSourceTests` checks the
 name, the strict manifest, the gauge's return, the counters, that no write allocates while nobody
 listens, events 1-7 and 9 once each with their payloads over real sessions on the in-memory
 driver (every handshake refusal code, a timeout at a read and inside the authenticator, the bound
 on an oversized startup), the `COHDBB003` refusal at the handshake and at an exchange, a disposed
-engine's refusals at the handshake and at the accept, and a read of a missing blob with the
-blob's name redacted. Not yet driven by a real operation: `SessionCleanupFailed`,
+engine's refusals at the handshake and at the accept, a read of a missing blob (its failure by
+code and type, no blob name in any event), and a peer that resets its TCP connection while its
+session idles and while the server writes (a transport reason, never `SessionFaulted`; the write
+case, reset once the peer's unread pongs stop growing, accepts only `TransportFailed` or
+`ConnectionAborted`, so it fails if the reset stops reaching a send). Not yet driven by a real operation: `SessionCleanupFailed`,
 `HostTransactionAbortFailed` and the guarded stream's `TransferFailed`, which need test doubles
 that fail a disposal, an abort or a stream's completion; they are covered by the allocation check
-and, for the redaction and bounds, by a direct write.
+and, for the payload and bounds, by a direct write.

@@ -68,7 +68,7 @@ public sealed class LockManager
 
     // How a lock request's wait ended, as the LockWaitStop event names it.
     private const string WaitGranted = "Granted";
-    private const string WaitCanceled = "Canceled";
+    private const string WaitCancelled = "Cancelled";
     private const string WaitEnded = "Ended";
     private const string WaitAbandoned = "Abandoned";
 
@@ -251,19 +251,21 @@ public sealed class LockManager
         // whether or not anyone listens (plan D5 (b)): a listener that attaches during a long
         // wait still learns how long it lasted. Start and stop are written on this flow.
         long started = Stopwatch.GetTimestamp();
-        TransactionEventSource.Log.LockWaitStart(_database, owner, resource, mode);
-
-        using var registration = cancellationToken.Register(() => CancelWaiter(resource, waiter));
+        bool startWritten = TransactionEventSource.Log.LockWaitStart(_database, owner, resource, mode);
 
         try
         {
+            // Disposed as soon as the wait ends, before the stop is written, as it was before the
+            // wait was traced: a late cancellation cannot reach CancelWaiter during a listener's
+            // synchronous dispatch.
+            using var registration = cancellationToken.Register(() => CancelWaiter(resource, waiter));
             await waiter.Completion.Task.ConfigureAwait(false);
         }
         finally
         {
             if (TransactionEventSource.Log.IsEnabled())
             {
-                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), started);
+                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), startWritten, started);
             }
         }
     }
@@ -277,7 +279,7 @@ public sealed class LockManager
     {
         TaskStatus.RanToCompletion => WaitGranted,
         TaskStatus.Canceled when !callerToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is not null => WaitAbandoned,
-        TaskStatus.Canceled => WaitCanceled,
+        TaskStatus.Canceled => WaitCancelled,
         _ => WaitEnded,
     };
 

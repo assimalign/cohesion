@@ -49,13 +49,14 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     /// closes; written only for a recovery whose start was written.
     /// </summary>
     /// <param name="database">The database.</param>
+    /// <param name="succeeded">False when the recovery threw: the stop is written with <c>Error</c>.</param>
     /// <param name="startTimestamp">The timestamp <see cref="IndexRecoveryStart(DatabaseName, int)"/> returned.</param>
     [NonEvent]
-    public void IndexRecoveryStop(DatabaseName database, long startTimestamp)
+    public void IndexRecoveryStop(DatabaseName database, bool succeeded, long startTimestamp)
     {
         if (startTimestamp != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            IndexRecoveryStop(database.ToString(), Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            IndexRecoveryStop(database.ToString(), succeeded ? "Success" : "Error", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
 
@@ -63,7 +64,7 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     private void IndexRecoveryStart(string database, int abortedWriters)
         => WriteEvent(1, database, abortedWriters);
 
-    [Event(2, Level = EventLevel.Informational, Message = "Database '{0}' ended its index recovery after {1} ms.")]
-    private void IndexRecoveryStop(string database, double durationMilliseconds)
-        => WriteEvent(2, database, durationMilliseconds);
+    [Event(2, Level = EventLevel.Informational, Message = "Database '{0}' ended its index recovery {1} after {2} ms.")]
+    private void IndexRecoveryStop(string database, string status, double durationMilliseconds)
+        => WriteEvent(2, database, status, durationMilliseconds);
 }

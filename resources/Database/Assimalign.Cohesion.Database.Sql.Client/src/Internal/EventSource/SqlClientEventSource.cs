@@ -5,8 +5,8 @@ using System.Diagnostics.Tracing;
 namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 /// <summary>
-/// The typed SQL client's diagnostics: each command's start, stop and coded failure, and the
-/// failures of the application's <see cref="SqlClientObserver"/> hooks, which the client swallows.
+/// The typed SQL client's diagnostics: each command's start, stop and failure, and the failures of
+/// the application's <see cref="SqlClientObserver"/> hooks, which the client swallows.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,15 +16,27 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 /// reported by the shared client core's source, <c>Assimalign.Cohesion.Database.Client</c>.
 /// </para>
 /// <para>
-/// A command writes its database, parameter count, row and affected counts, error kind and wire
-/// code; never its statement text or parameter values (plan D8). A failure also writes the server's
-/// message, which for a parse error can quote a fragment of the statement (plan owner question Q3).
-/// No counters: a process-wide count updated per command would be a contention point (plan D6).
+/// A command writes its database, parameter count, row and affected counts, and how it ended; never
+/// its statement text or parameter values (plan D8). A failure is written by its error kind, wire
+/// code and exception type only, never a message: the server's message for a parse error quotes the
+/// statement (the area's failure rule, <c>docs/resources/Database/DESIGN.md</c>). Every
+/// <c>CommandStart</c> is closed by one <c>CommandStop</c>, whose <c>status</c> is <c>Success</c>,
+/// <c>Error</c> (after <c>CommandFailed</c>) or <c>Cancelled</c>. No counters: a process-wide count
+/// updated per command would be a contention point (plan D6).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Sql.Client")]
 internal sealed class SqlClientEventSource : EventSource
 {
+    /// <summary>The status of a command that returned its result.</summary>
+    internal const string StatusSuccess = "Success";
+
+    /// <summary>The status of a command that failed.</summary>
+    internal const string StatusError = "Error";
+
+    /// <summary>The status of a command its caller cancelled.</summary>
+    internal const string StatusCancelled = "Cancelled";
+
     public static readonly SqlClientEventSource Log = new();
 
     private SqlClientEventSource()
@@ -41,52 +53,73 @@ internal sealed class SqlClientEventSource : EventSource
     }
 
     /// <summary>
+    /// Records what a command threw and returns false, so the exception filter that calls it catches
+    /// nothing; the command writes its end from the <c>finally</c> of the same <c>try</c>.
+    /// </summary>
+    /// <param name="exception">What the command threw.</param>
+    /// <param name="captured">Receives <paramref name="exception"/>.</param>
+    /// <returns>False, always.</returns>
+    public static bool CaptureFailure(Exception exception, out Exception captured)
+    {
+        captured = exception;
+        return false;
+    }
+
+    /// <summary>
     /// Writes the start of a command.
     /// </summary>
     /// <param name="connection">The connection that runs the command.</param>
     /// <param name="parameterCount">The number of bound parameters.</param>
+    /// <returns>Whether the start was written: only then does the command's end write its <c>CommandStop</c>.</returns>
     [NonEvent]
-    public void CommandStart(SqlConnection connection, int parameterCount)
+    public bool CommandStart(SqlConnection connection, int parameterCount)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Commands))
+        if (!IsEnabled(EventLevel.Verbose, Keywords.Commands))
         {
-            CommandStart(connection.Database, parameterCount);
+            return false;
         }
+
+        CommandStart(connection.Database, parameterCount);
+        return true;
     }
 
     /// <summary>
-    /// Writes the successful end of a command.
+    /// Writes the end of a command on every path: <c>CommandFailed</c> first for a failure, then
+    /// <c>CommandStop</c> with the command's status when its start was written, as
+    /// <c>System.Net.Http</c>'s <c>RequestStop</c>. <c>CommandFailed</c> is written either way.
     /// </summary>
     /// <param name="connection">The connection that ran the command.</param>
-    /// <param name="rowCount">The number of rows the command returned.</param>
-    /// <param name="affectedCount">The number of records the command affected, or -1 for a row-returning command.</param>
+    /// <param name="startWritten">What <see cref="CommandStart(SqlConnection, int)"/> returned.</param>
+    /// <param name="failure">What the command threw, or <see langword="null"/> when it returned its result.</param>
+    /// <param name="rowCount">The rows the command returned; -1 when it failed.</param>
+    /// <param name="affectedCount">The records it affected, -1 for a row-returning command or a failure.</param>
     /// <param name="startTimestamp">The timestamp taken when the command started.</param>
     [NonEvent]
-    public void CommandStop(SqlConnection connection, long rowCount, long affectedCount, long startTimestamp)
+    public void CommandEnded(SqlConnection connection, bool startWritten, Exception? failure, long rowCount, long affectedCount, long startTimestamp)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Commands))
+        bool failed = failure is not null and not OperationCanceledException;
+        bool stop = startWritten && IsEnabled(EventLevel.Verbose, Keywords.Commands);
+        if (!stop && !(failed && IsEnabled(EventLevel.Error, EventKeywords.None)))
         {
-            CommandStop(connection.Database, rowCount, affectedCount, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            return;
         }
-    }
 
-    /// <summary>
-    /// Writes a command that failed with a coded error.
-    /// </summary>
-    /// <param name="connection">The connection that ran the command.</param>
-    /// <param name="exception">The failure the command throws.</param>
-    /// <param name="startTimestamp">The timestamp taken when the command started.</param>
-    [NonEvent]
-    public void CommandFailed(SqlConnection connection, SqlClientException exception, long startTimestamp)
-    {
-        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        if (failed && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
+            var coded = failure as SqlClientException;
             CommandFailed(
                 connection.Database,
-                exception.Kind.ToString(),
-                exception.Code.ToString(),
-                exception.Message,
-                Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                coded?.Kind.ToString() ?? string.Empty,
+                coded?.Code.ToString() ?? string.Empty,
+                TypeName(failure!),
+                duration);
+        }
+
+        if (stop)
+        {
+            string status = failure is null ? StatusSuccess : failed ? StatusError : StatusCancelled;
+            CommandStop(connection.Database, status, rowCount, affectedCount, duration);
         }
     }
 
@@ -101,7 +134,7 @@ internal sealed class SqlClientEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            ObserverFailed(connection.Database, callback, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+            ObserverFailed(connection.Database, callback, TypeName(exception), exception.Message);
         }
     }
 
@@ -109,15 +142,17 @@ internal sealed class SqlClientEventSource : EventSource
     private void CommandStart(string database, int parameterCount)
         => WriteEvent(1, database, parameterCount);
 
-    [Event(2, Level = EventLevel.Verbose, Keywords = Keywords.Commands, Message = "SQL command on '{0}' completed: {1} row(s), {2} affected, in {3} ms.")]
-    private void CommandStop(string database, long rowCount, long affectedCount, double durationMilliseconds)
-        => WriteEvent(2, database, rowCount, affectedCount, durationMilliseconds);
+    [Event(2, Level = EventLevel.Verbose, Keywords = Keywords.Commands, Message = "SQL command on '{0}' ended {1}: {2} row(s), {3} affected, in {4} ms.")]
+    private void CommandStop(string database, string status, long rowCount, long affectedCount, double durationMilliseconds)
+        => WriteEvent(2, database, status, rowCount, affectedCount, durationMilliseconds);
 
-    [Event(3, Level = EventLevel.Error, Message = "SQL command on '{0}' failed ({1}, {2}): {3}. After {4} ms.")]
-    private void CommandFailed(string database, string errorKind, string code, string exceptionMessage, double durationMilliseconds)
-        => WriteEvent(3, database, errorKind, code, exceptionMessage, durationMilliseconds);
+    [Event(3, Level = EventLevel.Error, Message = "SQL command on '{0}' failed after {4} ms: kind '{1}', code '{2}', exception '{3}'.")]
+    private void CommandFailed(string database, string errorKind, string code, string exceptionType, double durationMilliseconds)
+        => WriteEvent(3, database, errorKind, code, exceptionType, durationMilliseconds);
 
     [Event(4, Level = EventLevel.Warning, Message = "The SQL client observer's {1} hook threw on a command on '{0}': {2}: {3}. The command's outcome is unchanged.")]
     private void ObserverFailed(string database, string callback, string exceptionType, string exceptionMessage)
         => WriteEvent(4, database, callback, exceptionType, exceptionMessage);
+
+    private static string TypeName(Exception exception) => exception.GetType().FullName ?? exception.GetType().Name;
 }

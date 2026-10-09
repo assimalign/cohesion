@@ -188,14 +188,14 @@ public sealed class TransactionEventSourceTests
         deadlock.EventId.ShouldBe(6);
         deadlock.Level.ShouldBe(EventLevel.Warning);
         deadlock.PayloadNames.ShouldBe(["database", "transactionSequence", "resource", "mode"]);
-        deadlock.Payload.ShouldBe([name, Sequence(victim), first.ToString(), nameof(LockMode.Exclusive)]);
+        deadlock.Payload.ShouldBe([name, Sequence(victim), "Entry:1", nameof(LockMode.Exclusive)]);
 
         var start = events.Where(e => e.EventName == "LockWaitStart").ShouldHaveSingleItem();
         start.EventId.ShouldBe(7);
         start.Level.ShouldBe(EventLevel.Verbose);
         Declared(start.Keywords).ShouldBe(TransactionEventSource.Keywords.Locks);
         start.PayloadNames.ShouldBe(["database", "transactionSequence", "resource", "mode"]);
-        start.Payload.ShouldBe([name, Sequence(waiter), second.ToString(), nameof(LockMode.Exclusive)]);
+        start.Payload.ShouldBe([name, Sequence(waiter), "Entry:1", nameof(LockMode.Exclusive)]);
 
         var stop = events.Where(e => e.EventName == "LockWaitStop").ShouldHaveSingleItem();
         stop.EventId.ShouldBe(8);
@@ -259,11 +259,11 @@ public sealed class TransactionEventSourceTests
             slow.EventId.ShouldBe(9);
             slow.Level.ShouldBe(EventLevel.Warning);
             slow.PayloadNames.ShouldBe(["database", "transactionSequence", "resource", "mode", "durationMilliseconds", "thresholdMilliseconds"]);
-            slow.Payload!.Take(4).ShouldBe([name, Sequence(granted), Row.ToString(), nameof(LockMode.Exclusive)]);
+            slow.Payload!.Take(4).ShouldBe([name, Sequence(granted), "Entry:7", nameof(LockMode.Exclusive)]);
             ((double)slow.Payload![4]!).ShouldBeGreaterThanOrEqualTo(0);
             slow.Payload![5].ShouldBe(0d);
 
-            events[1].Payload![2].ShouldBe("Canceled");
+            events[1].Payload![2].ShouldBe("Cancelled");
             events[3].Payload![2].ShouldBe("Granted");
         }
 
@@ -275,6 +275,100 @@ public sealed class TransactionEventSourceTests
 
         thresholdWhileEnabled.ShouldBe(0);
         thresholdAfterAnotherEnable.ShouldBe(TransactionEventSource.DefaultSlowLockWaitThresholdMilliseconds);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should write a slow wait whose start was not written, but no LockWaitStop for it")]
+    public void LockWaitStop_StartNotWritten_ShouldWriteTheSlowWaitButNoStop()
+    {
+        // Arrange: a 0 ms threshold, and a wait whose start a listener that attached during it never
+        // saw (System.Net.Http's RequestStop shape), beside one whose start it saw.
+        string name = UniqueName();
+        var owner = new TransactionSequence(41);
+        using var recorder = new TransactionEventRecorder(
+            EventLevel.Verbose,
+            new Dictionary<string, string?> { [TransactionEventSource.SlowLockWaitThresholdArgument] = "0" });
+
+        // Act
+        TransactionEventSource.Log.LockWaitStop(name, owner, Row, LockMode.Exclusive, "Granted", startWritten: false, Stopwatch.GetTimestamp());
+        TransactionEventSource.Log.LockWaitStop(name, owner, Row, LockMode.Exclusive, "Granted", startWritten: true, Stopwatch.GetTimestamp());
+
+        // Assert: the slow wait is reported either way, so a late listener still learns how long a
+        // wait lasted; the stop only closes a start that was written.
+        recorder.ShouldHaveNoInstrumentationError();
+        recorder.For(name).Select(e => e.EventName).ShouldBe(["SlowLockWait", "SlowLockWait", "LockWaitStop"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should restore the default slow-lock-wait threshold when the session that set it disables the source")]
+    public void OnEventCommand_ThresholdSessionDisables_ShouldRestoreTheDefaultForTheRemainingSession()
+    {
+        // Arrange: a forwarder-like session with no arguments, then a tool session that sets 0 ms.
+        var source = TransactionEventSource.Log;
+        using var forwarder = new TransactionEventRecorder(EventLevel.Warning);
+        double whileToolEnabled;
+        double afterToolDisabled;
+        using (var tool = new TransactionEventRecorder(
+            EventLevel.Verbose,
+            new Dictionary<string, string?> { [TransactionEventSource.SlowLockWaitThresholdArgument] = "0" }))
+        {
+            whileToolEnabled = source.SlowLockWaitThresholdMilliseconds;
+
+            // Act: the tool session ends while the forwarder stays enabled.
+            tool.DisableEvents(source);
+            afterToolDisabled = source.SlowLockWaitThresholdMilliseconds;
+        }
+
+        // Assert
+        whileToolEnabled.ShouldBe(0);
+        afterToolDisabled.ShouldBe(TransactionEventSource.DefaultSlowLockWaitThresholdMilliseconds);
+        source.IsEnabled(EventLevel.Warning, EventKeywords.None).ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should never write an entry lock's id, which for a key lock is the key's hash")]
+    [InlineData(LockResourceKind.Database, 0UL, 0UL, "Database")]
+    [InlineData(LockResourceKind.Object, 12UL, 0UL, "Object:12")]
+    [InlineData(LockResourceKind.Entry, 12UL, 0xDEAD_BEEF_CAFE_F00DUL, "Entry:12")]
+    public void DescribeResource_AnyKind_ShouldNameTheKindAndObjectOnly(LockResourceKind kind, ulong objectId, ulong entryId, string expected)
+    {
+        // Arrange
+        var resource = new LockResource(kind, objectId, entryId);
+
+        // Act
+        string described = TransactionEventSource.DescribeResource(resource);
+
+        // Assert
+        described.ShouldBe(expected);
+        if (entryId != 0)
+        {
+            described.ShouldNotContain(entryId.ToString(CultureInfo.InvariantCulture), Case.Sensitive);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should write a key lock's wait by its object only, never the key's hash")]
+    public async Task AcquireAsync_KeyHashEntryWait_ShouldWriteTheObjectOnly()
+    {
+        // Arrange: an entry lock whose id is a key's 64-bit hash, as a unique index or a key space takes it.
+        string name = UniqueName();
+        using var storage = EventStorage.Create(name);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var locks = coordinator.LockManager;
+        var keyLock = LockResource.Entry(31, 0x9E37_79B9_7F4A_7C15UL);
+        var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await locks.AcquireAsync(holder.Sequence, keyLock, LockMode.Exclusive);
+        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+
+        // Act
+        var waiting = locks.AcquireAsync(waiter.Sequence, keyLock, LockMode.Exclusive).AsTask();
+        await coordinator.CommitAsync(holder);
+        await waiting.WaitAsync(Timeout);
+        await coordinator.CommitAsync(waiter);
+
+        // Assert
+        recorder.ShouldHaveNoInstrumentationError();
+        var start = recorder.For(name).Where(e => e.EventName == "LockWaitStart").ShouldHaveSingleItem();
+        start.Payload![2].ShouldBe("Entry:31");
+        recorder.For(name).ShouldNotContain(e => e.Payload!.OfType<string>().Any(
+            text => text.Contains(keyLock.EntryId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report the waits a storage going offline abandons, once, and end each wait as abandoned")]
@@ -390,7 +484,7 @@ public sealed class TransactionEventSourceTests
         // Assert
         recorder.ShouldHaveNoInstrumentationError();
         var aborted = recorder.For(name).ShouldHaveSingleItem();
-        aborted.EventName.ShouldBe("TransactionAborted");
+        aborted.EventName.ShouldBe("CommitRecordWriteFailed");
         aborted.EventId.ShouldBe(4);
         aborted.Level.ShouldBe(EventLevel.Warning);
         aborted.PayloadNames.ShouldBe(["database", "transactionSequence", "exceptionType", "exceptionMessage"]);

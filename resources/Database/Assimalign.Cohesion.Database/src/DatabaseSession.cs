@@ -452,9 +452,10 @@ public abstract class DatabaseSession : IAsyncDisposable
         _tracingStatement = true;
         ValueTask<QueryResult> pending;
         Exception? thrown = null;
+        bool startWritten = false;
         try
         {
-            DatabaseEventSource.Log.StatementStart(this, request);
+            startWritten = DatabaseEventSource.Log.StatementStart(this, request);
             pending = request is not null
                 ? ExecuteCoreAsync(request, cancellationToken)
                 : ExecuteCoreAsync(statement!, parameters, cancellationToken);
@@ -468,7 +469,7 @@ public abstract class DatabaseSession : IAsyncDisposable
             if (thrown is not null)
             {
                 _tracingStatement = false;
-                DatabaseEventSource.Log.StatementThrew(this, request, thrown, started);
+                DatabaseEventSource.Log.StatementThrew(this, request, thrown, startWritten, started);
             }
         }
 
@@ -476,18 +477,18 @@ public abstract class DatabaseSession : IAsyncDisposable
         {
             // Still running, or already faulted or canceled: the wrapper observes the outcome and
             // hands it on as the core's task would.
-            return AwaitTracedAsync(pending, request, started);
+            return AwaitTracedAsync(pending, request, startWritten, started);
         }
 
         var result = pending.Result;
         _tracingStatement = false;
-        DatabaseEventSource.Log.StatementCompleted(this, request, result, started);
+        DatabaseEventSource.Log.StatementCompleted(this, request, result, startWritten, started);
         return new ValueTask<QueryResult>(result);
     }
 
     // The rest of a traced statement whose core did not complete successfully at once.
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, QueryRequest? request, long started)
+    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, QueryRequest? request, bool startWritten, long started)
     {
         QueryResult result;
         Exception? thrown = null;
@@ -504,11 +505,11 @@ public abstract class DatabaseSession : IAsyncDisposable
             _tracingStatement = false;
             if (thrown is not null)
             {
-                DatabaseEventSource.Log.StatementThrew(this, request, thrown, started);
+                DatabaseEventSource.Log.StatementThrew(this, request, thrown, startWritten, started);
             }
         }
 
-        DatabaseEventSource.Log.StatementCompleted(this, request, result, started);
+        DatabaseEventSource.Log.StatementCompleted(this, request, result, startWritten, started);
         return result;
     }
 

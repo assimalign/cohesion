@@ -1240,14 +1240,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             Volatile.Write(ref _redoLsn, redoLsn);
 
-            StorageEventSource.Log.RecoveryStop(this, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted);
+            StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted);
             recoveryStarted = 0;
         }
         finally
         {
-            // A recovery that threw: its stop carries zeros, and the open's exception is the failure.
+            // A recovery that threw: its stop carries zeros and Error, and the open's exception is the failure.
             // A no-op after the stop above, and while nobody listens.
-            StorageEventSource.Log.RecoveryStop(this, 0, 0, 0, recoveryStarted);
+            StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted);
         }
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };
@@ -1527,14 +1527,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
                 MarkCheckpointed();
                 StorageEventSource.Log.CountCheckpoint();
-                StorageEventSource.Log.CheckpointStop(this, checkpointLsn ?? 0, checkpointStarted);
+                StorageEventSource.Log.CheckpointStop(this, succeeded: true, checkpointLsn ?? 0, checkpointStarted);
                 checkpointStarted = 0;
             }
             finally
             {
-                // A checkpoint that threw: its stop carries checkpoint LSN zero, and the caller's
+                // A checkpoint that threw: its stop carries Error and checkpoint LSN zero, and the caller's
                 // exception is the failure. A no-op after the stop above, and while nobody listens.
-                StorageEventSource.Log.CheckpointStop(this, 0, checkpointStarted);
+                StorageEventSource.Log.CheckpointStop(this, succeeded: false, 0, checkpointStarted);
             }
         }
     }

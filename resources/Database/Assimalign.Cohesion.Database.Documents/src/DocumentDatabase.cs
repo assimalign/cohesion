@@ -89,14 +89,16 @@ public sealed class DocumentDatabase : DatabaseInstance
             // The stop closes the activity the start opened on this flow even when the recovery
             // throws; the root's failed open reports the failure itself.
             long recoveryStarted = DocumentDatabaseEventSource.Log.IndexRecoveryStart(name, recovery.Aborted.Count);
+            bool recovered = false;
             try
             {
                 Catalog.RecoverIndexesAsync(recovery.Aborted).AsTask().GetAwaiter().GetResult();
                 Coordinator.CompleteRecovery();
+                recovered = true;
             }
             finally
             {
-                DocumentDatabaseEventSource.Log.IndexRecoveryStop(name, recoveryStarted);
+                DocumentDatabaseEventSource.Log.IndexRecoveryStop(name, recovered, recoveryStarted);
             }
         }
         else { Catalog = DocumentCatalog.Open(storage, Coordinator); }

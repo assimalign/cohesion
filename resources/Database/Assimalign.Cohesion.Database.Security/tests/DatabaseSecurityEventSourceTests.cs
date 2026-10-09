@@ -141,24 +141,63 @@ public sealed class DatabaseSecurityEventSourceTests
         recorder.Events.Where(e => Equals(e.Payload?[1], database)).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Security] - DatabaseSecurityEventSource: A core that throws synchronously is reported after its own finally blocks ran")]
+    public void AuthenticateAsync_CoreThrowsInsideItsLock_ShouldReportAfterTheLockIsReleased()
+    {
+        // Arrange: a core that throws while it holds its own lock, and a listener that looks at the
+        // lock when the failure is written.
+        string database = "db-" + Guid.NewGuid().ToString("N");
+        var authenticator = new LockingThrowingAuthenticator();
+        using var recorder = new SecurityEventRecorder(EventLevel.Verbose, onWritten: _ => authenticator.LockHeldWhileWriting = Monitor.IsEntered(authenticator.Gate));
+
+        // Act
+        Should.Throw<InvalidOperationException>(() => authenticator.AuthenticateAsync(database, "ada", ReadOnlyMemory<byte>.Empty));
+
+        // Assert
+        recorder.Events.Where(e => Equals(e.Payload?[1], database)).Select(e => e.EventName).ShouldBe(["AuthenticationFailed"]);
+        authenticator.LockHeldWhileWriting.ShouldBe(false);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Security] - DatabaseSecurityEventSource: Should bound the database and principal a peer sent at 256 characters")]
+    public async Task AuthenticateAsync_LongNames_ShouldWriteThemBounded()
+    {
+        // Arrange: names an unauthenticated peer may send, longer than any event writes.
+        string database = new('d', 300);
+        string principal = new('p', 300);
+        using var recorder = new SecurityEventRecorder(EventLevel.Verbose);
+
+        // Act
+        (await new RecordingAuthenticator(result: false).AuthenticateAsync(database, principal, ReadOnlyMemory<byte>.Empty)).ShouldBeFalse();
+
+        // Assert
+        string boundDatabase = new string('d', DatabaseSecurityEventSource.MaxNameLength) + "...";
+        string boundPrincipal = new string('p', DatabaseSecurityEventSource.MaxNameLength) + "...";
+        var rejected = recorder.Events.Where(e => Equals(e.Payload?[1], boundDatabase)).ShouldHaveSingleItem();
+        rejected.EventName.ShouldBe("AuthenticationRejected");
+        ((string)rejected.Payload![1]!).Length.ShouldBe(259);
+        rejected.Payload![2].ShouldBe(boundPrincipal);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Security] - DatabaseSecurityEventSource: AuthenticateAsync allocates nothing while nobody listens")]
-    public async Task AuthenticateAsync_NoListener_ShouldNotAllocate()
+    public void AuthenticateAsync_NoListener_ShouldNotAllocate()
     {
         // Arrange: the built-in authenticator's core completes synchronously without allocating, so
-        // any allocation would be the trace's.
+        // any allocation would be the trace's. Every call is measured without an await, and a call
+        // that did not complete synchronously fails the test, so no work can move to a thread the
+        // per-thread count does not see.
         const int attempts = 1_000;
         DatabaseSecurityEventSource.Log.IsEnabled().ShouldBeFalse("A listener from another test is still attached.");
         DatabaseAuthenticator authenticator = DatabaseAuthenticator.AllowAll;
         for (int index = 0; index < 100; index++)
         {
-            (await authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty)).ShouldBeTrue();
+            Completed(authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty)).ShouldBeTrue();
         }
 
         // Act
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < attempts; index++)
         {
-            _ = await authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty);
+            _ = Completed(authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty));
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -166,6 +205,37 @@ public sealed class DatabaseSecurityEventSourceTests
 
         // Assert
         allocated.ShouldBe(0L);
+    }
+
+    /// <summary>
+    /// Returns the result of a call that completed synchronously, and throws when it did not.
+    /// </summary>
+    private static T Completed<T>(ValueTask<T> pending)
+    {
+        if (!pending.IsCompletedSuccessfully)
+        {
+            throw new InvalidOperationException("The measured call did not complete synchronously; its allocations are not on this thread.");
+        }
+
+        return pending.Result;
+    }
+
+    /// <summary>
+    /// An authenticator whose core throws synchronously while it holds its own lock.
+    /// </summary>
+    private sealed class LockingThrowingAuthenticator : DatabaseAuthenticator
+    {
+        public object Gate { get; } = new();
+
+        public bool? LockHeldWhileWriting { get; set; }
+
+        protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken)
+        {
+            lock (Gate)
+            {
+                throw new InvalidOperationException("the directory is unreachable");
+            }
+        }
     }
 
     /// <summary>
@@ -228,9 +298,11 @@ public sealed class DatabaseSecurityEventSourceTests
     private sealed class SecurityEventRecorder : EventListener
     {
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
+        private readonly Action<EventWrittenEventArgs>? _onWritten;
 
-        public SecurityEventRecorder(EventLevel level)
+        public SecurityEventRecorder(EventLevel level, Action<EventWrittenEventArgs>? onWritten = null)
         {
+            _onWritten = onWritten;
             EnableEvents(DatabaseSecurityEventSource.Log, level, EventKeywords.All);
         }
 
@@ -240,6 +312,7 @@ public sealed class DatabaseSecurityEventSourceTests
         {
             if (ReferenceEquals(eventData.EventSource, DatabaseSecurityEventSource.Log))
             {
+                _onWritten?.Invoke(eventData);
                 _events.Enqueue(eventData);
             }
         }

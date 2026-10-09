@@ -4,12 +4,15 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
@@ -414,7 +417,8 @@ public sealed class KeyValueDatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should allocate nothing on any write while nobody listens")]
     public async Task Writes_NoListener_ShouldAllocateNothing()
     {
-        // Arrange: a disabled source (a disposed listener leaves it enabled until a disable command).
+        // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
+        // disable below is redundant but harmless.
         await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = UniqueEngineName() });
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
@@ -450,6 +454,79 @@ public sealed class KeyValueDatabaseEventSourceTests
         log.SessionClosed(session, KeyValueDatabaseEventSource.CloseReason.Terminated, timestamp);
         log.SessionsAborted(engine, 1, TimeSpan.FromSeconds(1));
         return timestamp;
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should close a session whose peer reset its TCP connection with a transport reason, not a fault")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionClosed_PeerResetsTcpConnection_ShouldReportATransportReasonAndNoFault(bool whileServerWrites)
+    {
+        // Arrange: a real TCP listener; the in-memory driver cannot reset a connection.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
+        TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+
+        // Act: the peer completes its handshake, then resets the connection: while the session idles
+        // in its ready loop, or while the server's pong writes fill the socket buffers the peer
+        // never drains, so the reset fails a send the pump is blocked in.
+        using (Socket socket = await TcpResetPeer.ConnectReadyAsync(listener.EndPoint, KeyValueServerHarness.DatabaseName, TestTimeout.Token()))
+        {
+            Task? flood = whileServerWrites ? TcpResetPeer.FloodPingsAsync(socket, 4_000_000) : null;
+            if (flood is not null)
+            {
+                await TcpResetPeer.WaitUntilServerStalledAsync(socket, TimeSpan.FromSeconds(15));
+            }
+
+            TcpResetPeer.Reset(socket);
+            if (flood is not null)
+            {
+                // Whether the kernel took the whole flood before the reset does not matter.
+                await Record.ExceptionAsync(() => flood);
+            }
+        }
+
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        var closed = await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault. The
+        // write case accepts only the transport reasons: a PeerClosed there means the flood no
+        // longer blocked the pump in a send, and the case stopped testing the classification.
+        string seen = string.Join("; ", recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventName + "(" + string.Join(", ", e.Payload!.Skip(1)) + ")"));
+        recorder.Events.Where(e => IsFor(e, 7, sessionId)).ShouldBeEmpty("The pump reported the reset as a fault: " + seen);
+        string[] expected = whileServerWrites
+            ? ["TransportFailed", "ConnectionAborted"]
+            : ["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"];
+        ((string)closed.Payload![1]!).ShouldBeOneOf(expected, seen);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should close a session once and restore the gauge when its connection's disposal throws")]
+    public async Task SessionClosed_ConnectionDisposalThrows_ShouldStillCloseOnceAndRestoreTheGauge()
+    {
+        // Arrange: every accepted connection throws from its disposal.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var inner = new Assimalign.Cohesion.Connections.InMemory.InMemoryConnectionListener();
+        var listener = new DisposeFailingConnectionListener(inner);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        long currentBefore = KeyValueDatabaseEventSource.Log.CurrentServerSessions;
+
+        // Act: a session that terminates cleanly, whose cleanup then meets the failing disposal.
+        await using (var client = new KeyValueProtocolClient(await inner.CreateFactory().ConnectAsync(inner.EndPoint, TestTimeout.Token())))
+        {
+            await client.HandshakeAsync();
+            await client.SendAsync(ProtocolMessageType.Terminate);
+            Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+            await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+            await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
+
+            // Assert: the session left the server once, whatever its disposal threw.
+            recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("Terminated");
+        }
+
+        KeyValueDatabaseEventSource.Log.CurrentServerSessions.ShouldBe(currentBefore);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
     private static string UniqueEngineName() => "kv-events-" + Guid.NewGuid().ToString("N");

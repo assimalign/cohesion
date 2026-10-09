@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -84,6 +86,7 @@ public sealed class SqlClientEventSourceTests
             ("ObserverFailed", "OnExecuting"),
             ("CommandStart", string.Empty),
             ("CommandFailed", string.Empty),
+            ("CommandStop", string.Empty),
             ("ObserverFailed", "OnFailed"),
         ]);
 
@@ -97,18 +100,24 @@ public sealed class SqlClientEventSourceTests
         var stop = events[2];
         stop.EventId.ShouldBe(2);
         stop.Level.ShouldBe(EventLevel.Verbose);
-        stop.PayloadNames.ShouldBe(["database", "rowCount", "affectedCount", "durationMilliseconds"]);
-        stop.Payload![1].ShouldBe(1L);
-        stop.Payload[2].ShouldBe(-1L);
-        ((double)stop.Payload[3]!).ShouldBeGreaterThanOrEqualTo(0d);
+        stop.PayloadNames.ShouldBe(["database", "status", "rowCount", "affectedCount", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe("Success");
+        stop.Payload[2].ShouldBe(1L);
+        stop.Payload[3].ShouldBe(-1L);
+        ((double)stop.Payload[4]!).ShouldBeGreaterThanOrEqualTo(0d);
 
         var failed = events[6];
         failed.EventId.ShouldBe(3);
         failed.Level.ShouldBe(EventLevel.Error);
-        failed.PayloadNames.ShouldBe(["database", "errorKind", "code", "exceptionMessage", "durationMilliseconds"]);
+        failed.PayloadNames.ShouldBe(["database", "errorKind", "code", "exceptionType", "durationMilliseconds"]);
         failed.Payload![1].ShouldBe(nameof(SqlClientErrorKind.ExecutionFailure));
         failed.Payload[2].ShouldBe(failure.Code.ToString());
-        failed.Payload[3].ShouldBe(failure.Message);
+        failed.Payload[3].ShouldBe(typeof(SqlClientException).FullName);
+
+        // The failure's stop follows it, with Error and no counts.
+        var failedStop = events[7];
+        failedStop.EventId.ShouldBe(2);
+        failedStop.Payload!.Take(4).ShouldBe([SqlClientTestHarness.DatabaseName, "Error", -1L, -1L]);
 
         var observerFailed = events[0];
         observerFailed.EventId.ShouldBe(4);
@@ -116,8 +125,28 @@ public sealed class SqlClientEventSourceTests
         observerFailed.PayloadNames.ShouldBe(["database", "callback", "exceptionType", "exceptionMessage"]);
         observerFailed.Payload.ShouldBe([SqlClientTestHarness.DatabaseName, "OnExecuting", typeof(InvalidOperationException).FullName, "OnExecuting failed"]);
 
-        // No payload carries the statement text or a parameter value.
+        // No payload carries the statement text, a parameter value or the server's message.
         events.SelectMany(e => e.Payload!).OfType<string>().ShouldNotContain(value => value.Contains("SELECT", StringComparison.Ordinal));
+        events.SelectMany(e => e.Payload!).OfType<string>().ShouldNotContain(value => value == failure.Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - SqlClientEventSource: Should close a cancelled command with a Cancelled stop and no failure")]
+    public async Task Command_Cancelled_ShouldWriteACancelledStop()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        using var recorder = new SqlClientEventRecorder();
+
+        // Act: a token canceled before the command's exchange writes its first frame.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await connection.QueryAsync("SELECT id FROM users", cancellationToken: new CancellationToken(canceled: true)));
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], SqlClientTestHarness.DatabaseName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["CommandStart", "CommandStop"]);
+        events[1].Payload!.Take(4).ShouldBe([SqlClientTestHarness.DatabaseName, "Cancelled", -1L, -1L]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - SqlClientEventSource: Should write no command start or stop without the Commands keyword")]
@@ -140,6 +169,27 @@ public sealed class SqlClientEventSourceTests
     /// <summary>
     /// An observer whose every hook throws.
     /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - SqlClientEventSource: Should write an uncoded failure with empty kind and code, and a stop only for a command whose start was written")]
+    public async Task CommandEnded_UncodedFailure_ShouldWriteEmptyCodeAndStopOnlyWhenStarted()
+    {
+        // Arrange: a failure the client raises itself (an overlapping exchange) carries no wire code.
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        using var recorder = new SqlClientEventRecorder();
+        var failure = new InvalidOperationException("An exchange is already active on this connection.");
+
+        // Act: one command whose start a listener that attached late never saw, and one it saw.
+        SqlClientEventSource.Log.CommandEnded(connection, startWritten: false, failure, -1, -1, Stopwatch.GetTimestamp());
+        SqlClientEventSource.Log.CommandEnded(connection, startWritten: true, failure, -1, -1, Stopwatch.GetTimestamp());
+
+        // Assert: the failure is written either way, the stop only after a written start.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], SqlClientTestHarness.DatabaseName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["CommandFailed", "CommandFailed", "CommandStop"]);
+        events[0].Payload!.Take(4).ShouldBe([SqlClientTestHarness.DatabaseName, string.Empty, string.Empty, typeof(InvalidOperationException).FullName]);
+        events[2].Payload!.Take(4).ShouldBe([SqlClientTestHarness.DatabaseName, "Error", -1L, -1L]);
+    }
+
     private sealed class ThrowingObserver : SqlClientObserver
     {
         protected internal override void OnExecuting(string commandText, int parameterCount)

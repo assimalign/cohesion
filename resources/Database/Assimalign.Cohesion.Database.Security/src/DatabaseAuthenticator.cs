@@ -68,15 +68,25 @@ public abstract class DatabaseAuthenticator
         }
 
         ValueTask<bool> pending;
+        Exception? thrown = null;
         try
         {
             pending = AuthenticateCoreAsync(database, principal, evidence, cancellationToken);
         }
-        catch (Exception exception) when (ReportFailure(database, principal, exception))
+        catch (Exception exception) when (DatabaseSecurityEventSource.CaptureFailure(exception, out thrown))
         {
-            // Unreachable: the filter writes the failure and declines the exception, so it
-            // propagates from the core unchanged.
+            // Unreachable: the filter records the failure and declines it, so it propagates from
+            // the core unchanged.
             throw;
+        }
+        finally
+        {
+            // Written once the core's own finally blocks released what they held: a core that
+            // throws synchronously may do so inside its own lock.
+            if (thrown is not null)
+            {
+                ReportFailure(database, principal, thrown);
+            }
         }
 
         if (pending.IsCompletedSuccessfully)
@@ -112,14 +122,22 @@ public abstract class DatabaseAuthenticator
     private async ValueTask<bool> AuthenticateTracedAsync(ValueTask<bool> pending, string database, string principal)
     {
         bool authenticated;
+        Exception? thrown = null;
         try
         {
             authenticated = await pending.ConfigureAwait(false);
         }
-        catch (Exception exception) when (ReportFailure(database, principal, exception))
+        catch (Exception exception) when (DatabaseSecurityEventSource.CaptureFailure(exception, out thrown))
         {
-            // Unreachable: the filter writes the failure and declines the exception.
+            // Unreachable: the filter records the failure and declines it.
             throw;
+        }
+        finally
+        {
+            if (thrown is not null)
+            {
+                ReportFailure(database, principal, thrown);
+            }
         }
 
         DatabaseSecurityEventSource.Log.AuthenticationCompleted(this, database, principal, authenticated);
@@ -127,18 +145,14 @@ public abstract class DatabaseAuthenticator
     }
 
     /// <summary>
-    /// Writes a failure of the core to the event source and declines it, so an exception filter
-    /// that calls it never catches: the exception propagates unchanged. A cancellation is not a
-    /// failure and is not written.
+    /// Writes a failure of the core to the event source. A cancellation is not a failure and is not
+    /// written.
     /// </summary>
-    /// <returns>Always false.</returns>
-    private bool ReportFailure(string database, string principal, Exception exception)
+    private void ReportFailure(string database, string principal, Exception exception)
     {
         if (exception is not OperationCanceledException)
         {
             DatabaseSecurityEventSource.Log.AuthenticationFailed(this, database, principal, exception);
         }
-
-        return false;
     }
 }

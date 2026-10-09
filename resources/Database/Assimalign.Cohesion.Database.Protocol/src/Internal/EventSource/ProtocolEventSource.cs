@@ -13,11 +13,12 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// into their logging with <c>Assimalign.Cohesion.Logging.EventSource</c>.
 /// </para>
 /// <para>
-/// The public members of <see cref="ProtocolFrameReader"/> and <see cref="ProtocolFrameWriter"/> write
-/// the events, and only for the stream reader and writer that their <c>Create</c> factories return: the
-/// other readers and writers (the channel's family check, the clients' error translation) decorate a
-/// stream one through its public member, so each wire frame is reported once, where it crosses the
-/// transport. A frame carries its message type and payload length only, never its payload.
+/// The stream reader and writer that the <see cref="ProtocolFrameReader"/> and
+/// <see cref="ProtocolFrameWriter"/> <c>Create</c> factories return write the events from their own
+/// cores, once a frame has crossed the transport. Every other reader and writer (the channel's family
+/// check, the clients' error translation) decorates a stream one through its public member, so each
+/// wire frame is reported once, and the public bases carry no tracing and no type check. A frame
+/// carries its message type and payload length only, never its payload.
 /// </para>
 /// <para>
 /// No counters: the SQL server writes one frame per result row, and a process-wide count updated per
@@ -45,23 +46,17 @@ internal sealed class ProtocolEventSource : EventSource
     }
 
     /// <summary>
-    /// Gets a value indicating whether a listener takes the frame trace.
+    /// Writes a frame read from the transport. The clean end of the stream is not a frame and is
+    /// not written.
     /// </summary>
-    /// <returns>True when <c>FrameRead</c> and <c>FrameWritten</c> are written.</returns>
+    /// <param name="type">The frame's message type.</param>
+    /// <param name="payloadLength">The frame's payload length in bytes.</param>
     [NonEvent]
-    public bool IsFrameTraceEnabled()
-        => IsEnabled(EventLevel.Verbose, Keywords.Frames);
-
-    /// <summary>
-    /// Writes a frame read from the transport.
-    /// </summary>
-    /// <param name="frame">The frame the reader returned; null, the clean end of the stream, writes nothing.</param>
-    [NonEvent]
-    public void FrameRead(ProtocolFrame? frame)
+    public void FrameRead(ProtocolMessageType type, int payloadLength)
     {
-        if (frame is { } value && IsEnabled(EventLevel.Verbose, Keywords.Frames))
+        if (IsEnabled(EventLevel.Verbose, Keywords.Frames))
         {
-            FrameRead(value.Type.ToString(), value.Payload.Length);
+            FrameRead(type.ToString(), payloadLength);
         }
     }
 

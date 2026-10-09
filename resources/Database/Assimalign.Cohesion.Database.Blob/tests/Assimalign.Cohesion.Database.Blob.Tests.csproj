@@ -12,6 +12,7 @@
     <CohesionPackageReference Include="Shouldly" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.StreamingFixture" ReferenceOutputAssembly="false" />
     <!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->
     <Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\StorageFormatFiles.cs" Link="TestObjects\StorageFormatFiles.cs" />

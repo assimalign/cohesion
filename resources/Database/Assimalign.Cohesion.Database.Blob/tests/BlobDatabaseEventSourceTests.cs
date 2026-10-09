@@ -4,12 +4,15 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
@@ -416,7 +419,8 @@ public sealed class BlobDatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should allocate nothing on any write while nobody listens")]
     public async Task Writes_NoListener_ShouldAllocateNothing()
     {
-        // Arrange: a disabled source (a disposed listener leaves it enabled until a disable command).
+        // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
+        // disable below is redundant but harmless.
         await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { EngineName = UniqueEngineName() });
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
@@ -533,7 +537,7 @@ public sealed class BlobDatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should report a failed exchange once with its container and the blob's name redacted, and the session closed for it")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should report a failed exchange once with its container, code and type and no blob name, and the session closed for it")]
     public async Task TransferFailed_MissingBlob_ShouldBeReportedOnceWithItsContainerAndNoBlobName()
     {
         // Arrange
@@ -556,17 +560,17 @@ public sealed class BlobDatabaseEventSourceTests
         error.Message.ShouldBe("Blob 'missing' does not exist.");
         var failed = recorder.Events.Where(e => IsFor(e, 13, sessionId)).ShouldHaveSingleItem();
         failed.EventName.ShouldBe("TransferFailed");
-        failed.Level.ShouldBe(EventLevel.Warning);
-        failed.PayloadNames.ShouldBe(["sessionId", "container", "exceptionType", "exceptionMessage"]);
-        failed.Payload.ShouldBe([sessionId, BlobServerHarness.ContainerName, typeof(DatabaseException).FullName, "Blob '<blob>' does not exist."]);
-        ((string)failed.Payload![3]!).ShouldNotContain("missing");
+        failed.Level.ShouldBe(EventLevel.Error);
+        failed.PayloadNames.ShouldBe(["sessionId", "container", "code", "exceptionType"]);
+        failed.Payload.ShouldBe([sessionId, BlobServerHarness.ContainerName, nameof(ProtocolErrorCode.ExecutionFailure), typeof(DatabaseException).FullName]);
+        recorder.Events.Where(e => IsForSession(e, sessionId)).SelectMany(e => e.Payload!).OfType<string>().ShouldNotContain(text => text.Contains("missing", StringComparison.Ordinal));
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([13, 5]);
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("ExchangeFailed");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should redact every quoted occurrence of the blob's name and bound the container in a transfer failure")]
-    public void TransferFailed_BlobNamedInMessage_ShouldRedactTheNameAndBoundTheContainer()
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should write a transfer failure without its message and bound the container")]
+    public void TransferFailed_BlobNamedInMessage_ShouldWriteNoMessageAndBoundTheContainer()
     {
         // Arrange
         var session = new StubServerSession();
@@ -575,11 +579,12 @@ public sealed class BlobDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
 
         // Act
-        BlobDatabaseEventSource.Log.TransferFailed(session, container, "q3/ledger.csv", failure);
+        BlobDatabaseEventSource.Log.TransferFailed(session, container, ProtocolErrorCode.ExecutionFailure, failure);
 
         // Assert
         var failed = recorder.Events.Where(e => e.EventId == 13 && Equals(e.Payload![0], session.Id)).ShouldHaveSingleItem();
-        failed.Payload.ShouldBe([session.Id, new string('c', 256) + "...", typeof(DatabaseException).FullName, "Blob '<blob>' already exists; '<blob>' was not replaced."]);
+        failed.Payload.ShouldBe([session.Id, new string('c', 256) + "...", nameof(ProtocolErrorCode.ExecutionFailure), typeof(DatabaseException).FullName]);
+        failed.Payload!.OfType<string>().ShouldNotContain(text => text.Contains("ledger", StringComparison.Ordinal));
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
@@ -589,8 +594,8 @@ public sealed class BlobDatabaseEventSourceTests
         log.DatabaseRefused(session, new DatabaseName("objects"), BlobDatabaseEventSource.RefusalPhase.Exchange, "refused");
         log.EngineRefused(engine, BlobDatabaseEventSource.RefusalPhase.Accept, EngineState.Disposed);
         log.HostTransactionAbortFailed(session, failure);
-        log.TransferFailed(session, "files", "report.pdf", failure);
-        log.TransferFailed(null, string.Empty, string.Empty, failure);
+        log.TransferFailed(session, "files", ProtocolErrorCode.ExecutionFailure, failure);
+        log.TransferFailed(null, string.Empty, code: null, failure);
         long timestamp = log.SessionTimestamp();
         log.SessionAccepted(engine, session, 1);
         log.SessionRejected(engine, BlobDatabaseEventSource.RejectReason.SessionLimit, 1, 1);
@@ -602,6 +607,51 @@ public sealed class BlobDatabaseEventSourceTests
         log.SessionClosed(session, BlobDatabaseEventSource.CloseReason.Terminated, timestamp);
         log.SessionsAborted(engine, 1, TimeSpan.FromSeconds(1));
         return timestamp;
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should close a session whose peer reset its TCP connection with a transport reason, not a fault")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionClosed_PeerResetsTcpConnection_ShouldReportATransportReasonAndNoFault(bool whileServerWrites)
+    {
+        // Arrange: a real TCP listener; the in-memory driver cannot reset a connection.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
+        TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await using var harness = await BlobServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+
+        // Act: the peer completes its handshake, then resets the connection: while the session idles
+        // in its ready loop, or while the server's pong writes fill the socket buffers the peer
+        // never drains, so the reset fails a send the pump is blocked in.
+        using (Socket socket = await TcpResetPeer.ConnectReadyAsync(listener.EndPoint, BlobServerHarness.DatabaseName, TestTimeout.Token()))
+        {
+            Task? flood = whileServerWrites ? TcpResetPeer.FloodPingsAsync(socket, 4_000_000) : null;
+            if (flood is not null)
+            {
+                await TcpResetPeer.WaitUntilServerStalledAsync(socket, TimeSpan.FromSeconds(15));
+            }
+
+            TcpResetPeer.Reset(socket);
+            if (flood is not null)
+            {
+                // Whether the kernel took the whole flood before the reset does not matter.
+                await Record.ExceptionAsync(() => flood);
+            }
+        }
+
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        var closed = await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault. The
+        // write case accepts only the transport reasons: a PeerClosed there means the flood no
+        // longer blocked the pump in a send, and the case stopped testing the classification.
+        string seen = string.Join("; ", recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventName + "(" + string.Join(", ", e.Payload!.Skip(1)) + ")"));
+        recorder.Events.Where(e => IsFor(e, 7, sessionId)).ShouldBeEmpty("The pump reported the reset as a fault: " + seen);
+        string[] expected = whileServerWrites
+            ? ["TransportFailed", "ConnectionAborted"]
+            : ["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"];
+        ((string)closed.Payload![1]!).ShouldBeOneOf(expected, seen);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
     private static string UniqueEngineName() => "blob-events-" + Guid.NewGuid().ToString("N");

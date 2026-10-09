@@ -245,7 +245,7 @@ public sealed class BTreeIndexManager
         }
 
         // Timed only while a listener takes the purge event (event-source.md, rule 9).
-        bool timed = IndexEventSource.Log.IsEnabled(EventLevel.Verbose, EventKeywords.None);
+        bool timed = IndexEventSource.Log.IsEnabled(EventLevel.Informational, EventKeywords.None);
         long started = timed ? Stopwatch.GetTimestamp() : 0;
 
         List<BTreeIndex> indexes;

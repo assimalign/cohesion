@@ -5,12 +5,15 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
@@ -416,7 +419,8 @@ public sealed class GraphDatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should allocate nothing on any write while nobody listens")]
     public async Task Writes_NoListener_ShouldAllocateNothing()
     {
-        // Arrange: a disabled source (a disposed listener leaves it enabled until a disable command).
+        // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
+        // disable below is redundant but harmless.
         await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = UniqueEngineName() });
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
@@ -480,8 +484,29 @@ public sealed class GraphDatabaseEventSourceTests
         var stop = recorder.Events.Where(e => e.EventId == 11 && Equals(e.Payload![0], name)).ShouldHaveSingleItem();
         stop.EventName.ShouldBe("IndexRecoveryStop");
         stop.Level.ShouldBe(EventLevel.Informational);
-        stop.PayloadNames.ShouldBe(["database", "durationMilliseconds"]);
-        ((double)stop.Payload![1]!).ShouldBeGreaterThan(0);
+        stop.PayloadNames.ShouldBe(["database", "status", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe("Success");
+        ((double)stop.Payload![2]!).ShouldBeGreaterThan(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should close a recovery that threw with an Error stop, by a direct write")]
+    public void IndexRecoveryStop_RecoveryThrew_ShouldWriteAnErrorStop()
+    {
+        // Arrange: no fault-injection seam reaches RecoverIndexesAsync inside the open, so the
+        // status a recovery that threw writes is checked by a direct write.
+        string name = "threw" + Guid.NewGuid().ToString("N");
+        var database = new DatabaseName(name);
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Informational);
+
+        // Act
+        long started = GraphDatabaseEventSource.Log.IndexRecoveryStart(database, 1);
+        GraphDatabaseEventSource.Log.IndexRecoveryStop(database, succeeded: false, started);
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => e.EventId is 10 or 11 && Equals(e.Payload![0], name)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["IndexRecoveryStart", "IndexRecoveryStop"]);
+        events[1].Payload![1].ShouldBe("Error");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should report a wire statement that fails to parse once, before the root sees it")]
@@ -510,22 +535,26 @@ public sealed class GraphDatabaseEventSourceTests
         var failed = recorder.Events.Where(e => e.EventId == 12 && Equals(e.Payload![0], sessionId)).ShouldHaveSingleItem();
         failed.EventName.ShouldBe("StatementParseFailed");
         failed.Level.ShouldBe(EventLevel.Error);
-        failed.PayloadNames.ShouldBe(["sessionId", "database", "exceptionType", "exceptionMessage"]);
-        failed.Payload.ShouldBe([sessionId, GraphServerHarness.DatabaseName, typeof(DatabaseParseException).FullName, error.Message]);
+        failed.PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType"]);
+        failed.Payload.ShouldBe([sessionId, GraphServerHarness.DatabaseName, string.Empty, typeof(DatabaseParseException).FullName]);
+        failed.Payload!.OfType<string>().ShouldNotContain(error.Message, "A parse error quotes the statement; the event writes its type only.");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
 
-        // The root's StatementFailed (event 28, batch B1) is not written for it: the statement
-        // failed before the root session saw it. Until B1 merges, the root writes no statement
-        // events, so this holds trivially; it is the assertion B1 must keep true.
-        root.Events.ShouldNotContain(e => e.EventId == 28);
+        // The root's StatementFailed (event 28) is not written for it, nor is its StatementStart: the
+        // statement failed before the root session saw it.
+        // The server session's root session is found by its engine, which is this test's alone.
+        long sessionNumber = (long)root.Events.Where(e => e.EventId == 23 && Equals(e.Payload![0], engineName)).ShouldHaveSingleItem().Payload![2]!;
+        root.Events.Where(e => (e.EventId == 25 || e.EventId == 28) && Equals(e.Payload![1], sessionNumber)).ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should not report an in-process statement that fails to parse, which the root reports")]
     public async Task StatementParseFailed_InProcessSyntaxError_ShouldNotBeReported()
     {
         // Arrange
+        string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = UniqueEngineName() });
+        using var root = new RootEventRecorder();
+        await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = engineName });
         var database = await engine.CreateDatabaseAsync("graph", TestTimeout.Token(30));
         await using var session = await database.CreateSessionAsync(TestTimeout.Token(30));
 
@@ -533,15 +562,21 @@ public sealed class GraphDatabaseEventSourceTests
         var failure = await Should.ThrowAsync<DatabaseParseException>(async () =>
             await session.ExecuteAsync("MATCH (a)-->(b) RETURN a", cancellationToken: TestTimeout.Token(30)));
 
-        // Assert: the in-process text path is the root's (StatementFailed, event 28, batch B1).
+        // Assert: the in-process text path is the root's: its StatementFailed exactly once, by the
+        // failure's type and never its message, and Graph's event 12 not at all.
         failure.Message.ShouldStartWith("GQL parse error GQL0008: ", Case.Sensitive);
         recorder.Events.ShouldNotContain(e => e.EventId == 12);
+        long sessionNumber = (long)root.Events.Where(e => e.EventId == 23 && Equals(e.Payload![0], engineName)).ShouldHaveSingleItem().Payload![2]!;
+        var failed = root.Events.Where(e => e.EventId == 28 && Equals(e.Payload![1], sessionNumber)).ShouldHaveSingleItem();
+        failed.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "code", "exceptionType", "durationMilliseconds"]);
+        failed.Payload![4].ShouldBe(typeof(DatabaseParseException).FullName);
+        failed.Payload!.OfType<string>().ShouldNotContain(failure.Message);
     }
 
     private static long WriteEveryEvent(DatabaseEngine engine, DatabaseServerSession session, Exception failure)
     {
         var log = GraphDatabaseEventSource.Log;
-        log.IndexRecoveryStop(new DatabaseName("graph"), log.IndexRecoveryStart(new DatabaseName("graph"), 1));
+        log.IndexRecoveryStop(new DatabaseName("graph"), true, log.IndexRecoveryStart(new DatabaseName("graph"), 1));
         log.StatementParseFailed(session, new DatabaseName("graph"), failure);
         long timestamp = log.SessionTimestamp();
         log.SessionAccepted(engine, session, 1);
@@ -554,6 +589,51 @@ public sealed class GraphDatabaseEventSourceTests
         log.SessionClosed(session, GraphDatabaseEventSource.CloseReason.Terminated, timestamp);
         log.SessionsAborted(engine, 1, TimeSpan.FromSeconds(1));
         return timestamp;
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should close a session whose peer reset its TCP connection with a transport reason, not a fault")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionClosed_PeerResetsTcpConnection_ShouldReportATransportReasonAndNoFault(bool whileServerWrites)
+    {
+        // Arrange: a real TCP listener; the in-memory driver cannot reset a connection.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
+        TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await using var harness = await GraphServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+
+        // Act: the peer completes its handshake, then resets the connection: while the session idles
+        // in its ready loop, or while the server's pong writes fill the socket buffers the peer
+        // never drains, so the reset fails a send the pump is blocked in.
+        using (Socket socket = await TcpResetPeer.ConnectReadyAsync(listener.EndPoint, GraphServerHarness.DatabaseName, TestTimeout.Token()))
+        {
+            Task? flood = whileServerWrites ? TcpResetPeer.FloodPingsAsync(socket, 4_000_000) : null;
+            if (flood is not null)
+            {
+                await TcpResetPeer.WaitUntilServerStalledAsync(socket, TimeSpan.FromSeconds(15));
+            }
+
+            TcpResetPeer.Reset(socket);
+            if (flood is not null)
+            {
+                // Whether the kernel took the whole flood before the reset does not matter.
+                await Record.ExceptionAsync(() => flood);
+            }
+        }
+
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        var closed = await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: a peer that hung up is an expected outcome (plan D9), never a server fault. The
+        // write case accepts only the transport reasons: a PeerClosed there means the flood no
+        // longer blocked the pump in a send, and the case stopped testing the classification.
+        string seen = string.Join("; ", recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventName + "(" + string.Join(", ", e.Payload!.Skip(1)) + ")"));
+        recorder.Events.Where(e => IsFor(e, 7, sessionId)).ShouldBeEmpty("The pump reported the reset as a fault: " + seen);
+        string[] expected = whileServerWrites
+            ? ["TransportFailed", "ConnectionAborted"]
+            : ["PeerClosed", "TransportFailed", "ConnectionAborted", "Cancelled"];
+        ((string)closed.Payload![1]!).ShouldBeOneOf(expected, seen);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
     private static string UniqueEngineName() => "graph-events-" + Guid.NewGuid().ToString("N");

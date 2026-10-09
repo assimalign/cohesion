@@ -87,14 +87,16 @@ public sealed partial class GraphDatabase : DatabaseInstance
             // The stop closes the activity the start opened on this flow even when the recovery
             // throws; the root's failed open reports the failure itself.
             long recoveryStarted = GraphDatabaseEventSource.Log.IndexRecoveryStart(name, recovery.Aborted.Count);
+            bool recovered = false;
             try
             {
                 Store.RecoverIndexesAsync(recovery.Aborted).AsTask().GetAwaiter().GetResult();
                 Coordinator.CompleteRecovery();
+                recovered = true;
             }
             finally
             {
-                GraphDatabaseEventSource.Log.IndexRecoveryStop(name, recoveryStarted);
+                GraphDatabaseEventSource.Log.IndexRecoveryStop(name, recovered, recoveryStarted);
             }
         }
     }

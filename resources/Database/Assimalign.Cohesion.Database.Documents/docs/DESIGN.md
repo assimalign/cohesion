@@ -861,14 +861,17 @@ The Graph model writes the same two events, as its ids 10 and 11.
 | Id | Event | Level | Payload |
 | --- | --- | --- | --- |
 | 1 | `IndexRecoveryStart` | Informational | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
-| 2 | `IndexRecoveryStop` | Informational | `database`, `durationMilliseconds` (written when the recovery ends, whether it recovered the indexes or threw) |
+| 2 | `IndexRecoveryStop` | Informational | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
 
 Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
 from the constructor that recovers it; a create writes neither. The stop is written from a
 `finally`, so a recovery that throws still closes the activity its start opened on the opening
 flow (event-source.md rule 8): without it, every later event on that flow, the root's failed open
 among them, would be nested under a recovery that never ended. The root's failed open reports the
-failure itself. No counters. The start reads its timestamp only while it is written.
+failure itself; the stop's `status` follows the area's ending convention
+(`docs/resources/Database/DESIGN.md`, "Diagnostics"), so an operator reads a failed recovery from
+the stop alone. No counters. The start reads its timestamp only while it is written.
 `DocumentDatabaseEventSourceTests` checks the name, the strict manifest, a reopen with an aborted
 writer, a create, and that neither write allocates while nobody listens; a recovery that throws
-is not driven by a test yet (no fault-injection seam reaches `RecoverIndexesAsync`).
+is not driven by a test yet (no fault-injection seam reaches `RecoverIndexesAsync`), so its
+`Error` stop is checked by a direct write.

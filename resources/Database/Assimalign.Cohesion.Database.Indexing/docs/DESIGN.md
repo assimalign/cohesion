@@ -615,7 +615,9 @@ engine. The `database` payload is the name of the storage whose pages hold the t
 reads it from `BTreeIndexManagerOptions.Storage`, and a tree from the storage it was attached
 over, inside the enabled check. Payloads name an index by its owning object's id and its name and
 a page by its id; no key, entry reference or other indexed value is ever written (event-source.md
-rule 11; plan D8).
+rule 11; plan D8). `objectId` is written as a `long`, as every other unsigned identifier of the
+area is (`transactionSequence`, `pageId`). The conventions every Database source shares are in the
+area's [`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
 Keyword: `Splits = 0x1`; the other events check `EventKeywords.None`.
 
@@ -628,12 +630,17 @@ Keyword: `Splits = 0x1`; the other events check `EventKeywords.None`.
 | 5 | `IndexInvariantViolated` | Error | — | `database`, `index`, `pageId`, `detail` (the `IndexException` message, which names pages and positions, never keys) | the five split checks: a leaf or internal node too small to split, a leaf out of order, a separator position out of range, a separator that would misorder its parent |
 | 6 | `PageSplit` | Verbose | Splits | `database`, `index`, `pageId`, `leaf`, `entries` (before the split) | `SplitLeaf` and `SplitInternal`, once the page's halves are written and before the parent takes the separator |
 | 7 | `RootGrown` | Verbose | Splits | `database`, `index`, `rootPageId` | `GrowRoot`: the root split in place and the tree grew a level |
-| 8 | `WritersPurged` | Verbose | — | `database`, `writers`, `entriesRemoved`, `durationMilliseconds` | `BTreeIndexManager.PurgeWritersAsync` with at least one writer: open-time recovery's scrub of unproven writers |
+| 8 | `WritersPurged` | Informational | — | `database`, `writers`, `entriesRemoved`, `durationMilliseconds` | `BTreeIndexManager.PurgeWritersAsync` with at least one writer: open-time recovery's scrub of unproven writers. Informational, as Graph's and Documents' `IndexRecoveryStart`/`Stop` are: it is Sql's and KeyValuePair's only record of index recovery on open, written once per open, never per operation |
 
 A split is written as it happens, inside the statement's storage bracket: a split whose parent
 insertion then fails an invariant writes `PageSplit` and then `IndexInvariantViolated`, and the
 bracket's rollback takes both changes back. A root leaf's first split writes `PageSplit` for the
 root page and then `RootGrown`. `WritersPurged` is timed only while a listener takes it.
+
+**Events written under the tree latch.** `PageSplit`, `RootGrown`, `IndexInvariantViolated` and
+`IndexCorruptionDetected` are written while the tree's write latch (a `ReaderWriterLockSlim`
+without recursion) is held, so a listener's synchronous work runs there, as was decided for the
+storage buffer pool's events. A listener must not call back into the same index.
 
 No counters: a tree has no transition its storage does not already count (page reads and writes
 are the storage source's), and a split rate would be a process-global counter on the insert path

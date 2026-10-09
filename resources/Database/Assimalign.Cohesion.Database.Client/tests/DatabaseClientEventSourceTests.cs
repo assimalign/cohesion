@@ -145,12 +145,12 @@ public sealed class DatabaseClientEventSourceTests
         var exchangeFailed = events[4];
         exchangeFailed.EventId.ShouldBe(7);
         exchangeFailed.Level.ShouldBe(EventLevel.Verbose);
-        exchangeFailed.PayloadNames.ShouldBe(["database", "code", "exceptionMessage"]);
+        exchangeFailed.PayloadNames.ShouldBe(["database", "code", "exceptionType"]);
         failure.Code.ShouldNotBe(ProtocolErrorCode.Internal);
         failure.Code.ShouldNotBe(ProtocolErrorCode.ProtocolViolation);
         failure.Message.ShouldContain("missing_table", Case.Sensitive);
-        exchangeFailed.Payload.ShouldBe([database, failure.Code.ToString(), string.Empty],
-            "The server's statement-level message can quote the statement; the core does not write it.");
+        exchangeFailed.Payload.ShouldBe([database, failure.Code.ToString(), typeof(DatabaseClientException).FullName],
+            "The server's statement-level message can quote the statement; the core writes the code and type only.");
 
         var closed = events[6];
         closed.EventId.ShouldBe(3);
@@ -292,8 +292,8 @@ public sealed class DatabaseClientEventSourceTests
             "DownloadReleaseFailed",
         ]);
 
-        // A statement-level server error's message is the model client's to write, not the core's.
-        events[2].Payload.ShouldBe([database, nameof(ProtocolErrorCode.ExecutionFailure), string.Empty]);
+        // A statement-level server error is written by its code and type, never its message.
+        events[2].Payload.ShouldBe([database, nameof(ProtocolErrorCode.ExecutionFailure), typeof(DatabaseClientException).FullName]);
 
         var released = events[5];
         released.EventId.ShouldBe(8);

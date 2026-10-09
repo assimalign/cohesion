@@ -81,29 +81,31 @@ stop carry the `Commands` keyword (`0x1`).
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
 | 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
-| 2 | `CommandStop` | Verbose | `Commands` | `database`, `rowCount`, `affectedCount`, `durationMilliseconds` |
-| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`KeyValueClientErrorKind`), `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `status` (`Success`, `Error` or `Cancelled`), `rowCount`, `affectedCount` (both -1 unless `Success`), `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`KeyValueClientErrorKind`; empty for an uncoded failure), `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
 | 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
 
 Keys, values and the command text are never written, as the observers never receive key or value
-bytes. Event 3 writes the server's message, and the server names a conflicting key in hexadecimal
-(`Write-write conflict on key '…'`), so the event replaces the hexadecimal form of every byte
-parameter the command bound with `<redacted>`; the shared core's `ExchangeFailed` writes no
-statement-level server message at all (Database.Client `DESIGN.md`, "Diagnostics"). A command
-fails with an Error whatever its cause; a `MalformedResult` the typed operation raises after a
-completed response is not a command failure. Only a coded failure (`DatabaseClientException`) ends
-a start with event 3: a cancellation, which is how a timeout surfaces, or an uncoded exception (an
-overlapping exchange, a disposed connection) leaves the start without a stop or a failure, and
-because event 3 is not a stop, an activity-tracking tool leaves a failed command's activity open.
-Pairing every start with a stop is an owner decision on the event-source plan's catalog. Event 4
-makes visible an observer failure the client swallows. No counters. The command path already takes
-the timestamp its observer receives, so the events add only `IsEnabled` checks while nobody
-listens.
+bytes. Nor is the server's message: it names a conflicting key in hexadecimal (`Write-write
+conflict on key '…'`), so event 3 writes the error kind, the wire code and the exception's type
+only (the area's failure rule, `docs/resources/Database/DESIGN.md`, "Diagnostics"); no redaction
+is needed, and none is done. **Every start has a stop**: the command writes its end from a
+`finally`, before its observer hears of it: event 3 and then `CommandStop` with `Error` for a coded
+or an uncoded failure (an overlapping exchange, a disposed connection), `CommandStop` with
+`Cancelled` and no failure for a cancellation, which is how a timeout surfaces. A command fails
+with an Error whatever its cause; a `MalformedResult` the typed operation raises after a completed
+response is not a command failure. As `System.Net.Http`'s `RequestStop`, `CommandStop` is written
+only for a command whose `CommandStart` was written; event 3 is written either way. Event 4 makes
+visible an observer failure the client swallows.
+No counters. The command path already takes the timestamp its observer receives, so the events add
+only `IsEnabled` checks while nobody listens.
 
 `KeyValueClientEventSourceTests` checks the name, the strict manifest, a put and a refused scan
-under an observer whose every hook throws (each event once, in order, with its payload, and no
-key, value or command text), and a write-write conflict whose server message names the key, which
-neither event 3 nor the core's events write. The test assembly's observers override the hooks as
+under an observer whose every hook throws (each event once, in order, with its payload, the
+failure's stop after it, and no key, value or command text), a cancelled command (a `Cancelled`
+stop), a write-write conflict whose server message names the key, which neither event 3 nor
+the core's events write, and, by direct writes, an uncoded failure (empty kind and code) and a stop
+written only after a written start. The test assembly's observers override the hooks as
 `protected internal`, which the project's test-only `InternalsVisibleTo` requires (CS0507).
 
 ## Materialized scans, AOT, and non-goals

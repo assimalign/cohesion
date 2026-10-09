@@ -27,9 +27,9 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// and its wire outcome is this source's <c>TransferFailed</c> when it fails. No payload carries a
 /// blob name (it may be user data; plan D8 and owner question Q3); container names are
 /// identifiers. The engine's messages quote a blob's name (<c>Blob 'x' does not exist.</c>), so
-/// <c>TransferFailed</c> replaces the quoted name of the request's blob, or its list prefix, with
-/// <c>'&lt;blob&gt;'</c> before it writes the message. A string a peer sent is cut to a bound
-/// (256 characters for a name, 1024 for a message). Every write sits
+/// <c>TransferFailed</c> writes the failure's wire code and exception type only, never its message
+/// (the area's failure rule, <c>docs/resources/Database/DESIGN.md</c>). A string a peer sent is cut
+/// to a bound (256 characters for a name, 1024 for a message). Every write sits
 /// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
 /// allocates is computed inside that check. The counters' backing fields are maintained whether or
 /// not anyone listens, on the accept and close transitions only, never per frame or per row.
@@ -40,15 +40,12 @@ internal sealed class BlobDatabaseEventSource : EventSource
 {
     public static readonly BlobDatabaseEventSource Log = new();
 
-    // The longest name (database, principal, container) and text (a refusal's detail, a violation,
-    // a failure's message) a payload carries. Each can quote what a peer sent, before
+    // The longest name (database, principal, container) and text (a refusal's detail, a violation)
+    // a payload carries. Each can quote what a peer sent, before
     // authentication too, and a frame may hold 16 MB, so a longer value is cut and marked
     // (event-source.md rule 11: bounded payloads).
     private const int MaxNameLength = 256;
     private const int MaxTextLength = 1024;
-
-    // What TransferFailed writes in place of a blob's quoted name.
-    private const string RedactedBlob = "'<blob>'";
 
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
@@ -97,7 +94,7 @@ internal sealed class BlobDatabaseEventSource : EventSource
         public const string ProtocolViolation = "ProtocolViolation";
 
         /// <summary>The session was aborted, its connection closed, or the stop arrived mid-frame.</summary>
-        public const string Canceled = "Canceled";
+        public const string Cancelled = "Cancelled";
 
         /// <summary>The connection was aborted under the session.</summary>
         public const string ConnectionAborted = "ConnectionAborted";
@@ -357,27 +354,23 @@ internal sealed class BlobDatabaseEventSource : EventSource
 
     /// <summary>
     /// Writes that a container operation failed: an exchange the server ended the session over, or
-    /// a stream's completion failure swallowed after its read already failed.
+    /// a stream's completion failure swallowed after its read already failed. Written by the wire
+    /// code and the exception's type only: the engine's messages quote the blob's name.
     /// </summary>
     /// <param name="session">The session; null for a stream, which serves in-process callers too and knows no session.</param>
     /// <param name="container">The operation's container; empty when it is not known. Written cut to 256 characters.</param>
-    /// <param name="blob">
-    /// The blob the operation named, or a list's prefix; empty when there is none or it is not
-    /// known. Never written: its quoted occurrences in the message become <c>'&lt;blob&gt;'</c>.
-    /// </param>
-    /// <param name="exception">The failure. Its message is written redacted and cut to 1024 characters.</param>
+    /// <param name="code">The code of the error frame the session sent; null for a stream, which sends none.</param>
+    /// <param name="exception">The failure.</param>
     [NonEvent]
-    public void TransferFailed(DatabaseServerSession? session, string container, string blob, Exception exception)
+    public void TransferFailed(DatabaseServerSession? session, string container, ProtocolErrorCode? code, Exception exception)
     {
-        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            string message = exception.Message;
-            if (blob.Length > 0)
-            {
-                message = message.Replace(string.Concat("'", blob, "'"), RedactedBlob, StringComparison.Ordinal);
-            }
-
-            TransferFailed(session?.Id ?? Guid.Empty, Bound(container, MaxNameLength), exception.GetType().FullName ?? exception.GetType().Name, Bound(message, MaxTextLength));
+            TransferFailed(
+                session?.Id ?? Guid.Empty,
+                Bound(container, MaxNameLength),
+                code?.ToString() ?? string.Empty,
+                exception.GetType().FullName ?? exception.GetType().Name);
         }
     }
 
@@ -429,9 +422,9 @@ internal sealed class BlobDatabaseEventSource : EventSource
     private void HostTransactionAbortFailed(Guid sessionId, string exceptionType, string exceptionMessage)
         => WriteEvent(12, sessionId, exceptionType, exceptionMessage);
 
-    [Event(13, Level = EventLevel.Warning, Message = "A transfer of session {0} on container '{1}' failed: {2}: {3}")]
-    private void TransferFailed(Guid sessionId, string container, string exceptionType, string exceptionMessage)
-        => WriteEvent(13, sessionId, container, exceptionType, exceptionMessage);
+    [Event(13, Level = EventLevel.Error, Message = "A transfer of session {0} on container '{1}' failed: code '{2}', exception '{3}'.")]
+    private void TransferFailed(Guid sessionId, string container, string code, string exceptionType)
+        => WriteEvent(13, sessionId, container, code, exceptionType);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

@@ -409,7 +409,7 @@ public sealed class TransactionManager : IAsyncDisposable
             catch (Exception exception)
             {
                 await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
-                TransactionEventSource.Log.TransactionAborted(_database, owned.Sequence, exception);
+                TransactionEventSource.Log.CommitRecordWriteFailed(_database, owned.Sequence, exception);
                 throw new TransactionAbortedException(
                     $"Transaction {owned.Sequence} aborted: the commit record could not be written.", exception);
             }

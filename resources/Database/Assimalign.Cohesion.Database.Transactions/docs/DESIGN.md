@@ -782,7 +782,12 @@ catalog: `docs/programs/DATABASE_EVENT_SOURCES_PLAN.md` §4.3). Every engine mod
 database's kernel through `TransactionCoordinator`, so the one source covers the transactions of
 all five engines. The explicit transaction a session runs is the root's
 (`Assimalign.Cohesion.Database`); the events here are the kernel transactions: one under each
-explicit transaction, and one per autocommit statement.
+explicit transaction, one per autocommit statement, and, in Blob, Graph and Documents, one
+snapshot pin per statement of a `ReadCommitted` explicit transaction, which always ends rolled
+back (`BlobOperation`, `GraphOperation` and `DocumentOperation` begin it at `Snapshot` and end it
+with `RollbackAsync`). The same read in Sql or KeyValuePair ends as a commit. The conventions
+every Database source shares (failure payloads, `Start`/`Stop` endings) are in the area's
+[`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
 **The `database` payload is the storage's name.** The kernel types do not know their database,
 so the coordinator hands `Storage.Name` to the two it builds, through internal members only: the
@@ -791,13 +796,17 @@ events the coordinator writes itself read the name from its storage inside the e
 standalone `TransactionManager.Create` or `LockManager.Create` reports an empty `database`.
 
 **Payloads carry identifiers only** (event-source.md rule 11; plan D8): a sequence, a lock mode,
-a `LockResource` (its kind, object id and entry id), a storage-offline cause, counts, and an
-exception's type full name and `Message`. No record, key or value. A unique index's and a
-KeyValuePair key's entry id is an unseeded FNV-1a hash of the key (`IndexKey.Hash`), never the key
-itself; a Sql row's is its packed page and slot. An unseeded 64-bit hash of a key drawn from a
-small domain can be reversed by enumerating the domain, so whether that hash is an identifier
-under D8 is an owner question; if it is not, `resource` for an entry lock is reduced to its kind
-and object id.
+a lock resource's kind and object id, a storage-offline cause, counts, and, for the kernel's own
+device and infrastructure failures (events 4, 5, 11, 13 and 17), an exception's type full name
+and `Message`. No record, key or value. **`resource` never carries an entry's id**
+(`TransactionEventSource.DescribeResource`): it is `Database`, `Object:<objectId>` or
+`Entry:<objectId>`. A unique index's and a KeyValuePair key's entry id is an unseeded FNV-1a hash
+of the key (`IndexKey.Hash`), and an unseeded 64-bit hash of a key drawn from a small domain is
+the key, since enumerating the domain reverses it. The lock manager cannot tell such an entry from
+a Sql row-location entry (its packed page and slot): both are `LockResourceKind.Entry`, and the
+key-hash identity is the published pre-acquire contract the Sql executor depends on, so no new
+resource kind separates them. Every entry is therefore written as its object; the object id still
+locates the table, collection or key space, and a Sql row's location is dropped with the rest.
 
 Keywords: `Transactions = 0x1`, `Locks = 0x2`, `Checkpoints = 0x4`, `Purge = 0x8`; the other
 events check `EventKeywords.None`.
@@ -807,11 +816,11 @@ events check `EventKeywords.None`.
 | 1 | `TransactionBegun` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | `TransactionCoordinator.BeginAsync`, once the context is tracked |
 | 2 | `TransactionCommitted` | Verbose | Transactions | `database`, `transactionSequence` | `TransactionCoordinator.CommitAsync`, after the manager's commit |
 | 3 | `TransactionRolledBack` | Verbose | Transactions | `database`, `transactionSequence` | `TransactionCoordinator.RollbackAsync`, after the manager's rollback, also when its undo was deferred |
-| 4 | `TransactionAborted` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager.CommitAsync`: the commit record could not be written, so the kernel rolled the transaction back (the caller's failed commit is the root's Error) |
+| 4 | `CommitRecordWriteFailed` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager.CommitAsync`: the commit record could not be written, so the kernel rolled the transaction back (the caller's failed commit is the root's Error). It pairs with 13; named apart from the root's event 32 `TransactionAborted`, which is an explicit transaction an operation aborted |
 | 5 | `CommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `exceptionMessage` (the flush failure's: the inner exception's message) | `TransactionCoordinator.CommitAsync`, on `TransactionCommitUnconfirmedException` |
 | 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle |
 | 7 | `LockWaitStart` | Verbose | Locks | `database`, `transactionSequence`, `resource`, `mode` | `LockManager`, when a request is queued |
-| 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow |
+| 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow, only for a wait whose `LockWaitStart` was written (`System.Net.Http`'s `RequestStop` shape); `SlowLockWait` is written either way, so a listener that attached during a long wait still learns how long it lasted |
 | 9 | `SlowLockWait` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `thresholdMilliseconds` | with 8, written before it, when the wait lasted at least the threshold |
 | 10 | `LockWaitsAbandoned` | Warning | — | `database`, `cause` (the `StorageOfflineCause` name) | `LockManager.Abandon`, from `AbandonLockWaits`, once per lock manager |
 | 11 | `UndoDeferred` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager`, when an abort's undo failed: the writer keeps its locks until a retry completes it |
@@ -826,16 +835,28 @@ events check `EventKeywords.None`.
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
 (event-source.md rule 8): the stop is written in the `finally` around the waiter's await, whatever
-ended it, and names how: `Granted`; `Canceled` by the caller's token; `Ended`, because the owner's
-transaction ended while it waited; or `Abandoned`, because the storage went offline (the same
-decision `WaitAbandonableAsync` makes). The wait is timed whether or not anyone listens: it
-already costs a queued waiter, a completion source and a registration, and a listener that
-attaches during a long wait then learns its full length (plan D5 (b)). The deadlock victim's
+ended it, and names how in `outcome`, the one `Stop` of the area whose ending is a domain outcome
+rather than the area's `status` (the area `DESIGN.md`): `Granted`; `Cancelled` by the caller's
+token; `Ended`, because the owner's transaction ended while it waited; or `Abandoned`, because the
+storage went offline (the same decision `WaitAbandonableAsync` makes). The cancellation
+registration is disposed inside that `try`, as soon as the await ends and before the stop is
+written, the order the wait had before it was traced. The wait is timed whether or not anyone
+listens: it already costs a queued waiter, a completion source and a registration, and a listener
+that attaches during a long wait then learns its full length (plan D5 (b)). The deadlock victim's
 event is written after the lock table's lock is released, just before the refusal is thrown.
+
+**Events written under a lock.** `LockWaitsAbandoned` (10) is written from the storage's offline
+hook, which can run under `Storage`'s transaction lock (a checkpoint or shutdown flush that failed),
+as Storage's own `StorageOffline` is; a listener's synchronous work runs there, as was decided for
+the buffer pool's events. No other event here is written under the lock table's or the manager's
+lock.
 
 **The slow-lock-wait threshold** is an EventSource argument, not API (plan D7): each session that
 enables the source sets it to its `SlowLockWaitThresholdMs` argument, or to 1000 ms when it passes
-none, as the in-process forwarder does. The last enabling session wins. PostgreSQL logs lock waits
+none or a value that is not a finite, non-negative number, as the in-process forwarder does. The
+last enabling session wins, and any session's disable restores the 1000 ms default until the next
+enable, as the root's `SlowStatementThresholdMs` does: a brief tool session's 0 ms never outlives
+it under a forwarder that stays enabled. PostgreSQL logs lock waits
 past `deadlock_timeout` (1 s) by default (`log_lock_waits`, `src/backend/storage/lmgr/proc.c:1700`);
 the 1000 ms default follows it, pending owner question Q2 of the plan:
 
@@ -853,14 +874,26 @@ reads exact values.
 | `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync`); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
 | `transactions-per-second` | rate | the gauge's +1 |
 | `commits-per-second` | rate | the gauge's −1 of a context that ended `Committed` (an unconfirmed commit included) |
-| `rollbacks-per-second` | rate | the gauge's −1 of any other end: a rollback, an aborted commit, a disposal's abort |
+| `rollbacks-per-second` | rate | the gauge's −1 of any other end: a rollback, an aborted commit, a disposal's abort, and the Blob, Graph and Documents snapshot pins of `ReadCommitted` statements, which always end rolled back (so this rate includes read traffic in those three models) |
 | `total-deadlocks` | total | each deadlock victim (event 6) |
 | `lock-waits-per-second` | rate | each queued request (event 7) |
 
 The transaction counters count the coordinator's transactions, the same population as the gauge;
-the lock counters count every lock manager. The begin and end transitions already take the
-coordinator's lock and append a journal record, so the `Interlocked` update is noise beside them,
-and no counter moves on a per-row or per-statement path (plan D6).
+the lock counters count every lock manager. The transaction counters move once at a kernel
+transaction's begin and once at its end, which is once per autocommit statement (plan D6 reads
+statement throughput from `transactions-per-second`), beside a per-database lock and a journal
+append. No counter moves per row or per frame. The six backing fields are process-global and sit
+together, so the begin and end `Interlocked` operations of every database in the process share
+them (plan D6 sanctions these counters).
+
+**A begin racing the coordinator's disposal.** `BeginAsync` tracks the context after the
+manager's begin returns. The coordinator's disposal aborts every active context and then clears
+its table, counting each one out of the gauge. A context the manager's disposal aborted before
+`BeginAsync` added it would be added after that clearing and never counted out, so `BeginAsync`
+runs `UntrackEnded` right after adding it: a context that is no longer active leaves the gauge
+there, and one the later clearing counts is no longer in the table when `UntrackEnded` looks. No
+hook makes the race deterministic for a test (the sequence hook runs under the manager's lock,
+which the manager's disposal takes), so it is covered by this argument rather than a test.
 
 **Cost when nobody listens** (event-source.md rule 9): every write is behind
 `IsEnabled(level, keywords)`, and every `ToString` and the storage name read are inside it. An

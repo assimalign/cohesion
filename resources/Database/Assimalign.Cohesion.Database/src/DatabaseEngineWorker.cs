@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -752,34 +753,50 @@ public abstract class DatabaseEngineWorker
             }
 
             long started = DatabaseEventSource.Log.WorkerPassStart(this, pass);
-            Exception? thrown = null;
+
+            // Error until the pass settles, so a pass that escapes still closes its activity.
+            var status = QueryResultStatus.Error;
             try
             {
-                RunIterationCore(cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                AbandonPass();
+                Exception? thrown = null;
+                try
+                {
+                    RunIterationCore(cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    AbandonPass();
 
-                // A pass cancelled at shutdown is not a failure (event-sources plan, D9); its stop
-                // closes the activity its start opened.
-                DatabaseEventSource.Log.WorkerPassStop(this, pass, failed: false, started);
-                throw;
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                thrown = exception;
-            }
-            catch
-            {
-                AbandonPass();
-                throw;
-            }
+                    // A pass cancelled at shutdown is not a failure (event-sources plan, D9).
+                    status = QueryResultStatus.Cancelled;
+                    throw;
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    thrown = exception;
+                }
+                catch
+                {
+                    AbandonPass();
+                    throw;
+                }
 
-            threw = thrown is not null;
-            bool succeeded = SettlePass(thrown, cancellationToken.IsCancellationRequested);
-            DatabaseEventSource.Log.WorkerPassStop(this, pass, !succeeded, started);
-            return succeeded;
+                threw = thrown is not null;
+                bool cancelled = cancellationToken.IsCancellationRequested;
+                bool succeeded = SettlePass(thrown, cancelled);
+
+                // A pass that saw the engine's stop and returned stopped early, as SettlePass reads
+                // it: what it did not visit is not done, so it ends Cancelled, not Success.
+                status = !succeeded ? QueryResultStatus.Error
+                    : cancelled ? QueryResultStatus.Cancelled
+                    : QueryResultStatus.Success;
+                return succeeded;
+            }
+            finally
+            {
+                // Every exit writes the stop that closes the activity the start opened.
+                DatabaseEventSource.Log.WorkerPassStop(this, pass, status, started);
+            }
         }
     }
 

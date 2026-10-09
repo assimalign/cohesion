@@ -102,30 +102,39 @@ written by GraphConnection's three public members. Start and stop carry the `Que
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
 | 1 | `QueryStart` | Verbose | `Queries` | `database`, `operation` (`Query`, `Execute` or `QueryPaths`) |
-| 2 | `QueryStop` | Verbose | `Queries` | `database`, `operation`, `rowCount` (rows; for `QueryPaths`, paths), `durationMilliseconds` |
-| 3 | `QueryFailed` | Error | — | `database`, `operation`, `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 2 | `QueryStop` | Verbose | `Queries` | `database`, `operation`, `status` (`Success`, `Error` or `Cancelled`), `rowCount` (rows; for `QueryPaths`, the paths read by then; -1 for a scalar query that did not return), `durationMilliseconds` |
+| 3 | `QueryFailed` | Error | — | `database`, `operation`, `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
 
 QueryAsync and ExecuteAsync share one private core that names the operation, so an Execute is
-reported as such and not as the Query it runs. A path query stops when its enumeration reaches the
-server's terminal count, and fails on a coded failure of the initial response or of any later read.
-Its start and stop are written by different steps of the enumerator, so an activity-tracking tool
-sees the stop on the consumer's flow rather than nested under the start; an enumeration disposed
-early, like a cancellation, writes neither stop nor failure. Only a coded failure
-(`DatabaseClientException`) ends a start with event 3: a cancellation, which is how a timeout
-surfaces, or an uncoded exception (an overlapping exchange, a disposed connection) leaves the
-start without a stop or a failure, and because event 3 is not a stop, an activity-tracking tool
-leaves a failed query's activity open. Pairing every start with a stop, and moving the path
-query's pair off the enumerator, are owner decisions on the event-source plan's catalog.
+reported as such and not as the Query it runs. **Every start has a stop** (the area's convention,
+`docs/resources/Database/DESIGN.md`, "Diagnostics"), written from a `finally`: a failure writes
+event 3 and then `QueryStop` with `Error`, a cancellation (how a timeout surfaces) `QueryStop` with
+`Cancelled` and no failure. The failure is captured by an exception filter that declines it, so it
+reaches the caller unchanged. A path query ends when its enumeration does: `Success` once it
+reached the server's terminal count; `Error`, after event 3, for a failed open or read;
+`Cancelled` for a cancellation or for a caller that stopped reading and disposed the enumerator
+early, with the paths read by then. An iterator cannot catch around a `yield`, so the open and each
+read capture their own failure, and the iterator's `finally` writes the stop. Its start and stop are
+written by different steps of the enumerator, each on its consumer's execution context, where the
+start's activity is not current; so while the start was written, the enumerator captures the
+start's execution context and writes the end in it (`ExecutionContext.Run`, allocating only then),
+and an activity-tracking tool sees `QueryStop` close the activity `QueryStart` opened. As
+`System.Net.Http`'s `RequestStop`, a stop is written only for a start that was written, so a
+listener that attaches mid-query sees no stop without its start; event 3 is written either way.
 
-The statement text and the parameter values are not written, but event 3's `exceptionMessage` is
-the server's text, and a GQL parse error's can quote a fragment of the statement. The client cannot
-tell such a fragment from the rest of the message; the shared core's `ExchangeFailed` writes no
-statement-level server message at all, and whether event 3 may carry it is owner question Q3 of the
-plan. Timestamps are taken only while a listener takes the source. No counters.
+The statement text and the parameter values are never written, nor is the server's message: a GQL
+parse error's quotes a fragment of the statement, so event 3 writes the wire code and the
+exception's type only (the area's failure rule). Timestamps are taken only while a listener takes
+the source. No counters.
 
-`GraphClientEventSourceTests` checks the name, the strict manifest, and one event per query of each
-member, a refused statement included, with its payload and no statement text outside the refusal's
-server message.
+`GraphClientEventSourceTests` checks the name, the strict manifest, one event per query of each
+member, a refused statement included (its failure, then its `Error` stop, with no statement text and
+no server message), a path query its caller stopped reading (a `Cancelled` stop with the paths read),
+a cancelled query (a `Cancelled` stop and no failure), a path query the server refused
+(`ParseFailure`, then an `Error` stop with no paths), a query refused by the client itself because a
+path query holds the exchange (an empty code and `InvalidOperationException`), a failure whose start
+was not written (no stop), and, under `TplEventSource` activity tracking, a path query's stop
+carrying its start's activity id whether its caller read every path or stopped early.
 
 ## Concrete types (concrete-types plan, phase 5, #1261)
 

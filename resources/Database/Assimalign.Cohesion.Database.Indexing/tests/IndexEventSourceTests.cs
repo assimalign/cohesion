@@ -85,12 +85,12 @@ public sealed class IndexEventSourceTests
         events[0].EventId.ShouldBe(1);
         events[0].Level.ShouldBe(EventLevel.Verbose);
         events[0].PayloadNames.ShouldBe(["database", "objectId", "index", "kind"]);
-        events[0].Payload.ShouldBe([name, ObjectId, "ix_lifecycle", nameof(IndexKind.BTree)]);
+        events[0].Payload.ShouldBe([name, (long)ObjectId, "ix_lifecycle", nameof(IndexKind.BTree)]);
 
         events[1].EventId.ShouldBe(2);
         events[1].Level.ShouldBe(EventLevel.Verbose);
         events[1].PayloadNames.ShouldBe(["database", "objectId", "index"]);
-        events[1].Payload.ShouldBe([name, ObjectId, "ix_lifecycle"]);
+        events[1].Payload.ShouldBe([name, (long)ObjectId, "ix_lifecycle"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should report the first leaf split of a root and the root's growth once each")]
@@ -222,7 +222,7 @@ public sealed class IndexEventSourceTests
         refused.EventId.ShouldBe(3);
         refused.Level.ShouldBe(EventLevel.Error);
         refused.PayloadNames.ShouldBe(["database", "objectId", "index", "rootPageId", "foundFormat"]);
-        refused.Payload.ShouldBe([name, ObjectId, "ix_legacy", root, 1]);
+        refused.Payload.ShouldBe([name, (long)ObjectId, "ix_legacy", root, 1]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should report a split whose separator would misorder its parent, once")]
@@ -301,7 +301,7 @@ public sealed class IndexEventSourceTests
         var purge = recorder.For(name).ShouldHaveSingleItem();
         purge.EventName.ShouldBe("WritersPurged");
         purge.EventId.ShouldBe(8);
-        purge.Level.ShouldBe(EventLevel.Verbose);
+        purge.Level.ShouldBe(EventLevel.Informational);
         purge.PayloadNames.ShouldBe(["database", "writers", "entriesRemoved", "durationMilliseconds"]);
         purge.Payload!.Take(3).ShouldBe([name, 1, purged]);
         ((double)purge.Payload![3]!).ShouldBeGreaterThanOrEqualTo(0);
