@@ -382,6 +382,67 @@ The integration architecture, in the order the work items landed:
 - **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
 - **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (`Sql.Security` enforcing over the SQL catalog's objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
 
+#### Diagnostics: one event source per assembly
+
+Every Database project that does run-time work reports through its own internal `EventSource`,
+named for its assembly (`.claude/rules/event-source.md`; the public list is
+[`docs/EVENT_SOURCES.md`](../../EVENT_SOURCES.md)). The rollout plan is
+[`docs/programs/DATABASE_EVENT_SOURCES_PLAN.md`](../../programs/DATABASE_EVENT_SOURCES_PLAN.md)
+until its last batch lands; each project's `docs/DESIGN.md` **Diagnostics** section is then the
+durable record of its events. The decisions every source shares:
+
+- **One source per assembly, written where the behavior lives.** A behavior every model shares lives
+  once in the root bases, so its events are written once, by the root source: database
+  create/open/drop/close, engine lifecycle, worker passes, server start/stop, the server-session
+  handshake setters, session and statement execution, and explicit transactions. A statement of any
+  model is one root `StatementStart`/`StatementStop` pair, written for the outermost call on a
+  session. Model sources carry only what the model owns.
+- **No shared, linked or forwarded source.** The four model servers' sources are separate files with
+  the same ids, names and payloads for the same events, so one provider list and one log query cover
+  all four.
+- **Levels:** `Error` an operation failed; `Warning` degraded but recovered; `Informational`
+  lifecycle; `Verbose` per-operation detail, each high-volume family under its own keyword.
+  `Start`/`Stop` only for work on one flow; lifetimes use `Opened`/`Closed`/`Begun`.
+- **Cost nothing when nobody listens.** Every write is behind `IsEnabled(level, keywords)`; a member
+  that times its core keeps a synchronous fast path and enters a pooled `async` wrapper only while
+  enabled; timestamps and `ToString` run inside the check. Counters are exact or absent, and none
+  sits on a per-row, per-frame or per-statement path.
+- **Payload hygiene.** Never statement text, parameter values, keys, values, document or blob
+  content, authentication evidence, connection strings or tokens. Identifiers (engine, database,
+  storage, container, index and principal names, session and transaction ids, protocol and
+  diagnostic codes) are fine; an exception is its type's full name and its `Message`, except where
+  the message can quote the statement: parse errors quote the token they stopped at, string
+  literals included, and the models' aborted-transaction refusals repeat the failed operation's
+  message. A statement or command failure is written by its diagnostic code or exception type only
+  (the root's `StatementFailed`, `TransactionAborted` and aborted `TransactionCommitFailed`).
+- **Thresholds are EventSource arguments**, not public API: `SlowStatementThresholdMs` (root) and
+  `SlowLockWaitThresholdMs` (Transactions), 1000 ms by default.
+
+| Event source (= assembly) | Type | Batch | Reports |
+| --- | --- | --- | --- |
+| `Assimalign.Cohesion.Database` | `DatabaseEventSource` | existed; B1 | Engine, database, worker, server, server-session handshake, session, statement and explicit-transaction lifecycle; worker failures and give-ups; `current-sessions` ([Database DESIGN.md](../../../resources/Database/Assimalign.Cohesion.Database/docs/DESIGN.md#diagnostics)) |
+| `Assimalign.Cohesion.Database.Storage` | `StorageEventSource` | B2 | Recovery, checkpoints, write-back, group commit, a storage gone offline, buffer-pool pressure, checksum failures; 8 counters |
+| `Assimalign.Cohesion.Database.Transactions` | `TransactionEventSource` | B3 | Kernel transactions, deadlocks, lock waits, deferred undo, recovery analysis, deferred checkpoints, version purge; 6 counters |
+| `Assimalign.Cohesion.Database.Indexing` | `IndexEventSource` | B3 | Index DDL, format and corruption failures, invariant violations, page splits, writer purges |
+| `Assimalign.Cohesion.Database.Protocol` | `ProtocolEventSource` | B4 | Frames read and written (Verbose, `Frames`) |
+| `Assimalign.Cohesion.Database.Security` | `DatabaseSecurityEventSource` | B4 | Authenticator verdicts and failures |
+| `Assimalign.Cohesion.Database.Client` | `DatabaseClientEventSource` | B4 | Connections, dial and handshake failures, broken connections, pool rent and return; 4 counters |
+| `Assimalign.Cohesion.Database.Sql.Client` | `SqlClientEventSource` | B4 | Commands, observer failures |
+| `Assimalign.Cohesion.Database.KeyValuePair.Client` | `KeyValueClientEventSource` | B4 | Commands, observer failures |
+| `Assimalign.Cohesion.Database.Graph.Client` | `GraphClientEventSource` | B4 | Queries |
+| `Assimalign.Cohesion.Database.Blob.Client` | `BlobClientEventSource` | B4 | Transfers, list cleanup failures |
+| `Assimalign.Cohesion.Database.Sql` | `SqlDatabaseEventSource` | B5; D | The server and its sessions; statement planning and model-owned provisioning after the redesign |
+| `Assimalign.Cohesion.Database.KeyValuePair` | `KeyValueDatabaseEventSource` | B5 | The server and its sessions |
+| `Assimalign.Cohesion.Database.Graph` | `GraphDatabaseEventSource` | B5 | The server and its sessions, index recovery on open, wire-path parse failures |
+| `Assimalign.Cohesion.Database.Blob` | `BlobDatabaseEventSource` | B5 | The server and its sessions, per-database and engine-wide refusals, transfers |
+| `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | B5 | Index recovery on open |
+| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | existed; D | Reopening offline databases; the application's build, start, stop, commands, admin endpoint and health after the hosting redesign |
+
+`D` is the batch that follows the owner's redesign of the Hosting builder, schema provisioning and
+engine extensibility; nothing in those files is instrumented before it lands. The projects that get
+no source, and why, are listed in [`docs/EVENT_SOURCES.md`](../../EVENT_SOURCES.md). A NativeAOT
+application receives these events only with `<EventSourceSupport>true</EventSourceSupport>`.
+
 ### 3.10 The second model: the kernel-generality verdict (2026-07-14, KeyValuePair bring-up)
 
 The KeyValuePair engine was built as the deliberate test of R3's premise — that the kernel is model-general, not SQL-shaped. The test was honest by construction: the model composes the kernel in the **inverse shape** of the SQL engine (index-primary — the B+Tree primary key index *is* the key structure, and every read is a seek — versus SQL's scan-primary record space with secondary-index accelerators), with a different conflict grain (key locks only; no per-row location locks — one key lock subsumes them because every mutation is keyed by exactly one key), a different statement surface (a five-verb command grammar, no language), and a near-empty catalog. What follows is what the second model **proved** and what it **exposed**, both earned by the delivered story list (engine #205, server + extraction #917, typed client #207, builder verbs + wire E2E), not asserted.

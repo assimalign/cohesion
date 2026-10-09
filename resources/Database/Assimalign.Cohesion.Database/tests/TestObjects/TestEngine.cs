@@ -111,6 +111,12 @@ internal sealed class TestEngine : DatabaseEngine
     /// <summary>Gets or sets the gate every database the engine creates or opens holds its close on.</summary>
     public TaskCompletionSource? CloseGate { get; set; }
 
+    /// <summary>
+    /// Gets or sets a task the open core awaits before it looks the database up, so a test can hold
+    /// several opens in flight together.
+    /// </summary>
+    public Task? OpenBarrier { get; set; }
+
     public override IReadOnlyList<DatabaseName> OfflineDatabases => Offline;
 
     public bool Disposed => IsDisposed;
@@ -120,6 +126,12 @@ internal sealed class TestEngine : DatabaseEngine
     public void Attach(DatabaseServer server) => AttachServer(server);
 
     public void Complete() => CompleteComposition();
+
+    /// <summary>
+    /// Gets whether the calling thread holds the lock the database cores run under, which they
+    /// throw inside: the event source's tests read it while an event is written.
+    /// </summary>
+    public bool HoldsRegistryLock => Monitor.IsEntered(_databases);
 
     /// <summary>Gets whether the leaf still tracks this instance.</summary>
     public bool Tracks(DatabaseInstance database)
@@ -154,13 +166,29 @@ internal sealed class TestEngine : DatabaseEngine
     protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (OpenBarrier is { } barrier)
+        {
+            return OpenAfterAsync(barrier, name);
+        }
+
+        return new ValueTask<DatabaseInstance>(OpenTracked(name));
+    }
+
+    private async ValueTask<DatabaseInstance> OpenAfterAsync(Task barrier, DatabaseName name)
+    {
+        await barrier.ConfigureAwait(false);
+        return OpenTracked(name);
+    }
+
+    private DatabaseInstance OpenTracked(DatabaseName name)
+    {
         lock (_databases)
         {
             // A tracked database is returned as it is, a closing one too: the base waits for its
             // close, which forgets it, and calls the core again.
             if (_databases.TryGetValue(name, out var database))
             {
-                return new ValueTask<DatabaseInstance>(database);
+                return database;
             }
 
             if (!_existing.Contains(name))
@@ -172,7 +200,7 @@ internal sealed class TestEngine : DatabaseEngine
             _databases.Add(name, reopened);
             Interlocked.Increment(ref _reopens);
             Publish();
-            return new ValueTask<DatabaseInstance>(reopened);
+            return reopened;
         }
     }
 

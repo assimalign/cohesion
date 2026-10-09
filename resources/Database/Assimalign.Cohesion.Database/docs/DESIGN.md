@@ -808,52 +808,160 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 ## Diagnostics
 
 The root raises its own events through one internal event source, named for the assembly:
-`Assimalign.Cohesion.Database` (`src/Internal/EventSource/DatabaseEventSource.cs`, #1268
-review). Every engine model's workers derive from `DatabaseEngineWorker`, which writes these
-events, so the one source covers the workers of all five engines. A worker's failure is retried,
-so it is a `Warning`; a failure that repeats is written at most once per `FailureBackoff` per
-database (once per coordinator retry for a deferred undo), and the recovery that ends it is
-`Informational`. PostgreSQL reports every error of a background worker's cycle the same way
-before it sleeps and retries (`src/backend/postmaster/checkpointer.c:294-295`).
+`Assimalign.Cohesion.Database` (`src/Internal/EventSource/DatabaseEventSource.cs`; #1268 review,
+extended by batch B1 of `docs/programs/DATABASE_EVENT_SOURCES_PLAN.md`). A behavior every model
+shares lives once in the root bases (`database-area.md`, rule 8), so its events are written once,
+here: every model's engine, worker, server, server session, session and explicit transaction
+derives from these bases, and the one source covers all five models (the plan's D1). The model
+sources carry only what a model owns (its server's accept loop and sessions, Graph and Documents
+index recovery); the kernel children (`Database.Storage`, `Database.Transactions`,
+`Database.Indexing`) and the wire and client packages have sources of their own
+([`docs/resources/Database/DESIGN.md`](../../../../docs/resources/Database/DESIGN.md), "Diagnostics").
 
-| Id | Event | Level | Payload |
-| --- | --- | --- | --- |
-| 1 | `WorkerFailed` | Warning | `workerName`, `workerKind`, `database` (empty for a failure of the whole pass or of its trigger wait), `exceptionType` (full name), `exceptionMessage`, `consecutiveFailures` |
-| 2 | `WorkerRecovered` | Informational | `workerName`, `workerKind`, `database` (empty for the worker's passes), `failures` |
-| 3 | `DatabaseTakenOffline` | Error | `engineName`, `database`, `cause` (the `StorageOfflineCause` name), `workerName`, `workerKind`, `exceptionType` (full name of the worker's last failure), `exceptionMessage` |
+Levels follow `event-source.md` rule 7: `Error` is an operation that failed, `Warning` degraded but
+recovered, `Informational` lifecycle, `Verbose` per-operation detail. `Start`/`Stop` pairs are only
+for work that begins and ends on one flow (a statement, a worker pass, the engine's disposal);
+lifetimes that cross flows use `Created`/`Opened`/`Closed`/`Begun` (rule 8).
+
+**Keywords.** Each family of high-volume `Verbose` events has one, so a tool can take one family
+without the rest: `Workers` = `0x1`, `Sessions` = `0x2`, `Statements` = `0x4`, `Transactions` =
+`0x8`. Events without a keyword (every `Informational`, `Warning` and `Error` event) are written
+whenever the level is enabled. The in-process forwarder enables every keyword of a source it
+forwards, so keywords scope out-of-process tools only.
+
+| Id | Event | Level | Keyword | Payload | Written by |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `WorkerFailed` | Warning | — | `workerName`, `workerKind`, `database` (empty for a failure of the whole pass or of its trigger wait), `exceptionType` (full name), `exceptionMessage`, `consecutiveFailures` | `DatabaseEngineWorker`: a reported failure, a pass or trigger wait that threw, a give-up the leaf failed |
+| 2 | `WorkerRecovered` | Informational | — | `workerName`, `workerKind`, `database` (empty for the worker's passes), `failures` | `DatabaseEngineWorker`, the pass that finished the failed work |
+| 3 | `DatabaseTakenOffline` | Error | — | `engineName`, `database`, `cause` (the `StorageOfflineCause` name), `workerName`, `workerKind`, `exceptionType` (full name of the worker's last failure), `exceptionMessage` | `DatabaseEngine`, the queued give-up (owner decision 25) |
+| 4 | `EngineCreated` | Informational | — | `engineName`, `model`, `workerFailureWindowMilliseconds`, `workerFailureMinimumPasses` | the `DatabaseEngine` constructor every leaf reaches |
+| 5 | `EngineComposed` | Informational | — | `engineName`, `model`, `workerCount`, `serverCount` | `CompleteComposition`, its first call |
+| 6 | `EngineDisposeStart` | Informational | — | `engineName`, `model` | `DatabaseEngine.DisposeAsync`, after the once-only exchange |
+| 7 | `EngineDisposeStop` | Informational | — | `engineName`, `model`, `failureCount`, `durationMilliseconds` | the same, when every step ran |
+| 8 | `WorkerLoopFaulted` | Error | — | `engineName`, `workerName`, `workerKind`, `exceptionType`, `exceptionMessage` | the engine's pump, when a worker's `Run` returned before the engine stopped it or threw (the base's loop allows neither; the frame and its event are kept so the pump never ends silently) |
+| 9 | `DatabaseCreated` | Informational | — | `engineName`, `model`, `database`, `durationMilliseconds` | `CreateDatabaseAsync`; not yet for `SqlDatabaseEngine.CreateDatabaseAsync(name, collation)`, which bypasses the base member (a follow-up for the Sql engine, batch D); the same holds for event 13 |
+| 10 | `DatabaseOpened` | Informational | — | `engineName`, `model`, `database`, `waitedForClose`, `durationMilliseconds` | `OpenDatabaseAsync`, once per instance an open made: an open that returns the instance the leaf already held writes nothing, and concurrent first opens of a closed database, which share one instance, write it once |
+| 11 | `DatabaseDropped` | Informational | — | `engineName`, `model`, `database` | `DropDatabaseAsync` |
+| 12 | `DatabaseClosed` | Informational | — | `engineName`, `model`, `database` | `ForgetClosedDatabase`, which every first close reaches: a holder's, a drop's, a reopen's after the database went offline, the engine's disposal |
+| 13 | `DatabaseOperationFailed` | Error | — | `engineName`, `model`, `database`, `operation` (`Create`, `Open`, `Drop`), `exceptionType`, `exceptionMessage` | the three members above; never for a cancellation, nor for `DatabaseNotFoundException` on open, which a server's database resolution expects |
+| 14 | `WorkerPassStart` | Verbose | `Workers` | `workerName`, `workerKind`, `pass` | `DatabaseEngineWorker`, every pass |
+| 15 | `WorkerPassStop` | Verbose | `Workers` | `workerName`, `workerKind`, `pass`, `failed`, `durationMilliseconds` | the same pass; a pass cancelled at shutdown stops with `failed` false |
+| 16 | `WorkerDatabaseUnfinished` | Verbose | `Workers` | `workerName`, `workerKind`, `database` | `ReportUnfinished`: a busy pass (owner decision 45) |
+| 17 | `WorkerGiveUpFailed` | Error | — | `workerName`, `workerKind`, `database`, `exceptionType`, `exceptionMessage` | `RecordGiveUpFailure`: the leaf's `TakeDatabaseOfflineCore` threw (event 1 is written too, as before) |
+| 18 | `ServerStarted` | Informational | — | `engineName`, `model`, `serverType` | `DatabaseServer.StartAsync` |
+| 19 | `ServerStartFailed` | Error | — | `engineName`, `model`, `serverType`, `exceptionType`, `exceptionMessage` | the terminal failed start: a bind failure, Blob's engine-wide refusal; never for a canceled start, which leaves the server stopped as well |
+| 20 | `ServerStopped` | Informational | — | `engineName`, `model`, `serverType`, `durationMilliseconds` | `DatabaseServer.StopAsync` of a server that ran; one that never started stops silently |
+| 21 | `ServerSessionNegotiated` | Verbose | `Sessions` | `sessionId`, `protocolVersion` | `DatabaseServerSession.SetNegotiatedVersion` |
+| 22 | `ServerSessionAuthenticated` | Informational | — | `sessionId`, `principal` | `DatabaseServerSession.SetAuthenticatedPrincipal` |
+| 23 | `SessionOpened` | Verbose | `Sessions` | `engineName`, `database`, `sessionNumber` | the `DatabaseSession` constructor |
+| 24 | `SessionClosed` | Verbose | `Sessions` | `database`, `sessionNumber`, `failed` | `DatabaseSession.DisposeAsync`, its first call |
+| 25 | `StatementStart` | Verbose | `Statements` | `database`, `sessionNumber`, `requestKind` (the request type's name, or `Text`) | `DatabaseSession.ExecuteAsync`, both overloads, outermost call only |
+| 26 | `StatementStop` | Verbose | `Statements` | `database`, `sessionNumber`, `status` (`QueryResultStatus` name; `Error` or `Cancelled` for a core that threw), `affectedCount` (`-1` for a core that threw), `durationMilliseconds` | the same |
+| 27 | `SlowStatement` | Warning | — | `engineName`, `model`, `database`, `sessionNumber`, `requestKind`, `status`, `durationMilliseconds`, `thresholdMilliseconds` | the same, when the statement ran at least `SlowStatementThresholdMs` |
+| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `failure`, `durationMilliseconds` | the same: `failure` is a thrown exception's full type name, or the code of a failed result's first error diagnostic (its first diagnostic when it holds no error; `Error` when it holds none); never the message, which can quote the statement; never for a cancellation |
+| 29 | `TransactionBegun` | Verbose | `Transactions` | `database`, `sessionNumber`, `transactionId`, `isolationLevel` | `DatabaseSession.BeginTransactionAsync`, once the transaction is the session's |
+| 30 | `TransactionCommitted` | Verbose | `Transactions` | `transactionId`, `durationMilliseconds` (the commit's own) | `DatabaseTransaction.CommitAsync` |
+| 31 | `TransactionRolledBack` | Verbose | `Transactions` | `transactionId`, `cause` (`Rollback`, `Dispose`, `SessionClosed`) | `RollbackAsync`, `DisposeAsync` and the session's teardown, when a kernel rollback ran |
+| 32 | `TransactionAborted` | Verbose | `Transactions` | `transactionId`, `exceptionType` (the cause's; not its message, which can quote the statement) | `AbortAsync`, for the failure that aborted the transaction (the statement's own failure is event 28) |
+| 33 | `TransactionCommitFailed` | Error | — | `transactionId`, `exceptionType`, `exceptionMessage` (empty when an operation had aborted the transaction: the model's refusal repeats the operation's message) | `CommitAsync`: an offline refusal, a refused or aborted commit, a kernel commit that threw; never for a cancellation before the commit started |
+| 34 | `EngineDisposeFailed` | Error | — | `engineName`, `model`, `failureCount`, `exceptionType`, `exceptionMessage` (the first failure collected) | `DatabaseEngine.DisposeAsync`, before event 7 |
 
 `consecutiveFailures` counts failed passes of that database since owner decision 25: a pass that
 reports several failures of one database (one per file set) counts once, and the count is what
 the engine's `WorkerFailureMinimumPasses` is compared with (owner decision 42; the window is
 timed, not counted, and is in the give-up's reason).
 
-No counters: a worker's counts are on the worker (`FailureCount`, `ConsecutiveFailures`), and
-the hosting health aggregate reports them. The health output names a failing worker and the
-type of its failure only, because the health endpoint is unauthenticated and an exception's
-message can carry file paths; the event carries the message. An engine that gives up on a
-database (owner decision 25) writes event 3 once, from the root engine base, on the thread-pool
-thread that took the database offline: the worker's failures lasted the engine's window across
-its minimum of passes, or
-the checkpointer found the journal past the cap on a second failed checkpoint in a row. A give-up
-the leaf fails is written as event 1 of the worker that asked, with the database's name. A
-database a device failure took offline is not a worker event: the engines report it
-through `DatabaseEngine.OfflineDatabases` and health, and every refusal carries the failure that
-took it offline (`DatabaseOfflineException`'s inner `StorageOfflineException`, its `Cause` and its
-I/O error). This source does not write that transition, and cannot without breaking the
+**Payloads.** Names follow the plan's vocabulary, so one query works across every Database
+source: `engineName`, `model` (the `EngineModel` name), `database`, `sessionNumber`,
+`transactionId`, `workerName`, `workerKind`, `exceptionType`, `exceptionMessage`,
+`durationMilliseconds`. `sessionNumber` is a process-wide sequence the base gives a session the
+first time an event needs it (no public surface). No payload carries statement text, parameter
+values, keys, values or authentication evidence (rule 11; the plan's D8, owner question Q3): a
+statement is located by its session, its request kind, its status and its diagnostic code, and a
+principal's name is an identifier (owner question Q4). An exception is its type's full name and
+its `Message`, except where the message can quote the statement: a parser quotes the token it
+stopped at, string literals included (`SqlQueryParser.DescribeToken`, `OqlQueryParser`), and every
+model's aborted-transaction refusal repeats the failed operation's message. So `StatementFailed`
+writes a diagnostic code or an exception type and no message, `TransactionAborted` writes its
+cause's type only, and `TransactionCommitFailed` writes an empty message for a commit an
+operation's failure aborted. This narrows the plan's catalog, which listed a `message` for event 28
+and an `exceptionMessage` for event 32, to its own D8.
+
+**Statements and re-entry.** A statement is reported by the root session, once, whatever the model:
+Sql, KeyValuePair, Graph and Documents statements all enter through `DatabaseSession.ExecuteAsync`.
+Graph and Documents parse a text statement and run the typed request through the root's typed
+overload again on the same session, so events 25-28 are written for the outermost call on a
+session only, through a private flag the traced call sets; a session runs one operation at a time,
+so the flag needs no synchronization. Graph's wire path enters at the typed overload after its
+server parsed the statement, so a parse failure there is reported by the Graph model's source.
+Blob has no statements: its container operations are reported by the kernel's transaction events
+and, on the wire, by its server and client.
+
+**Cost while nobody listens** (rule 9; the plan's D5). Every write is behind
+`IsEnabled(level, keywords)`, and every string a payload needs is computed inside that check. The
+members that time their work (both `ExecuteAsync` overloads, `CreateDatabaseAsync`,
+`OpenDatabaseAsync`, `DropDatabaseAsync`) return their core directly while the source is disabled.
+While it is enabled at `Error` or a more verbose level they call the core the same way and enter an
+`async` wrapper built with `PoolingAsyncValueTaskMethodBuilder` only for a core that has not
+completed successfully, so a core that throws synchronously throws from the call whether or not
+anyone listens, and an already faulted or pending core's task carries the same exception
+(`event-source.md`, rule 12). The open is asynchronous untraced too, so its traced form is one
+pooled wrapper. A failure is captured by an exception filter that catches nothing and written from
+the `finally` that follows, after the core's own `finally` blocks released what they held: a filter
+runs before them, so writing from it would run every listener and forwarded logger under the leaf's
+registry lock or the transaction's lock and end gate. Timestamps are taken only inside an enabled
+check. A traced open first reads the leaf's `TryGetDatabaseCore` for the instance it holds; a lookup
+that throws reads as none, and the open's core then decides. The instances whose open was reported
+sit in a weak table the first traced open creates, so concurrent opens that share an instance write
+it once. The allocation checks in `tests/DatabaseEventSourceTests.cs` measure the statement path:
+with no listener, the public member allocates exactly what its core does (0 bytes for a
+synchronous core); under a `Warning` listener (an application that forwards at `Information`), it
+allocates nothing for a synchronous core in an optimized or an unoptimized build.
+
+**Arguments.** `SlowStatementThresholdMs` sets how long a statement runs before event 27 reports it,
+in milliseconds; the default is 1000 (the plan's D7, owner question Q2). Each enabling session sets
+it, to its argument or, when it passes none or one that is not a finite non-negative number, to the
+default, so the last session to enable the source wins. A session that disables the source
+restores the default, so a brief tool session's threshold never outlives it; another session that
+set its own loses it then too. The in-process forwarder passes no arguments and gets the default:
+`dotnet-trace collect --providers "Assimalign.Cohesion.Database:0x4:4:SlowStatementThresholdMs=250"`.
+
+**Counter.** `current-sessions` ("Current Sessions", a gauge): sessions constructed and not yet
+closed, process-wide. The `DatabaseSession` constructor counts a session in and its one close
+transition counts it out, whether or not anyone listens, so a tool that attaches late reads the exact
+value. It is created on the first enable command. No per-statement counter is kept (the plan's D6:
+a process-global `Interlocked` on every statement is a contention point); throughput is the kernel's
+`transactions-per-second`, since every autocommit statement is one kernel transaction.
+
+A worker's counts are on the worker (`FailureCount`, `ConsecutiveFailures`), and the hosting health
+aggregate reports them. The health output names a failing worker and the type of its failure only,
+because the health endpoint is unauthenticated and an exception's message can carry file paths; the
+event carries the message. An engine that gives up on a database (owner decision 25) writes event 3
+once, from the root engine base, on the thread-pool thread that took the database offline: the
+worker's failures lasted the engine's window across its minimum of passes, or the checkpointer found
+the journal past the cap on a second failed checkpoint in a row. A give-up the leaf fails is written
+as event 1 of the worker that asked and as event 17, with the database's name. A database a device
+failure took offline is not a root event: the engines report it through
+`DatabaseEngine.OfflineDatabases` and health, every refusal carries the failure that took it offline
+(`DatabaseOfflineException`'s inner `StorageOfflineException`, its `Cause` and its I/O error), and
+the storage that went offline reports it in its own source (`Assimalign.Cohesion.Database.Storage`,
+`StorageOffline`, batch B2 of the plan). The root cannot write that transition without breaking the
 event-source convention: an engine model sees it in its storage's `OnOffline` hook, outside the
 root, and the root may expose no public entry point into this internal source
-(`.claude/rules/event-source.md`, rule 2). An offline event for a device failure therefore belongs
-in each engine model's own source, which none has yet: an open follow-up of the #1268 review.
-Until then a database a drain on a worker's thread took offline (#1252) is visible as it happens
-only in health, and in the hosting module's event source when the application reopens it
-(`Assimalign.Cohesion.Database.Hosting`, owner decision 22), and its cause in the next refused
-operation.
+(`.claude/rules/event-source.md`, rule 2). The hosting module's source reports the application's
+reopen of such a database (`Assimalign.Cohesion.Database.Hosting`, owner decision 22).
+
+Not instrumented here: schema provisioning (`DatabaseInstance.ApplySchemaAsync`, `Provisioning/`),
+which leaves the root in the owner's redesign; its events go with the code into the model (the
+plan's §5).
 
 ## AOT posture
 
 Contracts, enums, value objects, and canonical-document hashing only. The root does not inspect
-model schemas or discover types dynamically. The event source writes only strings and integers,
-which bind to the trim-safe `WriteEvent` overloads; a NativeAOT application receives its events
+model schemas or discover types dynamically. The event source writes only strings, integers,
+doubles, booleans and GUIDs, which bind to the trim-safe `WriteEvent` overloads
+(`EventSourcePrimitive`); a request kind or server type is a type's `Name`, read only while the
+source is enabled; a NativeAOT application receives its events
 only with `<EventSourceSupport>true</EventSourceSupport>`, and nothing depends on delivery. SQL declaration compilation and source-generated
 JSON serialization live in `Database.Sql.Schema`.
 

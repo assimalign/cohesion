@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.Tracing;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database;
@@ -55,12 +59,24 @@ public abstract class DatabaseSession : IAsyncDisposable
     /// </summary>
     internal const string AlreadyActiveMessage = "A transaction or operation is already active on this session.";
 
+    // The last number the root event source gave a session, process-wide.
+    private static long _lastSessionNumber;
+
     private readonly DatabaseInstance _database;
     private readonly object _sync = new();
     private DatabaseTransaction? _transaction;
     private bool _beginning;
     private bool _operating;
     private bool _closed;
+
+    // The session's number in the root event source's payloads, given the first time an event needs
+    // it; 0 until then.
+    private long _sessionNumber;
+
+    // Whether a traced statement runs on the session: a statement a model's text overload parses and
+    // runs again through the typed overload (Graph, Documents) is written once, for the outermost
+    // call. A session runs one operation at a time, so the field needs no synchronization.
+    private bool _tracingStatement;
 
     /// <summary>
     /// Initializes a new session scoped to a database.
@@ -71,6 +87,7 @@ public abstract class DatabaseSession : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
+        DatabaseEventSource.Log.SessionOpened(this);
     }
 
     /// <summary>
@@ -109,6 +126,27 @@ public abstract class DatabaseSession : IAsyncDisposable
     }
 
     private DatabaseTransaction? OpenTransactionLocked => _transaction is { IsOpen: true } transaction ? transaction : null;
+
+    /// <summary>
+    /// Gets the session's number in the root event source's payloads (<c>sessionNumber</c>): a
+    /// process-wide sequence, given the first time an event needs it, so a session no listener sees
+    /// takes none. No public surface (event-sources plan, payload vocabulary).
+    /// </summary>
+    internal long SessionNumber
+    {
+        get
+        {
+            long number = Volatile.Read(ref _sessionNumber);
+            if (number != 0)
+            {
+                return number;
+            }
+
+            long next = Interlocked.Increment(ref _lastSessionNumber);
+            long prior = Interlocked.CompareExchange(ref _sessionNumber, next, 0);
+            return prior == 0 ? next : prior;
+        }
+    }
 
     /// <summary>
     /// Begins an explicit transaction at the default isolation level, <see cref="IsolationLevel.Snapshot"/>.
@@ -173,6 +211,7 @@ public abstract class DatabaseSession : IAsyncDisposable
                 throw CreateClosedException();
             }
 
+            DatabaseEventSource.Log.TransactionBegun(this, transaction);
             return transaction;
         }
         finally
@@ -198,7 +237,15 @@ public abstract class DatabaseSession : IAsyncDisposable
         ThrowIfClosed();
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
-        return ExecuteCoreAsync(request, cancellationToken);
+
+        // The statement path's fast path (event-sources plan, D5 a): the core is returned as it is
+        // while nobody listens, and while an outer statement of this session is already traced.
+        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None) || _tracingStatement)
+        {
+            return ExecuteCoreAsync(request, cancellationToken);
+        }
+
+        return ExecuteTraced(request, statement: null, parameters: null, cancellationToken);
     }
 
     /// <summary>
@@ -218,7 +265,12 @@ public abstract class DatabaseSession : IAsyncDisposable
         ThrowIfClosed();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         cancellationToken.ThrowIfCancellationRequested();
-        return ExecuteCoreAsync(statement, parameters, cancellationToken);
+        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None) || _tracingStatement)
+        {
+            return ExecuteCoreAsync(statement, parameters, cancellationToken);
+        }
+
+        return ExecuteTraced(request: null, statement, parameters, cancellationToken);
     }
 
     /// <summary>
@@ -239,6 +291,8 @@ public abstract class DatabaseSession : IAsyncDisposable
             _closed = true;
         }
 
+        // The one close transition: the session leaves the current-sessions gauge here.
+        DatabaseEventSource.Log.SessionClosing();
         List<Exception>? failures = null;
         try
         {
@@ -269,6 +323,8 @@ public abstract class DatabaseSession : IAsyncDisposable
                 (failures ??= []).Add(failure);
             }
         }
+
+        DatabaseEventSource.Log.SessionClosed(this, failed: failures is not null);
 
         // Always an aggregate, as the engine's disposal and the Graph, Documents and Blob sessions
         // report theirs: a caller catches one type whatever failed.
@@ -376,6 +432,85 @@ public abstract class DatabaseSession : IAsyncDisposable
     /// </summary>
     /// <returns>A task that completes once the leaf's operations ended.</returns>
     protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
+
+    // The traced statement (event-sources plan, D5 a and §4.1 "Re-entry"): entered only while the
+    // source is enabled, for the outermost statement on the session; its timestamp costs nothing
+    // while nobody listens. It calls the core exactly as the untraced path does, so a core that
+    // throws synchronously throws from the call whether or not anyone listens (event-source.md,
+    // rule 12), and a core that completed returns without a wrapper; only a core that has not
+    // completed successfully is awaited, in a pooled wrapper. A failure is captured by the filter,
+    // which catches nothing, and written from the finally, once the core's own finally blocks
+    // released what they held. The events of a core that returned are written once the flag is
+    // cleared.
+    private ValueTask<QueryResult> ExecuteTraced(
+        QueryRequest? request,
+        string? statement,
+        IReadOnlyDictionary<string, object?>? parameters,
+        CancellationToken cancellationToken)
+    {
+        long started = Stopwatch.GetTimestamp();
+        _tracingStatement = true;
+        ValueTask<QueryResult> pending;
+        Exception? thrown = null;
+        try
+        {
+            DatabaseEventSource.Log.StatementStart(this, request);
+            pending = request is not null
+                ? ExecuteCoreAsync(request, cancellationToken)
+                : ExecuteCoreAsync(statement!, parameters, cancellationToken);
+        }
+        catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
+        {
+            throw;
+        }
+        finally
+        {
+            if (thrown is not null)
+            {
+                _tracingStatement = false;
+                DatabaseEventSource.Log.StatementThrew(this, request, thrown, started);
+            }
+        }
+
+        if (!pending.IsCompletedSuccessfully)
+        {
+            // Still running, or already faulted or canceled: the wrapper observes the outcome and
+            // hands it on as the core's task would.
+            return AwaitTracedAsync(pending, request, started);
+        }
+
+        var result = pending.Result;
+        _tracingStatement = false;
+        DatabaseEventSource.Log.StatementCompleted(this, request, result, started);
+        return new ValueTask<QueryResult>(result);
+    }
+
+    // The rest of a traced statement whose core did not complete successfully at once.
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, QueryRequest? request, long started)
+    {
+        QueryResult result;
+        Exception? thrown = null;
+        try
+        {
+            result = await pending.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
+        {
+            throw;
+        }
+        finally
+        {
+            _tracingStatement = false;
+            if (thrown is not null)
+            {
+                DatabaseEventSource.Log.StatementThrew(this, request, thrown, started);
+            }
+        }
+
+        DatabaseEventSource.Log.StatementCompleted(this, request, result, started);
+        return result;
+    }
 
     private void ThrowIfClosedLocked()
     {

@@ -583,6 +583,8 @@ public abstract class DatabaseEngineWorker
                 record.UnfinishedPass = _pass;
             }
         }
+
+        DatabaseEventSource.Log.WorkerDatabaseUnfinished(this, database);
     }
 
     /// <summary>
@@ -734,19 +736,22 @@ public abstract class DatabaseEngineWorker
         }
 
         DatabaseEventSource.Log.WorkerFailed(this, database, exception, giveUpFailures);
+        DatabaseEventSource.Log.WorkerGiveUpFailed(this, database, exception);
     }
 
     private bool RunPass(CancellationToken cancellationToken, out bool threw)
     {
         lock (_passGate)
         {
+            long pass;
             lock (_sync)
             {
-                _pass++;
+                pass = ++_pass;
                 _passRunning = true;
                 _passReported = false;
             }
 
+            long started = DatabaseEventSource.Log.WorkerPassStart(this, pass);
             Exception? thrown = null;
             try
             {
@@ -755,6 +760,10 @@ public abstract class DatabaseEngineWorker
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 AbandonPass();
+
+                // A pass cancelled at shutdown is not a failure (event-sources plan, D9); its stop
+                // closes the activity its start opened.
+                DatabaseEventSource.Log.WorkerPassStop(this, pass, failed: false, started);
                 throw;
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -768,7 +777,9 @@ public abstract class DatabaseEngineWorker
             }
 
             threw = thrown is not null;
-            return SettlePass(thrown, cancellationToken.IsCancellationRequested);
+            bool succeeded = SettlePass(thrown, cancellationToken.IsCancellationRequested);
+            DatabaseEventSource.Log.WorkerPassStop(this, pass, !succeeded, started);
+            return succeeded;
         }
     }
 
