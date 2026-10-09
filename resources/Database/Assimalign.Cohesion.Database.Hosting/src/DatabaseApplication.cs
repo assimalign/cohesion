@@ -19,19 +19,11 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     private Task? _disposeTask;
     private bool _startAttempted;
 
-    /// <summary>
-    /// Builds an application from copied legacy borrowed inputs, with an empty configuration and no
-    /// service registrations, as <see cref="DatabaseApplicationBuilder(DatabaseApplicationOptions)"/> creates them.
-    /// </summary>
-    /// <param name="options">The host settings and caller-owned inputs.</param>
-    public DatabaseApplication(DatabaseApplicationOptions options)
-        : this(new DatabaseApplicationBuilder(options).BuildComposition()) { }
-
     internal DatabaseApplication(DatabaseApplicationComposition composition) : base(composition.Options)
     {
         _context = composition.Context;
         _ownership = composition.Ownership;
-        var services = new List<IHostService>(composition.Options.Services);
+        var services = new List<IHostService>(composition.Services);
         foreach (DatabaseServer server in composition.Context.Servers)
         {
             services.Add(new DatabaseServerHostService(server));
@@ -64,13 +56,6 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(DatabaseApplication).Assembly;
         return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly, args);
     }
-
-    /// <summary>Creates a builder from host settings and borrowed legacy inputs, with an empty configuration.</summary>
-    /// <param name="options">
-    /// The options: their environment and content root are read now, the rest is copied at Build.
-    /// </param>
-    /// <returns>A new builder.</returns>
-    public static DatabaseApplicationBuilder CreateBuilder(DatabaseApplicationOptions options) => new(options);
 
     /// <inheritdoc />
     protected override Task OnStartingAsync(CancellationToken cancellationToken = default)

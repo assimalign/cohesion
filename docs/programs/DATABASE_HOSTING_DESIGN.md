@@ -1,6 +1,6 @@
 # Phase 29 — Database hosting composition
 
-**Status: implemented with the owner-approved corrections below; acceptance evidence is recorded in §13.**
+**Status: implemented with the owner-approved corrections below; acceptance evidence is recorded in §13. §14 records what B1 of the engine extensibility design changed (2026-10-09).**
 Branch `feature/L03.02-mvp-engines`, base `18918601`, 2026-09-19. The owner approved Shape A
 and the implementation corrections captured in §13. Sections 1–12 preserve the Phase 28 review
 record; their proposed signatures and examples are historical wherever §13 supersedes them.
@@ -1154,3 +1154,45 @@ test-file insertions/deletions are recorded in `_out/PHASE29-REPORT.md`, `_out/P
 and `_out/PHASE29-TEST-DELTAS.md`. `_out/phase29-ESCALATIONS.md` records whether any escalation remained.
 The original CI gap is handled by explicitly running Templates and the package-backed Database.Testing
 fixture against freshly packed framework/SDK content rather than trusting the resources path trigger.
+
+## 14. Superseded by B1 of the engine extensibility design (2026-10-09)
+
+B1 of [DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md](DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md) (owner
+decisions 49 to 58 of 2026-10-09) changes the composition §13 records. The earlier sections stay as
+the record of how the surface was reached; where they conflict, this section wins.
+
+- **Every owned engine is named at registration.** The root seam's nameless
+  `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)` became
+  `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, so Hosting reserves the
+  name, and refuses a duplicate, before any factory runs (§13.1's "arbitrary model factory names are
+  necessarily validated when products return" no longer holds). The five model verbs take
+  `(string name, Action<XEngineBuilder>)`; the callback lost the application context, and every model
+  builder is created by `CreateBuilder(name)` and reports `Name`.
+- **Provisioning moved into the model.** `Provision(...)` ×2, `AddDatabase(...)` ×2, `Schemas` and
+  the `DefaultDatabaseProvisioner` host service are deleted. A SQL engine builder declares its
+  databases (`sql.AddDatabase(name, database => ...)`) and provisions them while it is built, inside
+  application `Build()`; servers start only when the application starts, so provisioning still
+  precedes accept. The root's `CompiledSchema`, `SchemaMigrationResult` and the `DatabaseInstance`
+  capability are deleted.
+- **One registration path per kind of thing.** `DatabaseApplicationOptions.Engines`, `.Servers` and
+  `.Services`, the `DatabaseApplication(options)` constructor and `CreateBuilder(options)` are
+  deleted: engines and services register on the builder, and servers on their engine's builder.
+- **The SQL engine builder exposes its settings as `Options`**, copied at Build, instead of fourteen
+  mirrored properties; the other four builders keep theirs until B3.
+
+The composition example, as of B1:
+
+```csharp
+var builder = DatabaseApplication.CreateBuilder(args);
+builder.AddSql("orders", sql =>
+{
+    sql.Options.RootPath = FileSystemPath.Parse("./data/orders");
+    sql.AddDatabase("sales", database => database.Schema(schema =>
+        schema.Table<Order>("orders", table => table.Key(order => order.Id))));
+    sql.AddServer(server => server.Listen(new Uri("tcp://127.0.0.1:5439")));
+});
+builder.AddDocuments("catalog", _ => { });
+await using var application = builder.Build();
+SqlDatabaseEngine orders = application.Context.GetEngine<SqlDatabaseEngine>("orders");
+await application.RunAsync();
+```

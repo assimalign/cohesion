@@ -175,7 +175,7 @@ public sealed class DocumentStorageOperationsTests
     public async Task CreateBuilder_StorageOptions_ShouldReachTheBuiltEngine()
     {
         // Arrange
-        var builder = DocumentDatabaseEngine.CreateBuilder();
+        var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         long defaultPool = builder.BufferPoolCapacity;
         long defaultSize = builder.CheckpointJournalSize;
         builder.BufferPoolCapacity = 2 * 1024 * 1024;

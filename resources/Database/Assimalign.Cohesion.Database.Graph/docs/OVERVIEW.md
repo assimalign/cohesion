@@ -16,7 +16,7 @@ await using var result = await session.ExecuteAsync(
 ```
 
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
-enforcement and node-property index creation. `AddGraph((context, engine) => ...)`
+enforcement and node-property index creation. `AddGraph(name, engine => ...)`
 captures construction through `IDatabaseApplicationBuilder` and returns that builder.
 The callback runs at Build with the sealed `GraphDatabaseEngineBuilder`. Workers and
 servers register as nested factories typed over `GraphDatabaseEngine`; the built engine
@@ -59,7 +59,7 @@ A read that names a label or relationship type the database does not have is not
 Neo4j, the name matches nothing and the result carries a `COHDBG010` or `COHDBG011` warning, so a
 probe such as `MATCH (n:Missing) RETURN n` keeps the transaction.
 
-`GraphDatabaseEngine.CreateBuilder()` returns the same model builder for
+`GraphDatabaseEngine.CreateBuilder(name)` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine
 factory. This lets the consumer pass already resolved values and register nested
 components while keeping the model package dependency-free.

@@ -207,7 +207,7 @@ public sealed class BlobStorageOperationsTests
     public async Task CreateBuilder_StorageOptions_ShouldReachTheBuiltEngine()
     {
         // Arrange
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         long defaultPool = builder.BufferPoolCapacity;
         long defaultSize = builder.CheckpointJournalSize;
         builder.BufferPoolCapacity = 2 * 1024 * 1024;

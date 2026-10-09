@@ -450,8 +450,7 @@ public sealed class BlobDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
         DatabaseFailingWorker? registered = null;
-        var builder = BlobDatabaseEngine.CreateBuilder();
-        builder.EngineName = engineName;
+        var builder = BlobDatabaseEngine.CreateBuilder(engineName);
         builder.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         var engine = builder.Build();

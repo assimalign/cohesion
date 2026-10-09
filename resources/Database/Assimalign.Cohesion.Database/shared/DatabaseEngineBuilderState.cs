@@ -59,8 +59,46 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
 {
     private readonly List<Func<TEngine, DatabaseEngineWorker>> _workers = [];
     private readonly List<Func<TEngine, DatabaseServer>> _servers = [];
+    private readonly string _name;
     private int _buildAttempted;
     private TEngine? _completedEngine;
+
+    /// <summary>
+    /// Initializes the state of one engine builder for the engine of that name: the first argument
+    /// of the model's verb and of its <c>CreateBuilder(name)</c>, written once (owner decision 52 of
+    /// 2026-10-09).
+    /// </summary>
+    /// <param name="name">The engine name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    public DatabaseEngineBuilderState(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _name = name;
+    }
+
+    /// <summary>
+    /// Gets the engine name the builder was created for.
+    /// </summary>
+    public string Name => _name;
+
+    /// <summary>
+    /// Refuses a build whose options name another engine. Until the model's options lose
+    /// <c>EngineName</c>, the builder seeds it with <see cref="Name"/>, and a value that differs
+    /// (ordinal, a null one included) fails the build instead of naming the engine twice.
+    /// </summary>
+    /// <param name="engineName">The options' engine name.</param>
+    /// <exception cref="InvalidOperationException"><paramref name="engineName"/> is not <see cref="Name"/>.</exception>
+    public void ThrowIfRenamed(string? engineName)
+    {
+        if (!string.Equals(engineName, _name, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"The engine builder for '{_name}' has its options' EngineName set to " +
+                $"{(engineName is null ? "null" : $"'{engineName}'")}. The engine is named once, by the builder; " +
+                "leave EngineName as the builder set it.");
+        }
+    }
 
     // The product the compose method was last handed and has not asked past: the one it was
     // attaching when it failed. The sequences clear it once they see it attached.
@@ -203,6 +241,33 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
         if (engine is not null)
         {
             DisposeRejected(engine, failure);
+        }
+    }
+
+    /// <summary>
+    /// Disposes the engine a completed composition returned, when a later step of the same build
+    /// failed (a SQL engine's provisioning of its declared databases): the asynchronous form of
+    /// <see cref="Abort"/>, which awaits the disposal instead of blocking on it.
+    /// </summary>
+    /// <param name="failure">The failure that abandoned the engine.</param>
+    /// <returns>A task that completes once the engine is disposed.</returns>
+    /// <exception cref="AggregateException"><paramref name="failure"/>, together with the engine's disposal failure.</exception>
+    public async ValueTask AbortAsync(Exception failure)
+    {
+        var engine = _completedEngine;
+        _completedEngine = null;
+        if (engine is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await engine.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+        {
+            throw new AggregateException(failure, cleanup);
         }
     }
 

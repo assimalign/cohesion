@@ -203,4 +203,35 @@ public sealed class SqlDatabaseEngineOptions
     /// fault-injecting doubles here through the test-only grant.
     /// </remarks>
     internal SqlStorageStrategy? StorageStrategy { get; set; }
+
+    /// <summary>
+    /// Copies every option, the internal ones included, into a new object: what an engine keeps, so
+    /// a later change to the caller's options cannot reach the running engine
+    /// (<see cref="SqlDatabaseEngine.Create"/> and <see cref="SqlDatabaseEngineBuilder.Build"/>).
+    /// </summary>
+    /// <returns>The copy.</returns>
+    /// <remarks>
+    /// A new option is added here too: <c>SqlEngineProvisioningTests</c> sets every option to a value
+    /// other than its default, checks that the engine kept each one, and counts the public ones.
+    /// </remarks>
+    internal SqlDatabaseEngineOptions Snapshot() => new()
+    {
+        EngineName = EngineName,
+        Durability = Durability,
+        GroupCommitWindow = GroupCommitWindow,
+        CheckpointInterval = CheckpointInterval,
+        CheckpointJournalSize = CheckpointJournalSize,
+        WorkerFailureWindow = WorkerFailureWindow,
+        WorkerFailureMinimumPasses = WorkerFailureMinimumPasses,
+        JournalSizeLimit = JournalSizeLimit,
+        BufferPoolCapacity = BufferPoolCapacity,
+        PageWriteBackInterval = PageWriteBackInterval,
+        PageWriteBackBatchSize = PageWriteBackBatchSize,
+        MaintenanceInterval = MaintenanceInterval,
+        DeferredUndoRetryDelay = DeferredUndoRetryDelay,
+        TimeProvider = TimeProvider,
+        ExpressionNestingLimit = ExpressionNestingLimit,
+        RootPath = RootPath,
+        StorageStrategy = StorageStrategy,
+    };
 }

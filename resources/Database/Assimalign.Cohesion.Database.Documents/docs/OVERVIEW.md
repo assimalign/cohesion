@@ -35,7 +35,7 @@ await session.ExecuteAsync("CREATE INDEX by_total ON orders (total)");
 var result = await session.ExecuteAsync("SELECT o.customer.name FROM orders o WHERE o.total >= 40");
 ```
 
-`AddDocuments((context, engine) => ...)` captures engine construction on the root
+`AddDocuments(name, engine => ...)` captures engine construction on the root
 `IDatabaseApplicationBuilder` and returns that application builder. During Build,
 the callback configures the sealed `DocumentDatabaseEngineBuilder`, including deferred worker
 and server factories typed over `DocumentDatabaseEngine`. The application owns the resulting
@@ -56,7 +56,7 @@ defines the supported grammar; the [storage design](../../Assimalign.Cohesion.Da
 defines the on-disk format. ApplicationModel and compiled-schema provisioning
 remain outside this composition change.
 
-`DocumentDatabaseEngine.CreateBuilder()` returns the same model builder for
+`DocumentDatabaseEngine.CreateBuilder(name)` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine
 factory. This lets the consumer pass already resolved values and register nested
 components while keeping the model package dependency-free.

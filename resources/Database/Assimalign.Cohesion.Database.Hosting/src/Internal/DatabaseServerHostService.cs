@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// <remarks>
 /// The server owns its own two-phase drain; this service only maps that lifecycle
 /// onto the hosting execution menu. <see cref="DatabaseApplication"/> constructs
-/// one per server registered on <see cref="DatabaseApplicationOptions.Servers"/>
+/// one per server of the application's engines (<see cref="DatabaseApplicationContext.Servers"/>)
 /// and registers them last, so every endpoint starts after — and drains before —
 /// every other composed service.
 /// </remarks>

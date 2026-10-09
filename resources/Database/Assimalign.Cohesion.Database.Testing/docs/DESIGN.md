@@ -126,10 +126,11 @@ it does not depend on an application-export API. Coverage asserts:
 - Replacing real-process gateway tests. The in-process factory gives fast resource tests;
 the sample E2E independently validates the SDK manifest and process carrier.
 
-The fixture declares and compiles its relational schema with
-`Database.Sql.Schema`'s `SqlSchema.Compile`, then passes the compiled identity to Hosting's
-`AddDatabase`. The SDK analyzes that same declaration at build time. Hosting's
-before-accept provisioning order and the fixture's runtime behavior are unchanged.
+The fixture declares its relational schema with `Database.Sql.Schema` and, since B1 of the
+engine extensibility design, declares its database on the SQL engine builder
+(`sql.AddDatabase(name, database => database.Schema(...))`), whose build provisions it inside the
+application's Build, before any server accepts. The SDK analyzes that same declaration at build
+time. The fixture's move to that composition is part 2 of B1.
 
 ## Bootstrap identity (O35)
 
@@ -141,9 +142,10 @@ Custom managed contexts must supply a matching JWT and public trust key.
 
 ## Phase 29 Database composition migration
 
-Database programs now capture `AddSql((context, engine) => ...)` intent, register
-the server through that engine builder's deferred `AddServer` factory, and
-identify deferred provisioning with the engine name. One application Build
+Database programs now capture `AddSql(name, sql => ...)` intent (B1 replaced the
+phase-29 `AddSql((context, engine) => ...)` shape), register the server through that engine
+builder's deferred `AddServer`, and declare the databases the engine provisions on the same
+builder. One application Build
 constructs and owns the engine and nested server; the program disposes the
 application. The standalone template still uses its ordinary local data path.
 This migration changes composition only; it adds no ApplicationModel declarations,

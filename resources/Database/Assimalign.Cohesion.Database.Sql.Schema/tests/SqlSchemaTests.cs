@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Linq.Expressions;
 
 using Shouldly;
 using Xunit;
@@ -26,9 +25,7 @@ public class SqlSchemaTests
         }
 
         SqlCompiledSchema schema = SqlSchema.Compile("orders", Configure);
-        SqlCompiledSchema twoStep = SqlSchemaCompiler.Compile(
-            SqlSchema.Create("orders", Configure),
-            EngineModel.Sql);
+        SqlCompiledSchema twoStep = SqlSchemaCompiler.Compile(SqlSchema.Create("orders", Configure));
 
         schema.Hash.ShouldBe(twoStep.Hash);
         schema.CanonicalDocument.ShouldBe(twoStep.CanonicalDocument);
@@ -47,7 +44,7 @@ public class SqlSchemaTests
         SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
             () => SqlSchema.Compile("invalid", Configure));
         SqlSchemaValidationException twoStep = Should.Throw<SqlSchemaValidationException>(
-            () => SqlSchemaCompiler.Compile(SqlSchema.Create("invalid", Configure), EngineModel.Sql));
+            () => SqlSchemaCompiler.Compile(SqlSchema.Create("invalid", Configure)));
 
         exception.Message.ShouldBe(twoStep.Message);
         exception.Errors
@@ -84,10 +81,6 @@ public class SqlSchemaTests
                 table.Key(line => line.Id);
                 table.References<Order>(line => line.OrderId);
             });
-            database.Function("order_identity", (long orderId) => orderId);
-            database.Trigger<Order>(
-                SqlTriggerEvent.AfterInsert,
-                (transaction, row) => transaction.Audit("order.placed", row.Id));
             database.Principal(
                 "appa-api",
                 principal => principal.Grant(SqlPermission.ReadWrite, "Orders", "OrderLines"));
@@ -113,18 +106,6 @@ public class SqlSchemaTests
         SqlSchemaReference reference = line.References.ShouldHaveSingleItem();
         reference.Member.ShouldBe(nameof(OrderLine.OrderId));
         reference.TargetType.ShouldBe(typeof(Order));
-
-        SqlSchemaFunction function = schema.Declaration.Functions.ShouldHaveSingleItem();
-        function.Name.ShouldBe("order_identity");
-        function.Body.ShouldBeAssignableTo<Expression<Func<long, long>>>();
-        function.Body.Parameters.ShouldHaveSingleItem().Type.ShouldBe(typeof(long));
-
-        SqlSchemaTrigger trigger = schema.Declaration.Triggers.ShouldHaveSingleItem();
-        trigger.RowType.ShouldBe(typeof(Order));
-        trigger.Event.ShouldBe(SqlTriggerEvent.AfterInsert);
-        trigger.Body.Parameters.Count.ShouldBe(2);
-        trigger.Body.Parameters[0].Type.ShouldBe(typeof(SqlTriggerContext));
-        trigger.Body.Parameters[1].Type.ShouldBe(typeof(Order));
 
         SqlSchemaPrincipal principal = schema.Declaration.Principals.ShouldHaveSingleItem();
         principal.Name.ShouldBe("appa-api");
@@ -185,13 +166,10 @@ public class SqlSchemaTests
             database => database.Principal("reader", principal => principal.Grant(SqlPermission.Read))));
 
         // The sealed builder's parameters carry the names its documentation gives; the former
-        // implementation behind the interface reported "tableName" and "extensionName".
+        // implementation behind the interface reported "tableName".
         Should.Throw<ArgumentException>(() => SqlSchema.Create(
             "orders",
             database => database.Table<Order>(" ", _ => { }))).ParamName.ShouldBe("name");
-        Should.Throw<ArgumentException>(() => SqlSchema.Create(
-            "orders",
-            database => database.Extension(" ", "value"))).ParamName.ShouldBe("name");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declaration compiles itself as the one-step form does")]
@@ -204,9 +182,6 @@ public class SqlSchemaTests
                 table.PrimaryKey(order => order.Id);
                 table.Index(order => order.CustomerId);
             });
-            database.Trigger<Order>(
-                SqlTriggerEvent.AfterInsert,
-                (transaction, row) => transaction.Audit("order.placed", row.Id));
         }
 
         SqlSchema declaration = SqlSchema.Create("orders", Configure);
@@ -214,13 +189,8 @@ public class SqlSchemaTests
 
         declaration.Name.ShouldBe("orders");
         compiled.Name.ShouldBe("orders");
-        compiled.Model.ShouldBe(EngineModel.Sql);
+        compiled.Format.ShouldBe(SqlCompiledSchema.CurrentFormat);
         compiled.Hash.ShouldBe(SqlSchema.Compile("orders", Configure).Hash);
-
-        // The trigger context is a phantom that only expression trees name: its canonical text
-        // carries the sealed type's identity, which the Sdk.Database canonicalizer matches.
-        compiled.Triggers.ShouldHaveSingleItem().Body.CanonicalText
-            .ShouldContain("Assimalign.Cohesion.Database.Sql.Schema:Assimalign.Cohesion.Database.Sql.Schema.SqlTriggerContext.Audit");
     }
 
     private static long StaticId => 42;

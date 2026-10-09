@@ -37,21 +37,28 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// The root <see cref="IDatabaseApplicationBuilder"/> carries none of them: model packages compose
 /// against it without the container, configuration or logging (COHRES004).
 /// </para>
+/// <para>
+/// <b>The application level</b> of the three composition levels (B1 of the engine extensibility
+/// design, owner decisions 52 and 54 of 2026-10-09): host infrastructure, host services, health,
+/// the control plane, the reopen policy, and which engines exist. It holds no database, schema,
+/// function or model type: a model's engine builder declares and provisions its databases while
+/// it is built. Every engine is registered by name, so the name is reserved when the engine is
+/// registered, before any factory runs; there is one registration path per kind of thing.
+/// </para>
 /// </remarks>
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
-    private readonly List<(DatabaseEngine? Instance, string? Name, Func<DatabaseApplicationContext, DatabaseEngine>? Factory)> _engines = [];
+    private readonly List<(DatabaseEngine? Instance, string Name, Func<DatabaseApplicationContext, DatabaseEngine>? Factory)> _engines = [];
     private readonly List<(IHostService? Instance, Func<DatabaseApplicationContext, IHostService>? Factory)> _serviceRegistrations = [];
     private readonly List<IHealthContributor> _healthContributors = [];
-    private readonly List<CompiledSchema> _schemas = [];
     private readonly PhysicalFileSystem? _contentRoot;
     private readonly IHostService? _telemetry;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private int _buildAttempted;
 
-    /// <summary>Initializes a builder with borrowed legacy inputs and host settings.</summary>
+    /// <summary>Initializes a builder with host settings.</summary>
     /// <param name="options">
     /// The host settings: their <c>Environment</c> and
     /// <see cref="DatabaseApplicationOptions.ContentRootPath"/> are read now, for
@@ -105,9 +112,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     /// <summary>
-    /// Gets host settings and legacy borrowed input lists: <c>Environment</c> and
-    /// <see cref="DatabaseApplicationOptions.ContentRootPath"/> are read when the builder is created
-    /// (see <see cref="Environment"/>); the rest is copied at Build.
+    /// Gets the host settings, host policy only (timeouts and the reopen policy):
+    /// <c>Environment</c> and <see cref="DatabaseApplicationOptions.ContentRootPath"/> are read when
+    /// the builder is created (see <see cref="Environment"/>); the rest is copied at Build.
     /// </summary>
     /// <remarks>
     /// Setting the environment or the content root here after the builder exists changes nothing:
@@ -173,8 +180,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// </remarks>
     public ServiceProviderBuilder Services { get; }
 
-    /// <summary>Gets compiled schema declarations registered for provisioning.</summary>
-    public IReadOnlyList<CompiledSchema> Schemas => _schemas.AsReadOnly();
     internal IResourceControlPlane? ControlPlane => _controlPlane;
 
     /// <summary>Registers a named health contribution using the existing host integration.</summary>
@@ -203,19 +208,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentNullException.ThrowIfNull(engine);
         ReserveName(engine.Name);
         _engines.Add((engine, engine.Name, null));
-        return this;
-    }
-
-    /// <summary>Defers owned engine construction until Build.</summary>
-    /// <param name="configure">The dependency-free factory, observing preceding engines.</param>
-    /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
-    public DatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
-    {
-        EnsureMutable();
-        ArgumentNullException.ThrowIfNull(configure);
-        _engines.Add((null, null, context => configure(context)));
         return this;
     }
 
@@ -260,91 +252,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentNullException.ThrowIfNull(service);
         _serviceRegistrations.Add((null, service));
         return this;
-    }
-
-    /// <summary>Registers before-accept provisioning for a borrowed registered engine.</summary>
-    /// <param name="engine">The registered engine.</param>
-    /// <param name="schema">The compiled schema.</param>
-    /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="engine"/> or <paramref name="schema"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="schema"/> targets another data model than <paramref name="engine"/>.</exception>
-    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
-    /// <remarks>Build refuses an engine the application did not register.</remarks>
-    public DatabaseApplicationBuilder Provision(DatabaseEngine engine, CompiledSchema schema)
-    {
-        EnsureMutable();
-        ArgumentNullException.ThrowIfNull(engine);
-        ValidateSchema(engine, schema);
-        _schemas.Add(schema);
-        return AddService(context =>
-        {
-            if (!ReferenceEquals(context.GetEngine(engine.Name), engine))
-            {
-                throw new InvalidOperationException("The provisioning engine must belong to the application.");
-            }
-
-            return new DefaultDatabaseProvisioner(engine, schema);
-        });
-    }
-
-    /// <summary>Registers existing compiled-schema provisioning against a deferred engine name.</summary>
-    /// <param name="engineName">The registered engine name.</param>
-    /// <param name="schema">The compiled schema.</param>
-    /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="engineName"/> or <paramref name="schema"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="engineName"/> is empty or white space.</exception>
-    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
-    /// <remarks>Build refuses a name no engine of the application has, or a schema of another data model.</remarks>
-    public DatabaseApplicationBuilder Provision(string engineName, CompiledSchema schema)
-    {
-        EnsureMutable();
-        ArgumentException.ThrowIfNullOrWhiteSpace(engineName);
-        ArgumentNullException.ThrowIfNull(schema);
-        _schemas.Add(schema);
-        return AddService(context =>
-        {
-            DatabaseEngine engine = context.GetEngine(engineName);
-            ValidateSchema(engine, schema);
-            return new DefaultDatabaseProvisioner(engine, schema);
-        });
-    }
-
-    /// <summary>Registers a compiled logical database on a borrowed registered engine.</summary>
-    /// <param name="engine">The registered engine.</param>
-    /// <param name="name">The name matching the compiled schema.</param>
-    /// <param name="schema">The compiled schema.</param>
-    /// <returns>The same compiled schema.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="engine"/>, <paramref name="name"/> or <paramref name="schema"/> is null.</exception>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="name"/> is empty, white space or not the schema's name, or <paramref name="schema"/> targets
-    /// another data model than <paramref name="engine"/>.
-    /// </exception>
-    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
-    /// <remarks>Build refuses an engine the application did not register.</remarks>
-    public CompiledSchema AddDatabase(DatabaseEngine engine, string name, CompiledSchema schema)
-    {
-        ValidateDatabaseName(name, schema);
-        Provision(engine, schema);
-        return schema;
-    }
-
-    /// <summary>Registers a compiled logical database on a named deferred engine.</summary>
-    /// <param name="engineName">The registered engine name.</param>
-    /// <param name="name">The name matching the compiled schema.</param>
-    /// <param name="schema">The compiled schema.</param>
-    /// <returns>The same compiled schema.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="engineName"/>, <paramref name="name"/> or <paramref name="schema"/> is null.</exception>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="engineName"/> or <paramref name="name"/> is empty or white space, or <paramref name="name"/> is
-    /// not the schema's name.
-    /// </exception>
-    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
-    /// <remarks>Build refuses a name no engine of the application has, or a schema of another data model.</remarks>
-    public CompiledSchema AddDatabase(string engineName, string name, CompiledSchema schema)
-    {
-        ValidateDatabaseName(name, schema);
-        Provision(engineName, schema);
-        return schema;
     }
 
     /// <summary>Consumes this builder and constructs one complete application.</summary>
@@ -407,35 +314,18 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             // must not leave the snapshot disagreeing with the context.
             options.Environment = Environment.Name;
             options.ContentRootPath = Environment.ContentRootPath;
-            var context = new DatabaseApplicationContext(options, Environment, Configuration, services, loggerFactory);
+            var context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory);
 
             var products = new HashSet<object>(ReferenceEqualityComparer.Instance);
-            var registeredEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            var borrowedEngines = new List<DatabaseEngine>(options.Engines);
-            borrowedEngines.AddRange(_engines.Where(registration => registration.Instance is not null).Select(registration => registration.Instance!));
-            borrowedEngines.AddRange(options.Servers.Select(server => server.Engine));
-            foreach (DatabaseEngine engine in borrowedEngines)
+            var engines = new List<DatabaseEngine>(_engines.Count);
+            var servers = new List<DatabaseServer>();
+            var hostServices = new List<IHostService>(_serviceRegistrations.Count + 2);
+            foreach (var registration in _engines)
             {
-                products.Add(engine);
-                foreach (DatabaseServer server in engine.Servers)
+                if (registration.Instance is { } borrowed)
                 {
-                    products.Add(server);
+                    AddProducts(products, borrowed);
                 }
-
-                foreach (DatabaseEngineWorker worker in engine.Workers)
-                {
-                    products.Add(worker);
-                }
-            }
-            foreach (DatabaseServer server in options.Servers)
-            {
-                products.Add(server);
-            }
-
-            foreach (IHostService service in options.Services)
-            {
-                products.Add(service);
             }
 
             foreach (var registration in _serviceRegistrations)
@@ -446,103 +336,58 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 }
             }
 
-            var inputEngines = options.Engines.ToArray();
-            options.Engines.Clear();
-            void RegisterEngine(DatabaseEngine engine)
+            // Every name was reserved, and every duplicate refused, when the engine was registered.
+            foreach (var registration in _engines)
             {
-                if (!registeredEngines.Add(engine))
+                DatabaseEngine engine;
+                if (registration.Instance is { } borrowed)
                 {
-                    return;
+                    engine = borrowed;
+                }
+                else
+                {
+                    engine = registration.Factory!(context) ?? throw new InvalidOperationException("An engine factory returned null.");
+                    if (!products.Add(engine))
+                    {
+                        throw new InvalidOperationException("An engine factory returned an already registered product.");
+                    }
+
+                    ownership.Engines.Add(engine);
+                    AddProducts(products, engine);
+                    if (!string.Equals(registration.Name, engine.Name, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"Engine factory '{registration.Name}' returned engine '{engine.Name}'.");
+                    }
                 }
 
-                ArgumentException.ThrowIfNullOrWhiteSpace(engine.Name);
                 if (engine.Model is not (EngineModel.Custom or EngineModel.Sql or EngineModel.Document or EngineModel.KeyValueStore or EngineModel.Blob or EngineModel.Graph))
                 {
                     throw new InvalidOperationException($"Engine '{engine.Name}' has an unknown model.");
                 }
 
-                if (!names.Add(engine.Name))
-                {
-                    throw new InvalidOperationException($"Duplicate database engine name '{engine.Name}'.");
-                }
-
-                options.Engines.Add(engine);
-                context.FreezeRegistries(options.Engines, []);
-            }
-            foreach (DatabaseEngine engine in inputEngines)
-            {
-                RegisterEngine(engine);
+                engines.Add(engine);
+                context.FreezeRegistries(engines, []);
             }
 
-            foreach (var registration in _engines)
-            {
-                if (registration.Instance is not null) { RegisterEngine(registration.Instance); continue; }
-                DatabaseEngine engine = registration.Factory!(context) ?? throw new InvalidOperationException("An engine factory returned null.");
-                if (!products.Add(engine))
-                {
-                    throw new InvalidOperationException("An engine factory returned an already registered product.");
-                }
-
-                ownership.Engines.Add(engine);
-                foreach (DatabaseServer server in engine.Servers)
-                {
-                    products.Add(server);
-                }
-
-                foreach (DatabaseEngineWorker worker in engine.Workers)
-                {
-                    products.Add(worker);
-                }
-
-                if (registration.Name is not null && !string.Equals(registration.Name, engine.Name, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException($"Engine factory '{registration.Name}' returned engine '{engine.Name}'.");
-                }
-
-                RegisterEngine(engine);
-            }
-            foreach (DatabaseServer server in options.Servers)
-            {
-                RegisterEngine(server.Engine);
-            }
-
-            var borrowedServers = options.Servers.ToArray();
-            options.Servers.Clear();
-            var registeredServers = new HashSet<DatabaseServer>(ReferenceEqualityComparer.Instance);
-            foreach (DatabaseEngine engine in options.Engines)
+            foreach (DatabaseEngine engine in engines)
             {
                 // The engine base attaches only a server that fronts it, and each server once, so
                 // a nested server belongs to exactly one registered engine (phase 6 of the
                 // concrete-types plan retired the checks the root interface needed here).
-                foreach (DatabaseServer server in engine.Servers)
-                {
-                    registeredServers.Add(server);
-                    products.Add(server);
-                    options.Servers.Add(server);
-                }
+                servers.AddRange(engine.Servers);
             }
-            foreach (DatabaseServer server in borrowedServers)
-            {
-                if (!registeredServers.Add(server))
-                {
-                    throw new InvalidOperationException("A server was registered more than once.");
-                }
 
-                options.Servers.Add(server);
-            }
-            context.FreezeRegistries(options.Engines, options.Servers);
+            context.FreezeRegistries(engines, servers);
             if (_telemetry is not null)
             {
-                options.Services.Insert(0, _telemetry);
+                hostServices.Add(_telemetry);
                 ownership.Services.Add(_telemetry);
             }
-            var lifecycleProducts = new HashSet<object>(options.Servers, ReferenceEqualityComparer.Instance);
-            foreach (IHostService service in options.Services)
+
+            var lifecycleProducts = new HashSet<object>(servers, ReferenceEqualityComparer.Instance);
+            foreach (IHostService service in hostServices)
             {
-                if (!lifecycleProducts.Add(service))
-                {
-                    throw new InvalidOperationException("A lifecycle service was registered more than once.");
-                }
+                lifecycleProducts.Add(service);
             }
 
             foreach (var registration in _serviceRegistrations)
@@ -563,9 +408,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                     throw new InvalidOperationException("A lifecycle service was registered more than once.");
                 }
 
-                options.Services.Add(service);
+                hostServices.Add(service);
             }
-            ConfigureExistingResourceIntegration(options, context, ownership);
+            ConfigureExistingResourceIntegration(hostServices, engines, servers, context, ownership);
 
             // The module's own reopen service (owner decision 22): started with the other services,
             // before the servers, and stopped after the servers drained. It supervises every engine
@@ -574,11 +419,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             {
                 var reopen = new DatabaseReopenService(context.Engines, options.ReopenInitialDelay, options.ReopenMaximumDelay);
                 ownership.Services.Add(reopen);
-                options.Services.Add(reopen);
+                hostServices.Add(reopen);
                 context.ReopenService = reopen;
             }
 
-            return new DatabaseApplicationComposition(options, context, ownership);
+            return new DatabaseApplicationComposition(options, context, ownership, hostServices.AsReadOnly());
         }
         catch (Exception exception)
         {
@@ -605,7 +450,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentOutOfRangeException.ThrowIfLessThan(options.ReopenMaximumDelay, options.ReopenInitialDelay, nameof(options.ReopenMaximumDelay));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(options.ReopenMaximumDelay, DatabaseApplicationOptions.MaximumReopenDelay, nameof(options.ReopenMaximumDelay));
 
-        var snapshot = new DatabaseApplicationOptions
+        return new DatabaseApplicationOptions
         {
             Environment = options.Environment,
             ContentRootPath = options.ContentRootPath,
@@ -615,22 +460,22 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             ReopenInitialDelay = options.ReopenInitialDelay,
             ReopenMaximumDelay = options.ReopenMaximumDelay,
         };
-        foreach (DatabaseEngine engine in options.Engines)
+    }
+
+    // A borrowed engine's own products, and a factory engine's, so a factory that returns one of them
+    // as a new product is refused.
+    private static void AddProducts(HashSet<object> products, DatabaseEngine engine)
+    {
+        products.Add(engine);
+        foreach (DatabaseServer server in engine.Servers)
         {
-            snapshot.Engines.Add(engine);
+            products.Add(server);
         }
 
-        foreach (DatabaseServer server in options.Servers)
+        foreach (DatabaseEngineWorker worker in engine.Workers)
         {
-            snapshot.Servers.Add(server);
+            products.Add(worker);
         }
-
-        foreach (IHostService service in options.Services)
-        {
-            snapshot.Services.Add(service);
-        }
-
-        return snapshot;
     }
 
     private void EnsureMutable()
@@ -746,42 +591,40 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return combined;
     }
 
+    // Every engine is registered by name, so a duplicate is refused here, before any factory runs
+    // (owner decision 52): a factory can open and provision databases.
     private void ReserveName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (_engines.Any(registration => string.Equals(registration.Name, name, StringComparison.Ordinal)) ||
-            _options.Engines.Any(engine => string.Equals(engine.Name, name, StringComparison.Ordinal)))
+        if (_engines.Any(registration => string.Equals(registration.Name, name, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException($"Duplicate database engine name '{name}'.");
         }
     }
 
-    private static void ValidateSchema(DatabaseEngine engine, CompiledSchema schema)
-    {
-        ArgumentNullException.ThrowIfNull(schema);
-        if (engine.Model != schema.Model)
-        {
-            throw new ArgumentException($"Schema '{schema.Name}' targets {schema.Model}, but engine '{engine.Name}' uses {engine.Model}.", nameof(schema));
-        }
-    }
-
-    private static void ValidateDatabaseName(string name, CompiledSchema schema)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(schema);
-        if (!string.Equals(name, schema.Name, StringComparison.Ordinal))
-        {
-            throw new ArgumentException("The database name must match the compiled schema's name.", nameof(name));
-        }
-    }
-
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(DatabaseEngine engine) => AddEngine(engine);
-    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure) => AddEngine(configure);
+
+    // The root seam's named factory, which every model verb calls: the name is reserved now, and the
+    // factory receives the application's context (it implements the root's), never the container.
+    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine> factory)
+    {
+        EnsureMutable();
+        ArgumentNullException.ThrowIfNull(factory);
+        ReserveName(name);
+        _engines.Add((null, name, context => factory(context)));
+        return this;
+    }
+
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
 
     private static object? CreateConnectionFactory(string protocol) => string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase) ? new TcpConnectionFactory() : null;
 
-    private void ConfigureExistingResourceIntegration(DatabaseApplicationOptions options, DatabaseApplicationContext context, DatabaseApplicationOwnership ownership)
+    private void ConfigureExistingResourceIntegration(
+        List<IHostService> services,
+        List<DatabaseEngine> engines,
+        List<DatabaseServer> servers,
+        DatabaseApplicationContext context,
+        DatabaseApplicationOwnership ownership)
     {
         if (_controlPlane is not null)
         {
@@ -804,9 +647,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 }
             }
 
-            foreach (IHealthContributor contributor in options.Services
-                .Concat<object>(options.Engines)
-                .Concat(options.Servers)
+            foreach (IHealthContributor contributor in services
+                .Concat<object>(engines)
+                .Concat(servers)
                 .OfType<IHealthContributor>())
             {
                 if (registeredContributors.Add(contributor))
@@ -835,7 +678,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                     _resourceContext!,
                     context,
                     controlPlaneContributors);
-                options.Services.Add(adminService);
+                services.Add(adminService);
                 ownership.Services.Add(adminService);
             }
         }

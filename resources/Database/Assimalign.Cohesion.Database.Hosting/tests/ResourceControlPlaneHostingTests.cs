@@ -56,7 +56,7 @@ public sealed class ResourceControlPlaneHostingTests
             new DatabaseApplicationOptions(),
             typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddHealthCheck("builder", _ => ValueTask.FromResult(HealthContribution.Healthy()));
-        builder.Options.Services.Add(new HealthyHostService("services"));
+        builder.AddService(new HealthyHostService("services"));
 
         await using DatabaseApplication application = builder.Build();
         IResourceControlPlane controlPlane = builder.ControlPlane.ShouldNotBeNull();
@@ -149,7 +149,9 @@ public sealed class ResourceControlPlaneHostingTests
         DatabaseApplicationBuilder builder = new(
             new DatabaseApplicationOptions(),
             typeof(ResourceControlPlaneHostingTests).Assembly);
-        builder.Options.Servers.Add(new ControlledStartServer(bindStarted, accepting));
+        await using var engine = new RecordingEngine();
+        engine.AddServer(owner => new ControlledStartServer(owner, bindStarted, accepting));
+        builder.AddEngine(engine);
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
 
@@ -280,21 +282,21 @@ public sealed class ResourceControlPlaneHostingTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: aggregates distinct engine states and worker inventory")]
     public async Task CheckAsync_WithFaultedServerEngine_ShouldReportDegradedWithWorkerInventory()
     {
-        // Arrange: register the same engine directly and behind a server; the context health
-        // contribution must count the data machine once while still discovering server engines.
-        // A pass of the engine's worker fails, so the engine base folds the engine as Faulted.
+        // Arrange: an engine fronted by a server; the context health contribution must count the
+        // data machine once while still discovering server engines. A pass of the engine's worker
+        // fails, so the engine base folds the engine as Faulted.
         var worker = new RecordingEngineWorker(
             "sql/wal-flush",
             DatabaseEngineWorkerKind.WriteAheadFlush,
             TimeSpan.FromMilliseconds(25));
         await using var engine = new RecordingEngine("sql");
         engine.AddWorker(worker);
+        engine.AddServer(owner => new RecordingServer([], engine: owner));
         worker.Failure = new InvalidOperationException("Injected flush failure");
         worker.RunIteration(CancellationToken.None).ShouldBeFalse();
-        var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        options.Servers.Add(new RecordingServer([], engine: engine));
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
 
         // Act
         HealthContribution contribution = await application.Context.CheckAsync(CancellationToken.None);
@@ -325,8 +327,9 @@ public sealed class ResourceControlPlaneHostingTests
         // Arrange: a running engine whose database the test takes offline.
         var engine = new RecordingEngine("sql");
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
         HealthContribution before = await application.Context.CheckAsync(CancellationToken.None);
 
         // Act: the commit's journal fsync fails, and the engine lists the database offline until
@@ -357,8 +360,9 @@ public sealed class ResourceControlPlaneHostingTests
         var engine = new RecordingEngine();
         await engine.DisposeAsync();
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
 
         // Act
         HealthContribution contribution = await application.Context.CheckAsync(CancellationToken.None);
@@ -424,12 +428,14 @@ public sealed class ResourceControlPlaneHostingTests
         private readonly TaskCompletionSource<bool> _accepting;
 
         /// <summary>Initializes a new instance of the <see cref="ControlledStartServer"/> class.</summary>
+        /// <param name="engine">The engine the server fronts, which attaches it.</param>
         /// <param name="bindStarted">Completed when the host begins starting the server.</param>
         /// <param name="accepting">Completes the server start once it is set, signalling the server is accepting.</param>
         public ControlledStartServer(
+            DatabaseEngine engine,
             TaskCompletionSource<bool> bindStarted,
             TaskCompletionSource<bool> accepting)
-            : base(new RecordingEngine())
+            : base(engine)
         {
             _bindStarted = bindStarted;
             _accepting = accepting;

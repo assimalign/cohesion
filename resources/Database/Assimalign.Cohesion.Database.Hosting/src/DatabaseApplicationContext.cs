@@ -35,7 +35,6 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     private IReadOnlyList<IHostService> _hostedServices = [];
 
     internal DatabaseApplicationContext(
-        DatabaseApplicationOptions options,
         HostEnvironment environment,
         ConfigurationManager configuration,
         ServiceProvider services,
@@ -45,8 +44,8 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         Services = services;
         _environment = environment;
         BuildContext = new DatabaseApplicationBuildContext(environment, configuration, services, loggerFactory);
-        _engines = new ReadOnlyCollection<DatabaseEngine>(options.Engines);
-        _servers = new ReadOnlyCollection<DatabaseServer>(options.Servers);
+        _engines = [];
+        _servers = [];
     }
 
     /// <summary>

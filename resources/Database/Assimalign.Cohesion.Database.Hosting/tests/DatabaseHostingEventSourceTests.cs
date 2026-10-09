@@ -72,10 +72,9 @@ public sealed class DatabaseHostingEventSourceTests
         // reopen that fails once, then runs the engine's own reopen.
         string engineName = "event-source-" + Guid.NewGuid().ToString("N");
         FailTwice? worker = null;
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = engineName;
-        builder.WorkerFailureWindow = TimeSpan.FromTicks(1);
-        builder.WorkerFailureMinimumPasses = 2;
+        var builder = SqlDatabaseEngine.CreateBuilder(engineName);
+        builder.Options.WorkerFailureWindow = TimeSpan.FromTicks(1);
+        builder.Options.WorkerFailureMinimumPasses = 2;
         builder.AddWorker(_ => worker = new FailTwice(engineName + "/probe"));
         await using var engine = builder.Build();
         await engine.CreateDatabaseAsync(App);
@@ -85,8 +84,9 @@ public sealed class DatabaseHostingEventSourceTests
             ReopenInitialDelay = TimeSpan.FromMilliseconds(20),
             ReopenMaximumDelay = TimeSpan.FromMilliseconds(40),
         };
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
         var service = application.Context.ReopenService.ShouldNotBeNull();
         int attempts = 0;
         service.Reopen = async (target, name, token) =>
@@ -167,10 +167,9 @@ public sealed class DatabaseHostingEventSourceTests
         // Arrange: the first reopen waits a second or two; the database is dropped meanwhile.
         string engineName = "event-source-" + Guid.NewGuid().ToString("N");
         FailTwice? worker = null;
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = engineName;
-        builder.WorkerFailureWindow = TimeSpan.FromTicks(1);
-        builder.WorkerFailureMinimumPasses = 2;
+        var builder = SqlDatabaseEngine.CreateBuilder(engineName);
+        builder.Options.WorkerFailureWindow = TimeSpan.FromTicks(1);
+        builder.Options.WorkerFailureMinimumPasses = 2;
         builder.AddWorker(_ => worker = new FailTwice(engineName + "/probe"));
         await using var engine = builder.Build();
         await engine.CreateDatabaseAsync(App);
@@ -179,8 +178,9 @@ public sealed class DatabaseHostingEventSourceTests
             ReopenInitialDelay = TimeSpan.FromSeconds(2),
             ReopenMaximumDelay = TimeSpan.FromSeconds(4),
         };
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
         var service = application.Context.ReopenService.ShouldNotBeNull();
         using var recorder = new HostingEventRecorder(EventLevel.Informational);
 

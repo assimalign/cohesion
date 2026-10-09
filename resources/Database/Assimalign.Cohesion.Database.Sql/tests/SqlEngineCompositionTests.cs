@@ -23,8 +23,7 @@ public sealed class SqlEngineCompositionTests
     public async Task Build_WithWorkerAndServerFactories_ShouldAttachInOrderAndFreeze()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = "composed";
+        var builder = SqlDatabaseEngine.CreateBuilder("composed");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         RecordingServer? server = null;
@@ -54,7 +53,7 @@ public sealed class SqlEngineCompositionTests
         server.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
         server.Starts.ShouldBe(0);
         frozen.Message.ShouldBe("Engine composition is frozen; workers and servers attach only before it completes.");
-        Should.Throw<InvalidOperationException>(() => builder.EngineName = "late");
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
         Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => first!));
         Should.Throw<InvalidOperationException>(() => builder.Build());
         first.Disposals.ShouldBe(1);
@@ -71,8 +70,7 @@ public sealed class SqlEngineCompositionTests
     public async Task Build_WorkersOfOneKind_ShouldPumpEachOnAThreadNamedForIt()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = "pumps";
+        var builder = SqlDatabaseEngine.CreateBuilder("pumps");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         builder.AddWorker(engine => first = new RecordingWorker(engine, engine.Name + "/first"));
@@ -102,7 +100,7 @@ public sealed class SqlEngineCompositionTests
     public async Task Build_WorkerAndServerFactories_ShouldSeeEveryProductAttachedBeforeThem()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         RecordingWorker? first = null;
         RecordingWorker? second = null;
         RecordingServer? server = null;
@@ -157,7 +155,7 @@ public sealed class SqlEngineCompositionTests
     public void Build_RepeatedServer_ShouldBeRefusedAndReleasedOnceByTheEngine()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         RecordingServer? server = null;
         SqlDatabaseEngine? product = null;
         builder.AddServer(engine => server = new RecordingServer(product = engine));
@@ -176,7 +174,7 @@ public sealed class SqlEngineCompositionTests
     public void Build_BuiltInWorkerReturned_ShouldBeRefusedAndLeftToTheEngine()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         SqlDatabaseEngine? product = null;
         builder.AddWorker(engine => (product = engine).Workers[2]);
 
@@ -194,7 +192,7 @@ public sealed class SqlEngineCompositionTests
         // Arrange
         await using var other = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "other" });
         var server = new RecordingServer(other);
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         SqlDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; return server; });
 
@@ -215,7 +213,7 @@ public sealed class SqlEngineCompositionTests
         // Arrange
         await using var other = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "other" });
         var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         SqlDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; return server; });
 
@@ -245,8 +243,7 @@ public sealed class SqlEngineCompositionTests
     public void Build_DuplicateWorkerName_ShouldBeRefusedAndDisposed(string duplicate)
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = "named";
+        var builder = SqlDatabaseEngine.CreateBuilder("named");
         RecordingWorker? custom = null;
         RecordingWorker? worker = null;
         SqlDatabaseEngine? product = null;
@@ -267,7 +264,7 @@ public sealed class SqlEngineCompositionTests
     public void Build_BlankWorkerName_ShouldFailInsideTheFactory()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         SqlDatabaseEngine? product = null;
         builder.AddWorker(engine => new RecordingWorker(product = engine, " "));
 
@@ -282,7 +279,7 @@ public sealed class SqlEngineCompositionTests
     public void Build_NullProduct_ShouldDisposeTheEngine(bool worker)
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         SqlDatabaseEngine? product = null;
         if (worker)
         {
@@ -310,7 +307,7 @@ public sealed class SqlEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<SqlDatabaseEngine>();
+        var state = new DatabaseEngineBuilderState<SqlDatabaseEngine>("contract");
         var engine = SqlDatabaseEngine.CreateUncomposed(new SqlDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];
@@ -361,13 +358,43 @@ public sealed class SqlEngineCompositionTests
     {
         // Act
         var direct = Should.Throw<ArgumentException>(() => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name }));
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = name;
-        var built = Should.Throw<ArgumentException>(() => builder.Build());
+        var builder = Should.Throw<ArgumentException>(() => SqlDatabaseEngine.CreateBuilder(name));
+        var verb = Should.Throw<ArgumentException>(() => new RecordingApplicationBuilder().AddSql(name, _ => { }));
 
-        // Assert: the SQL engine accepted a blank name before the root base.
+        // Assert: the SQL engine accepted a blank name before the root base; the builder and the
+        // verb, which name the engine once, refuse it before anything is registered.
         direct.ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.EngineName));
-        built.ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.EngineName));
+        builder.ParamName.ShouldBe("name");
+        verb.ParamName.ShouldBe("name");
+    }
+
+    /// <summary>
+    /// Until the options lose <c>EngineName</c>, the builder seeds it with its name, and a build whose
+    /// options name another engine is refused before anything is created (B1 of the engine
+    /// extensibility design): the engine is named once.
+    /// </summary>
+    /// <param name="renamed">The options' engine name at Build.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Composition: options that name another engine than the builder fail the build")]
+    [InlineData("other")]
+    [InlineData("SQL-ENGINE")]
+    [InlineData(null)]
+    public void Build_OptionsNameAnotherEngine_ShouldFailBeforeTheEngineExists(string? renamed)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        string seeded = builder.Options.EngineName!;
+        builder.Options.EngineName = renamed;
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        seeded.ShouldBe("sql-engine");
+        builder.Name.ShouldBe("sql-engine");
+        failure.Message.ShouldStartWith("The engine builder for 'sql-engine' has its options' EngineName set to ", Case.Sensitive);
+        product.ShouldBeNull();
     }
 
     /// <summary>
@@ -379,8 +406,7 @@ public sealed class SqlEngineCompositionTests
     public async Task DisposeAsync_ServerFailsToClose_ShouldReportTheEngineAggregate()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = "closing";
+        var builder = SqlDatabaseEngine.CreateBuilder("closing");
         RecordingServer? server = null;
         RecordingWorker? worker = null;
         builder.AddWorker(engine => worker = new RecordingWorker(engine));
@@ -403,7 +429,7 @@ public sealed class SqlEngineCompositionTests
     public void Build_FailingFactory_ShouldDisposeTheEngineAndForbidRetry()
     {
         // Arrange
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         SqlDatabaseEngine? product = null;
         builder.AddServer(engine => { product = engine; throw new InvalidOperationException("factory"); });
 
@@ -423,7 +449,7 @@ public sealed class SqlEngineCompositionTests
         // Arrange
         var application = new RecordingApplicationBuilder();
         SqlDatabaseEngine? early = null;
-        application.AddSql((_, builder) => early = builder.Build());
+        application.AddSql("premature", builder => early = builder.Build());
 
         // Act
         var failure = Should.Throw<InvalidOperationException>(() => application.MaterializeEngine());
@@ -444,9 +470,9 @@ public sealed class SqlEngineCompositionTests
         // Arrange
         using var other = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "other" });
         var rejected = new YieldingServer(other);
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         builder.AddServer(_ => rejected);
-        var valid = SqlDatabaseEngine.CreateBuilder();
+        var valid = SqlDatabaseEngine.CreateBuilder("sql-engine");
         var accepted = default(YieldingServer);
         valid.AddServer(engine => accepted = new YieldingServer(engine));
         var original = SynchronizationContext.Current;
@@ -481,7 +507,7 @@ public sealed class SqlEngineCompositionTests
     {
         // Arrange
         CancellationFailureWorker? worker = null;
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         builder.AddWorker(engine => worker = new CancellationFailureWorker(engine.Name + "/cancellation-failure"));
         var engine = builder.Build();
         worker.ShouldNotBeNull().Waiting.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();

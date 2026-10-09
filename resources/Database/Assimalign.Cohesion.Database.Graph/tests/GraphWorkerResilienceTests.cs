@@ -495,7 +495,7 @@ public sealed class GraphWorkerResilienceTests
     {
         // Arrange
         var worker = new EscapingWorker();
-        var builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         builder.AddWorker(_ => worker);
         await using var engine = builder.Build();
 
@@ -1090,7 +1090,7 @@ public sealed class GraphWorkerResilienceTests
     {
         // Arrange
         var defaults = new GraphDatabaseEngineOptions();
-        var builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
         builder.WorkerFailureMinimumPasses = 4;
         builder.JournalSizeLimit = 512L * 1024 * 1024;

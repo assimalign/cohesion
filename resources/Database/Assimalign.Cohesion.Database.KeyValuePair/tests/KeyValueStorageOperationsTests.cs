@@ -306,7 +306,7 @@ public sealed class KeyValueStorageOperationsTests
     public async Task CreateBuilder_StorageOptions_ShouldReachTheBuiltEngine()
     {
         // Arrange
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         long defaultPool = builder.BufferPoolCapacity;
         long defaultSize = builder.CheckpointJournalSize;
         builder.BufferPoolCapacity = 2 * 1024 * 1024;

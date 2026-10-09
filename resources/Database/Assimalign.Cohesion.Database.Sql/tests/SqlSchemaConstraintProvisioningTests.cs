@@ -23,7 +23,6 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
         await using (var engine = CreateEngine())
         {
             var database = await engine.CreateDatabaseAsync("app");
-            database.SupportsSchemaProvisioning.ShouldBeTrue();
             (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
             (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
@@ -73,8 +72,8 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
             new CompiledSchemaKey("pk_right", ["id"]), [],
             [new CompiledSchemaConstraint("fk_left", CompiledSchemaConstraintKind.Reference,
                 ["left_id"], "a_left", ["id"], OnDelete: CompiledSchemaReferentialAction.Cascade)]);
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false,
-            [], [left, right], [], [], [], []);
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false,
+            [], [left, right], []);
 
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("app");
@@ -98,7 +97,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
     }
 
     private static SqlCompiledSchema CreateSchema()
-        => new(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false, [],
+        => new(SqlCompiledSchema.CurrentFormat, "app", false, [],
             [
                 new CompiledSchemaTable("a_child", "Tests.Child",
                     [new("id", DatabaseType.Int32, false), new("parent_id", DatabaseType.Int32, false),
@@ -111,7 +110,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
                         ["qty"], null, [], new CompiledSchemaExpression("qty > 0"))]),
                 new CompiledSchemaTable("z_parent", "Tests.Parent", [new("id", DatabaseType.Int32, false)],
                     new CompiledSchemaKey("pk_parent", ["id"]), [], []),
-            ], [], [], [], []);
+            ], []);
 
     private SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "schema-constraints", RootPath = _rootPath });

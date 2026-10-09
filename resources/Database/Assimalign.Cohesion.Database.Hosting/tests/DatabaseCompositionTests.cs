@@ -28,9 +28,9 @@ public sealed class DatabaseCompositionTests
     public async Task Build_WithRepeatedAndDifferentModels_ShouldRetainEveryNamedEngine()
     {
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddSql((_, engine) => engine.EngineName = "orders");
-        builder.AddSql((_, engine) => engine.EngineName = "analytics");
-        builder.AddDocuments((_, engine) => engine.EngineName = "catalog");
+        builder.AddSql("orders", _ => { });
+        builder.AddSql("analytics", _ => { });
+        builder.AddDocuments("catalog", _ => { });
 
         await using var application = builder.Build();
 
@@ -66,7 +66,7 @@ public sealed class DatabaseCompositionTests
             configurationCalls++;
             return new TestConfigurationProvider();
         });
-        builder.AddEngine(_ =>
+        builder.AddEngine("recording-engine", _ =>
         {
             engineCalls++;
             Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -84,7 +84,7 @@ public sealed class DatabaseCompositionTests
         configurationCalls.ShouldBe(1);
         container.IsReadOnly.ShouldBeTrue();
         Should.Throw<InvalidOperationException>(() => builder.Build());
-        Should.Throw<InvalidOperationException>(() => builder.AddEngine(_ => new RecordingEngine()));
+        Should.Throw<InvalidOperationException>(() => builder.AddEngine("late", _ => new RecordingEngine("late")));
         Should.Throw<InvalidOperationException>(() => builder.AddService(new RecordingService([])));
         Should.Throw<InvalidOperationException>(() => services.AddSingleton(new Marker()));
         Should.Throw<InvalidOperationException>(() => container.Clear());
@@ -131,7 +131,7 @@ public sealed class DatabaseCompositionTests
             context.Services.GetRequiredService<DisposableService>().ShouldBeSameAs(dependency);
             return owned;
         });
-        builder.AddEngine(_ => throw failure);
+        builder.AddEngine("failing", _ => throw failure);
 
         Should.Throw<InvalidOperationException>(() => builder.Build()).ShouldBeSameAs(failure);
 
@@ -153,9 +153,9 @@ public sealed class DatabaseCompositionTests
         var second = new RecordingEngine("second") { DisposeException = cleanupFailure };
         var constructionFailure = new InvalidOperationException("construction failed");
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => first);
-        builder.AddEngine(_ => second);
-        builder.AddEngine(_ => throw constructionFailure);
+        builder.AddEngine("first", _ => first);
+        builder.AddEngine("second", _ => second);
+        builder.AddEngine("failing", _ => throw constructionFailure);
 
         var actual = Should.Throw<AggregateException>(() => builder.Build());
 
@@ -180,46 +180,46 @@ public sealed class DatabaseCompositionTests
         engine.DisposeCount.ShouldBe(1);
     }
 
-    /// <summary>Verifies duplicate names fail without treating a borrowed engine as owned.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: rejects duplicate names and borrowed factory products")]
-    public void Build_WhenEngineIdentityCollides_ShouldPreserveBorrowedOwnership()
+    /// <summary>
+    /// Verifies a duplicate name is refused when it is registered, before any factory runs (owner
+    /// decision 52 of 2026-10-09): a model's factory opens and provisions databases, so a second
+    /// engine of the name must never be built. Names compare ordinally, as at Build.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Registration: a duplicate engine name is refused at registration, before any factory runs")]
+    public void AddEngine_DuplicateName_ShouldBeRefusedBeforeAnyFactoryRuns()
     {
         var borrowed = new RecordingEngine("same");
-        var duplicate = new RecordingEngine("same");
+        int factories = 0;
         var builder = DatabaseApplication.CreateBuilder();
         builder.AddEngine(borrowed);
-        builder.AddEngine(_ => duplicate);
-        Should.Throw<InvalidOperationException>(() => builder.Build());
-        borrowed.DisposeCount.ShouldBe(0);
-        duplicate.DisposeCount.ShouldBe(1);
 
-        var collision = DatabaseApplication.CreateBuilder();
-        collision.AddEngine(borrowed);
-        collision.AddEngine(_ => borrowed);
-        Should.Throw<InvalidOperationException>(() => collision.Build());
+        var factory = Should.Throw<InvalidOperationException>(() => builder.AddEngine("same", _ => { factories++; return new RecordingEngine("same"); }));
+        var instance = Should.Throw<InvalidOperationException>(() => builder.AddEngine(new RecordingEngine("same")));
+        var verb = Should.Throw<InvalidOperationException>(() => builder.AddSql("same", _ => factories++));
+        var root = Should.Throw<InvalidOperationException>(() => ((IDatabaseApplicationBuilder)builder).AddEngine("same", _ => { factories++; return new RecordingEngine("same"); }));
+        builder.AddSql("other", _ => factories++);
+        builder.AddEngine("SAME", _ => { factories++; return new RecordingEngine("SAME"); });
+
+        factories.ShouldBe(0);
+        foreach (var refusal in new[] { factory, instance, verb, root })
+        {
+            refusal.Message.ShouldBe("Duplicate database engine name 'same'.");
+        }
         borrowed.DisposeCount.ShouldBe(0);
     }
 
-    /// <summary>
-    /// Verifies a nested server cannot also be registered as a borrowed server. A nested server
-    /// that fronts another engine cannot be composed at all since phase 6 of the concrete-types
-    /// plan: the engine base refuses it when it is attached (<c>DatabaseEngineTests</c>).
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: rejects a nested server also registered as a borrowed server")]
-    public void Build_WhenNestedServerIsAlsoBorrowed_ShouldRejectComposition()
+    /// <summary>Verifies a factory that returns a borrowed engine is refused without disposing it.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: rejects a borrowed engine returned by a factory")]
+    public void Build_WhenFactoryReturnsBorrowedEngine_ShouldPreserveBorrowedOwnership()
     {
-        var owner = new RecordingEngine("owner");
-        var server = new RecordingServer([], engine: owner);
-        owner.AddServer(_ => server);
-        var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(owner);
-        builder.Options.Servers.Add(server);
+        var borrowed = new RecordingEngine("same");
+        var collision = DatabaseApplication.CreateBuilder();
+        collision.AddEngine(borrowed);
+        collision.AddEngine("other", _ => borrowed);
 
-        Should.Throw<InvalidOperationException>(() => builder.Build())
-            .Message.ShouldBe("A server was registered more than once.");
-
-        owner.DisposeCount.ShouldBe(0);
-        server.Stops.ShouldBe(0);
+        Should.Throw<InvalidOperationException>(() => collision.Build())
+            .Message.ShouldBe("An engine factory returned an already registered product.");
+        borrowed.DisposeCount.ShouldBe(0);
     }
 
     /// <summary>Verifies a nested server cannot also be registered as an independent lifecycle service.</summary>
@@ -230,7 +230,7 @@ public sealed class DatabaseCompositionTests
         var alias = new ServerService(engine);
         engine.AddServer(_ => alias);
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => engine);
+        builder.AddEngine(engine.Name, _ => engine);
         builder.AddService(alias);
 
         Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -251,7 +251,7 @@ public sealed class DatabaseCompositionTests
         var builder = DatabaseApplication.CreateBuilder();
         var configuration = new TestConfigurationProvider();
         builder.Configuration.AddProvider(_ => configuration);
-        builder.AddEngine(_ => owned);
+        builder.AddEngine("owned", _ => owned);
         builder.AddEngine(borrowed);
         builder.AddService(_ => ownedService);
         builder.AddService(borrowedService);
@@ -269,8 +269,8 @@ public sealed class DatabaseCompositionTests
         configuration.DisposeCount.ShouldBe(1);
     }
 
-    /// <summary>Verifies built registries retain snapshots even if legacy options or fake engines mutate.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context: nested servers and option lists are frozen snapshots")]
+    /// <summary>Verifies built registries retain snapshots even if the options or fake engines mutate.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context: nested servers and options are frozen snapshots")]
     public async Task Build_WhenRetainedInputsMutate_ShouldPreserveRuntimeRegistries()
     {
         var log = new List<string>();
@@ -281,7 +281,6 @@ public sealed class DatabaseCompositionTests
         builder.AddEngine(engine);
         await using var application = builder.Build();
         engine.AddServer(owner => new RecordingServer(log, "late", owner));
-        builder.Options.Engines.Add(new RecordingEngine("late"));
         builder.Options.StartServicesConcurrently = true;
 
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
@@ -332,9 +331,8 @@ public sealed class DatabaseCompositionTests
             {
                 observed = context;
                 context.Services.GetRequiredService<Marker>().Value.ShouldBe("custom");
-                var engine = SqlDatabaseEngine.CreateBuilder();
-                engine.EngineName = context.Services.GetRequiredService<Marker>().Value;
-                engine.AddServer(owner => SqlDatabaseServer.Create(owner, new SqlDatabaseServerOptions { Listener = new InMemoryConnectionListener() }));
+                var engine = SqlDatabaseEngine.CreateBuilder(context.Services.GetRequiredService<Marker>().Value!);
+                engine.AddServer(server => server.Listener = new InMemoryConnectionListener());
                 return engine.Build();
             });
             provider.LoadCount.ShouldBe(1);
@@ -381,7 +379,7 @@ public sealed class DatabaseCompositionTests
     {
         // Arrange
         FileSystemPath root = FileSystemPath.Parse(AppContext.BaseDirectory);
-        var builder = DatabaseApplication.CreateBuilder(new DatabaseApplicationOptions
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions
         {
             Environment = "Testing",
             ContentRootPath = root,

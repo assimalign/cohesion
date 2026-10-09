@@ -454,14 +454,14 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     public async Task CompiledSchema_NonCanonicalCheck_ShouldReapplyAsNoOp()
     {
         // Arrange
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", EngineModel.Sql, false, [],
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false, [],
             [
                 new CompiledSchemaTable("items", "Tests.Item",
                     [new("id", DatabaseType.Int32, false), new("qty", DatabaseType.Int32, false)],
                     new CompiledSchemaKey("pk_items", ["id"]), [],
                     [new CompiledSchemaConstraint("ck_qty", CompiledSchemaConstraintKind.Check,
                         ["qty"], null, [], new CompiledSchemaExpression("QTY>0   AND qty<=100"))]),
-            ], [], [], [], []);
+            ], []);
 
         await using (var engine = CreateEngine("persisted-schema", _rootPath))
         {

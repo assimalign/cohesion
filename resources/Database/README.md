@@ -18,8 +18,10 @@ collections, graph edges, and blob containers live in their model family, never 
 the area root.
 
 The placement test is: *if a different model would need a different shape of it,
-it is not root material.* `CompiledSchema` identity is root material;
-`CompiledSchemaTable` is not. The root previously carried the relational schema
+it is not root material.* The object-ownership contract (`DatabaseObjectOwner`,
+`DatabaseObjectLockedException`) is root material, because four model catalogs persist it; a
+compiled schema is not, because its shape is the model's (the root's former `CompiledSchema`
+left in B1, owner decision 50 of 2026-10-09). The root previously carried the relational schema
 model; feature A3 in [DATABASE_MVP_FEATURES.md](../../docs/programs/DATABASE_MVP_FEATURES.md)
 moved it into `Database.Sql.Schema`. That package supplies SQL declarations,
 compilation, canonical serialization, and migration planning, independently of the
@@ -97,7 +99,7 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, model-agnostic `CompiledSchema` identity and provisioning seam, and object ownership — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, and object ownership (no schema type since B1) — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |

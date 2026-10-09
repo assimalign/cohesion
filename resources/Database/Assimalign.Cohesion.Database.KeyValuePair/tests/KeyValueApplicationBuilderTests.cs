@@ -23,8 +23,9 @@ public class KeyValueApplicationBuilderTests
         var builder = new RecordingApplicationBuilder();
 
         // Act
-        builder.AddKeyValue((context, options) => options.EngineName = "kv-verb");
+        builder.AddKeyValue("kv-verb", options => options.RootPath = null);
         builder.Factories.ShouldHaveSingleItem();
+        builder.Names.ShouldBe(["kv-verb"]);
         await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
 
         // Assert: registered on the seam, configured, and operational (data machine).
@@ -39,9 +40,8 @@ public class KeyValueApplicationBuilderTests
     {
         var builder = new RecordingApplicationBuilder();
         bool serverCreated = false;
-        builder.AddKeyValue((context, options) =>
+        builder.AddKeyValue("kv-server-verb", options =>
         {
-            options.EngineName = "kv-server-verb";
             options.AddServer(engine =>
             {
                 serverCreated = true;
@@ -62,7 +62,7 @@ public class KeyValueApplicationBuilderTests
     {
         // Arrange
         var builder = new RecordingApplicationBuilder();
-        builder.AddKeyValue((context, options) => { });
+        builder.AddKeyValue("defaults", _ => { });
         await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
 
         // Act: the registered engine is immediately usable (in-memory default).

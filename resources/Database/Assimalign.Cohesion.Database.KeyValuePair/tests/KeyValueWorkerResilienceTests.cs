@@ -494,7 +494,7 @@ public sealed class KeyValueWorkerResilienceTests
     {
         // Arrange
         var worker = new EscapingWorker();
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         builder.AddWorker(_ => worker);
         await using var engine = builder.Build();
 
@@ -1048,7 +1048,7 @@ public sealed class KeyValueWorkerResilienceTests
     {
         // Arrange
         var defaults = new KeyValueDatabaseEngineOptions();
-        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
         builder.WorkerFailureMinimumPasses = 4;
         builder.JournalSizeLimit = 512L * 1024 * 1024;

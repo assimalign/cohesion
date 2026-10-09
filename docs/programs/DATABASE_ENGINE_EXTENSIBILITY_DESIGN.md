@@ -1349,6 +1349,9 @@ Numbering continues the plan of record's table. Each line is the question, then 
 
     >My Decision: I'm fine with at `Build`/`BuildAsync`. However, this may be due to my ignorance, but I am concerned that when we start implementing the ability to run schema migrations. A database that could have a terabyte of data could take a while and I am wondering if the engine build could hang up the host at all.
 
+    *Landed in B1 part 1:* the SQL engine's `Build`/`BuildAsync` provisions its declared databases;
+    49a below is not implemented.
+
     **49a (proposed 2026-10-09, awaiting the owner; lands in B2).** The concern holds. [Certain]
     Four of the planner's operations cost time in proportion to the table: `AddIndex` and
     `AddConstraint` on a populated table scan every row (an index also builds its whole tree), and
@@ -1381,9 +1384,14 @@ Numbering continues the plan of record's table. Each line is the question, then 
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence
     to "`DatabaseInstance` has no capability member", recorded in O34a? *Recommend:* yes.
     > Agree with recommendation
+
+    *Landed in B1 part 1:* the capability, `CompiledSchema` and `SchemaMigrationResult` are deleted;
+    the rule-4 sentence and O34a wait for the main session.
 51. **Ownership vocabulary.** Keep `DatabaseObjectOwner` and `DatabaseObjectLockedException` in the
     root (four catalogs persist them), moving the file out of `Provisioning/`? *Recommend:* keep.
     > Agree
+
+    *Landed in B1 part 1:* `DatabaseObjectOwner` moved to `Database/src/`, namespace unchanged.
 52. **Builder shape.** Three levels; the engine name a mandatory first argument of every model verb
     and of `CreateBuilder(name)`; the root seam's nameless `AddEngine` replaced by
     `AddEngine(name, factory)`; the model-verb callback loses `IDatabaseApplicationContext`?
@@ -1413,30 +1421,50 @@ Numbering continues the plan of record's table. Each line is the question, then 
       owner asked for. Code that needs the container uses the lower-level
       `builder.AddEngine(name, context => …)`, whose build context carries the built
       `ServiceProvider`.
+
+    *Landed in B1 part 1:* the root seam is `AddEngine(name, factory)`, Hosting reserves the name at
+    registration, the five verbs take `(string name, Action<XEngineBuilder>)`, and every
+    `CreateBuilder` takes the name.
 53. **Imperative apply.** Keep `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)` public for tools,
     Studio and tests? *Recommend:* keep, on the sealed leaf.
     > Agree
+
+    *Landed in B1 part 1.*
 54. **Legacy registration paths.** Delete `DatabaseApplicationOptions.Engines`, `.Servers` and
     `.Services`, the options constructor and `CreateBuilder(DatabaseApplicationOptions)`?
     *Recommend:* yes, one path per kind of thing.
     > Agree
+
+    *Landed in B1 part 1* (the public `new DatabaseApplicationBuilder(options)` stays, for host
+    settings only).
 55. **Provisioning modes.** `Apply` (default) and `Verify` only? *Recommend:* yes; `Verify` is
     opt-in per database, not per environment.
     > Agree
+
+    *Landed in B1 part 1* (`Verify` also refuses a missing database instead of creating it).
 56. **Declared databases.** Refuse `DropDatabaseAsync` of a declared database, and refuse an
     existing database whose collation differs from the declared one? *Recommend:* refuse both.
     > Agree
+
+    *Landed in B1 part 1* (`COHSQLP002` for the collation; an unset declaration means `Binary`).
 57. **Schema lambdas.** Delete `SqlSchemaBuilder.Function<…>`, `Trigger<…>` and `Extension`, their
     compiled records, and the SDK canonicalizer? None has ever executed. *Recommend:* delete in B1.
     > Agree
+
+    *Sql.Schema side landed in B1 part 1;* the SDK canonicalizer and extraction are part 2.
 58. **Principals.** Remove `Principal(...)` from the five templates in B1, and refuse schema
     principals at engine Build (before I/O) until principal and grant DDL is its own item?
     *Recommend:* yes.
     > Agree
+
+    *Engine Build refusal landed in B1 part 1* (`COHSQLP001`, before any file is touched); the
+    templates are part 2.
 59. **SDK artifacts and format.** One schema artifact per declared database, the inline
     `database.Schema(...)` anchor, document format `v2`, and the one-time hash change?
     *Recommend:* yes.
     > Agree
+
+    *Format `v2` and the hash change landed in B1 part 1;* the SDK artifacts and anchor are part 2.
 60. **Function abstraction shape.** Abstract NVI bases plus static typed factories over `SqlValue`
     (recommended), typed generic bases over `object?`, or sealed delegate descriptors?
     *Recommend:* the first.

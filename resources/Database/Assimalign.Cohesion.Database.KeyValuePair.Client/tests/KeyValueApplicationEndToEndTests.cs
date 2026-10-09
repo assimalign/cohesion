@@ -99,9 +99,8 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
         TcpConnectionListener? listener = null;
-        builder.AddKeyValue((context, options) =>
+        builder.AddKeyValue("kv", options =>
         {
-            options.EngineName = "kv";
             options.RootPath = _rootPath;
             options.AddServer(engine =>
             {

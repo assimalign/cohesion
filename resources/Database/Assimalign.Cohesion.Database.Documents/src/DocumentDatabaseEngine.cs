@@ -143,9 +143,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     internal bool IsOpen(DocumentDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
+    /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
-    public static DocumentDatabaseEngineBuilder CreateBuilder() => new();
+    public static DocumentDatabaseEngineBuilder CreateBuilder(string name) => new(name);
 
     /// <summary>
     /// Creates an operational engine using memory or files under the configured root. Its workers

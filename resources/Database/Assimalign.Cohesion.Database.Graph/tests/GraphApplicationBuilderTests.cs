@@ -22,15 +22,15 @@ public sealed class GraphApplicationBuilderTests
         var builder = new RecordingBuilder();
         var context = new RecordingContext();
         int configured = 0;
-        builder.AddGraph((actualContext, options) =>
+        builder.AddGraph("registered", options =>
         {
-            actualContext.ShouldBeSameAs(context);
             configured++;
-            options.EngineName = "registered";
+            options.Name.ShouldBe("registered");
             options.Durability = StorageCommitDurability.Grouped;
         }).ShouldBeSameAs(builder);
 
         configured.ShouldBe(0);
+        builder.Name.ShouldBe("registered");
         await using var engine = builder.Factory.ShouldNotBeNull()(context);
         configured.ShouldBe(1);
         engine.Name.ShouldBe("registered");
@@ -46,7 +46,7 @@ public sealed class GraphApplicationBuilderTests
     {
         var builder = new RecordingBuilder(reject: true);
         bool configured = false;
-        Should.Throw<InvalidOperationException>(() => builder.AddGraph((_, _) => configured = true))
+        Should.Throw<InvalidOperationException>(() => builder.AddGraph("refused", _ => configured = true))
             .Message.ShouldBe("Registration refused.");
         configured.ShouldBeFalse();
     }
@@ -54,8 +54,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public void Build_ShouldAttachDeferredComponentsAndOwnTheirLifetime()
     {
-        var builder = GraphDatabaseEngine.CreateBuilder();
-        builder.EngineName = "composed";
+        var builder = GraphDatabaseEngine.CreateBuilder("composed");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
         builder.AddWorker(engine => worker = new RecordingWorker(engine, engine.Name + "/custom"));
@@ -83,7 +82,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public void FailedServerFactory_ShouldDisposeEarlierComponentsAndFreezeBuilder()
     {
-        var builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
         GraphDatabaseEngine? product = null;
@@ -108,7 +107,7 @@ public sealed class GraphApplicationBuilderTests
     [InlineData(false)]
     public void NullComponentFactoryProduct_ShouldDisposeEngine(bool worker)
     {
-        var builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         GraphDatabaseEngine? product = null;
         if (worker)
         {
@@ -128,7 +127,7 @@ public sealed class GraphApplicationBuilderTests
     {
         using var other = GraphDatabaseEngine.Create(new());
         var server = new RecordingServer(other);
-        var builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         builder.AddServer(_ => server);
         Should.Throw<InvalidOperationException>(() => builder.Build()).Message.ShouldContain("owning engine");
         server.Stops.ShouldBe(1);
@@ -145,7 +144,7 @@ public sealed class GraphApplicationBuilderTests
         {
             using var strategy = new RecordingStorageStrategy(directory);
             strategy.CreateStorage(new DatabaseName("existing"), StorageCommitDurability.Synchronous).Dispose();
-            var builder = GraphDatabaseEngine.CreateBuilder();
+            var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
             builder.StorageStrategy = strategy;
             builder.RootPath = FileSystemPath.Parse(ignoredRoot);
             builder.Durability = StorageCommitDurability.Synchronous;
@@ -189,7 +188,7 @@ public sealed class GraphApplicationBuilderTests
     {
         var builder = new RecordingBuilder();
         GraphDatabaseEngine? product = null;
-        builder.AddGraph((_, engine) =>
+        builder.AddGraph("premature", engine =>
         {
             product = engine.Build();
             if (throwAfterBuild) { throw new InvalidOperationException("Configuration failed."); }
@@ -213,11 +212,13 @@ public sealed class GraphApplicationBuilderTests
         }
 
         internal Func<IDatabaseApplicationContext, DatabaseEngine>? Factory { get; private set; }
+        internal string? Name { get; private set; }
         public IDatabaseApplicationBuilder AddEngine(DatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
-        public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
+        public IDatabaseApplicationBuilder AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine> factory)
         {
             if (_reject) { throw new InvalidOperationException("Registration refused."); }
-            Factory = configure;
+            Name = name;
+            Factory = factory;
             return this;
         }
         public IDatabaseApplication Build() => throw new NotSupportedException();

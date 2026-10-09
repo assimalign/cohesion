@@ -6,8 +6,15 @@ using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
-/// <summary>Host settings and legacy borrowed composition inputs copied at application Build.</summary>
-/// <remarks>Sequential start/stop is required. Mutating these inputs after Build cannot change the application.</remarks>
+/// <summary>Host settings, host policy only (timeouts and the reopen policy), copied at application Build.</summary>
+/// <remarks>
+/// Sequential start/stop is required. Mutating these settings after Build cannot change the
+/// application. The borrowed <c>Engines</c>, <c>Servers</c> and <c>Services</c> lists were deleted
+/// (owner decision 54 of 2026-10-09): engines and services register on the builder
+/// (<see cref="DatabaseApplicationBuilder.AddEngine(DatabaseEngine)"/>,
+/// <see cref="DatabaseApplicationBuilder.AddService(IHostService)"/>), and servers on their
+/// engine's builder.
+/// </remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
     /// <summary>
@@ -23,16 +30,6 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     /// context sets both then.
     /// </summary>
     public FileSystemPath? ContentRootPath { get; set; }
-
-    /// <summary>Gets caller-owned engines to borrow. Nested servers are discovered during Build.</summary>
-    public IList<DatabaseEngine> Engines { get; } = new List<DatabaseEngine>();
-
-    /// <summary>Gets legacy caller-owned servers to start and stop; their engines are implicitly borrowed.</summary>
-    /// <remarks>New composition nests server factories under model engine builders.</remarks>
-    public IList<DatabaseServer> Servers { get; } = new List<DatabaseServer>();
-
-    /// <summary>Gets caller-owned services, started before servers and stopped after servers drain.</summary>
-    public IList<IHostService> Services { get; } = new List<IHostService>();
 
     /// <summary>
     /// Gets or sets whether the running application reopens a database its engine reports offline

@@ -119,10 +119,10 @@ public sealed class SqlAddColumnExecutionTests
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-column-owner" });
         var database = await engine.CreateDatabaseAsync("additions", cancellationToken: CancellationToken.None);
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "additions", EngineModel.Sql, false, [],
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "additions", false, [],
             [new CompiledSchemaTable("additions", "Tests.Additions",
                 [new CompiledSchemaColumn("id", DatabaseType.Int32, IsNullable: false),
-                 new CompiledSchemaColumn("label", DatabaseType.String, IsNullable: true)], null, [], [])], [], [], [], []);
+                 new CompiledSchemaColumn("label", DatabaseType.String, IsNullable: true)], null, [], [])], []);
         await database.ApplySchemaAsync(schema,
             cancellationToken: CancellationToken.None);
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);

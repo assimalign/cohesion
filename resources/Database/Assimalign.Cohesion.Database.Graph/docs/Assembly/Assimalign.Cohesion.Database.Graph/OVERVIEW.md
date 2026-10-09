@@ -4,7 +4,7 @@
   `DatabaseEngine`, whose lifecycle the base defines; `Workers` exposes the four maintenance
   duties. Dispose the engine to flush and release all databases. `CreateDatabaseAsync`,
   `OpenDatabaseAsync`, `GetDatabasesAsync` and `TryGetDatabase` return the typed `GraphDatabase`.
-- `GraphDatabaseEngine.CreateBuilder()` returns the sealed `GraphDatabaseEngineBuilder`: options
+- `GraphDatabaseEngine.CreateBuilder(name)` returns the sealed `GraphDatabaseEngineBuilder`: options
   and nested component factories typed over the engine, for standalone construction or a
   hosting-aware engine factory.
 - `GraphDatabase` (a `DatabaseInstance`) takes an explicit `GraphDatabaseSession` in its node,
@@ -22,7 +22,7 @@
   definition and property changes, and node-property index creation. It rejects foreign sessions.
   `GetIndexesAsync` returns `GraphSchemaResult<GraphIndexMetadata>`, a read-only list whose
   `Diagnostics` holds the `COHDBG010` warning for a label the database does not have.
-- `AddGraph((context, engine) => ...)` is an extension member on the root
+- `AddGraph(name, engine => ...)` is an extension member on the root
   `IDatabaseApplicationBuilder`; it captures construction and returns the application builder.
   Its Build-time callback receives the `GraphDatabaseEngineBuilder` with model options and
   deferred, typed `AddWorker` / `AddServer` factories. Failed construction disposes completed

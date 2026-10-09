@@ -11,7 +11,9 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Diffs, renders, applies, and records the compiled schema owned by one SQL database.
+/// Diffs, renders, applies, verifies and records the compiled schema owned by one SQL database:
+/// the imperative <see cref="SqlDatabase.ApplySchemaAsync"/> path and phase 6 of the engine
+/// builder's build (<see cref="SqlDeclaredDatabase"/>) share it.
 /// </summary>
 internal sealed class SqlSchemaProvisioner
 {
@@ -25,17 +27,11 @@ internal sealed class SqlSchemaProvisioner
         _catalog = catalog;
     }
 
-    internal async ValueTask<SchemaMigrationResult> ApplyAsync(
-        CompiledSchema compiledSchema,
+    internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
+        SqlCompiledSchema schema,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(compiledSchema);
-        if (compiledSchema is not SqlCompiledSchema schema)
-        {
-            throw new SqlSchemaMigrationException(
-                $"SQL database '{_database.Name}' requires a SQL compiled schema, but received model '{compiledSchema.Model}'.");
-        }
-
+        ArgumentNullException.ThrowIfNull(schema);
         ValidateSupportedSchema(schema);
 
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -45,16 +41,23 @@ internal sealed class SqlSchemaProvisioner
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             string targetHash = schema.Hash;
             string canonicalDocument = schema.CanonicalDocument;
-            if (recorded is not null &&
-                string.Equals(recorded.ContentHash, targetHash, StringComparison.Ordinal) &&
-                string.Equals(recorded.CanonicalDocument, canonicalDocument, StringComparison.Ordinal) &&
-                CatalogMatches(schema))
+            if (IsApplied(recorded, schema))
             {
-                return new SchemaMigrationResult(recorded.ContentHash, targetHash, 0, WasAlreadyApplied: true);
+                return new SqlSchemaMigrationResult(recorded!.ContentHash, targetHash, 0, WasAlreadyApplied: true);
             }
 
             SqlCompiledSchema? current = ReadCurrentSchema(recorded, schema);
-            SqlSchemaMigrationPlan plan = SqlSchemaMigrationPlanner.Plan(current, schema);
+            SqlSchemaMigrationPlan plan;
+            try
+            {
+                plan = SqlSchemaMigrationPlanner.Plan(current, schema);
+            }
+            catch (SqlSchemaMigrationException refused)
+            {
+                // The planner knows the schemas, not where they are applied.
+                throw new SqlSchemaMigrationException($"{Describe()}: {refused.Message}", refused);
+            }
+
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
 
@@ -85,12 +88,15 @@ internal sealed class SqlSchemaProvisioner
                 Exception inner = compensation.Failures.Count == 0
                     ? failure
                     : new AggregateException(new[] { failure }.Concat(compensation.Failures));
+                string where = applied.Count < script.Steps.Count
+                    ? $"step {applied.Count + 1} of {script.Steps.Count} ({Describe(script.Steps[applied.Count].Operation)}) failed"
+                    : $"recording the applied schema failed after all {script.Steps.Count} step(s)";
                 throw new SqlSchemaMigrationException(
-                    $"Applying SQL schema '{schema.Name}' failed after {applied.Count} of {script.Steps.Count} operation(s). {state}",
+                    $"{SqlProvisioningCodes.StepFailed}: {Describe()}: applying schema '{schema.Name}': {where}. {state}",
                     inner);
             }
 
-            return new SchemaMigrationResult(
+            return new SqlSchemaMigrationResult(
                 plan.SourceHash,
                 targetHash,
                 plan.Operations.Count,
@@ -101,6 +107,96 @@ internal sealed class SqlSchemaProvisioner
             _applyGate.Release();
         }
     }
+
+    /// <summary>
+    /// Verifies, without running any DDL, that the database holds exactly the schema: the recorded
+    /// hash and canonical document are the schema's, and the live schema-owned catalog matches it.
+    /// </summary>
+    /// <param name="schema">The declared schema.</param>
+    /// <param name="cancellationToken">Observed while the apply gate is awaited.</param>
+    /// <returns>The result, always already applied.</returns>
+    /// <exception cref="SqlSchemaMigrationException">The database drifted (<c>COHSQLP003</c>).</exception>
+    internal async ValueTask<SqlSchemaMigrationResult> VerifyAsync(
+        SqlCompiledSchema schema,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ValidateSupportedSchema(schema);
+
+        await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            SqlCatalogSchemaState? recorded = _catalog.SchemaState;
+            if (IsApplied(recorded, schema))
+            {
+                return new SqlSchemaMigrationResult(recorded!.ContentHash, schema.Hash, 0, WasAlreadyApplied: true);
+            }
+
+            string reason = recorded is null
+                ? "the database records no applied schema"
+                : !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal)
+                    ? $"the database records schema hash {recorded.ContentHash}"
+                    : "the live catalog no longer matches the recorded schema";
+            throw new SqlSchemaMigrationException(
+                $"{SqlProvisioningCodes.Drift}: {Describe()}: the declared schema (hash {schema.Hash}) is not the one " +
+                $"applied: {reason}. The database is declared in Verify mode, so nothing was changed; migrate it out of " +
+                "band, or declare it in Apply mode.");
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Describes what a compiled schema declares that the SQL DDL executor cannot provision yet,
+    /// or returns null when it declares nothing of the kind: the engine builder refuses such a
+    /// declaration before any file is touched (phase 3 of its build), and an apply refuses it before
+    /// any step runs.
+    /// </summary>
+    /// <param name="schema">The schema.</param>
+    /// <returns>The first unsupported object, described for a message, or null.</returns>
+    internal static string? DescribeUnsupported(SqlCompiledSchema schema)
+    {
+        if (schema.Principals.Count > 0)
+        {
+            return $"principal '{schema.Principals[0].Name}', and principals and grants are refused until their DDL exists";
+        }
+
+        if (schema.Types.Count > 0)
+        {
+            return $"custom type '{schema.Types[0].Name}', and custom types are refused until their DDL exists";
+        }
+
+        foreach (CompiledSchemaTable table in schema.Tables)
+        {
+            foreach (CompiledSchemaColumn column in table.Columns)
+            {
+                if (!string.IsNullOrWhiteSpace(column.CustomType))
+                {
+                    return $"column '{table.Name}.{column.Name}' of custom type '{column.CustomType}', and custom-type " +
+                        "migrations are not supported yet";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // The recorded hash, the recorded canonical document and the live catalog all agree with the schema.
+    private bool IsApplied(SqlCatalogSchemaState? recorded, SqlCompiledSchema schema)
+        => recorded is not null &&
+            string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) &&
+            string.Equals(recorded.CanonicalDocument, schema.CanonicalDocument, StringComparison.Ordinal) &&
+            CatalogMatches(schema);
+
+    // Names where a provisioning message happened: the engine and the database.
+    private string Describe() => $"SQL engine '{_database.Engine.Name}', database '{_database.Name}'";
+
+    private static string Describe(SqlSchemaMigrationOperation operation)
+        => operation.ParentName is null
+            ? $"{operation.Kind} '{operation.ObjectName}'"
+            : $"{operation.Kind} '{operation.ParentName}.{operation.ObjectName}'";
 
     private SqlCompiledSchema? ReadCurrentSchema(
         SqlCatalogSchemaState? recorded,
@@ -203,14 +299,10 @@ internal sealed class SqlSchemaProvisioner
         return new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             desired.Name,
-            EngineModel.Sql,
             allowsDestructiveChanges: false,
             Array.Empty<CompiledSchemaType>(),
             tables,
-            Array.Empty<CompiledSchemaFunction>(),
-            Array.Empty<CompiledSchemaTrigger>(),
-            Array.Empty<CompiledSchemaPrincipal>(),
-            Array.Empty<CompiledSchemaExtension>());
+            Array.Empty<CompiledSchemaPrincipal>());
     }
 
     private bool CatalogMatches(SqlCompiledSchema schema)
@@ -343,7 +435,7 @@ internal sealed class SqlSchemaProvisioner
             if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
                 throw new SqlSchemaMigrationException(
-                    $"SQL schema '{schema.Name}' cannot adopt table '{table.Name}' because it was not created by this schema.");
+                    $"{Describe()}: SQL schema '{schema.Name}' cannot adopt table '{table.Name}' because it was not created by this schema.");
             }
 
             foreach (CompiledSchemaIndex index in table.Indexes)
@@ -352,7 +444,7 @@ internal sealed class SqlSchemaProvisioner
                     !IsOwnedBy(existing.Owner, existing.OwningSchema, schema.Name))
                 {
                     throw new SqlSchemaMigrationException(
-                        $"SQL schema '{schema.Name}' cannot adopt index '{index.Name}' because it was not created by this schema.");
+                        $"{Describe()}: SQL schema '{schema.Name}' cannot adopt index '{index.Name}' because it was not created by this schema.");
                 }
             }
         }
@@ -382,44 +474,16 @@ internal sealed class SqlSchemaProvisioner
 
     private void ValidateSupportedSchema(SqlCompiledSchema schema)
     {
-        if (schema.Model != EngineModel.Sql)
-        {
-            throw new SqlSchemaMigrationException(
-                $"SQL database '{_database.Name}' cannot apply a schema for model '{schema.Model}'.");
-        }
-
         if (!string.Equals(schema.Name, _database.Name.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             throw new SqlSchemaMigrationException(
-                $"SQL database '{_database.Name}' cannot apply schema '{schema.Name}'.");
+                $"{Describe()}: the database cannot apply schema '{schema.Name}'.");
         }
 
-        RejectUnsupported(schema.Types.Count, "custom types");
-        RejectUnsupported(schema.Functions.Count, "functions");
-        RejectUnsupported(schema.Triggers.Count, "triggers");
-        RejectUnsupported(schema.Principals.Count, "principals and grants");
-        RejectUnsupported(schema.Extensions.Count, "model extensions");
-
-        foreach (CompiledSchemaTable table in schema.Tables)
+        if (DescribeUnsupported(schema) is { } unsupported)
         {
-            foreach (CompiledSchemaColumn column in table.Columns)
-            {
-                if (!string.IsNullOrWhiteSpace(column.CustomType))
-                {
-                    throw new SqlSchemaMigrationException(
-                        $"SQL column '{table.Name}.{column.Name}' uses custom type '{column.CustomType}', " +
-                        "but custom-type migrations are not supported yet.");
-                }
-            }
-        }
-
-        void RejectUnsupported(int count, string kind)
-        {
-            if (count > 0)
-            {
-                throw new SqlSchemaMigrationException(
-                    $"SQL schema '{schema.Name}' declares {kind}, but the SQL DDL executor cannot migrate them yet.");
-            }
+            throw new SqlSchemaMigrationException(
+                $"{Describe()}: SQL schema '{schema.Name}' declares {unsupported}.");
         }
     }
 

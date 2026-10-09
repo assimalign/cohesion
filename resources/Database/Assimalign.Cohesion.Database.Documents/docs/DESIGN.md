@@ -703,8 +703,12 @@ sequenceDiagram
 ## Phase 29: deferred hosting composition
 
 The owner-approved [Database hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md)
-is implemented as `AddDocuments((context, engine) => ...)` on
-`IDatabaseApplicationBuilder`. This replaces `AddDocumentDatabase`. The model callback
+is implemented as `AddDocuments(name, engine => ...)` on
+`IDatabaseApplicationBuilder`. This replaces `AddDocumentDatabase`. The engine name is the
+verb's first argument (owner decision 52 of 2026-10-09): the verb reserves it through the root
+seam's named `AddEngine(name, factory)`, so a duplicate fails at the call, and the builder
+created for it reports it as `Name`; its `EngineName` starts as that name and the build refuses any
+other value until B3 removes it. The model callback
 runs during application Build and receives the sealed `DocumentDatabaseEngineBuilder`.
 It configures the complete option set, including `FileSystemPath? RootPath`,
 durability, identity and worker intervals; it neither binds configuration nor
@@ -741,7 +745,7 @@ unchanged. Since phase 4 of the concrete-types plan the strategy is
 `IDocumentStorageStrategy`, so the options and builder property are internal and
 only this assembly's test doubles (fault-injecting and recording) supply one.
 
-`DocumentDatabaseEngine.CreateBuilder()` exposes the model builder for the
+`DocumentDatabaseEngine.CreateBuilder(name)` exposes the model builder for the
 concrete hosting builder's `AddEngine(name, build => ...)` overload. The consumer
 assigns resolved configuration/service values, registers nested server/worker
 factories, and returns `Build()`; the model package still never sees DI. The

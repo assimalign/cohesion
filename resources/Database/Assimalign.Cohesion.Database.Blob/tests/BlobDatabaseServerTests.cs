@@ -205,7 +205,7 @@ public sealed class BlobDatabaseServerTests
         // engine reports Faulted for every database.
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.AddWorker(engine => new FailingWorker(engine.Name + "/failing"));
         await using var engine = builder.Build();
         while (engine.State != EngineState.Faulted)
@@ -250,7 +250,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         await using var engine = builder.Build();
@@ -335,7 +335,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         await using var engine = builder.Build();
@@ -387,7 +387,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         await using var engine = builder.Build();
@@ -437,7 +437,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
-        var builder = BlobDatabaseEngine.CreateBuilder();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/maintenance", "objects", DatabaseEngineWorkerKind.IndexMaintenance));
         await using var engine = builder.Build();
         var worker = registered.ShouldNotBeNull();

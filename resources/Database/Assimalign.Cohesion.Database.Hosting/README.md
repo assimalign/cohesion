@@ -20,12 +20,13 @@ health/probe routes remain reachable by platform probes. Readiness stays unhealt
 until the outer Database host reaches `Started`, which means every wire server has
 completed its accepting bind; liveness remains process-oriented.
 
-`builder.Provision(engine, name)` opens or creates a declared database before
-accept. `builder.AddDatabase(engine, name, configure)` also retains its C# schema
-for the later schema-compilation and migration stages. These remain before-accept
-operations regardless of fluent verb order because additional services always
-start before server wrappers. Creation follows only an exact
-`DatabaseNotFoundException`; other open failures abort startup.
+The module provisions nothing and knows no schema. A model's engine builder declares
+the databases its engine owns (`sql.AddDatabase("orders", ...)` inside `AddSql`), and
+the engine's own build opens or creates and provisions them before it returns, inside
+the application's `Build()`; servers start only when the application starts, so
+provisioning still precedes accept. Every engine is registered by name (`AddSql(name, ...)`,
+`AddEngine(name, factory)`), and a duplicate name is refused at registration, before
+any engine is built.
 The concrete `DatabaseApplicationBuilder.AddService` verb accepts either an
 `IHostService` instance or a factory over the final database application context.
 The root builder contract exposes no hosting types or background-work registration (O34).
@@ -34,9 +35,9 @@ after the servers drain.
 Concurrent service start/stop options are rejected at construction and lifecycle
 settings are snapshotted, so retained mutable options cannot bypass this ordering.
 
-The no-argument and options overloads remain plain-host entry points. They do
-not create a control plane or bind an admin listener, and start with an empty
-configuration; `CreateBuilder(args)` loads the default sources.
+`CreateBuilder()` and `new DatabaseApplicationBuilder(options)` remain plain-host
+entry points. They do not create a control plane or bind an admin listener, and
+start with an empty configuration; `CreateBuilder(args)` loads the default sources.
 
 `DatabaseApplicationBuilder` exposes the host-level pieces `WebApplicationBuilder`
 does, created the same way: `Environment` (`HostEnvironment`), `Configuration`

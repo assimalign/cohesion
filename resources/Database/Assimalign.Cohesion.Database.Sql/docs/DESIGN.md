@@ -62,23 +62,78 @@ for the exact supported forms and semantics.
 
 ## Compiled-schema provisioning
 
-`SqlDatabase` provisions compiled schemas: it passes `supportsSchemaProvisioning: true` to
-the root `DatabaseInstance` and overrides `ApplySchemaCoreAsync`, behind the base's
-`ApplySchemaAsync` (which checks disposal, a null schema and the token first; the offline
-refusal, `COHSQLT004`, comes after them). The hosting provisioner reads the base's
-`SupportsSchemaProvisioning` and calls `ApplySchemaAsync`; until phase 6 of the concrete-types
-plan the database also listed the root `IDatabaseSchemaProvisioner`, which the provisioner tested
-for, and phase 6 deleted it. Before a
-schema is applied, the provisioner requires `EngineModel.Sql`, the same logical
+Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
+`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). It has two entry points over one internal
+`SqlSchemaProvisioner` per database: the engine builder provisions every database it declares
+before its build returns (next section), and the typed `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema,
+CancellationToken)` applies a schema imperatively, for tools, Studio and tests (decision 53). The
+public member checks disposal, a null schema and the token first, then refuses an offline database
+(`COHSQLT004`). Until B1 the root `DatabaseInstance` carried the capability
+(`SupportsSchemaProvisioning` over a virtual `ApplySchemaCoreAsync`) and a hosting service applied
+a root `CompiledSchema` through it; decision 50 deleted all three. Before a
+schema is applied, the provisioner requires the same logical
 database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
 steps are table, column, and secondary-index add/drop; alter/rebuild operations
-and advanced objects (custom types, functions,
-triggers, principals/grants, extensions) fail before execution rather than
+and advanced objects (custom types, principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
-DDL and persist in the table catalog; unique declarations use unique indexes.
+DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
+the engine and the database; a failed step leads with `COHSQLP004` and names "step k of n" and its
+operation.
+
+### Declared databases: the engine builder's build phases
+
+`SqlDatabaseEngineBuilder` declares the databases its engine owns
+(`AddDatabase(string, Action<SqlDatabaseBuilder>?)`, `AddDatabase(SqlSchema)`); a
+`SqlDatabaseBuilder` holds one database's default collation, typed schema and
+`SqlProvisioningMode` (`Apply`, the default, or `Verify`, decision 55). `BuildAsync` is the primary
+path; `Build()` bridges it on the thread pool, so it never captures the caller's synchronization
+context. The phases, each seeing only what earlier ones produced:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Options: Build or BuildAsync
+    Options --> Declarations: options checked and copied
+    Declarations --> Engine: each schema compiled, no I/O
+    Engine --> Composed: built-in workers started
+    Composed --> Provisioned: AddWorker, then AddServer products attached, composition frozen
+    Provisioned --> [*]: engine returned, servers still stopped
+    Declarations --> Refused: a declaration is invalid
+    Provisioned --> Disposed: a database fails to provision
+    Refused --> [*]: nothing written
+    Disposed --> [*]: coded error, engine disposed
+```
+
+1. **Options.** `Options` are checked (the checks of `Create`) and copied, so a later change cannot
+   reach the engine; `Create(options)` copies too, which fixed the write-back worker reading the
+   caller's `PageWriteBackBatchSize` on every pass. Until the options lose `EngineName` (B3), options
+   that name another engine than the builder fail the build.
+2. **Function and type catalog** — arrives with the function abstraction (E2).
+3. **Declarations.** Each declared schema is compiled. A schema that does not compile, or declares a
+   principal (decision 58) or a custom type, is refused here with `COHSQLP001`, before any file is
+   touched: the engine, whose creation makes the root directory, does not exist yet. Binding a
+   declared CHECK or DEFAULT to the function catalog joins this phase in E2.
+4. **Engine.** Created; its built-in workers attach and start.
+5. **Composition.** The `AddWorker` products attach, then the `AddServer` products (a server is
+   created stopped; `AddServer(Action<SqlDatabaseServerOptions>)` lets the model create a
+   `SqlDatabaseServer` from the options it configures), and composition is frozen.
+6. **Provisioning**, in declaration order. Open, or create (`DefaultCollation ?? Collation.Binary`)
+   when the database does not exist; an existing database whose collation is not the declared one
+   (an unset declaration meaning `Binary`) is refused with `COHSQLP002`, because a key's collation id
+   cannot change (decision 56). Then `Apply` skips a schema whose recorded hash, recorded document
+   and live catalog all match, and otherwise plans and applies it with compensation; `Verify` runs
+   no DDL and creates nothing, and refuses a missing database or any difference with `COHSQLP003`.
+   A declaration without a schema only ensures the database exists.
+7. **Return.** A failure in phases 4 to 6 disposes the engine (servers, workers, open databases)
+   before the build throws; the worker pumps are joined.
+
+The engine keeps its declared databases: `DropDatabaseAsync` of one is refused with
+`DatabaseObjectLockedException` (operation `DROP DATABASE`, decision 56), because the declaration
+owns it. The provisioning codes are a new family, `COHSQLP001` to `COHSQLP004`, each a
+`SqlSchemaMigrationException` whose message leads with the code and names the engine and the
+database. The provisioning events are the SQL event source's, added by the EventSource track.
 
 Retained table, column, index and constraint names share the parser's delimited
 identifier contract. The renderer preserves bare ordinary names and double-quotes
@@ -100,11 +155,10 @@ gap rather than hidden behind the content hash.
 
 ### Object ownership and the schema package
 
-The area root carries only `CompiledSchema` identity and canonical content, the
-`DatabaseInstance` schema seam (`SupportsSchemaProvisioning` and `ApplySchemaAsync`), and
-model-independent ownership contracts.
-`Database.Sql.Schema` owns SQL declarations, compiled tables/indexes/constraints,
-validation, serialization, and migration plans. The engine references this thin
+The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
+`DatabaseObjectLockedException`). `Database.Sql.Schema` owns SQL declarations, the standalone
+`SqlCompiledSchema` with its canonical document and hash, compiled tables/indexes/constraints,
+validation, serialization, migration plans, and `SqlSchemaMigrationResult`. The engine references this thin
 package; the schema package never references the engine or its storage/transport.
 
 Live sessions create `Adhoc` tables and indexes. The provisioner's private
@@ -1984,14 +2038,18 @@ and add it again" as the only remedy.
 
 ## Application composition (Phase 29)
 
-`AddSql(Action<IDatabaseApplicationContext, SqlDatabaseEngineBuilder>)` is an
-`extension(IDatabaseApplicationBuilder)` member in this model package. It captures
-one factory and returns the application builder. Application Build invokes the
-callback with the build-time root context and a model builder; no model registration
-uses DI, configuration binding, Hosting, or a container. The model builder exposes
-the SQL options, including `FileSystemPath? RootPath`, and permanently freezes them
-when its one Build attempt begins. Direct `SqlDatabaseEngine.Create(options)` stays
-supported for standalone use.
+`AddSql(string name, Action<SqlDatabaseEngineBuilder>)` is an
+`extension(IDatabaseApplicationBuilder)` member in this model package, a shim over the root
+seam's named `AddEngine(name, factory)` (owner decision 52 of 2026-10-09): the name is reserved when
+the verb is called, and the factory creates `SqlDatabaseEngine.CreateBuilder(name)`, runs the callback
+and builds, which provisions the declared databases. It returns the application builder. The
+callback receives no application context: it runs during application Build, so a closure over
+`builder.Configuration` reads the final configuration, and an engine that needs the container is
+registered with the hosting builder's own `AddEngine(name, context => ...)`. No model registration
+uses DI, configuration binding, Hosting, or a container. The model builder exposes the engine name
+once (`Name`) and the settings as one options object (`Options`, replacing fourteen mirrored
+properties), which its build copies. Direct `SqlDatabaseEngine.Create(options)` stays
+supported for standalone use, and copies its options too.
 
 Workers and servers are nested deferred factories on the sealed builder, typed over
 the SQL engine: `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and
@@ -2018,7 +2076,7 @@ are aggregated. Async cleanup reached through synchronous Build/Dispose runs wit
 the caller's synchronization context. Database name operations now accept
 `DatabaseName`, including SQL's collation-specific creation overload.
 
-`SqlDatabaseEngine.CreateBuilder()` returns the sealed `SqlDatabaseEngineBuilder`,
+`SqlDatabaseEngine.CreateBuilder(name)` returns the sealed `SqlDatabaseEngineBuilder`,
 whose constructor is internal. **Reversed at phase 4 of the concrete-types plan:** this
 paragraph used to call the builder an "interface-first entry" (`ISqlDatabaseEngineBuilder`
 over the root `IDatabaseEngineBuilder`), kept so a hosting-aware factory or a builder
@@ -2055,7 +2113,11 @@ are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT t
 does not load fails the open with a `DatabaseException` naming the database, table
 and constraint or column; one whose call fails its signature carries the
 `COHSQLE006` error in its message and as its inner exception. No runtime
-`ArithmeticException` escapes expression evaluation.
+`ArithmeticException` escapes expression evaluation. Provisioning a declared database fails with
+`SqlSchemaMigrationException` led by a `COHSQLP` code (`Internal/SqlProvisioningCodes`):
+`COHSQLP001` a declaration refused before any file is touched, `COHSQLP002` an existing database's
+collation that is not the declared one, `COHSQLP003` a `Verify` declaration that drifted or does not
+exist, `COHSQLP004` a failed schema step after compensation.
 
 ## The MVCC integration (scoped under #862)
 

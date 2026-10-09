@@ -7,9 +7,8 @@ context), and `DatabaseTransaction` (explicit ACID scope) — plus the server ba
 (`DatabaseServer`, `DatabaseServerSession`; servers are per-model, each implemented inside its
 model package) and the engine worker base (`DatabaseEngineWorker`), the application seam
 (`IDatabaseApplication`, `IDatabaseApplicationContext`, `IDatabaseApplicationBuilder`, three of
-the area's five kept interfaces), the model-agnostic provisioning surface (`CompiledSchema`,
-`DatabaseInstance.SupportsSchemaProvisioning` and `ApplySchemaAsync`, `SchemaMigrationResult`),
-object ownership (`DatabaseObjectOwner`, `DatabaseObjectLockedException`), the area's exception
+the area's five kept interfaces), object ownership (`DatabaseObjectOwner`,
+`DatabaseObjectLockedException`), the area's exception
 root (`DatabaseException`, `DatabaseNotFoundException`, `DatabaseParseException`), and shared value
 objects (`DatabaseName`, `EngineState`, `EngineModel`). The root is also the area's **rollup**: it
 references every child root (Types, Language, Storage, Transactions, Execution, Indexing,
@@ -50,20 +49,20 @@ child-owned vocabulary the contracts speak (`TransactionId` and `TransactionStat
   it inside its model package (`SqlDatabaseServer` in `Database.Sql`).
 - **Application composition seam** — `IDatabaseApplicationBuilder` / `IDatabaseApplication` /
   `IDatabaseApplicationContext`: model packages register deferred engines against this root seam
-  (e.g. `Database.Sql`'s `AddSql((context, engine) => ...)` with nested server factories) without
-  knowing the hosting implementation. The seam names the root bases (`AddEngine(DatabaseEngine)`,
+  (e.g. `Database.Sql`'s `AddSql("orders-sql", sql => ...)` with its declared databases and nested
+  server factories) without knowing the hosting implementation. Every owned engine is registered by
+  name (`AddEngine(name, factory)`), so the hosting layer refuses a duplicate name before any
+  factory runs. The seam names the root bases (`AddEngine(DatabaseEngine)`,
   `Engines`, `Servers`, `GetEngine(name)`), and the static extension `GetEngine<TEngine>(name)`
   returns a model's engine typed. Composition roots register background work through the concrete
   `DatabaseApplicationBuilder.AddService` in `Database.Hosting`; the root contracts expose no
   hosting-library types. `Database.Hosting` implements the seam
   (`DatabaseApplication.CreateBuilder(args)`) so services start before servers and stop after
   them in reverse order.
-- **Model-agnostic provisioning** — `CompiledSchema` carries identity, the canonical document,
-  and its content hash. A database whose model provisions schemas reports
-  `SupportsSchemaProvisioning`, and `DatabaseInstance.ApplySchemaAsync` applies the schema and
-  returns `SchemaMigrationResult`. SQL declarations and relational shapes live in
-  `Database.Sql.Schema`; Hosting receives an already compiled schema through
-  `AddDatabase(engine, name, schema)`.
+- **No schema type** — schemas and their provisioning belong to the model that owns their shape
+  (owner decision 50 of 2026-10-09): SQL declarations, the compiled schema and its migration result
+  live in `Database.Sql.Schema`, and the SQL engine builder provisions the databases it declares.
+  `DatabaseInstance` has no capability member.
 - **Object ownership** — `DatabaseObjectOwner` distinguishes code-first provisioning from ad-hoc
   statements. Schema-owned objects require schema apply to change; ad-hoc objects remain mutable
   through session statements. `DatabaseObjectLockedException` identifies the refused object,
@@ -105,5 +104,5 @@ Phase 29 gave each model an options-bearing engine builder with deferred worker/
 `DatabaseEngine.Servers` exposes nested servers for host lifecycle discovery; engines retain their
 disposal ownership. Named engine operations use `DatabaseName`. `IDatabaseApplication` is
 asynchronously disposable, its context includes all engines and ordinal `GetEngine(name)`, and its
-builder exposes AddEngine(instance/factory) plus one-shot Build without a mutable registry or Use
-stage.
+builder exposes AddEngine(instance) and AddEngine(name, factory) plus one-shot Build without a
+mutable registry or Use stage.

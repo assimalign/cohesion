@@ -662,9 +662,13 @@ packet-beta
 
 ## Phase 29 hosting composition
 
-`AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder>)`
+`AddKeyValue(string name, Action<KeyValueDatabaseEngineBuilder>)`
 replaces eager `AddKeyValueDatabase` and the sibling application `AddKeyValueServer`.
-The verb registers a dependency-free factory and returns the application builder.
+The verb registers a dependency-free factory and returns the application builder. The engine name
+is its first argument (owner decision 52 of 2026-10-09): the verb reserves it through the root
+seam's named `AddEngine(name, factory)`, so a duplicate fails at the call, and the builder created
+for it reports it as `Name`; its `EngineName` starts as that name and the build refuses any other
+value until B3 removes it.
 Application Build executes its callback; the model builder exposes all existing
 options, including `FileSystemPath? RootPath`, and freezes them on its one Build
 attempt. It constructs the engine before invoking nested `AddWorker` and `AddServer`
@@ -683,7 +687,7 @@ registrations remain caller-owned. Database create/open/drop/lookup accept
 `DatabaseName`.
 
 **The sealed builder (concrete-types plan, D5, phase 4, #1260).**
-`KeyValueDatabaseEngine.CreateBuilder()` returns the `public sealed`
+`KeyValueDatabaseEngine.CreateBuilder(name)` returns the `public sealed`
 `KeyValueDatabaseEngineBuilder`, which has an internal constructor, so the verb and
 `CreateBuilder` are the only ways to get one. Its factories are typed over the
 engine, `AddWorker(Func<KeyValueDatabaseEngine, DatabaseEngineWorker>)` and

@@ -4,9 +4,9 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
-/// A database whose cores create <see cref="TestSession"/>s, apply a schema when it supports
-/// provisioning, and record their disposal. A close gate, when given, holds the disposal cores
-/// until it is released, so a test can act while a close runs.
+/// A database whose cores create <see cref="TestSession"/>s and record their disposal. A close
+/// gate, when given, holds the disposal cores until it is released, so a test can act while a
+/// close runs.
 /// </summary>
 internal sealed class TestDatabase : DatabaseInstance
 {
@@ -15,10 +15,9 @@ internal sealed class TestDatabase : DatabaseInstance
     private int _sessions;
     private int _disposeCores;
     private int _asyncDisposeCores;
-    private int _schemaApplies;
 
-    public TestDatabase(DatabaseName name, DatabaseEngine engine, bool supportsSchemaProvisioning = false, TestLog? log = null, TaskCompletionSource? closeGate = null)
-        : base(name, engine, supportsSchemaProvisioning)
+    public TestDatabase(DatabaseName name, DatabaseEngine engine, TestLog? log = null, TaskCompletionSource? closeGate = null)
+        : base(name, engine)
     {
         Log = log ?? new TestLog();
         _closeGate = closeGate;
@@ -32,8 +31,6 @@ internal sealed class TestDatabase : DatabaseInstance
 
     public int AsyncDisposeCores => Volatile.Read(ref _asyncDisposeCores);
 
-    public int SchemaApplies => Volatile.Read(ref _schemaApplies);
-
     public bool Disposed => IsDisposed;
 
     /// <summary>Gets a task that completes once a disposal core started.</summary>
@@ -43,12 +40,6 @@ internal sealed class TestDatabase : DatabaseInstance
     {
         Interlocked.Increment(ref _sessions);
         return new ValueTask<DatabaseSession>(new TestSession(this, Log));
-    }
-
-    protected override ValueTask<SchemaMigrationResult> ApplySchemaCoreAsync(CompiledSchema schema, CancellationToken cancellationToken)
-    {
-        Interlocked.Increment(ref _schemaApplies);
-        return new ValueTask<SchemaMigrationResult>(new SchemaMigrationResult(null, schema.Hash, 1, false));
     }
 
     protected override void DisposeCore()
