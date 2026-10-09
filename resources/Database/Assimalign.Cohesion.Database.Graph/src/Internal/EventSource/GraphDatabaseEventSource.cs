@@ -35,6 +35,13 @@ internal sealed class GraphDatabaseEventSource : EventSource
 {
     public static readonly GraphDatabaseEventSource Log = new();
 
+    // The longest name (database, principal) and text (a refusal's detail, a violation, a parse
+    // diagnostic) a payload carries. Each can quote what a peer sent, before authentication too,
+    // and a frame may hold 16 MB, so a longer value is cut and marked (event-source.md rule 11:
+    // bounded payloads).
+    private const int MaxNameLength = 256;
+    private const int MaxTextLength = 1024;
+
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
     private PollingCounter? _rejectedSessionsCounter;
@@ -164,16 +171,16 @@ internal sealed class GraphDatabaseEventSource : EventSource
     /// Writes that the handshake refused a session with a coded error frame.
     /// </summary>
     /// <param name="session">The refused session.</param>
-    /// <param name="database">The database the startup named; empty before the startup was read.</param>
-    /// <param name="principal">The principal the startup claimed; empty before the startup was read.</param>
+    /// <param name="database">The database the startup named; empty before the startup was read. Written cut to 256 characters.</param>
+    /// <param name="principal">The principal the startup claimed; empty before the startup was read. Written cut to 256 characters.</param>
     /// <param name="code">The error frame's code.</param>
-    /// <param name="detail">The error frame's message.</param>
+    /// <param name="detail">The error frame's message. Written cut to 1024 characters.</param>
     [NonEvent]
     public void HandshakeRefused(DatabaseServerSession session, string database, string principal, ProtocolErrorCode code, string detail)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            HandshakeRefused(session.Id, database, principal, code.ToString(), detail);
+            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength));
         }
     }
 
@@ -213,13 +220,13 @@ internal sealed class GraphDatabaseEventSource : EventSource
     /// Writes that a framing or message-order violation terminated a session.
     /// </summary>
     /// <param name="session">The terminated session.</param>
-    /// <param name="message">The violation, as the error frame states it.</param>
+    /// <param name="message">The violation, as the error frame states it. Written cut to 1024 characters.</param>
     [NonEvent]
     public void SessionProtocolViolation(DatabaseServerSession session, string message)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            SessionProtocolViolation(session.Id, message);
+            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength));
         }
     }
 
@@ -287,8 +294,9 @@ internal sealed class GraphDatabaseEventSource : EventSource
     }
 
     /// <summary>
-    /// Writes that a reopened database recovered its indexes; written only for a recovery whose
-    /// start was written.
+    /// Writes that a reopened database's index recovery ended, whether it recovered the indexes or
+    /// threw (the root's failed open reports the failure), so the activity its start opened always
+    /// closes; written only for a recovery whose start was written.
     /// </summary>
     /// <param name="database">The database.</param>
     /// <param name="startTimestamp">The timestamp <see cref="IndexRecoveryStart(DatabaseName, int)"/> returned.</param>
@@ -307,13 +315,13 @@ internal sealed class GraphDatabaseEventSource : EventSource
     /// </summary>
     /// <param name="session">The server session that received the statement.</param>
     /// <param name="database">The session's database.</param>
-    /// <param name="exception">The parse or validation failure; it propagates unchanged.</param>
+    /// <param name="exception">The parse or validation failure; it propagates unchanged. Its message is written cut to 1024 characters.</param>
     [NonEvent]
     public void StatementParseFailed(DatabaseServerSession session, DatabaseName database, Exception exception)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            StatementParseFailed(session.Id, database.ToString(), exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+            StatementParseFailed(session.Id, database.ToString(), exception.GetType().FullName ?? exception.GetType().Name, Bound(exception.Message, MaxTextLength));
         }
     }
 
@@ -357,7 +365,7 @@ internal sealed class GraphDatabaseEventSource : EventSource
     private void IndexRecoveryStart(string database, int abortedWriters)
         => WriteEvent(10, database, abortedWriters);
 
-    [Event(11, Level = EventLevel.Informational, Message = "Database '{0}' recovered its indexes in {1} ms.")]
+    [Event(11, Level = EventLevel.Informational, Message = "Database '{0}' ended its index recovery after {1} ms.")]
     private void IndexRecoveryStop(string database, double durationMilliseconds)
         => WriteEvent(11, database, durationMilliseconds);
 
@@ -388,5 +396,18 @@ internal sealed class GraphDatabaseEventSource : EventSource
         {
             DisplayName = "Total Rejected Sessions",
         };
+    }
+
+    // Cuts a peer-supplied string to its payload bound and marks the cut; never splits a surrogate
+    // pair. Called only inside an IsEnabled check.
+    private static string Bound(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return string.Concat(value.AsSpan(0, length), "...");
     }
 }

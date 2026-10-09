@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
@@ -215,6 +217,114 @@ public sealed class SqlDatabaseEventSourceTests
         timedOut.Payload![1].ShouldBe(200d);
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("HandshakeTimedOut");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should report a handshake whose authenticator outlives the authentication timeout once")]
+    public async Task HandshakeTimedOut_StallingAuthenticator_ShouldBeReportedOnce()
+    {
+        // Arrange: the timeout lapses inside the authenticator, not at a read.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await ServerTestHarness.StartAsync(
+            options =>
+            {
+                options.Authenticator = new StallingAuthenticator();
+                options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
+            },
+            options => options.EngineName = engineName);
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, ServerTestHarness.DatabaseName, "ada").Encode());
+        await client.ExpectAsync(ProtocolMessageType.Authenticate);
+        await client.SendAsync(ProtocolMessageType.AuthenticateResponse);
+        (await client.ReadAsync()).ShouldBeNull();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: dropped without an error frame and reported as the timeout, not as a cancellation.
+        recorder.Events.Where(e => IsFor(e, 4, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe(2000d);
+        recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("HandshakeTimedOut");
+        recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([4, 5]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should cut the names an unauthenticated peer sent to their bound in a handshake refusal")]
+    public async Task HandshakeRefused_OversizedStartup_ShouldWriteBoundedNames()
+    {
+        // Arrange: a startup refused before any lookup, naming a database and principal far past
+        // the 256-character payload bound.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await ServerTestHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(new ProtocolVersion(99, 0), new string('d', 100_000), new string('p', 100_000)).Encode());
+        var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await client.ReadAsync()).ShouldBeNull();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert
+        var refused = recorder.Events.Where(e => IsFor(e, 3, sessionId)).ShouldHaveSingleItem();
+        refused.Payload.ShouldBe([sessionId, new string('d', 256) + "...", new string('p', 256) + "...", nameof(ProtocolErrorCode.UnsupportedVersion), error.Message]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should report a database on a refused data-storage format as a handshake refusal once")]
+    public async Task HandshakeRefused_RefusedStorageFormat_ShouldBeReportedOnceAsUnavailable()
+    {
+        // Arrange: a file-backed database whose catalog marker is forged to format 3, which the
+        // engine refuses at open (#1099).
+        string engineName = UniqueEngineName();
+        string rootPath = Path.Combine(Path.GetTempPath(), "cohesion-sql-events", Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using (var creating = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName, RootPath = rootPath }))
+            {
+                var created = await creating.CreateDatabaseAsync("format-db");
+                await created.Catalog.SetRecordSpaceFormatVersionAsync(3);
+            }
+
+            using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName, RootPath = rootPath });
+            await using var listener = new InMemoryConnectionListener();
+            await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
+            await server.StartAsync();
+            Connection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, TestTimeout.Token());
+            await using var client = new ProtocolTestClient(connection);
+
+            // Act
+            await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "format-db", "ada").Encode());
+            var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+            (await client.ReadAsync()).ShouldBeNull();
+            Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+            await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+            // Assert
+            error.Code.ShouldBe(ProtocolErrorCode.Unavailable);
+            error.Message.ShouldContain("uses data-storage format 3");
+            var refused = recorder.Events.Where(e => IsFor(e, 3, sessionId)).ShouldHaveSingleItem();
+            refused.Payload.ShouldBe([sessionId, "format-db", "ada", nameof(ProtocolErrorCode.Unavailable), error.Message]);
+            recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("HandshakeRefused");
+            recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([3, 5]);
+            recorder.Events.ShouldNotContain(e => e.EventId == 0);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(rootPath))
+                {
+                    Directory.Delete(rootPath, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup.
+            }
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should report a session the idle timeout evicts as closed once")]

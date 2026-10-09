@@ -193,8 +193,8 @@ internal sealed class BlobGuardedStream : Stream
             {
                 // The failed read already ended the operation and threw to the caller; the
                 // stream's completion callback can only report that the operation ended. The
-                // stream serves in-process callers too, so it knows no session or container.
-                BlobDatabaseEventSource.Log.TransferFailed(null, string.Empty, error);
+                // stream serves in-process callers too, so it knows no session, container or blob.
+                BlobDatabaseEventSource.Log.TransferFailed(null, string.Empty, string.Empty, error);
             }
         }
         base.Dispose(disposing);
@@ -218,7 +218,7 @@ internal sealed class BlobGuardedStream : Stream
         catch (Exception error) when (_readFailed)
         {
             // See Dispose: the failed read already ended the operation and threw to the caller.
-            BlobDatabaseEventSource.Log.TransferFailed(null, string.Empty, error);
+            BlobDatabaseEventSource.Log.TransferFailed(null, string.Empty, string.Empty, error);
         }
         GC.SuppressFinalize(this);
     }

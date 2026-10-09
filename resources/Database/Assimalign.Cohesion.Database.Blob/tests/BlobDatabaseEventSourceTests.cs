@@ -218,6 +218,59 @@ public sealed class BlobDatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should report a handshake whose authenticator outlives the authentication timeout once")]
+    public async Task HandshakeTimedOut_StallingAuthenticator_ShouldBeReportedOnce()
+    {
+        // Arrange: the timeout lapses inside the authenticator, not at a read.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await BlobServerHarness.StartAsync(
+            options =>
+            {
+                options.Authenticator = new StallingAuthenticator();
+                options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
+            },
+            options => options.EngineName = engineName);
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, BlobServerHarness.DatabaseName, "ada").Encode());
+        await client.ExpectAsync(ProtocolMessageType.Authenticate);
+        await client.SendAsync(ProtocolMessageType.AuthenticateResponse);
+        (await client.ReadAsync()).ShouldBeNull();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: dropped without an error frame and reported as the timeout, not as a cancellation.
+        recorder.Events.Where(e => IsFor(e, 4, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe(2000d);
+        recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("HandshakeTimedOut");
+        recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([4, 5]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should cut the names an unauthenticated peer sent to their bound in a handshake refusal")]
+    public async Task HandshakeRefused_OversizedStartup_ShouldWriteBoundedNames()
+    {
+        // Arrange: a startup refused before any lookup, naming a database and principal far past
+        // the 256-character payload bound.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await BlobServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(new ProtocolVersion(99, 0), new string('d', 100_000), new string('p', 100_000)).Encode());
+        var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await client.ReadAsync()).ShouldBeNull();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert
+        var refused = recorder.Events.Where(e => IsFor(e, 3, sessionId)).ShouldHaveSingleItem();
+        refused.Payload.ShouldBe([sessionId, new string('d', 256) + "...", new string('p', 256) + "...", nameof(ProtocolErrorCode.UnsupportedVersion), error.Message]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should report a session the idle timeout evicts as closed once")]
     public async Task SessionClosed_IdleTimeout_ShouldBeReportedOnceWithItsReason()
     {
@@ -480,8 +533,8 @@ public sealed class BlobDatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should report a failed exchange once with its container, and the session closed for it")]
-    public async Task TransferFailed_MissingBlob_ShouldBeReportedOnceWithItsContainer()
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should report a failed exchange once with its container and the blob's name redacted, and the session closed for it")]
+    public async Task TransferFailed_MissingBlob_ShouldBeReportedOnceWithItsContainerAndNoBlobName()
     {
         // Arrange
         string engineName = UniqueEngineName();
@@ -497,15 +550,36 @@ public sealed class BlobDatabaseEventSourceTests
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
         await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
 
-        // Assert
+        // Assert: the client gets the engine's message; the event names the container but not the
+        // blob, which may be user data (plan D8, Q3).
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldBe("Blob 'missing' does not exist.");
         var failed = recorder.Events.Where(e => IsFor(e, 13, sessionId)).ShouldHaveSingleItem();
         failed.EventName.ShouldBe("TransferFailed");
         failed.Level.ShouldBe(EventLevel.Warning);
         failed.PayloadNames.ShouldBe(["sessionId", "container", "exceptionType", "exceptionMessage"]);
-        failed.Payload.ShouldBe([sessionId, BlobServerHarness.ContainerName, typeof(DatabaseException).FullName, error.Message]);
+        failed.Payload.ShouldBe([sessionId, BlobServerHarness.ContainerName, typeof(DatabaseException).FullName, "Blob '<blob>' does not exist."]);
+        ((string)failed.Payload![3]!).ShouldNotContain("missing");
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([13, 5]);
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("ExchangeFailed");
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should redact every quoted occurrence of the blob's name and bound the container in a transfer failure")]
+    public void TransferFailed_BlobNamedInMessage_ShouldRedactTheNameAndBoundTheContainer()
+    {
+        // Arrange
+        var session = new StubServerSession();
+        var failure = new DatabaseException("Blob 'q3/ledger.csv' already exists; 'q3/ledger.csv' was not replaced.");
+        string container = new('c', 1_000);
+        using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        BlobDatabaseEventSource.Log.TransferFailed(session, container, "q3/ledger.csv", failure);
+
+        // Assert
+        var failed = recorder.Events.Where(e => e.EventId == 13 && Equals(e.Payload![0], session.Id)).ShouldHaveSingleItem();
+        failed.Payload.ShouldBe([session.Id, new string('c', 256) + "...", typeof(DatabaseException).FullName, "Blob '<blob>' already exists; '<blob>' was not replaced."]);
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
@@ -515,8 +589,8 @@ public sealed class BlobDatabaseEventSourceTests
         log.DatabaseRefused(session, new DatabaseName("objects"), BlobDatabaseEventSource.RefusalPhase.Exchange, "refused");
         log.EngineRefused(engine, BlobDatabaseEventSource.RefusalPhase.Accept, EngineState.Disposed);
         log.HostTransactionAbortFailed(session, failure);
-        log.TransferFailed(session, "files", failure);
-        log.TransferFailed(null, string.Empty, failure);
+        log.TransferFailed(session, "files", "report.pdf", failure);
+        log.TransferFailed(null, string.Empty, string.Empty, failure);
         long timestamp = log.SessionTimestamp();
         log.SessionAccepted(engine, session, 1);
         log.SessionRejected(engine, BlobDatabaseEventSource.RejectReason.SessionLimit, 1, 1);

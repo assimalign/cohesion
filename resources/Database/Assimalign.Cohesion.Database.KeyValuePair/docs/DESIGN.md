@@ -787,10 +787,10 @@ Blob servers write events 1-9 with the same ids, names and payloads from their o
 | --- | --- | --- | --- | --- |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit`), `activeSessions`, `maxSessions` |
-| 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message) |
-| 4 | `HandshakeTimedOut` | Warning | — | `sessionId`, `timeoutMilliseconds` |
+| 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |
+| 4 | `HandshakeTimedOut` | Warning | — | `sessionId`, `timeoutMilliseconds` (the timeout lapsed anywhere in the handshake: at a read, or while the database opened, a frame was written, the authenticator ran or the session was created) |
 | 5 | `SessionClosed` | Verbose | `Sessions` | `sessionId`, `reason`, `durationMilliseconds` (zero for a session accepted while the event was off) |
-| 6 | `SessionProtocolViolation` | Warning | — | `sessionId`, `exceptionMessage` |
+| 6 | `SessionProtocolViolation` | Warning | — | `sessionId`, `exceptionMessage` (cut to 1024 characters) |
 | 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
@@ -812,7 +812,12 @@ registers a session, down when the session's completion removes it), `total-serv
 
 Every write sits behind `IsEnabled(level, keywords)`, and a session reads its start timestamp
 only while `SessionClosed` is on. No payload carries command text, keys, values or
-authentication evidence; principal names are kept as identifiers.
-`KeyValueDatabaseEventSourceTests` checks the name, the strict manifest, each event once with its
-payload over the in-memory driver, the gauge's return, the counters, and that no write allocates
-while nobody listens.
+authentication evidence; principal names are kept as identifiers. A string a peer sent can reach
+a payload before authentication, and a frame may hold 16 MB, so the handshake's `database` and
+`principal` are cut to 256 characters and a `detail` or violation message to 1024, marked with
+`...` (event-source.md rule 11). `KeyValueDatabaseEventSourceTests` checks the name, the strict
+manifest, the gauge's return, the counters, that no write allocates while nobody listens, and
+events 1-7 and 9 once each with their payloads over real sessions on the in-memory driver: every
+handshake refusal code, a timeout at a read and inside the authenticator, and the bound on an
+oversized startup. `SessionCleanupFailed` is covered only by the allocation check: no test double
+makes a session's resource fail to dispose yet.

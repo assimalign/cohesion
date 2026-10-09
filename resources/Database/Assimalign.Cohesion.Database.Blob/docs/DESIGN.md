@@ -937,17 +937,17 @@ four servers.
 | --- | --- | --- | --- | --- |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit` or `EngineRefused`), `activeSessions`, `maxSessions` |
-| 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message) |
-| 4 | `HandshakeTimedOut` | Warning | — | `sessionId`, `timeoutMilliseconds` |
+| 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |
+| 4 | `HandshakeTimedOut` | Warning | — | `sessionId`, `timeoutMilliseconds` (the timeout lapsed anywhere in the handshake: at a read, or while the database opened, a frame was written, the authenticator ran or the session was created) |
 | 5 | `SessionClosed` | Verbose | `Sessions` | `sessionId`, `reason`, `durationMilliseconds` (zero for a session accepted while the event was off) |
-| 6 | `SessionProtocolViolation` | Warning | — | `sessionId`, `exceptionMessage` |
+| 6 | `SessionProtocolViolation` | Warning | — | `sessionId`, `exceptionMessage` (cut to 1024 characters) |
 | 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
-| 10 | `DatabaseRefused` | Warning | — | `sessionId`, `database`, `phase` (`Handshake` or `Exchange`), `detail` (the refusal, led by `COHDBB003`) |
+| 10 | `DatabaseRefused` | Warning | — | `sessionId`, `database` (cut to 256 characters), `phase` (`Handshake` or `Exchange`), `detail` (the refusal, led by `COHDBB003`; cut to 1024 characters) |
 | 11 | `EngineRefused` | Warning | — | `engineName`, `phase` (`Accept`, `Handshake` or `Exchange`), `state` (the `EngineState` name) |
 | 12 | `HostTransactionAbortFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
-| 13 | `TransferFailed` | Warning | — | `sessionId`, `container`, `exceptionType`, `exceptionMessage` |
+| 13 | `TransferFailed` | Warning | — | `sessionId`, `container` (cut to 256 characters), `exceptionType`, `exceptionMessage` (the blob's quoted name redacted to `'<blob>'`; cut to 1024 characters) |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
@@ -966,11 +966,18 @@ handshake, `DatabaseRefused` beside `HandshakeRefused`.
 container its request named (the server reads it back from the request frame only while the
 event is on), and by the guarded stream when it swallows its completion's failure after a read
 already failed; the stream serves in-process readers too and knows neither, so it writes an
-empty `sessionId` and `container`, and a failed wire read writes both. No payload field carries
-a blob name, which may be user data; an exception's message is written as the engine wrote it,
-and a few of those name the blob (a missing blob's, for one). `HostTransactionAbortFailed` and
-`SessionCleanupFailed` report failures the session swallows; `SessionFaulted` is the catch-all
-that used to leave only an internal-error frame.
+empty `sessionId` and `container`, and a failed wire read writes both. An exchange the
+connection's abort or reset ends (`ConnectionException`: a peer that hung up, or the shutdown's
+abort, which `SessionsAborted` reports) writes no `TransferFailed`; `SessionClosed` carries
+`ConnectionAborted` or `TransportFailed` instead, as for the pump's own catches (plan D9). An
+`IOException` is still reported: inside an exchange it can be the storage device's, not the
+peer's. No payload carries a blob name, which may be user data (plan D8, owner question Q3): the
+engine's messages quote one (`Blob 'x' does not exist.`, `Blob 'x' already exists.`), so
+`TransferFailed` replaces every quoted occurrence of the request's blob name, or of a list's
+prefix, with `'<blob>'` before it writes the message; the client's error frame still carries the
+engine's message unchanged. `HostTransactionAbortFailed` and `SessionCleanupFailed` report
+failures the session swallows; `SessionFaulted` is the catch-all that used to leave only an
+internal-error frame.
 
 Counters, maintained whether or not anyone listens and updated on accept, rejection and close
 only, never per frame or chunk: `current-server-sessions` (gauge: up when the accept loop
@@ -978,8 +985,16 @@ registers a session, down when the session's completion removes it), `total-serv
 `total-rejected-sessions` (session-limit and engine refusals at the accept).
 
 Every write sits behind `IsEnabled(level, keywords)`, and a session reads its start timestamp
-only while `SessionClosed` is on. `BlobDatabaseEventSourceTests` checks the name, the strict
-manifest, each server event once with its payload over the in-memory driver, the gauge's return,
-the counters, the `COHDBB003` refusal at the handshake and at an exchange, a disposed engine's
-refusals at the handshake and at the accept, a failed read, and that no write allocates while
-nobody listens.
+only while `SessionClosed` is on. A string a peer sent can reach a payload before
+authentication, and a frame may hold 16 MB, so the handshake's `database` and `principal` and a
+transfer's `container` are cut to 256 characters and a `detail`, violation or transfer message to
+1024, marked with `...` (event-source.md rule 11). `BlobDatabaseEventSourceTests` checks the
+name, the strict manifest, the gauge's return, the counters, that no write allocates while nobody
+listens, events 1-7 and 9 once each with their payloads over real sessions on the in-memory
+driver (every handshake refusal code, a timeout at a read and inside the authenticator, the bound
+on an oversized startup), the `COHDBB003` refusal at the handshake and at an exchange, a disposed
+engine's refusals at the handshake and at the accept, and a read of a missing blob with the
+blob's name redacted. Not yet driven by a real operation: `SessionCleanupFailed`,
+`HostTransactionAbortFailed` and the guarded stream's `TransferFailed`, which need test doubles
+that fail a disposal, an abort or a stream's completion; they are covered by the allocation check
+and, for the redaction and bounds, by a direct write.

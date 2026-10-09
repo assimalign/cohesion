@@ -217,6 +217,59 @@ public sealed class KeyValueDatabaseEventSourceTests
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should report a handshake whose authenticator outlives the authentication timeout once")]
+    public async Task HandshakeTimedOut_StallingAuthenticator_ShouldBeReportedOnce()
+    {
+        // Arrange: the timeout lapses inside the authenticator, not at a read.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await KeyValueServerHarness.StartAsync(
+            options =>
+            {
+                options.Authenticator = new StallingAuthenticator();
+                options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
+            },
+            options => options.EngineName = engineName);
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, KeyValueServerHarness.DatabaseName, "ada").Encode());
+        await client.ExpectAsync(ProtocolMessageType.Authenticate);
+        await client.SendAsync(ProtocolMessageType.AuthenticateResponse);
+        (await client.ReadAsync()).ShouldBeNull();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert: dropped without an error frame and reported as the timeout, not as a cancellation.
+        recorder.Events.Where(e => IsFor(e, 4, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe(2000d);
+        recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem().Payload![1].ShouldBe("HandshakeTimedOut");
+        recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([4, 5]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should cut the names an unauthenticated peer sent to their bound in a handshake refusal")]
+    public async Task HandshakeRefused_OversizedStartup_ShouldWriteBoundedNames()
+    {
+        // Arrange: a startup refused before any lookup, naming a database and principal far past
+        // the 256-character payload bound.
+        string engineName = UniqueEngineName();
+        using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await KeyValueServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(new ProtocolVersion(99, 0), new string('d', 100_000), new string('p', 100_000)).Encode());
+        var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await client.ReadAsync()).ShouldBeNull();
+        Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
+        await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
+
+        // Assert
+        var refused = recorder.Events.Where(e => IsFor(e, 3, sessionId)).ShouldHaveSingleItem();
+        refused.Payload.ShouldBe([sessionId, new string('d', 256) + "...", new string('p', 256) + "...", nameof(ProtocolErrorCode.UnsupportedVersion), error.Message]);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should report a session the idle timeout evicts as closed once")]
     public async Task SessionClosed_IdleTimeout_ShouldBeReportedOnceWithItsReason()
     {

@@ -24,10 +24,12 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// </para>
 /// <para>
 /// The model has no statements: a container operation's transaction is the Transactions source's,
-/// and its wire outcome is this source's <c>TransferFailed</c> when it fails. No payload field
-/// carries a blob name (it may be user data); container names are identifiers. An exception's
-/// message is written as the engine wrote it, and a few of those name the blob (for example a
-/// missing blob's). Every write sits
+/// and its wire outcome is this source's <c>TransferFailed</c> when it fails. No payload carries a
+/// blob name (it may be user data; plan D8 and owner question Q3); container names are
+/// identifiers. The engine's messages quote a blob's name (<c>Blob 'x' does not exist.</c>), so
+/// <c>TransferFailed</c> replaces the quoted name of the request's blob, or its list prefix, with
+/// <c>'&lt;blob&gt;'</c> before it writes the message. A string a peer sent is cut to a bound
+/// (256 characters for a name, 1024 for a message). Every write sits
 /// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
 /// allocates is computed inside that check. The counters' backing fields are maintained whether or
 /// not anyone listens, on the accept and close transitions only, never per frame or per row.
@@ -37,6 +39,16 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 internal sealed class BlobDatabaseEventSource : EventSource
 {
     public static readonly BlobDatabaseEventSource Log = new();
+
+    // The longest name (database, principal, container) and text (a refusal's detail, a violation,
+    // a failure's message) a payload carries. Each can quote what a peer sent, before
+    // authentication too, and a frame may hold 16 MB, so a longer value is cut and marked
+    // (event-source.md rule 11: bounded payloads).
+    private const int MaxNameLength = 256;
+    private const int MaxTextLength = 1024;
+
+    // What TransferFailed writes in place of a blob's quoted name.
+    private const string RedactedBlob = "'<blob>'";
 
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
@@ -192,16 +204,16 @@ internal sealed class BlobDatabaseEventSource : EventSource
     /// Writes that the handshake refused a session with a coded error frame.
     /// </summary>
     /// <param name="session">The refused session.</param>
-    /// <param name="database">The database the startup named; empty before the startup was read.</param>
-    /// <param name="principal">The principal the startup claimed; empty before the startup was read.</param>
+    /// <param name="database">The database the startup named; empty before the startup was read. Written cut to 256 characters.</param>
+    /// <param name="principal">The principal the startup claimed; empty before the startup was read. Written cut to 256 characters.</param>
     /// <param name="code">The error frame's code.</param>
-    /// <param name="detail">The error frame's message.</param>
+    /// <param name="detail">The error frame's message. Written cut to 1024 characters.</param>
     [NonEvent]
     public void HandshakeRefused(DatabaseServerSession session, string database, string principal, ProtocolErrorCode code, string detail)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            HandshakeRefused(session.Id, database, principal, code.ToString(), detail);
+            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength));
         }
     }
 
@@ -241,13 +253,13 @@ internal sealed class BlobDatabaseEventSource : EventSource
     /// Writes that a framing or message-order violation terminated a session.
     /// </summary>
     /// <param name="session">The terminated session.</param>
-    /// <param name="message">The violation, as the error frame states it.</param>
+    /// <param name="message">The violation, as the error frame states it. Written cut to 1024 characters.</param>
     [NonEvent]
     public void SessionProtocolViolation(DatabaseServerSession session, string message)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            SessionProtocolViolation(session.Id, message);
+            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength));
         }
     }
 
@@ -302,13 +314,13 @@ internal sealed class BlobDatabaseEventSource : EventSource
     /// <param name="session">The refused session.</param>
     /// <param name="database">The refused database.</param>
     /// <param name="phase">A <see cref="RefusalPhase"/> value.</param>
-    /// <param name="detail">The refusal, as the error frame states it.</param>
+    /// <param name="detail">The refusal, as the error frame states it. Written cut to 1024 characters.</param>
     [NonEvent]
     public void DatabaseRefused(DatabaseServerSession session, DatabaseName database, string phase, string detail)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            DatabaseRefused(session.Id, database.ToString(), phase, detail);
+            DatabaseRefused(session.Id, Bound(database.ToString(), MaxNameLength), phase, Bound(detail, MaxTextLength));
         }
     }
 
@@ -348,14 +360,24 @@ internal sealed class BlobDatabaseEventSource : EventSource
     /// a stream's completion failure swallowed after its read already failed.
     /// </summary>
     /// <param name="session">The session; null for a stream, which serves in-process callers too and knows no session.</param>
-    /// <param name="container">The operation's container; empty when it is not known.</param>
-    /// <param name="exception">The failure.</param>
+    /// <param name="container">The operation's container; empty when it is not known. Written cut to 256 characters.</param>
+    /// <param name="blob">
+    /// The blob the operation named, or a list's prefix; empty when there is none or it is not
+    /// known. Never written: its quoted occurrences in the message become <c>'&lt;blob&gt;'</c>.
+    /// </param>
+    /// <param name="exception">The failure. Its message is written redacted and cut to 1024 characters.</param>
     [NonEvent]
-    public void TransferFailed(DatabaseServerSession? session, string container, Exception exception)
+    public void TransferFailed(DatabaseServerSession? session, string container, string blob, Exception exception)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            TransferFailed(session?.Id ?? Guid.Empty, container, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+            string message = exception.Message;
+            if (blob.Length > 0)
+            {
+                message = message.Replace(string.Concat("'", blob, "'"), RedactedBlob, StringComparison.Ordinal);
+            }
+
+            TransferFailed(session?.Id ?? Guid.Empty, Bound(container, MaxNameLength), exception.GetType().FullName ?? exception.GetType().Name, Bound(message, MaxTextLength));
         }
     }
 
@@ -434,5 +456,18 @@ internal sealed class BlobDatabaseEventSource : EventSource
         {
             DisplayName = "Total Rejected Sessions",
         };
+    }
+
+    // Cuts a peer-supplied string to its payload bound and marks the cut; never splits a surrogate
+    // pair. Called only inside an IsEnabled check.
+    private static string Bound(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return string.Concat(value.AsSpan(0, length), "...");
     }
 }

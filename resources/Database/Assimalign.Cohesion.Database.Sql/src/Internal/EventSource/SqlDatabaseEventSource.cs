@@ -34,6 +34,12 @@ internal sealed class SqlDatabaseEventSource : EventSource
 {
     public static readonly SqlDatabaseEventSource Log = new();
 
+    // The longest name (database, principal) and text (a refusal's detail, a violation) a payload
+    // carries. Each can quote what a peer sent, before authentication too, and a frame may hold
+    // 16 MB, so a longer value is cut and marked (event-source.md rule 11: bounded payloads).
+    private const int MaxNameLength = 256;
+    private const int MaxTextLength = 1024;
+
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
     private PollingCounter? _rejectedSessionsCounter;
@@ -163,16 +169,16 @@ internal sealed class SqlDatabaseEventSource : EventSource
     /// Writes that the handshake refused a session with a coded error frame.
     /// </summary>
     /// <param name="session">The refused session.</param>
-    /// <param name="database">The database the startup named; empty before the startup was read.</param>
-    /// <param name="principal">The principal the startup claimed; empty before the startup was read.</param>
+    /// <param name="database">The database the startup named; empty before the startup was read. Written cut to 256 characters.</param>
+    /// <param name="principal">The principal the startup claimed; empty before the startup was read. Written cut to 256 characters.</param>
     /// <param name="code">The error frame's code.</param>
-    /// <param name="detail">The error frame's message.</param>
+    /// <param name="detail">The error frame's message. Written cut to 1024 characters.</param>
     [NonEvent]
     public void HandshakeRefused(DatabaseServerSession session, string database, string principal, ProtocolErrorCode code, string detail)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            HandshakeRefused(session.Id, database, principal, code.ToString(), detail);
+            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength));
         }
     }
 
@@ -212,13 +218,13 @@ internal sealed class SqlDatabaseEventSource : EventSource
     /// Writes that a framing or message-order violation terminated a session.
     /// </summary>
     /// <param name="session">The terminated session.</param>
-    /// <param name="message">The violation, as the error frame states it.</param>
+    /// <param name="message">The violation, as the error frame states it. Written cut to 1024 characters.</param>
     [NonEvent]
     public void SessionProtocolViolation(DatabaseServerSession session, string message)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            SessionProtocolViolation(session.Id, message);
+            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength));
         }
     }
 
@@ -325,5 +331,18 @@ internal sealed class SqlDatabaseEventSource : EventSource
         {
             DisplayName = "Total Rejected Sessions",
         };
+    }
+
+    // Cuts a peer-supplied string to its payload bound and marks the cut; never splits a surrogate
+    // pair. Called only inside an IsEnabled check.
+    private static string Bound(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return string.Concat(value.AsSpan(0, length), "...");
     }
 }

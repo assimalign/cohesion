@@ -44,8 +44,9 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     }
 
     /// <summary>
-    /// Writes that a reopened database recovered its indexes; written only for a recovery whose
-    /// start was written.
+    /// Writes that a reopened database's index recovery ended, whether it recovered the indexes or
+    /// threw (the root's failed open reports the failure), so the activity its start opened always
+    /// closes; written only for a recovery whose start was written.
     /// </summary>
     /// <param name="database">The database.</param>
     /// <param name="startTimestamp">The timestamp <see cref="IndexRecoveryStart(DatabaseName, int)"/> returned.</param>
@@ -62,7 +63,7 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     private void IndexRecoveryStart(string database, int abortedWriters)
         => WriteEvent(1, database, abortedWriters);
 
-    [Event(2, Level = EventLevel.Informational, Message = "Database '{0}' recovered its indexes in {1} ms.")]
+    [Event(2, Level = EventLevel.Informational, Message = "Database '{0}' ended its index recovery after {1} ms.")]
     private void IndexRecoveryStop(string database, double durationMilliseconds)
         => WriteEvent(2, database, durationMilliseconds);
 }
