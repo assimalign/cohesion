@@ -57,6 +57,23 @@ internal sealed partial class SqlExpressionEvaluator
     internal SqlBoundCollation BindCollation(SqlExpression expression)
         => SqlBoundCollation.Of(FindCollation(expression, bound: true), default, _defaultCollation);
 
+    /// <remarks>
+    /// <para>
+    /// A thin dispatcher: each level of a tree costs the walk this frame and one helper's, and the
+    /// operand candidates, the collection-expression buffers and any closure live in the helpers
+    /// only. With every case inline, this one recursive frame held all of them, and binding ran out
+    /// of stack 10 to 23% shallower than the parser had read the same text, so a persisted CHECK
+    /// that opened before could fail to open on the same thread. The helpers are kept out of line
+    /// (<see cref="MethodImplOptions.NoInlining"/>) for the same reason: an inlined helper's locals
+    /// would land back in this frame.
+    /// </para>
+    /// <para>
+    /// No failure closure is created on the success path: each <see cref="SqlBoundFailure"/> is
+    /// built by a factory that takes what it captures as an argument, because a lambda over a
+    /// method's parameter or switch-scoped local makes the compiler allocate its closure when the
+    /// method (or the switch) is entered, on every call.
+    /// </para>
+    /// </remarks>
     private SqlBoundExpression Bind(SqlExpression expression, out SqlCollationCandidate collation)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -71,9 +88,39 @@ internal sealed partial class SqlExpressionEvaluator
 
         switch (expression)
         {
-            case SqlConstantExpression constant:
-                collation = CollationOf(expression, []);
-                return new SqlBoundConstant(constant.Value);
+            case SqlLogicalExpression logical:
+                return BindLogical(logical, out collation);
+            case SqlBinaryExpression binary:
+                return BindBinary(binary, out collation);
+            case SqlUnaryExpression unary:
+                return BindUnary(unary, out collation);
+            case SqlIsNullExpression isNull:
+                return BindIsNull(isNull, out collation);
+            case SqlBetweenExpression between:
+                return BindBetween(between, out collation);
+            case SqlInExpression membership:
+                return BindIn(membership, out collation);
+            case SqlLikeExpression like:
+                return BindLike(like, out collation);
+            case SqlCaseExpression conditional:
+                return BindCase(conditional, out collation);
+            case SqlFunctionCallExpression call:
+                return BindCall(call, out collation);
+            case SqlCastExpression cast:
+                return BindCast(cast, out collation);
+            case SqlCollateExpression collate:
+                return BindCollate(collate, out collation);
+            default:
+                return BindLeaf(expression, out collation);
+        }
+    }
+
+    /// <summary>Binds a node without operands to bind, or one the executor does not evaluate.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindLeaf(SqlExpression expression, out SqlCollationCandidate collation)
+    {
+        switch (expression)
+        {
             case SqlSubqueryExpression or SqlExistsExpression:
                 collation = CollationOf(expression, []);
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot)
@@ -88,66 +135,67 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlParameterExpression parameter:
                 collation = CollationOf(expression, []);
                 return BindParameter(parameter);
-            case SqlLogicalExpression logical:
-                return BindLogical(logical, out collation);
-            case SqlBinaryExpression binary:
-            {
-                var left = Bind(binary.Left, out SqlCollationCandidate leftCollation);
-                var right = Bind(binary.Right, out SqlCollationCandidate rightCollation);
-                collation = CollationOf(expression, [leftCollation, rightCollation]);
-                return new SqlBoundBinary(binary.Operator, left, right,
-                    SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
-            }
-            case SqlUnaryExpression unary:
-                return BindUnary(unary, out collation);
-            case SqlIsNullExpression isNull:
-            {
-                var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation);
-                collation = CollationOf(expression, [operandCollation]);
-                return new SqlBoundIsNull(operand, isNull.IsNegated);
-            }
-            case SqlBetweenExpression between:
-            {
-                var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation);
-                var low = Bind(between.Low, out SqlCollationCandidate lowCollation);
-                var high = Bind(between.High, out SqlCollationCandidate highCollation);
-                collation = CollationOf(expression, [operandCollation, lowCollation, highCollation]);
-                return new SqlBoundBetween(operand, low, high, between.IsNegated,
-                    SqlBoundCollation.Of(operandCollation, lowCollation, _defaultCollation),
-                    SqlBoundCollation.Of(operandCollation, highCollation, _defaultCollation));
-            }
-            case SqlInExpression membership:
-                return BindIn(membership, out collation);
-            case SqlLikeExpression like:
-            {
-                var operand = Bind(like.Operand, out SqlCollationCandidate operandCollation);
-                var pattern = Bind(like.Pattern, out SqlCollationCandidate patternCollation);
-                collation = CollationOf(expression, [operandCollation, patternCollation]);
-                return new SqlBoundLike(operand, pattern, like.IsNegated,
-                    SqlBoundCollation.Of(operandCollation, patternCollation, _defaultCollation));
-            }
-            case SqlCaseExpression conditional:
-                return BindCase(conditional, out collation);
-            case SqlFunctionCallExpression call:
-                return BindCall(call, out collation);
-            case SqlCastExpression cast:
-            {
-                var operand = Bind(cast.Operand, out SqlCollationCandidate operandCollation);
-                collation = CollationOf(expression, [operandCollation]);
-                return new SqlBoundCast(operand, cast);
-            }
-            case SqlCollateExpression collate:
-            {
-                // COLLATE changes how a value compares, never the value: the operand stands for it.
-                var operand = Bind(collate.Operand, out SqlCollationCandidate operandCollation);
-                collation = CollationOf(expression, [operandCollation]);
-                return operand;
-            }
             default:
                 collation = CollationOf(expression, ChildCollations(expression));
-                string type = expression.GetType().Name;
-                return new SqlBoundFailure(() => throw new DatabaseException($"Expression '{type}' is not supported by the executor yet."));
+                return Unsupported(expression.GetType().Name);
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindBinary(SqlBinaryExpression binary, out SqlCollationCandidate collation)
+    {
+        var left = Bind(binary.Left, out SqlCollationCandidate leftCollation);
+        var right = Bind(binary.Right, out SqlCollationCandidate rightCollation);
+        collation = CollationOf(binary, [leftCollation, rightCollation]);
+        return new SqlBoundBinary(binary.Operator, left, right,
+            SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindIsNull(SqlIsNullExpression isNull, out SqlCollationCandidate collation)
+    {
+        var operand = Bind(isNull.Operand, out SqlCollationCandidate operandCollation);
+        collation = CollationOf(isNull, [operandCollation]);
+        return new SqlBoundIsNull(operand, isNull.IsNegated);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindBetween(SqlBetweenExpression between, out SqlCollationCandidate collation)
+    {
+        var operand = Bind(between.Operand, out SqlCollationCandidate operandCollation);
+        var low = Bind(between.Low, out SqlCollationCandidate lowCollation);
+        var high = Bind(between.High, out SqlCollationCandidate highCollation);
+        collation = CollationOf(between, [operandCollation, lowCollation, highCollation]);
+        return new SqlBoundBetween(operand, low, high, between.IsNegated,
+            SqlBoundCollation.Of(operandCollation, lowCollation, _defaultCollation),
+            SqlBoundCollation.Of(operandCollation, highCollation, _defaultCollation));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindLike(SqlLikeExpression like, out SqlCollationCandidate collation)
+    {
+        var operand = Bind(like.Operand, out SqlCollationCandidate operandCollation);
+        var pattern = Bind(like.Pattern, out SqlCollationCandidate patternCollation);
+        collation = CollationOf(like, [operandCollation, patternCollation]);
+        return new SqlBoundLike(operand, pattern, like.IsNegated,
+            SqlBoundCollation.Of(operandCollation, patternCollation, _defaultCollation));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindCast(SqlCastExpression cast, out SqlCollationCandidate collation)
+    {
+        var operand = Bind(cast.Operand, out SqlCollationCandidate operandCollation);
+        collation = CollationOf(cast, [operandCollation]);
+        return new SqlBoundCast(operand, cast);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlBoundExpression BindCollate(SqlCollateExpression collate, out SqlCollationCandidate collation)
+    {
+        // COLLATE changes how a value compares, never the value: the operand stands for it.
+        var operand = Bind(collate.Operand, out SqlCollationCandidate operandCollation);
+        collation = CollationOf(collate, [operandCollation]);
+        return operand;
     }
 
     /// <remarks>
@@ -169,7 +217,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (Exception exception) when (IsDeferrable(exception))
         {
-            return new SqlBoundFailure(() => EvaluateLiteral(literal));
+            return LiteralFailure(literal);
         }
     }
 
@@ -182,21 +230,16 @@ internal sealed partial class SqlExpressionEvaluator
         catch (Exception exception) when (IsDeferrable(exception))
         {
             // Planning validates every column first; a scope that did not reports it when evaluated.
-            return new SqlBoundFailure(() => ResolveColumn(column));
+            return ColumnFailure(column);
         }
     }
 
     private SqlBoundExpression BindParameter(SqlParameterExpression parameter)
-    {
-        if (TryGetParameterValue(parameter, out object? value))
-        {
-            return new SqlBoundParameter(parameter.ParameterName, value);
-        }
+        => TryGetParameterValue(parameter, out object? value)
+            ? new SqlBoundParameter(parameter.ParameterName, value)
+            : MissingParameter(parameter.ParameterName);
 
-        string name = parameter.ParameterName.TrimStart('@', '$');
-        return new SqlBoundFailure(() => throw new DatabaseException($"No value was supplied for parameter '{name}'."));
-    }
-
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindLogical(SqlLogicalExpression logical, out SqlCollationCandidate collation)
     {
         // Every term of the chain at one level, however long the chain (#1151).
@@ -211,6 +254,7 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlBoundLogical(logical.Operator == SqlLogicalOperator.Or, operands);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindUnary(SqlUnaryExpression unary, out SqlCollationCandidate collation)
     {
         // The BIGINT minimum's magnitude is one past BIGINT's maximum, so its literal cannot be
@@ -230,6 +274,7 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlBoundUnary(unary.Operator, operand);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindIn(SqlInExpression membership, out SqlCollationCandidate collation)
     {
         var operand = Bind(membership.Operand, out SqlCollationCandidate operandCollation);
@@ -261,7 +306,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (values is null)
         {
             collation = CollationOf(membership, collations);
-            return new SqlBoundFailure(() => throw new DatabaseException("An IN query requires a value list or a subquery."));
+            return MissingInValues();
         }
 
         var candidates = new SqlBoundExpression[values.Count];
@@ -276,6 +321,7 @@ internal sealed partial class SqlExpressionEvaluator
         return new SqlBoundIn(operand, candidates, comparisons, membership.IsNegated);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation)
     {
         SqlBoundExpression? input = null;
@@ -314,6 +360,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// for a declared name outside the signature table or an aggregate outside a grouping plan — and
     /// its arguments, which never ran, are not bound.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation)
     {
         SqlFunctionSignature? signature;
@@ -324,7 +371,7 @@ internal sealed partial class SqlExpressionEvaluator
         catch (Exception exception) when (IsDeferrable(exception))
         {
             collation = CollationOf(call, ChildCollations(call));
-            return new SqlBoundFailure(() => SqlFunctionSignatures.Resolve(call));
+            return SignatureFailure(call);
         }
 
         if (signature is not { Kind: SqlFunctionKind.Scalar, Function: SqlBuiltinFunction.Coalesce or SqlBuiltinFunction.Upper
@@ -333,8 +380,7 @@ internal sealed partial class SqlExpressionEvaluator
             // A declared name outside the signature table (NULLIF, TRIM, ...), an aggregate outside
             // the grouping plan that binds it to a slot, or a scalar entry without a case here.
             collation = CollationOf(call, ChildCollations(call));
-            string name = call.FunctionName;
-            return new SqlBoundFailure(() => throw new DatabaseException($"Function '{name}' is not supported by the executor yet."));
+            return UnsupportedFunction(call.FunctionName);
         }
 
         var arguments = new SqlBoundExpression[call.Arguments.Count];
@@ -387,10 +433,6 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate CollationOfCore(SqlExpression expression, ReadOnlySpan<SqlCollationCandidate> operands)
     {
-        if (expression is SqlConstantExpression { Collation: not null } constant)
-        {
-            return new(constant.Collation, 2);
-        }
         if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {
             return source.ColumnOrdinal is int ordinal ? ColumnCollation(ordinal) : FindCollation(source.Expression, bound: true);
@@ -407,6 +449,27 @@ internal sealed partial class SqlExpressionEvaluator
         return SqlCollationCandidate.Fold(operands);
     }
 
+    // The failures below are built only where binding defers one, never on the success path: each
+    // closure captures its factory's argument, so it is allocated when the factory runs.
+
     private static SqlBoundFailure NotMaterialized()
         => new(() => throw new DatabaseException("A subquery must be materialized by its plan before scalar evaluation."));
+
+    private static SqlBoundFailure MissingInValues()
+        => new(() => throw new DatabaseException("An IN query requires a value list or a subquery."));
+
+    private static SqlBoundFailure Unsupported(string type)
+        => new(() => throw new DatabaseException($"Expression '{type}' is not supported by the executor yet."));
+
+    private static SqlBoundFailure LiteralFailure(SqlLiteralExpression literal) => new(() => EvaluateLiteral(literal));
+
+    private SqlBoundFailure ColumnFailure(SqlColumnReferenceExpression column) => new(() => ResolveColumn(column));
+
+    private static SqlBoundFailure MissingParameter(string parameterName)
+        => new(() => throw new DatabaseException($"No value was supplied for parameter '{parameterName.TrimStart('@', '$')}'."));
+
+    private static SqlBoundFailure SignatureFailure(SqlFunctionCallExpression call) => new(() => SqlFunctionSignatures.Resolve(call));
+
+    private static SqlBoundFailure UnsupportedFunction(string name)
+        => new(() => throw new DatabaseException($"Function '{name}' is not supported by the executor yet."));
 }

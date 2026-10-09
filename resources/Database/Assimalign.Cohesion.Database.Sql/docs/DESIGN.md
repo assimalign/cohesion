@@ -72,8 +72,8 @@ The planner compiles every scalar expression a plan evaluates — a WHERE or JOI
 condition, a projection, an ORDER BY key, a grouping key, an aggregate's operand,
 HAVING, an UPDATE assignment, a VALUES row — once per statement into an engine-owned
 `SqlBoundExpression` tree (`src/Internal/Expressions/`), and the executor's
-`SqlExpressionEvaluator` walks that tree for every row. A persisted CHECK compiles once
-per table version instead. This is PostgreSQL's executor shape: `ExecInitExpr` compiles
+`SqlExpressionEvaluator` walks that tree for every row. A persisted CHECK compiles, and
+a persisted DEFAULT converts, once per table version instead. This is PostgreSQL's executor shape: `ExecInitExpr` compiles
 an expression once per execution, and `ExecInitFunc` binds a call's function then, not
 per row (`src/backend/executor/execExpr.c:2696`). Phase E1 of
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` (decision 70); it changes no
@@ -85,7 +85,7 @@ from the plan or from the table version's cache, and only the binder reads the A
 ```mermaid
 flowchart TD
     Executor["SqlPlanExecutor — evaluates per row"] --> Plan["SqlPlan"]
-    Executor --> Cache["SqlBoundTableCache — CHECK per table version"]
+    Executor --> Cache["SqlBoundTableCache — CHECK and DEFAULT per table version"]
     Planner["SqlPlanner — validates per statement"] --> Plan
     Planner --> Binder["SqlExpressionEvaluator.Bind"]
     Cache --> Binder
@@ -127,6 +127,16 @@ flowchart TD
   exactly as before, and an overflowing literal still codes as `COHSQLE002` at the
   evaluation boundary and as a conversion failure under CAST. The walk checks the stack
   as it descends, so a tree the thread cannot walk fails with `COHSQLE004` here.
+- **Binding costs less stack per level than parsing.** `Bind` is a thin dispatcher and
+  each node kind binds in its own non-inlined helper, so a level costs the walk two
+  small frames and the operand candidates, collection-expression buffers and closures
+  live only in the helper that needs them. In an optimized build the binder walks a
+  tree more than twice as deep as the parser reads one on the same thread, so the
+  parser, not the binder, limits how deeply a statement or a persisted CHECK nests. The
+  first E1 binder kept every case in one recursive frame and refused statements 10 to
+  23% shallower than the parser had read them, so a CHECK that opened on a thread
+  before E1 could fail to open on it. `Statement_DeepestOnThread_ShouldBeLimitedByTheParser`
+  and `BindCatalog_CheckTheParserReadsBack_ShouldBindOnTheSameThread` pin the order.
 - **Collations in one pass.** Each node's collation candidate (the collation and its
   priority: COLLATE 3, an explicitly collated column or a subquery's value 2, an
   implicitly collated column 1) is computed from its operands' as the binding walk
@@ -135,19 +145,34 @@ flowchart TD
   (`SqlDeferredCollation`): a term under `IN (subquery)`, whose collation was the
   subquery's when it returned rows and the operand's when it returned none, and a term
   whose collation failed to resolve, which still fails only when the comparison is
-  reached. The planner's own collation questions (seek bounds, join equalities, a
-  subquery's output collation) keep the plan-time rule, under which a subquery is
-  opaque.
-- **Persisted CHECK.** `SqlPlanExecutor.BindPersistedCheck` binds the loaded predicate
-  against the table version and returns its tree, which `SqlBoundTableCache` keeps in
-  `SqlBoundCheck.Bound` and every session writing the version evaluates. Bound trees
-  are immutable and failure nodes construct a new exception per throw, so sharing one
-  tree across threads is safe.
+  reached. A COLLATE over such a term resolves the collation it names when it is bound,
+  so the comparison does not look it up by name. The planner's own collation questions
+  (seek bounds, join equalities, a subquery's output collation) keep the plan-time
+  rule, under which a subquery is opaque.
+- **Persisted CHECK and DEFAULT.** `SqlPlanExecutor.BindPersistedCheck` binds the
+  loaded predicate against the table version and returns its tree, which
+  `SqlBoundTableCache` keeps in `SqlBoundCheck.Bound` and every session writing the
+  version evaluates. A DEFAULT binds once per table version too
+  (`SqlPlanExecutor.BindDefault`, kept in `SqlBoundTable.DefaultValues`): its literal
+  converted to the column's type, a `SqlBoundConstant` that every decoded row lacking
+  the column and every INSERT omitting it reads, where each use converted the text
+  before. A DEFAULT that does not convert, which DDL never stores, binds as a
+  `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
+  trees and converted values are immutable and failure nodes construct a new exception
+  per throw, so sharing them across threads is safe.
 - **Allocation.** Literals and parameters are boxed once per statement instead of per
   row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed
   sentinel; a projected value already of its declared type is not converted and boxed
   again. Results that are computed still box once into the `object?[]` row, until the
-  row representation changes.
+  row representation changes. Binding allocates no closure for a node that binds: each
+  deferred failure is built by a factory that takes what it captures, because a lambda
+  over a parameter or a switch-scoped local allocates its closure on entry to every
+  call, failure or not.
+- **Name lookups beside expressions.** An index-driven join reads the inner columns of
+  its seek prefix from the plan (`SqlJoinIndexPath.InnerColumns`) instead of finding
+  each by name for every outer row. Foreign-key checks and cascades still find their
+  key columns by name for each row they check; binding those ordinals per table
+  version, beside the CHECK trees, is a follow-up.
 - **Planner walkers.** `SqlPlanner.Children` returns the shared empty sequence for a
   node without operands and a chain's or call's own operand list, so the walkers that
   visit every node of every statement no longer allocate an iterator per leaf. With the
@@ -155,8 +180,7 @@ flowchart TD
   allocates 2.2 KB (13%) less per statement (Q7 below).
 - **Not in E1.** A bound call carries no argument coercions: the built-ins take any
   argument type and convert nothing, and overload resolution over typed signatures,
-  which introduces coercions, is phase E2. `SqlConstantExpression` is no longer
-  produced by the executor; a test still uses it as a node no SQL text spells.
+  which introduces coercions, is phase E2.
 
 **Measurement.** `samples/Assimalign.Cohesion.Database.Sql.Benchmarks` is the program's
 §10 NativeAOT statement benchmark: an in-memory engine, a 100,000-row table, one warm-up
@@ -877,7 +901,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   inside, and complete, so a missing check fails the test rather than the test
   process. Under a 4096 limit, a 3,000-level statement runs on a 64 MB thread and
   fails with `COHSQLE004` on a small one, whether its parse or a later walk is what
-  runs out (`Engine_HighLimit_ShouldRunOrFailWithStatementTooComplex`).
+  runs out (`Engine_HighLimit_ShouldRunOrFailWithStatementTooComplex`). A later walk
+  must also spend less stack per level than the parser, so that on any thread the
+  parse is what refuses a statement too deep for it and a definition the open can read
+  back it can also bind: `Statement_DeepestOnThread_ShouldBeLimitedByTheParser` finds
+  the deepest statement of six shapes a 1 MB thread runs and requires the next depth
+  to fail in the parser (`SQL0007`). The debug build's parser frames are large enough
+  that only an optimized build, which CI runs, can expose a walk costlier than the
+  parser.
 - **Signs require numbers; unary plus is the identity (#1068 follow-up).** The
   evaluator returns a unary-plus operand unchanged (value and CLR type; NULL
   propagates), while negation still widens exact integers to BIGINT, and
@@ -1990,14 +2021,15 @@ and add it again" as the only remedy.
   is collected with it — invalidation is structural, with no hook to forget. A
   `SqlBoundTable` holds each CHECK predicate parsed, and compiled once to its bound
   expression tree (`SqlBoundCheck.Bound`, [Bound expressions](#bound-expressions-e1)),
-  with the column ordinals a violation reports, and each column's DEFAULT value.
-  `SqlPlanExecutor.ValidateRows` evaluates the cached trees, so a write resolves no
-  column, function or collation of a predicate; `DecodeRow` and the INSERT path
-  resolve defaults from the cached values, and `EnsureCanDropColumn` re-binds the
-  cached predicates against the remaining columns. A DEFAULT is a literal, so its
-  bound form is its value text, which each use coerces to the column exactly as
-  before. No write, read or DML statement parses catalog text; `BindCount` lets
-  tests prove it.
+  with the column ordinals a violation reports, and each column's DEFAULT converted to
+  the column's type. `SqlPlanExecutor.ValidateRows` evaluates the cached trees, so a
+  write resolves no column, function or collation of a predicate; `DecodeRow` and the
+  INSERT path read defaults from the cached values, and `EnsureCanDropColumn` re-binds
+  the cached predicates against the remaining columns. A DEFAULT is a literal, so its
+  bound form is its value, converted once (`SqlPlanExecutor.BindDefault`) by exactly
+  the conversion each use applied to its text before; one that does not convert binds
+  as a failure that each use raises, as before. No write, read or DML statement parses
+  catalog text or converts a DEFAULT; `BindCount` lets tests prove it.
 - **Binding is not re-validation.** DDL accepts a CHECK through
   `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
   no sign over an operand the plan types as non-numeric). Loading binds it through

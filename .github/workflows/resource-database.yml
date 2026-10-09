@@ -92,6 +92,34 @@ jobs:
           category: 'Database'
           project: ${{ matrix.projects }}
 
+  # The SQL engine's NativeAOT statement benchmark (DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md
+  # section 10) is the instrument each engine phase's performance gate is measured with, so it
+  # must keep compiling as the public API it drives changes. A plain build (no native publish):
+  # the project sets PublishAot, which turns on the trim and AOT analyzers, so the build also
+  # fails on a new IL2xxx/IL3xxx warning in what it exercises.
+  sql-benchmarks:
+    name: "Build Database.Sql.Benchmarks"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      - name: Restore build tasks
+        shell: pwsh
+        run: dotnet restore "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj"
+
+      - name: Build build tasks
+        shell: pwsh
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --no-restore
+
+      - name: Build Database.Sql.Benchmarks (trim/AOT analyzers on)
+        shell: pwsh
+        run: dotnet build "./resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/Assimalign.Cohesion.Database.Sql.Benchmarks.csproj" --configuration Release
+
   database-testing-pack:
     name: "Prepare Database SDK E2E packages"
     runs-on: ubuntu-latest

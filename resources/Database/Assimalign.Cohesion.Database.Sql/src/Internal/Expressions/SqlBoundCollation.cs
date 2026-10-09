@@ -235,14 +235,21 @@ internal sealed class SqlCollationFoldTerm : SqlCollationTerm
 internal sealed class SqlCollationCollateTerm : SqlCollationTerm
 {
     private readonly SqlCollationCandidate _operand;
+    private readonly Collation? _collation;
     private readonly string _name;
 
     /// <summary>Initializes the term.</summary>
     /// <param name="operand">The operand's candidate.</param>
+    /// <param name="collation">
+    /// The collation the clause names, resolved when the expression was bound, or null when the
+    /// name did not resolve: the parser refuses an unknown name, so only a tree no SQL text spells
+    /// has one, and it fails, as before, only when the clause applies.
+    /// </param>
     /// <param name="name">The collation name the clause names.</param>
-    internal SqlCollationCollateTerm(SqlCollationCandidate operand, string name)
+    internal SqlCollationCollateTerm(SqlCollationCandidate operand, Collation? collation, string name)
     {
         _operand = operand;
+        _collation = collation;
         _name = name;
     }
 
@@ -250,7 +257,7 @@ internal sealed class SqlCollationCollateTerm : SqlCollationTerm
     internal override SqlCollationCandidate Resolve(SqlSubqueryValues? subqueries)
     {
         var inner = _operand.Resolve(subqueries);
-        return inner.Priority == 3 ? inner : new SqlCollationCandidate(Collation.FromName(_name), 3);
+        return inner.Priority == 3 ? inner : new SqlCollationCandidate(_collation ?? Collation.FromName(_name), 3);
     }
 }
 

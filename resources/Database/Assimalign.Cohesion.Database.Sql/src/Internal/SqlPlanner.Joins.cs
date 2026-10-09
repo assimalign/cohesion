@@ -54,6 +54,7 @@ internal sealed partial class SqlPlanner
             foreach (var index in _catalog.GetIndexes(innerBinding.Table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
             {
                 var outerOrdinals = new List<int>();
+                var innerColumns = new List<SqlCatalogColumn>();
                 foreach (string key in index.ColumnNames)
                 {
                     int innerOrdinal = FindColumnOrdinal(innerBinding.Table, key);
@@ -81,6 +82,7 @@ internal sealed partial class SqlPlanner
                         break;
                     }
                     outerOrdinals.Add(outerOrdinal);
+                    innerColumns.Add(innerBinding.Table.Columns[innerOrdinal]);
                 }
 
                 if (outerOrdinals.Count == 0)
@@ -94,7 +96,7 @@ internal sealed partial class SqlPlanner
                             || index.IsUnique == best.Index.IsUnique
                                 && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0)))
                 {
-                    best = new SqlJoinIndexPath(inner, index, outerOrdinals);
+                    best = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
                 }
             }
         }

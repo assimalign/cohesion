@@ -103,12 +103,15 @@ internal sealed record SqlJoinPlan(
 
 /// <summary>
 /// A correlated equality-prefix seek into one input, with probe ordinals in
-/// the other input's local row. A null path means a buffered nested-loop scan.
+/// the other input's local row and the inner columns of the seek prefix, resolved
+/// once when the statement is planned rather than by name for every outer row.
+/// A null path means a buffered nested-loop scan.
 /// </summary>
 internal sealed record SqlJoinIndexPath(
     int InnerBinding,
     SqlCatalogIndex Index,
-    IReadOnlyList<int> OuterOrdinals);
+    IReadOnlyList<int> OuterOrdinals,
+    IReadOnlyList<SqlCatalogColumn> InnerColumns);
 
 /// <summary>A catalog projection with no storage identity or physical access path.</summary>
 internal sealed record SqlSystemViewPlan(

@@ -213,14 +213,15 @@ internal sealed class SqlBoundTableCache
             checks.Add(new SqlBoundCheck(constraint, predicate, ordinals, bound));
         }
 
-        var defaults = new string?[table.Columns.Count];
+        var defaults = new SqlBoundExpression?[table.Columns.Count];
         for (int ordinal = 0; ordinal < defaults.Length; ordinal++)
         {
             var column = table.Columns[ordinal];
             if (column.DefaultLiteral is not null)
             {
-                defaults[ordinal] = SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
-                    $"DEFAULT of column '{column.Name}' on table '{tableName}'");
+                // Converted to the column's type once, here: no decoded row and no INSERT converts it again.
+                defaults[ordinal] = SqlPlanExecutor.BindDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
+                    $"DEFAULT of column '{column.Name}' on table '{tableName}'"));
             }
         }
 

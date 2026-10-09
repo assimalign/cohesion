@@ -2,7 +2,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// A value fixed when the expression was bound: a literal, parsed and boxed once rather than for
-/// every row, or the BIGINT minimum a negated literal spells.
+/// every row, the BIGINT minimum a negated literal spells, or a persisted DEFAULT converted to its
+/// column's type once per table version.
 /// </summary>
 internal sealed class SqlBoundConstant : SqlBoundExpression
 {

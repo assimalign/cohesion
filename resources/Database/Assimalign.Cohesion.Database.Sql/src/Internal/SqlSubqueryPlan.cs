@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -41,29 +40,3 @@ internal sealed record SqlSubquerySlot(int Id, SqlSubqueryKind Kind, Collation C
 
 /// <summary>The cardinality and reduction required by a subquery's use site.</summary>
 internal enum SqlSubqueryKind { Scalar, Exists, Set }
-
-/// <summary>
-/// A typed constant expression node: a value with a database type and an optional collation,
-/// which no SQL text spells. The bound expression tree carries subquery values in slots, so the
-/// engine itself no longer produces these; the evaluator still binds one to its value.
-/// </summary>
-internal sealed class SqlConstantExpression : SqlExpression
-{
-    /// <summary>
-    /// Initializes a new instance of the <see cref="SqlConstantExpression"/> class.
-    /// </summary>
-    /// <param name="value">The runtime constant value.</param>
-    /// <param name="type">The database type the value carries.</param>
-    /// <param name="collation">The collation the value carries, or <see langword="null"/> when none applies.</param>
-    public SqlConstantExpression(object? value, DatabaseType type, Collation? collation = null)
-        : base(null)
-    {
-        Value = value;
-        Type = type;
-        Collation = collation;
-    }
-
-    internal object? Value { get; }
-    internal DatabaseType Type { get; }
-    internal Collation? Collation { get; }
-}

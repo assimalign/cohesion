@@ -323,10 +323,6 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
     {
-        if (expression is SqlConstantExpression { Collation: not null } constant)
-        {
-            return new(constant.Collation, 2);
-        }
         if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {
             return source.ColumnOrdinal is int ordinal ? ColumnCollation(ordinal) : FindCollation(source.Expression, bound);
@@ -375,7 +371,19 @@ internal sealed partial class SqlExpressionEvaluator
     {
         if (operand.IsDeferred)
         {
-            return SqlCollationCandidate.Deferred(new SqlCollationCollateTerm(operand, name));
+            // The operand decides at run time whether the clause applies; the clause's own
+            // collation is resolved now, so the comparison does not look it up by name per row.
+            Collation? collation;
+            try
+            {
+                collation = Collation.FromName(name);
+            }
+            catch (Exception exception) when (IsDeferrable(exception))
+            {
+                collation = null;
+            }
+
+            return SqlCollationCandidate.Deferred(new SqlCollationCollateTerm(operand, collation, name));
         }
         if (operand.Priority == 3)
         {
@@ -392,7 +400,7 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (Exception exception) when (IsDeferrable(exception))
         {
-            return SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => Collation.FromName(name)));
+            return CollationFailure(name);
         }
     }
 
@@ -410,9 +418,18 @@ internal sealed partial class SqlExpressionEvaluator
         }
         catch (Exception exception) when (IsDeferrable(exception))
         {
-            return SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => ResolveColumn(column)));
+            return ColumnCollationFailure(column);
         }
     }
+
+    // Deferred collation failures are built by factories, so the closure over the name or column
+    // is allocated only when binding defers one, not on every call (see Bind's remarks).
+
+    private static SqlCollationCandidate CollationFailure(string name)
+        => SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => Collation.FromName(name)));
+
+    private SqlCollationCandidate ColumnCollationFailure(SqlColumnReferenceExpression column)
+        => SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => ResolveColumn(column)));
 
     /// <summary>
     /// Whether binding defers an exception to evaluation rather than raising it: every exception but

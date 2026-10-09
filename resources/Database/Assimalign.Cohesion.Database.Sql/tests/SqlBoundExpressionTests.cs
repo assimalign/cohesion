@@ -148,6 +148,73 @@ public sealed class SqlBoundExpressionTests
         check.Bound.ShouldBeOfType<SqlBoundLogical>().Operands.ShouldAllBe(operand => operand.Kind == SqlBoundExpressionKind.Binary);
     }
 
+    /// <summary>
+    /// A persisted DEFAULT binds once per table version to its value already converted to the
+    /// column's type: every row stored before ADD COLUMN reads that one value, and so does an INSERT
+    /// that omits the column, without converting the literal's text again or binding the table again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Bound expressions: a DEFAULT is converted once per table version and every row reads that value")]
+    public async Task ExecuteAsync_AddColumnDefault_ShouldReadTheValueBoundOncePerTableVersion()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-default" });
+        var database = await engine.CreateDatabaseAsync("bound");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1), (2)");
+        await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN n INT DEFAULT 7");
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        var bound = database.Definitions.Get(table).DefaultValues[1].ShouldBeOfType<SqlBoundConstant>();
+        long binds = database.Definitions.BindCount;
+
+        // Act
+        var backfilled = await RowsAsync(session, "SELECT id, n FROM t ORDER BY id");
+        await ExecuteAsync(session, "INSERT INTO t (id) VALUES (3)");
+        var inserted = await RowsAsync(session, "SELECT n FROM t WHERE id = 3");
+
+        // Assert
+        bound.Value.ShouldBe(7);
+        backfilled.Select(row => row[0]).ShouldBe([1, 2]);
+        backfilled.ShouldAllBe(row => ReferenceEquals(row[1], bound.Value));
+        inserted.ShouldHaveSingleItem().ShouldHaveSingleItem().ShouldBe(7);
+        database.Definitions.BindCount.ShouldBe(binds);
+        database.Definitions.Get(table).DefaultValues[1].ShouldBeSameAs(bound);
+    }
+
+    /// <summary>
+    /// A DEFAULT that does not convert to its column, which DDL never stores but a damaged catalog
+    /// can hold, binds as a failure: the table still binds and serves every statement that does not
+    /// need the default, and each statement that does fails the way it did when the default's text
+    /// was converted per use.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Bound expressions: a DEFAULT that does not convert fails only the statements that use it")]
+    public async Task ExecuteAsync_UnconvertibleDefault_ShouldFailOnlyWhenUsed()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-default-failure" });
+        var database = await engine.CreateDatabaseAsync("bound");
+        await database.Catalog.CreateTableAsync("dbo", "d",
+        [
+            new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32)),
+            new SqlCatalogColumn("n", new DatabaseTypeInfo(DatabaseType.Int32), defaultLiteral: "'abc'"),
+        ], [], cancellationToken: CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        database.Catalog.TryGetTable("dbo", "d", out var table).ShouldBeTrue();
+
+        // Act
+        await ExecuteAsync(session, "INSERT INTO d (id, n) VALUES (1, 2)");
+        var first = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO d (id) VALUES (2)"));
+        var second = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO d (id) VALUES (3)"));
+        var rows = await RowsAsync(session, "SELECT id, n FROM d");
+
+        // Assert
+        database.Definitions.Get(table).DefaultValues[1].ShouldBeOfType<SqlBoundFailure>();
+        first.Message.ShouldStartWith("Column 'n': DEFAULT value cannot be stored as Int32.", Case.Sensitive);
+        second.Message.ShouldBe(first.Message);
+        second.ShouldNotBeSameAs(first);
+        rows.ShouldHaveSingleItem().ShouldBe([1, 2]);
+    }
+
     private static SqlExpression Predicate(string predicate)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse($"SELECT * FROM t WHERE {predicate}");

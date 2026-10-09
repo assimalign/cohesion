@@ -250,7 +250,6 @@ internal sealed partial class SqlPlanner
         SqlColumnReferenceExpression column => columns[evaluator.ResolveColumn(column)].Type.Type,
         SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
             when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
-        SqlConstantExpression constant => constant.Type,
         SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
         SqlCastExpression cast => cast.TargetTypeInfo!.Type,
         SqlParameterExpression parameter => GroupValueType(evaluator.Evaluate(parameter, [])),

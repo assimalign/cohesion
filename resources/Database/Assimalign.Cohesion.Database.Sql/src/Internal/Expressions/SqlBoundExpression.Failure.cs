@@ -5,7 +5,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// A node the evaluator cannot compute: an unsupported construct, a declared function that does not
 /// execute yet, a call whose arguments its signature refuses, a parameter with no supplied value, an
-/// unresolvable column, or a literal its type cannot hold. Evaluating it raises a new exception of
+/// unresolvable column, a literal its type cannot hold, or a persisted DEFAULT that does not convert
+/// to its column (<see cref="SqlPlanExecutor.BindDefault"/>). Evaluating it raises a new exception of
 /// the same type and message the unbound evaluator raised when it reached the node; binding it
 /// raises nothing, so a statement fails only if it evaluates the node (a short-circuited term, an
 /// untaken CASE branch, or an empty table never does), exactly as before.
