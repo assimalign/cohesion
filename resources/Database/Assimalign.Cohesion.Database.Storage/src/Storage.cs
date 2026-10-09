@@ -140,6 +140,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private Action<StorageOfflineException>? _onOffline;
     private int _offlineRaised;
 
+    // The storage's place in the event source's current-storages gauge: 0 until a create or an
+    // open completes, 1 while it is counted, 2 once the first close uncounted it. _disposed is a
+    // plain bool two closes can both read false, so the gauge's transitions go through this.
+    private int _gaugeState;
+
     // The checkpoint size trigger (forwarded to the journal once it exists) and the bookkeeping
     // IsCheckpointDue reads: when the last checkpoint completed (or the storage was created or
     // opened), and the journal's last LSN at that moment.
@@ -507,6 +512,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (Interlocked.Exchange(ref _offlineRaised, 1) == 0)
         {
+            StorageEventSource.Log.StorageOffline(this, error);
             OnOffline?.Invoke(error);
         }
     }
@@ -970,6 +976,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         _name = name;
         _id = StorageId.NewId();
+        NameComponents();
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };
         AttachJournal();
 
@@ -1014,6 +1021,46 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // The journal is empty and every page carries LSN zero: each one's first change journals a
         // full page image.
         Volatile.Write(ref _redoLsn, _journal!.LastLsn);
+
+        CountOpen();
+        StorageEventSource.Log.StorageCreated(this);
+    }
+
+    /// <summary>
+    /// Hands the storage's name to the buffer pool and the group-commit gate, which report it as
+    /// the <c>database</c> of their events (<see cref="StorageEventSource"/>): once
+    /// <see cref="InitializeNew"/> or <see cref="OpenExisting"/> has learned it.
+    /// </summary>
+    private void NameComponents()
+    {
+        _bufferPool.StorageName = _name;
+        _groupCommitGate.StorageName = _name;
+    }
+
+    /// <summary>
+    /// Counts the storage in the event source's <c>current-storages</c> gauge once its create or
+    /// open completed.
+    /// </summary>
+    private void CountOpen()
+    {
+        if (Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
+        {
+            StorageEventSource.Log.CountStorageOpened();
+        }
+    }
+
+    /// <summary>
+    /// Uncounts the storage from the <c>current-storages</c> gauge and writes its close, on the first
+    /// close of a storage that was counted; a storage whose create or open failed was never counted.
+    /// </summary>
+    /// <param name="closing">The timestamp <see cref="StorageEventSource.StorageClosing"/> returned.</param>
+    private void ReportClosed(long closing)
+    {
+        if (Interlocked.CompareExchange(ref _gaugeState, 2, 1) == 1)
+        {
+            StorageEventSource.Log.CountStorageClosed();
+            StorageEventSource.Log.StorageClosed(this, closing);
+        }
     }
 
     /// <summary>
@@ -1070,6 +1117,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     protected unsafe void OpenExisting(bool checkpointOnOpen = true)
     {
         var header = ReadHeader(out long[] anchor, out List<long> anchorChain);
+        NameComponents();
         _checkpointActives = anchor;
         _anchorChains[_headerSlot].AddRange(anchorChain);
         var protectedPages = new HashSet<long>(anchorChain);
@@ -1086,104 +1134,121 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // below the ones data pages already carry (#1242). The redo point below rests on it.
         _journal.RaiseLsnFloor(header.LsnFloor);
 
-        var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity);
-
-        // Sequence assignment resumes above both the journal's highest observed
-        // sequence and the header floor persisted at the last checkpoint — the
-        // journal alone is insufficient because checkpoints truncate it while row
-        // version stamps persist in data pages.
-        _nextTransactionSequence = Math.Max(recovery.MaxSequence, header.SequenceFloor);
-
-        // The redo point: every LSN a page carries from before the journal's checkpoint is at or
-        // below that checkpoint's record, and below the LSN floor when the record was lost after
-        // the truncation, so a page above it has a full page image in the journal (invariant P;
-        // recovery stamped every page it rebuilt with the LSN of its last record). Without the
-        // floor a lost checkpoint record would leave the redo point at zero, no page would be
-        // imaged again, and the next delta of a page would have no image to chain onto. The page
-        // scan below can raise it further.
-        long redoLsn = Math.Max(header.LsnFloor, recovery.CheckpointLsn);
-
-        // Rebuild the free-space map and the per-owner page directory in one pass
-        // over the on-disk page headers. The stream length is the source of truth
-        // for the page count (the file header trails it if the process stopped
-        // between an allocation and the next header update). Page headers are also
-        // the single source of truth for chain membership — there is no persisted
-        // directory to drift from reality (the free-space-map precedent).
-        _freeSpaceMap.MarkAllocated((PageId)0L);
-
-        long pageCount = Data.Length / Page.Size;
-        var pageHeader = new byte[Page.HeaderSize];
-        byte[]? pageBuffer = null;
-        long strayLsn = 0;
-
-        for (long i = 1; i < pageCount; i++)
+        // Zero unless the event source is listening: the recovery's start and stop events then
+        // bracket the replay and the page scan, and the stop is written whether or not they
+        // complete, so its activity always closes.
+        long recoveryStarted = StorageEventSource.Log.RecoveryStart(this);
+        try
         {
-            Data.ReadPageHeader((PageId)i, pageHeader);
+            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity);
 
-            PageType type;
-            ulong pageOwner;
-            long pageLsn;
-            fixed (byte* headerPtr = pageHeader)
-            {
-                type = ((Page.Header*)headerPtr)->Type;
-                pageOwner = ((Page.Header*)headerPtr)->OwnerId;
-                pageLsn = ((Page.Header*)headerPtr)->Lsn;
-            }
+            // Sequence assignment resumes above both the journal's highest observed
+            // sequence and the header floor persisted at the last checkpoint — the
+            // journal alone is insufficient because checkpoints truncate it while row
+            // version stamps persist in data pages.
+            _nextTransactionSequence = Math.Max(recovery.MaxSequence, header.SequenceFloor);
 
-            // An anchor page off the newest generation's chain is the other slot's (whose
-            // generation the next header write replaces) or a leftover of a crashed header
-            // write: free. Its on-disk bytes are never read again — allocation overwrites
-            // without reading.
-            if (type == PageType.Free || (type == PageType.CheckpointAnchor && !protectedPages.Contains(i)))
-            {
-                _freeSpaceMap.MarkFree((PageId)i);
-            }
-            else
-            {
-                _freeSpaceMap.MarkAllocated((PageId)i);
+            // The redo point: every LSN a page carries from before the journal's checkpoint is at or
+            // below that checkpoint's record, and below the LSN floor when the record was lost after
+            // the truncation, so a page above it has a full page image in the journal (invariant P;
+            // recovery stamped every page it rebuilt with the LSN of its last record). Without the
+            // floor a lost checkpoint record would leave the redo point at zero, no page would be
+            // imaged again, and the next delta of a page would have no image to chain onto. The page
+            // scan below can raise it further.
+            long redoLsn = Math.Max(header.LsnFloor, recovery.CheckpointLsn);
 
-                if (type == PageType.Data)
+            // Rebuild the free-space map and the per-owner page directory in one pass
+            // over the on-disk page headers. The stream length is the source of truth
+            // for the page count (the file header trails it if the process stopped
+            // between an allocation and the next header update). Page headers are also
+            // the single source of truth for chain membership — there is no persisted
+            // directory to drift from reality (the free-space-map precedent).
+            _freeSpaceMap.MarkAllocated((PageId)0L);
+
+            long pageCount = Data.Length / Page.Size;
+            var pageHeader = new byte[Page.HeaderSize];
+            byte[]? pageBuffer = null;
+            long strayLsn = 0;
+
+            for (long i = 1; i < pageCount; i++)
+            {
+                Data.ReadPageHeader((PageId)i, pageHeader);
+
+                PageType type;
+                ulong pageOwner;
+                long pageLsn;
+                fixed (byte* headerPtr = pageHeader)
                 {
-                    // Ascending scan: the last page seen per owner becomes that
-                    // owner's current write page.
-                    RegisterOwnerPage(pageOwner, (PageId)i);
+                    type = ((Page.Header*)headerPtr)->Type;
+                    pageOwner = ((Page.Header*)headerPtr)->OwnerId;
+                    pageLsn = ((Page.Header*)headerPtr)->Lsn;
                 }
 
-                // A page recovery did not rebuild has no image in the journal, so invariant P
-                // needs its LSN at or below the redo point. One above it outlived the journal
-                // records that stamped it: under CommitDurability.None the write-ahead gate only
-                // drains the journal, so a power loss can keep a stolen page and lose the journal
-                // tail its image and deltas were in; a journal file lost or restored from an older
-                // copy does the same. Its LSN is taken only from a page whose stamped checksum
-                // verifies, as every write-back leaves it: a damaged header must not move LSNs (the
-                // page fails its checksum when it is read), and neither may a page whose checksum
-                // field reads zero, which is never verified.
-                if (pageLsn > redoLsn && pageLsn > strayLsn && !recovery.RebuiltPages.Contains(i))
+                // An anchor page off the newest generation's chain is the other slot's (whose
+                // generation the next header write replaces) or a leftover of a crashed header
+                // write: free. Its on-disk bytes are never read again — allocation overwrites
+                // without reading.
+                if (type == PageType.Free || (type == PageType.CheckpointAnchor && !protectedPages.Contains(i)))
                 {
-                    pageBuffer ??= new byte[Page.Size];
-                    Data.ReadPage((PageId)i, pageBuffer);
-                    if (PageChecksum.TryVerify(pageBuffer, out uint stored, out _) && stored != 0)
+                    _freeSpaceMap.MarkFree((PageId)i);
+                }
+                else
+                {
+                    _freeSpaceMap.MarkAllocated((PageId)i);
+
+                    if (type == PageType.Data)
                     {
-                        strayLsn = pageLsn;
+                        // Ascending scan: the last page seen per owner becomes that
+                        // owner's current write page.
+                        RegisterOwnerPage(pageOwner, (PageId)i);
+                    }
+
+                    // A page recovery did not rebuild has no image in the journal, so invariant P
+                    // needs its LSN at or below the redo point. One above it outlived the journal
+                    // records that stamped it: under CommitDurability.None the write-ahead gate only
+                    // drains the journal, so a power loss can keep a stolen page and lose the journal
+                    // tail its image and deltas were in; a journal file lost or restored from an older
+                    // copy does the same. Its LSN is taken only from a page whose stamped checksum
+                    // verifies, as every write-back leaves it: a damaged header must not move LSNs (the
+                    // page fails its checksum when it is read), and neither may a page whose checksum
+                    // field reads zero, which is never verified.
+                    if (pageLsn > redoLsn && pageLsn > strayLsn && !recovery.RebuiltPages.Contains(i))
+                    {
+                        pageBuffer ??= new byte[Page.Size];
+                        Data.ReadPage((PageId)i, pageBuffer);
+                        if (PageChecksum.TryVerify(pageBuffer, out uint stored, out _) && stored != 0)
+                        {
+                            strayLsn = pageLsn;
+                        }
                     }
                 }
             }
-        }
 
-        if (strayLsn > redoLsn)
+            if (strayLsn > redoLsn)
+            {
+                // LSNs resume above the stray page, so they never fall below one a page carries, and the
+                // redo point moves up to it: the page's next first touch journals its full image, which
+                // its later deltas chain onto. Without this the next LSNs restarted below the page's,
+                // no image was journaled for it (its LSN was above the redo point), and its next delta
+                // named a base no record in the journal produced — the following open refused the file
+                // set with a chain gap (#1253 review). Nothing has been appended since open, which
+                // RaiseLsnFloor requires.
+                StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn);
+                _journal.RaiseLsnFloor(strayLsn);
+                redoLsn = strayLsn;
+            }
+
+            Volatile.Write(ref _redoLsn, redoLsn);
+
+            StorageEventSource.Log.RecoveryStop(this, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted);
+            recoveryStarted = 0;
+        }
+        finally
         {
-            // LSNs resume above the stray page, so they never fall below one a page carries, and the
-            // redo point moves up to it: the page's next first touch journals its full image, which
-            // its later deltas chain onto. Without this the next LSNs restarted below the page's,
-            // no image was journaled for it (its LSN was above the redo point), and its next delta
-            // named a base no record in the journal produced — the following open refused the file
-            // set with a chain gap (#1253 review). Nothing has been appended since open, which
-            // RaiseLsnFloor requires.
-            _journal.RaiseLsnFloor(strayLsn);
-            redoLsn = strayLsn;
+            // A recovery that threw: its stop carries zeros, and the open's exception is the failure.
+            // A no-op after the stop above, and while nobody listens.
+            StorageEventSource.Log.RecoveryStop(this, 0, 0, 0, recoveryStarted);
         }
-
-        Volatile.Write(ref _redoLsn, redoLsn);
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };
 
@@ -1202,6 +1267,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             Volatile.Write(ref _lastCheckpointLsn, _journal.LastLsn);
         }
+
+        CountOpen();
     }
 
     /// <summary>
@@ -1419,40 +1486,56 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 throw new StorageTransactionException("Checkpoint requires no active transactions.");
             }
 
-            // The anchor and both floors reach durable storage before the journal
-            // truncation destroys the records they stand in for.
-            WriteHeader(activeTransactionSequences);
-
-            // The debug consistency check compares every page it shadows with what recovery would
-            // rebuild from the records the truncation is about to discard.
-            _consistency?.Checkpointing(ReadPageForAudit);
-
-            // Read once: a CommitDurability change racing the checkpoint must not make it flush
-            // without an fsync and then publish that LSN to the gate as durable. The setter takes
-            // this checkpoint's transaction lock too (owner decision 26 of 2026-10-06), so the
-            // header write above, its page write-backs and this flush all saw the same value. And
-            // an initialized storage never enters or leaves None, so a commit waiting durably in
-            // the gate never meets a truncation this checkpoint made without flushing the data file.
-            bool durable = RequiresDurableFlush;
-            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: durable);
-
-            if (checkpointLsn is not null)
+            // Zero unless the event source is listening. A refused checkpoint (above) changed
+            // nothing and writes no start; one that starts writes its stop whether or not it
+            // completes, so its activity always closes.
+            long checkpointStarted = StorageEventSource.Log.CheckpointStart(this, activeTransactionSequences.Length);
+            try
             {
-                // Every page now carries an LSN below the checkpoint record's, and the journal holds
-                // no record of any page: each one's next change journals a full page image first.
-                // Under the transaction lock with no transaction active, so no transaction sees the
-                // redo point move.
-                Volatile.Write(ref _redoLsn, checkpointLsn.Value);
+                // The anchor and both floors reach durable storage before the journal
+                // truncation destroys the records they stand in for.
+                WriteHeader(activeTransactionSequences);
 
-                if (durable)
+                // The debug consistency check compares every page it shadows with what recovery would
+                // rebuild from the records the truncation is about to discard.
+                _consistency?.Checkpointing(ReadPageForAudit);
+
+                // Read once: a CommitDurability change racing the checkpoint must not make it flush
+                // without an fsync and then publish that LSN to the gate as durable. The setter takes
+                // this checkpoint's transaction lock too (owner decision 26 of 2026-10-06), so the
+                // header write above, its page write-backs and this flush all saw the same value. And
+                // an initialized storage never enters or leaves None, so a commit waiting durably in
+                // the gate never meets a truncation this checkpoint made without flushing the data file.
+                bool durable = RequiresDurableFlush;
+                long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: durable);
+
+                if (checkpointLsn is not null)
                 {
-                    // Wake any group-commit bookkeeping past the truncation point. The journal's own
-                    // durable LSN, not the checkpoint's: the gate publishes only what an fsync confirmed.
-                    _groupCommitGate.PublishDurable(_journal!.DurableLsn);
-                }
-            }
+                    // Every page now carries an LSN below the checkpoint record's, and the journal holds
+                    // no record of any page: each one's next change journals a full page image first.
+                    // Under the transaction lock with no transaction active, so no transaction sees the
+                    // redo point move.
+                    Volatile.Write(ref _redoLsn, checkpointLsn.Value);
 
-            MarkCheckpointed();
+                    if (durable)
+                    {
+                        // Wake any group-commit bookkeeping past the truncation point. The journal's own
+                        // durable LSN, not the checkpoint's: the gate publishes only what an fsync confirmed.
+                        _groupCommitGate.PublishDurable(_journal!.DurableLsn);
+                    }
+                }
+
+                MarkCheckpointed();
+                StorageEventSource.Log.CountCheckpoint();
+                StorageEventSource.Log.CheckpointStop(this, checkpointLsn ?? 0, checkpointStarted);
+                checkpointStarted = 0;
+            }
+            finally
+            {
+                // A checkpoint that threw: its stop carries checkpoint LSN zero, and the caller's
+                // exception is the failure. A no-op after the stop above, and while nobody listens.
+                StorageEventSource.Log.CheckpointStop(this, 0, checkpointStarted);
+            }
         }
     }
 
@@ -1512,7 +1595,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             return 0;
         }
 
-        return _bufferPool.FlushSome(Data, maxPages);
+        long started = StorageEventSource.Log.WriteBackStarting();
+        int written = _bufferPool.FlushSome(Data, maxPages);
+        StorageEventSource.Log.PagesWrittenBack(this, written, started);
+        return written;
     }
 
     /// <summary>
@@ -2022,9 +2108,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // engine reports the operation as unconfirmed, not refused: a self-committing
             // statement whose bracket this was survives the reopen when the record did.
             CompleteCommitted(transaction);
+            StorageEventSource.Log.StorageCommitUnconfirmed(this, transaction.Sequence, commitLsn, offline);
             throw StorageOfflineException.CommitUnconfirmed(offline);
         }
-        catch
+        catch (Exception failure)
         {
             // Any other failure of the wait (the storage disposed under it, a durable flush the
             // handle stopped supporting after the check above): the commit record is in the journal
@@ -2032,6 +2119,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // The bracket must not roll back in memory — its pages would return to bases the journal
             // has moved past — so it ends committed, unconfirmed, and the failure propagates.
             CompleteCommitted(transaction);
+            StorageEventSource.Log.StorageCommitUnconfirmed(this, transaction.Sequence, commitLsn, failure);
             throw;
         }
 
@@ -2211,6 +2299,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (!_disposed)
         {
+            long closing = StorageEventSource.Log.StorageClosing();
             try
             {
                 ShutdownFlush();
@@ -2226,6 +2315,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 Backup.Dispose();
 
                 _disposed = true;
+                ReportClosed(closing);
             }
         }
     }
@@ -2235,6 +2325,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (!_disposed)
         {
+            long closing = StorageEventSource.Log.StorageClosing();
             try
             {
                 ShutdownFlush();
@@ -2255,6 +2346,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 await Backup.DisposeAsync().ConfigureAwait(false);
 
                 _disposed = true;
+                ReportClosed(closing);
             }
         }
     }
@@ -2289,6 +2381,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // the buffer are never written. The journal on the media is what the next open's
             // recovery reads; it decides every unconfirmed commit, and pages left dirty in the pool
             // are rebuilt from it or were never committed.
+            StorageEventSource.Log.ShutdownFlushSkipped(this, OfflineError);
             return;
         }
 
@@ -2583,6 +2676,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 {
                     transaction.RecordSpilledPreImage(pageId, location);
                     Interlocked.Increment(ref _spilledPreImages);
+                    StorageEventSource.Log.CountPreImageSpilled();
                     return;
                 }
 

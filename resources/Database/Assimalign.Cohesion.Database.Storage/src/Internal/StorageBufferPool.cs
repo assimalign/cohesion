@@ -76,6 +76,13 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// </summary>
     internal Action<long, long>? WriteBackAudit;
 
+    /// <summary>
+    /// The name of the storage that owns the pool, for its events' <c>database</c> payload
+    /// (<see cref="StorageEventSource"/>): set by the storage when it is created or opened, and
+    /// empty before that and for a pool nothing owns.
+    /// </summary>
+    internal string StorageName { get; set; } = string.Empty;
+
     internal StorageBufferPool(int capacity)
     {
         ValidateCapacity(capacity);
@@ -114,10 +121,12 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     internal void Resize(int capacity, StorageStream stream)
     {
         ValidateCapacity(capacity);
+        int previous;
 
         lock (_syncRoot)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            previous = _capacity;
 
             int pinned = 0;
             foreach (var entry in _entries.Values)
@@ -150,6 +159,13 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             }
 
             AssertInvariantsLocked();
+        }
+
+        // Outside the pool lock; an unchanged capacity (an engine applying its option to a pool
+        // already that size) is not a resize.
+        if (previous != capacity)
+        {
+            StorageEventSource.Log.BufferPoolResized(this, previous, capacity);
         }
     }
 
@@ -213,16 +229,26 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
             if (id * Page.Size < stream.Length)
             {
+                // Set while the checksum is verified, so a failure there is reported as one.
+                bool verifyingChecksum = false;
                 try
                 {
                     stream.ReadPage(pageId, entry.Buffer);
+                    StorageEventSource.Log.CountPageRead();
+                    verifyingChecksum = true;
                     PageChecksum.Verify(entry.Buffer, pageId);
+                    verifyingChecksum = false;
                     VerifyFitsBuffer(entry.Page, pageId);
                 }
                 catch
                 {
                     // Do not cache a page that failed to load or verify.
                     RecycleLocked(entry);
+                    if (verifyingChecksum)
+                    {
+                        StorageEventSource.Log.PageChecksumFailed(this, pageId);
+                    }
+
                     throw;
                 }
             }
@@ -610,13 +636,18 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
             if (entry.IsDirty)
             {
-                WriteBack(stream, (PageId)node.Value, entry);
+                // A foreground write: the thread that needed the frame (a pin, or a shrink) pays
+                // for the write-back, not a page writer.
+                long pageLsn = WriteBack(stream, (PageId)node.Value, entry);
+                StorageEventSource.Log.CountForegroundPageWrite();
+                StorageEventSource.Log.DirtyPageEvicted(this, (PageId)node.Value, pageLsn);
             }
 
             RemoveLocked(node.Value, entry);
             return;
         }
 
+        StorageEventSource.Log.BufferPoolExhausted(this, _capacity);
         throw new StorageIOException("Buffer pool is full and all pages are pinned.");
     }
 
@@ -697,7 +728,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// changes the bytes that record covers, so the copy's LSN covers every change in it.
     /// The entry is recorded clean only up to the version observed before the copy.
     /// </remarks>
-    private void WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
+    /// <returns>The LSN the written image carries (for the eviction's event).</returns>
+    private long WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
     {
         // Before anything else: an offline storage writes no page, whatever its LSN.
         WriteGuard?.Invoke();
@@ -720,7 +752,9 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
         PageChecksum.Stamp(_writeBackImage);
         stream.WritePage(pageId, _writeBackImage);
+        StorageEventSource.Log.CountPageWrite();
         entry.MarkClean(version);
+        return pageLsn;
     }
 
     // The per-operation checks below are debug-only; the structural check they share
