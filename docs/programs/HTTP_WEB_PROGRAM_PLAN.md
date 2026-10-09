@@ -260,7 +260,7 @@ Commits, behavior changes and follow-ups are in §5.
 
 ### Stage 10 — Gated
 
-**Status:** delivered 2026-10-07 on the Phase 2 branch and in owner review. Three ADRs cleared three gates (§7.4, decisions 16–18): WebSockets (#765), Web.Rewrite (#782) and trailers (#1314, #1315) are built. Defects found along the way were fixed in the same stage, among them an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1. Commits, behavior changes and follow-ups are in §5.
+**Status:** delivered 2026-10-07 on the Phase 2 branch and approved in the owner's review on 2026-10-09 (§7.4, decisions 19–20). The review follow-ups (#1367–#1369) are delivered and in owner review. Three ADRs cleared three gates (§7.4, decisions 16–18): WebSockets (#765), Web.Rewrite (#782) and trailers (#1314, #1315) are built. Defects found along the way were fixed in the same stage, among them an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1. Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -485,7 +485,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - A rule that throws, in a nested profile or as a custom rule, faults the validation.
   - **TLS endpoints.**
     - `Protocol: Https` endpoints and the ambient `https` endpoint serve HTTP/2 as well as HTTP/1.1.
-    - Every TLS exchange carries `IHttpTlsConnectionFeature`.
+    - Every TLS exchange carries `IHttpTlsConnectionFeature`. Superseded by decision 20 (#1367): the feature lives in Http.Tls, and `context.TlsConnection` builds it on first read from the transport's `ITlsConnectionInfo` facet.
   - **Graceful close.**
     - `IHttpConnectionContext` gains `BeginGracefulClose()`, a source break for an outside implementer.
     - `StopAsync` no longer throws when its budget runs out.
@@ -518,7 +518,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - #1311: a QUIC handshake-timeout option.
     - #1312: back-off when an accept fails for want of descriptors or buffers.
   - **Release.** #1290: nuget.org promotion in hourly batches (decision 13).
-- **Stage 10 delivered (2026-10-07), awaiting owner review.** Stage 10 was the gated stage. Three of its gates were decisions, and the integrator made them as ADRs under the owner's standing delegation (§7.4, decisions 16–18). The two others stay closed, for reasons outside this program: #829 and #830 belong to the IdentityModel program, and #806–#808 are post-v1. Agent sessions built the cleared items in parallel worktrees, and each item was reviewed, integrated, verified and pushed as it landed.
+- **Stage 10 delivered (2026-10-07), approved 2026-10-09.** Stage 10 was the gated stage. Three of its gates were decisions, and the integrator made them as ADRs under the owner's standing delegation (§7.4, decisions 16–18). The two others stay closed, for reasons outside this program: #829 and #830 belong to the IdentityModel program, and #806–#808 are post-v1. Agent sessions built the cleared items in parallel worktrees, and each item was reviewed, integrated, verified and pushed as it landed.
   - **Decisions** (`1cadb215`): [Http ADR 1](../libraries/Http/DECISIONS.md#adr-1-server-websockets) covers server WebSockets, [Http ADR 2](../libraries/Http/DECISIONS.md#adr-2-trailers-decided-apart-from-grpc) covers trailers apart from gRPC, and [Web ADR 1](../resources/Web/DECISIONS.md#adr-1-how-a-rewrite-changes-the-request-for-the-rest-of-the-pipeline) covers the request view behind rewrite.
   - **#782 `20679f05`: Web.Rewrite.**
     - `UseRewrite(rules => ...)` hands the rest of the pipeline a request view. `IWebRewriteFeature` keeps the client's original path and query.
@@ -532,7 +532,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
       - A drain closes open sockets with `1001` through the new Web-root `IWebServerDrainFeature`.
       - Web.Hosting installs the HTTP/1.1 upgrade interceptor by default.
     - `f30e4b42`: the same sockets over extended CONNECT (RFC 8441, RFC 9220).
-    - #1316 `127c68bd`: the tunnel. `IHttpExtendedConnectFeature.AcceptAsync` turns an extended CONNECT into a duplex stream on HTTP/2 and HTTP/3. The feature contract moved from Http.ExtendedConnect to core Http.
+    - #1316 `127c68bd`: the tunnel. `IHttpExtendedConnectFeature.AcceptAsync` turns an extended CONNECT into a duplex stream on HTTP/2 and HTTP/3. The feature contract moved from Http.ExtendedConnect to core Http; decision 20 returned it (#1368).
     - `8e4bb5ec`: the default upgrade interceptor had put a response sink on every request on every protocol. A new per-exchange response hook (`AddResponseInterceptor`) restores the fast path, and a plain GET is back to the allocation baseline.
     - `586cc318`: the output cache never serves or stores a protocol switch.
     - #1336 `fc87ae02`: `MapWebSocket` maps one endpoint for both handshake shapes. A `MapGet` endpoint works over HTTP/1.1, so in local testing, and fails for every browser on a `UseHttps` endpoint, because those browsers handshake over HTTP/2.
@@ -576,7 +576,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - A cross-origin WebSocket handshake is refused by default (`AllowedOrigins`, `AllowAnyOrigin`).
     - A `MapGet` WebSocket endpoint misses HTTP/2 and HTTP/3 handshakes; use `MapWebSocket`.
   - **Request trailers.** HTTP/3 request trailers follow the HTTP/2 rule set (`IsProhibitedInTrailers`), and HTTP/1.1 chunked trailers follow it too. A violation resets the stream, or fails the body read on HTTP/1.1.
-  - **Breaking:** `IHttpExtendedConnectFeature` moved from `Assimalign.Cohesion.Http.ExtendedConnect` to core `Assimalign.Cohesion.Http`. Source compiles unchanged, but binaries built against preview.1 must be rebuilt.
+  - **Superseded contract move.** Stage 10 first moved `IHttpExtendedConnectFeature` from `Assimalign.Cohesion.Http.ExtendedConnect` to core `Assimalign.Cohesion.Http`. Decision 20 (#1368) returned it to the assembly preview.1 shipped it in. The breaks that replace this one are listed under decision 20.
   - **Connections:** `IConnection.ConnectionClosed` on a multiplexed stream also fires when the peer abandons the stream (QUIC `RESET_STREAM`/`STOP_SENDING`).
   - **HTTP/2 conformance.**
     - A request missing `:method`, `:scheme` or `:path` is reset instead of being served as `GET /`.
@@ -588,7 +588,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 
   Questions for the review:
   - **Decisions.** Decisions 16–18 were made under the standing delegation. Confirm them, or reopen any.
-  - **Breaking contract move.** Accept moving `IHttpExtendedConnectFeature` to core Http during the previews? The alternative was a reference from Http.Connections to Http.ExtendedConnect, which would have pulled Http.ExtendedConnect into all 18 area frameworks.
+  - **Breaking contract move.** Accept moving `IHttpExtendedConnectFeature` to core Http during the previews? The alternative was a reference from Http.Connections to Http.ExtendedConnect, which would have pulled Http.ExtendedConnect into all 18 area frameworks. Answered by decision 20: neither. An interceptor in Http.ExtendedConnect installs the feature over generic core seams.
   - **Connections contract.** Accept the `ConnectionClosed` change (the in-memory driver documented it as local-only before)?
   - **Smuggling advisory.** Publish GHSA-m7g7-r8qf-qxxw (#1333, HTTP/1.1 request smuggling, medium) with the first preview that ships the fix, as decision 14 does for #1304 and #1308?
 
@@ -598,6 +598,31 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **Performance.** #1337 (allocating feature lookups), #1338 (an HTTP/3 thread-pool hop per request).
   - **QUIC.** #1330 (half-close).
   - **HTTP/1.1 and Web.** #1339 (413 and 408 after dispatch are answered as 500), #1340 (a malformed body is logged as an application defect), #1341 (field values trimmed of Unicode whitespace).
+
+  The owner's review (2026-10-09) confirmed decisions 16–18 and adopted 19 and 20 (§7.4). Decision 20 produced these follow-ups, delivered and in owner review:
+  - **#1367 `d7f271bc`: Http.Tls.** `IHttpTlsConnectionFeature` and `context.TlsConnection` move to a new `Assimalign.Cohesion.Http.Tls`. The transport publishes an `ITlsConnectionInfo` facet on its connection info, which is a snapshot that never holds the live connection. The accessor builds the feature on first read.
+  - **#1368 `6a453c25`: the extended CONNECT feature goes back to Http.ExtendedConnect.**
+    - `HttpExtendedConnect.CreateInterceptor()` installs it over two generic core seams: `HttpExchangeInterceptorRequestContext.Protocol`, and `IHttpExchangeControl.CanAcceptTunnel` with `AcceptTunnelAsync`.
+    - The transport's accept keeps its guard order.
+    - Web.Hosting registers the interceptor by default.
+    - Http.WebSockets references Http.ExtendedConnect.
+  - **#1369 `a8435d7d`: an empty `:protocol` is malformed.** Found by the review of #1368. Every HTTP/2 extended CONNECT violation now resets the stream instead of sending GOAWAY (RFC 9113 §8.1.1).
+  - **Review corrections** (`626d046c`, `adf6b5c5`, `d244311a`):
+    - the TLS override rule;
+    - the accept-attempt latch;
+    - the interceptor's guard order;
+    - the 12-node Http map;
+    - a preview.1 behavior-change section, checked against the tag.
+  - **Verification at `d244311a`: 78 suites, 0 failures.**
+    - Http 1,262; Http.Connections 778; Http.Tls 10; Http.ExtendedConnect 21; Http.WebSockets 101.
+    - Web.Hosting 217, Web.WebSockets 106.
+    - The rest of the Http, Connections and Web families, App.Runtime and the 17 area Hosting suites.
+    - The guard passes 36/36 checks under JIT.
+    - The release inventory (220) and the dependency graph checks pass.
+    - Each new #1369 test fails with the old validator.
+    - The guard, published NativeAOT for win-arm64 from a clean worktree at `d244311a`, has no trim or AOT warnings. The native binary passes 36/36 smoke checks, including a WebSocket over HTTP/2 extended CONNECT through the new interceptor.
+  - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)): `0dac06b` adds the Http.Tls pages. `1deb713`, `42d29fc` and `86e7148` sync the Http, Web and Connections pages, the server and WebSockets guides, and the 17 area framework tables. Those tables now list Http.ExtendedConnect and cite the Runtime producers' member lists instead of a `frameworks/` folder that no longer exists.
+  - **Source corrections** (`35ad42f0`): the Http.WebSockets bare-listener sample now registers the extended CONNECT interceptor on a listener that serves HTTP/2. The docs-site check found the problem.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -704,6 +729,10 @@ What works end to end:
 - Found and fixed: an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). After an application read a chunked body into a framing error, the keep-alive drain resumed past the bad line and served what followed as a new request. Its advisory is drafted privately as GHSA-m7g7-r8qf-qxxw.
 - Still open: D12 (#806–#808).
 
+**After the Stage 10 review (2026-10-09):**
+- Core Http holds base contracts and generic seams only (decision 20). The TLS feature moved to Http.Tls (#1367), and the extended CONNECT feature went back to Http.ExtendedConnect behind an interceptor (#1368).
+- Found and fixed: an empty `:protocol` passed validation on HTTP/2 and HTTP/3 (#1369), so a GET could carry `Protocol = ""` and report a tunnel it could accept. The gap is in preview.1's validator, but preview.1 had no tunnel accept.
+
 ### 7.3 Missing capabilities
 
 | Capability | Status | Tracking |
@@ -720,7 +749,7 @@ What works end to end:
 | Pipeline branching (`Map(path)`, `MapWhen`, `UseWhen`, `Run`); fallback routes (`MapFallbackToFile`) | Delivered in Stage 6. A path branch publishes an effective path and path base instead of rewriting the request, which stays gated on #782 | #1056 |
 | Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Delivered in Stage 9: a server span and the HTTP server metrics from `Assimalign.Cohesion.Web.Hosting`, W3C trace context, a request id (`IWebRequestIdFeature`) and `http.route` | #1064 |
 | Hosting diagnostics; lame-duck drain | Delivered in Stage 9: bind failures, accept-loop faults, connection faults and cut-short drains are logged through `builder.Logging`, and a stop drains lame-duck style, cancelling only what outlives its budget | #147; #146 |
-| mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Delivered in Stage 9: client certificates and the session's TLS details reach handlers (`IHttpTlsConnectionFeature`), `UseHttps` serves HTTP/2 and HTTP/1.1 per connection, and configuration binds HTTP/3, certificate files, the connection cap and the HTTP/2 limits. Authenticating a user from a client certificate is #1305 | #1065; #1063 |
+| mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Delivered in Stage 9: client certificates and the session's TLS details reach handlers (`context.TlsConnection`, in Http.Tls since decision 20), `UseHttps` serves HTTP/2 and HTTP/1.1 per connection, and configuration binds HTTP/3, certificate files, the connection cap and the HTTP/2 limits. Authenticating a user from a client certificate is #1305 | #1065; #1063 |
 | HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). Trailers delivered in Stage 10: HTTP/2 decodes and exposes request trailers like HTTP/1.1 and HTTP/3, and HTTP/2 and HTTP/3 send response trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; #1314, #1315; gRPC hosting stays outside the program |
 | Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
 | A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
@@ -776,6 +805,12 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
     - **The TLS feature (#1367).** `IHttpTlsConnectionFeature` and `context.TlsConnection` move to a new `Assimalign.Cohesion.Http.Tls`. The transport publishes the handshake facts as an `ITlsConnectionInfo` facet on its connection info, and the accessor builds the feature on first use. It costs one App.Web entry and no new transport reference.
     - **The extended CONNECT feature (#1368).** `IHttpExtendedConnectFeature` returns to Http.ExtendedConnect, where preview.1 shipped it. An interceptor installs it, as Http.ProtocolUpgrade does. Core gains two generic seam members: `HttpExchangeInterceptorRequestContext.Protocol`, and `IHttpExchangeControl.CanAcceptTunnel` with `AcceptTunnelAsync`. This supersedes the Stage 10 move, which had followed the TLS feature into core.
     - **`ITlsConnectionInfo` stays in the Connections contracts library.** The TLS layer and the QUIC driver both implement it, and HTTP reads it to choose the protocol through ALPN. Moving it into Connections.Security would make all three depend on the SslStream layer.
+    - **Consequences, accepted with the decision:**
+      - `IHttpExchangeControl`, which shipped in 10.0.0-preview.1, gains `CanAcceptTunnel` and `AcceptTunnelAsync`. That is a source break for an implementer outside this repository, accepted on the terms of decision 15.
+      - In preview.1 the transport installed the extended CONNECT feature itself. A listener now has to register `HttpExtendedConnect.CreateInterceptor()` for `context.ExtendedConnect` to appear. Web.Hosting registers it by default, after the upgrade interceptor. A host that clears `options.Interceptors` loses WebSockets on all three protocols.
+      - `Features.Get<IHttpTlsConnectionFeature>()` is null until something reads `context.TlsConnection`.
+      - Http.ExtendedConnect becomes a private member of the 17 non-Web area frameworks, and Http.Tls a public member of App.Web.
+      - An ordinary request pays 8 bytes for the new `Protocol` field. The interceptor itself allocates nothing, and an ordinary exchange still gets no response sink.
 
 ### 7.5 Lineup
 
