@@ -730,7 +730,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation, and they are reviewed with Stage 10. Decision 5 is open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20. Decision 5 is open.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -768,6 +768,14 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
     - **Request trailers:** HTTP/2 decodes them, which fixes an HPACK desynchronization, and exposes them.
     - **Response trailers:** HTTP/2 and HTTP/3 send them through `IHttpResponse.Trailers`. HTTP/1.1 does not.
     - **gRPC hosting** stays outside this program and needs its own ADR on serialization.
+19. **The Stage 10 review (adopted 2026-10-09).**
+    - Decisions 16–18 are confirmed.
+    - `IConnection.ConnectionClosed` now fires when the peer abandons a multiplexed stream (#1329). This change is accepted.
+    - [GHSA-m7g7-r8qf-qxxw](https://github.com/assimalign/cohesion/security/advisories/GHSA-m7g7-r8qf-qxxw), for #1333, will be published with the first preview that ships the fix, as decision 14 does for #1304 and #1308.
+20. **Feature contracts leave core Http (raised by the owner in the Stage 10 review, adopted 2026-10-09).** Core Http keeps only base contracts and generic seams.
+    - **The TLS feature (#1367).** `IHttpTlsConnectionFeature` and `context.TlsConnection` move to a new `Assimalign.Cohesion.Http.Tls`. The transport publishes the handshake facts as an `ITlsConnectionInfo` facet on its connection info, and the accessor builds the feature on first use. It costs one App.Web entry and no new transport reference.
+    - **The extended CONNECT feature (#1368).** `IHttpExtendedConnectFeature` returns to Http.ExtendedConnect, where preview.1 shipped it. An interceptor installs it, as Http.ProtocolUpgrade does. Core gains two generic seam members: `HttpExchangeInterceptorRequestContext.Protocol`, and `IHttpExchangeControl.CanAcceptTunnel` with `AcceptTunnelAsync`. This supersedes the Stage 10 move, which had followed the TLS feature into core.
+    - **`ITlsConnectionInfo` stays in the Connections contracts library.** The TLS layer and the QUIC driver both implement it, and HTTP reads it to choose the protocol through ALPN. Moving it into Connections.Security would make all three depend on the SslStream layer.
 
 ### 7.5 Lineup
 
