@@ -24,7 +24,7 @@ The surface is the same on every protocol; an endpoint does not branch on the ve
 On a Web application, map the endpoint with `MapWebSocket` (`Assimalign.Cohesion.Web.WebSockets`).
 It routes both handshake methods, `GET` on HTTP/1.1 and `CONNECT` on HTTP/2 and HTTP/3, refuses a
 request that is not a handshake, applies the origin policy, and accepts; the handler drives the
-socket. The host registers the protocol-upgrade interceptor.
+socket. The host registers the protocol-upgrade and extended CONNECT interceptors.
 
 ```csharp
 using System.Net.WebSockets;
@@ -72,7 +72,7 @@ listener's interceptors loses WebSockets on the protocols whose interceptor it r
 ```csharp
 HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 {
-    options.UseHttp1(tcpListener);
+    options.UseHttp1AndHttp2(tlsListener); // ALPN picks HTTP/1.1 or HTTP/2 per connection
     options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
     options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 });

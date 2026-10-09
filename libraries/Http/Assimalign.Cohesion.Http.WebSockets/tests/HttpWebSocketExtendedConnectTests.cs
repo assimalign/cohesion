@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.WebSockets.Tests;
 /// <summary>
 /// <c>context.WebSockets</c> over HTTP/2 and HTTP/3 (RFC 8441 §5, RFC 9220 §3): the opening handshake
 /// is an extended CONNECT whose <c>:protocol</c> is <c>websocket</c>, carried here by a double of the
-/// transport's <see cref="IHttpExtendedConnectFeature"/>. Validation, the refusals, and the accept.
+/// <see cref="IHttpExtendedConnectFeature"/> the Http.ExtendedConnect interceptor installs. Validation, the refusals, and the accept.
 /// </summary>
 public class HttpWebSocketExtendedConnectTests
 {
