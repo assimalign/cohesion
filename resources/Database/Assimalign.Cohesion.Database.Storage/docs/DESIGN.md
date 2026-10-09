@@ -435,13 +435,35 @@ instead of dereferencing it:
   writer — a scan takes a pin, not a latch — so they enforce only what holds in every state a
   well-formed page passes through: the slot index lies inside a directory a page can
   hold, and the record lies inside the page body. That is what keeps a read inside the
-  buffer. A read racing a change can still see a torn record — stale bytes, or a
-  corruption error if it catches a rollback's page restore half-way, where it used to
-  read past the buffer — which is the content-isolation question page latches would
-  answer; the layers above own it today. A reader that walks slots uses `TryReadSlot`,
+  buffer. A read racing a change can still copy a torn record — stale bytes, or bytes a
+  rollback's page restore or a page clear is overwriting — which is the content-isolation
+  question page latches would answer; the layers above own it today (the SQL and key-value
+  reads confirm a record that does not decode by reading it again, each model's DESIGN,
+  "Error model"). A reader that walks slots uses `TryReadSlot`,
   which reads the slot count and one snapshot of the slot entry and copies the record from
   that snapshot: a slot deleted or reverted between two separate reads would otherwise fail
   the read ("Reading a record through a reference", below).
+- **The slot directory is published in order.** The geometry check above is only sound if
+  the entry it checks is one the writer finished. The writer copies a record's bytes, then
+  writes its slot entry as one 32-bit release store, then, for a new slot, the slot count as
+  a release store; `ReadSlot`, `GetSlotLength` and `TryReadSlot` load the count and the entry
+  with acquire loads, the entry as one 32-bit load (the public `SlotCount` stays a plain read,
+  for the writer and as a loop bound). A reader therefore never sees a count
+  ahead of its entry, half an entry, or an entry ahead of its record's bytes. Until the #1362
+  review the entry was two plain 16-bit stores and the count a plain store: on ARM64, where
+  stores to different addresses become visible out of order, a SQL scan beside an insert read
+  the new count with the entry's offset still zero and reported a healthy page as malformed
+  ("slot K addresses bytes 0..934, outside the page body"): 11 of 40 two-second iterations of
+  `SqlRecordDecodeIntegrityTests`' race test failed that way in Release on an ARM64 host, and
+  0 of 40 with ordered publication. A relocating `UpdateSlot` also marked the entry deleted
+  before it copied the record and then rewrote the offset and the length separately, so a
+  reader on any hardware could read a live record as deleted; it now appends the record and
+  moves the entry in one store, and the old bytes stay intact as dead space for a reader that
+  still holds the old entry. `SlottedPageTests` runs a reader beside inserts and relocations;
+  against the old code it read the newest insert's slot, or a relocated slot, as deleted
+  within milliseconds on the same host. The acquire loads cost about 1 ns per slot read
+  (in-process A/B against the plain loads on ARM64, median of five runs), well under the noise
+  of a table scan. This is publication order only: it does not latch a page against its writer.
 - **Relocation needs the whole record.** An update that outgrows its slot appends the
   record at the free-data end and leaves the old bytes as dead space, so it requires
   the record's full length in free space and leaves the page untouched when it does

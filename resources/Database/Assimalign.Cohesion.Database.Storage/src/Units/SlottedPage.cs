@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Storage.Units;
 
@@ -22,6 +23,14 @@ namespace Assimalign.Cohesion.Database.Storage.Units;
 /// pinned buffers), so an unchecked offset is a write into whatever object the allocator
 /// placed next to the buffer — the failure behind #1157. A page whose header or slot
 /// directory is out of range fails with <see cref="StorageCorruptionException"/>.
+/// </para>
+/// <para>
+/// Reads run beside the page's single writer (a reader takes a pin, not a latch), so the writer
+/// publishes in order: a record's bytes, then its slot entry as one 32-bit release write, then,
+/// for a new slot, the slot count as a release write. A reader loads the slot count and the
+/// entry with acquire reads, the entry as one 32-bit load, so on weakly ordered hardware such as
+/// ARM64 it never sees a slot count ahead of its entry, half an entry, or an entry ahead of its
+/// record's bytes.
 /// </para>
 /// <code>
 /// ┌──────────────────────────────────────┐  Offset 0
@@ -82,6 +91,11 @@ public readonly unsafe struct SlottedPage
     /// <summary>
     /// Gets the number of slots (records) in this page.
     /// </summary>
+    /// <remarks>
+    /// A plain read, for the page's writer and for a loop bound. A reader beside the writer reads
+    /// a slot through <see cref="ReadSlot"/> or <see cref="TryReadSlot"/>, which read the count
+    /// again with acquire semantics before they read the slot.
+    /// </remarks>
     public ushort SlotCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -134,7 +148,7 @@ public readonly unsafe struct SlottedPage
     public int ReadSlot(int index, Span<byte> destination)
     {
         // One snapshot of the entry: the bounds check and the copy use the same values.
-        PageSlot slot = *GetSlotPtr(index);
+        PageSlot slot = ReadEntry(GetSlotPtr(index));
 
         if (slot.IsDeleted)
         {
@@ -168,7 +182,7 @@ public readonly unsafe struct SlottedPage
     /// </exception>
     internal bool TryReadSlot(int index, out byte[] record)
     {
-        int slotCount = SlotCount;
+        int slotCount = ReadPublishedSlotCount();
 
         if ((uint)index >= (uint)slotCount)
         {
@@ -182,7 +196,11 @@ public readonly unsafe struct SlottedPage
         }
 
         // One snapshot of the entry, as in ReadSlot: the checks and the copy use the same values.
-        PageSlot slot = *SlotAt(index);
+        // The count and the entry are acquire reads, so the entry is never older than the count
+        // that admitted it, nor half written: before ordered publication, a scan on ARM64 read
+        // an insert's new count with the entry's offset still zero and reported a healthy page as
+        // malformed (#1362 review).
+        PageSlot slot = ReadEntry(SlotAt(index));
 
         if (slot.IsDeleted)
         {
@@ -239,13 +257,10 @@ public readonly unsafe struct SlottedPage
         // Advance FreeDataEnd
         header->FreeDataEnd = (ushort)(recordOffset + data.Length);
 
-        // Write new slot entry at the end of the slot directory
-        var slotPtr = SlotAt(slotIndex);
-        slotPtr->Offset = (ushort)recordOffset;
-        slotPtr->Length = (ushort)data.Length;
-
-        // Increment slot count
-        header->SlotCount = (ushort)(slotIndex + 1);
+        // Publish the entry, then the count: a reader that sees the new count sees the entry and
+        // the record bytes behind it.
+        PublishEntry(SlotAt(slotIndex), recordOffset, data.Length);
+        Volatile.Write(ref header->SlotCount, (ushort)(slotIndex + 1));
 
         return slotIndex;
     }
@@ -303,7 +318,7 @@ public readonly unsafe struct SlottedPage
         if (data.Length <= current.Length)
         {
             data.CopyTo(new Span<byte>(_pointer + current.Offset, data.Length));
-            slot->Length = (ushort)data.Length;
+            PublishEntry(slot, current.Offset, data.Length);
             return;
         }
 
@@ -316,14 +331,14 @@ public readonly unsafe struct SlottedPage
             throw new SlottedPageException("Insufficient free space to update the record.");
         }
 
-        // Mark old slot as deleted and append at end
-        slot->Length = 0;
-
+        // Append at the free-data end, then move the entry there in one write. The old bytes stay
+        // as dead space, so a reader holding the old entry still copies the old record whole; the
+        // entry used to be marked deleted first and rewritten a field at a time, so a reader beside
+        // the update read a live record as deleted or paired the old offset with the new length.
         data.CopyTo(new Span<byte>(_pointer + freeDataEnd, data.Length));
         header->FreeDataEnd = (ushort)(freeDataEnd + data.Length);
 
-        slot->Offset = (ushort)freeDataEnd;
-        slot->Length = (ushort)data.Length;
+        PublishEntry(slot, freeDataEnd, data.Length);
     }
 
     /// <summary>
@@ -424,7 +439,7 @@ public readonly unsafe struct SlottedPage
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private PageSlot* GetSlotPtr(int index)
     {
-        int slotCount = SlotCount;
+        int slotCount = ReadPublishedSlotCount();
 
         if ((uint)index >= (uint)slotCount)
         {
@@ -449,6 +464,37 @@ public readonly unsafe struct SlottedPage
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int SlotDirectoryStart(int slotCount) => Page.Size - (slotCount * sizeof(PageSlot));
+
+    /// <summary>
+    /// Reads the slot count with acquire semantics: every slot below it has its entry and its
+    /// record's bytes published (<see cref="InsertSlot"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int ReadPublishedSlotCount() => Volatile.Read(ref ((Page.Header*)_pointer)->SlotCount);
+
+    /// <summary>
+    /// Reads a slot entry as one 32-bit acquire load, so the offset and the length come from the
+    /// same write and the record bytes it addresses are at least as new as the entry. The
+    /// directory sits at the end of a pool buffer, which is 8-byte aligned, so every entry is
+    /// 4-byte aligned, as an acquire load on ARM64 requires.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static PageSlot ReadEntry(PageSlot* entry)
+    {
+        uint raw = Volatile.Read(ref *(uint*)entry);
+        return Unsafe.As<uint, PageSlot>(ref raw);
+    }
+
+    /// <summary>
+    /// Writes a slot entry as one 32-bit release store, after every byte of the record it
+    /// addresses (<see cref="ReadEntry"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void PublishEntry(PageSlot* entry, int offset, int length)
+    {
+        var slot = new PageSlot { Offset = (ushort)offset, Length = (ushort)length };
+        Volatile.Write(ref *(uint*)entry, Unsafe.As<PageSlot, uint>(ref slot));
+    }
 
     /// <summary>
     /// Checks the header geometry a write relies on: the slot directory fits the body
