@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 using Shouldly;
 using Xunit;
@@ -173,6 +176,109 @@ public sealed unsafe class SlottedPageTests
         Should.Throw<StorageCorruptionException>(() => slotted.Compact());
         PageBytes(memory).ShouldBe(before);
     }
+
+    /// <summary>
+    /// A reader beside the page's writer (a scan takes a pin, not a latch) copies the slots below the
+    /// slot count it reads, and every slot an insert or a relocating update published reads whole:
+    /// never deleted, never outside the page body, never bytes that are not its record. Before ordered
+    /// publication a relocating update marked the entry deleted and then rewrote it one field at a
+    /// time, which a reader on any hardware can catch, and on ARM64 a reader could see an insert's
+    /// new slot count ahead of its entry, which a SQL scan reported as a malformed page (#1362
+    /// review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - SlottedPage: a reader beside inserts and relocating updates reads every published slot whole")]
+    public void TryReadSlot_BesideInsertsAndRelocations_ShouldReadEveryPublishedSlotWhole()
+    {
+        // Arrange: the writer fills fresh pages, each kept alive until the reader stops, and hands
+        // each to the reader before its first insert.
+        var pages = new List<byte[]>();
+        nint current = 0;
+        bool reading = false;
+        bool done = false;
+        string? failure = null;
+        long slotsRead = 0;
+        var reader = new Thread(() =>
+        {
+            Volatile.Write(ref reading, true);
+            while (!Volatile.Read(ref done) && failure is null)
+            {
+                var page = (byte*)Volatile.Read(ref current);
+                if (page is null)
+                {
+                    continue;
+                }
+
+                var slotted = new SlottedPage(page);
+                int count = slotted.SlotCount;
+                for (int slot = 0; slot < count && failure is null; slot++)
+                {
+                    try
+                    {
+                        if (!slotted.TryReadSlot(slot, out byte[] record))
+                        {
+                            failure = $"slot {slot} of {count} read as deleted";
+                        }
+                        else if (record.Length == 0 || record.AsSpan().IndexOfAnyExcept(FillOf(slot)) >= 0)
+                        {
+                            failure = $"slot {slot} of {count} read {record.Length} bytes that are not its record";
+                        }
+
+                        slotsRead++;
+                    }
+                    catch (StorageCorruptionException exception)
+                    {
+                        failure = exception.Message;
+                    }
+                }
+            }
+        });
+
+        // Act: inserts, each followed by a relocating update of the slot inserted two before, until
+        // the reader has run beside 2048 pages and read 100,000 slots (at most 4096 pages or two
+        // seconds).
+        reader.Start();
+        SpinWait.SpinUntil(() => Volatile.Read(ref reading), TimeSpan.FromSeconds(10)).ShouldBeTrue();
+        var elapsed = Stopwatch.StartNew();
+        while (Volatile.Read(ref failure) is null
+            && pages.Count < 4096
+            && elapsed.Elapsed < TimeSpan.FromSeconds(2)
+            && (pages.Count < 2048 || Volatile.Read(ref slotsRead) < 100_000))
+        {
+            var memory = GC.AllocateArray<byte>(Page.Size, pinned: true);
+            var page = (byte*)Marshal.UnsafeAddrOfPinnedArrayElement(memory, 0);
+            var header = new Page(page);
+            header.Id = pageId;
+            var slotted = new SlottedPage(page);
+            slotted.Initialize();
+            pages.Add(memory);
+            Volatile.Write(ref current, (nint)page);
+
+            var lengths = new List<int>();
+            while (slotted.CanFit(24 + (lengths.Count % 5 * 8)))
+            {
+                int slot = lengths.Count;
+                lengths.Add(24 + (slot % 5 * 8));
+                slotted.InsertSlot(Filled(lengths[slot], FillOf(slot)));
+
+                int earlier = slot - 2;
+                if (earlier >= 0 && lengths[earlier] + 8 <= slotted.FreeSpace)
+                {
+                    lengths[earlier] += 8;
+                    slotted.UpdateSlot(earlier, Filled(lengths[earlier], FillOf(earlier)));
+                }
+            }
+        }
+
+        Volatile.Write(ref done, true);
+        reader.Join();
+
+        // Assert
+        failure.ShouldBeNull();
+        slotsRead.ShouldBeGreaterThan(0);
+        GC.KeepAlive(pages);
+    }
+
+    private static byte FillOf(int slot) => (byte)((slot % 255) + 1);
 
     private static byte[] NewGuardedPage(out byte* page)
     {

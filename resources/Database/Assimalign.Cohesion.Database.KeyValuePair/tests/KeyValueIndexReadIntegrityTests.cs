@@ -160,7 +160,8 @@ public sealed class KeyValueIndexReadIntegrityTests
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            if (KeyValueRecordCodec.TryDecode(unit.Data.Span, out byte[] stored, out _, out _, out _) && Text(stored) == key)
+            KeyValueRecordCodec.Decode(unit.Data.Span, out byte[] stored, out _, out _, out _);
+            if (Text(stored) == key)
             {
                 return (unit.PageId, unit.SlotIndex);
             }

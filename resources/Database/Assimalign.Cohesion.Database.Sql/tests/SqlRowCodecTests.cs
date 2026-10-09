@@ -106,7 +106,7 @@ public sealed class SqlRowCodecTests
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: every definition decodes every version of the table onto the right columns")]
-    public void TryDecode_EveryDefinitionOverEveryVersion_ShouldReadEachValueInItsColumn()
+    public void Decode_EveryDefinitionOverEveryVersion_ShouldReadEachValueInItsColumn()
     {
         // Arrange: one version written under each definition.
         byte[] beforeDrop = SqlRowCodec.Encode(Created, [1, "dropped text", 1.25m, TokenValue], new TransactionSequence(3));
@@ -139,7 +139,7 @@ public sealed class SqlRowCodecTests
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a dropped component is skipped without being read as a value, stamps preserved")]
-    public void TryDecode_DroppedComponent_ShouldBeSkippedWithTheStamps()
+    public void Decode_DroppedComponent_ShouldBeSkippedWithTheStamps()
     {
         // Arrange: a tombstoned version whose dropped component is a long string.
         byte[] record = SqlRowCodec.WithDeleter(
@@ -147,7 +147,7 @@ public sealed class SqlRowCodecTests
             new TransactionSequence(9));
 
         // Act
-        var values = SqlRowCodec.TryDecode(record, NoteDropped, out var writer, out var deleter, out int stored);
+        var values = SqlRowCodec.Decode(record, NoteDropped, out var writer, out var deleter, out int stored);
 
         // Assert
         values.ShouldBe(new object?[] { 7, 12.50m, TokenValue });
@@ -157,7 +157,7 @@ public sealed class SqlRowCodecTests
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a version that ends inside the dropped columns stores only its leading live columns")]
-    public void TryDecode_VersionEndingAtADroppedOrdinal_ShouldCountOnlyStoredLiveColumns()
+    public void Decode_VersionEndingAtADroppedOrdinal_ShouldCountOnlyStoredLiveColumns()
     {
         // Arrange: written when the table was (id, note).
         var original = new SqlCatalogTable(ObjectId, "dbo", "t", [Id, Note]);
@@ -165,27 +165,103 @@ public sealed class SqlRowCodecTests
         var noteDroppedAmountAdded = new SqlCatalogTable(ObjectId, "dbo", "t", [Id, Amount], droppedColumnOrdinals: [1]);
 
         // Act
-        var values = SqlRowCodec.TryDecode(record, noteDroppedAmountAdded, out _, out _, out int stored);
+        var values = SqlRowCodec.Decode(record, noteDroppedAmountAdded, out _, out _, out int stored);
 
         // Assert: amount is the missing tail, not the dropped note's value.
         values.ShouldBe(new object?[] { 7, null });
         stored.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a record of another object or without a stamp header is not decoded")]
-    public void TryDecode_ForeignOrShortRecord_ShouldReturnNull()
+    /// <summary>
+    /// Every record a decode meets comes from the table's own page chain, so a record of another
+    /// object, or one too short for its stamps, is damaged rather than skipped (#1362). Before,
+    /// both decoded as "not this table's" and the executor dropped the row.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a record of another object or without a stamp header fails to decode (#1362)")]
+    public void Decode_ForeignOrShortRecord_ShouldThrow()
     {
         // Arrange
         byte[] record = SqlRowCodec.Encode(Created, [7, "n", 1m, TokenValue], new TransactionSequence(3));
         var other = new SqlCatalogTable(ObjectId + 1, "dbo", "other", [Id, Note, Amount, Token]);
 
-        // Act / Assert
-        SqlRowCodec.TryDecode(record, other, out _, out _, out _).ShouldBeNull();
-        SqlRowCodec.TryDecode(record.AsSpan(0, SqlRowCodec.StampHeaderSize - 1), Created, out _, out _, out _).ShouldBeNull();
+        // Act
+        var foreign = Should.Throw<DatabaseTypeException>(() => SqlRowCodec.Decode(record, other, out _, out _, out _));
+        var shortRecord = Should.Throw<DatabaseTypeException>(
+            () => SqlRowCodec.Decode(record.AsSpan(0, SqlRowCodec.StampHeaderSize - 1), Created, out _, out _, out _));
+        var prefixOnly = Should.Throw<DatabaseTypeException>(
+            () => SqlRowCodec.Decode(record.AsSpan(0, SqlRowCodec.StampHeaderSize), Created, out _, out _, out _));
+
+        // Assert
+        foreign.Message.ShouldContain($"names object {ObjectId}, not the table's object {ObjectId + 1}", Case.Sensitive);
+        shortRecord.Message.ShouldContain("fewer than its 16-byte version-stamp header", Case.Sensitive);
+        prefixOnly.Message.ShouldContain("no further components", Case.Sensitive);
     }
 
-    private static object?[]? Decode(byte[] record, SqlCatalogTable table) => Decode(record, table, out _);
+    /// <summary>
+    /// A component whose tag names a well-formed value of another type is not a version the
+    /// engine wrote: every value is coerced to its column's type before it is encoded. Before
+    /// #1362 the decode read whatever type the tag named, so an INT column produced a float.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a component of another type than its column's fails to decode (#1362)")]
+    public void Decode_ComponentOfAnotherType_ShouldThrow()
+    {
+        // Arrange: id's INT tag rewritten as a REAL's, which has the same four-byte width.
+        byte[] record = SqlRowCodec.Encode(Created, [7, "n", 1m, TokenValue], new TransactionSequence(3));
+        record[IdComponentOffset].ShouldBe((byte)DatabaseType.Int32);
+        record[IdComponentOffset] = (byte)DatabaseType.Float32;
 
-    private static object?[]? Decode(byte[] record, SqlCatalogTable table, out int stored)
-        => SqlRowCodec.TryDecode(record, table, out _, out _, out stored);
+        // Act
+        var failure = Should.Throw<DatabaseTypeException>(() => SqlRowCodec.Decode(record, Created, out _, out _, out _));
+
+        // Assert
+        failure.Message.ShouldBe("Expected a Int32 component but found Float32.");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a malformed or truncated component fails to decode, a missing tail does not (#1362)")]
+    public void Decode_MalformedOrTruncatedComponent_ShouldThrow()
+    {
+        // Arrange
+        byte[] record = SqlRowCodec.Encode(Created, [7, "n", 1m, TokenValue], new TransactionSequence(3));
+        byte[] invalidTag = record.ToArray();
+        invalidTag[IdComponentOffset] = 0xEE;
+
+        // Act
+        var malformed = Should.Throw<DatabaseTypeException>(() => SqlRowCodec.Decode(invalidTag, Created, out _, out _, out _));
+        var truncated = Should.Throw<DatabaseTypeException>(
+            () => SqlRowCodec.Decode(record.AsSpan(0, IdComponentOffset + 3), Created, out _, out _, out _));
+        var missingTail = SqlRowCodec.Decode(record.AsSpan(0, IdComponentOffset + 5), Created, out _, out _, out int stored);
+
+        // Assert: a record that ends between components is a version written before the
+        // columns it lacks; one that ends inside a component is damaged.
+        malformed.Message.ShouldBe("Expected a Int32 component but found 238.");
+        truncated.Message.ShouldBe("Malformed key: truncated component.");
+        missingTail.ShouldBe(new object?[] { 7, null, null, null });
+        stored.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a well-formed component whose value is outside its type fails to decode (#1362)")]
+    public void Decode_ValueOutsideItsType_ShouldThrow()
+    {
+        // Arrange: a DATE whose stored day number is past DateOnly.MaxValue.
+        var day = new SqlCatalogColumn("day", new DatabaseTypeInfo(DatabaseType.Date));
+        var table = new SqlCatalogTable(ObjectId, "dbo", "days", [day]);
+        byte[] record = SqlRowCodec.Encode(table, [new DateOnly(2026, 10, 9)], new TransactionSequence(3));
+        int dayNumber = IdComponentOffset + 1;
+        record.AsSpan(dayNumber, 4).Fill(0xFF);
+
+        // Act
+        var failure = Should.Throw<DatabaseTypeException>(() => SqlRowCodec.Decode(record, table, out _, out _, out _));
+
+        // Assert
+        failure.Message.ShouldStartWith("A component holds a value outside its type: ", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>The offset of the first column's type tag: the stamps, then the object-id prefix (a tag and eight bytes).</summary>
+    private const int IdComponentOffset = SqlRowCodec.StampHeaderSize + 9;
+
+    private static object?[] Decode(byte[] record, SqlCatalogTable table) => Decode(record, table, out _);
+
+    private static object?[] Decode(byte[] record, SqlCatalogTable table, out int stored)
+        => SqlRowCodec.Decode(record, table, out _, out _, out stored);
 }

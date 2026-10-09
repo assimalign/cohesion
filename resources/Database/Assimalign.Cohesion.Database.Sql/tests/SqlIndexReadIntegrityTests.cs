@@ -170,7 +170,7 @@ public sealed class SqlIndexReadIntegrityTests
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            if (SqlRowCodec.TryDecode(unit.Data.Span, table, out _, out _, out _) is { } values && Convert.ToInt32(values[0]) == id)
+            if (Convert.ToInt32(SqlRowCodec.Decode(unit.Data.Span, table, out _, out _, out _)[0]) == id)
             {
                 return (unit.PageId, unit.SlotIndex);
             }

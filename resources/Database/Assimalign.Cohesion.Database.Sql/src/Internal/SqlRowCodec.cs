@@ -12,8 +12,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// B+Tree leaf-entry design adopted for the record space — followed by the
 /// owning table's object id and one self-describing component per physical
 /// column, live or dropped, in physical-ordinal order, up to the last live column.
-/// The object-id prefix is what lets multiple tables share
-/// one record space (scans filter by it); the fixed-width stamp header is what
+/// The object-id prefix names the table the record belongs to: each table keeps its
+/// records in its own page chain, so a decode checks the prefix rather than filtering
+/// by it, and a mismatch is a damaged record (#1362); the fixed-width stamp header is what
 /// makes tombstoning an in-place, same-length update (a deleter stamp never
 /// relocates a record) and keeps ADD COLUMN's missing-tail decode intact
 /// (stamps sit in front of the tuple, never after the columns).
@@ -133,66 +134,86 @@ internal static class SqlRowCodec
         => RecordVersionStamp.WithoutDeleter(record);
 
     /// <summary>
-    /// Decodes a stamped record through a table definition when it belongs to that
-    /// table; returns null when the record belongs to a different object or is too short
-    /// to carry a stamp header. Every physical component up to the definition's
-    /// <see cref="SqlCatalogTable.PhysicalColumnCount"/> that the record stores is walked; a
-    /// component at a dropped ordinal is skipped without being materialized, and components
-    /// past the definition's physical columns (written under a later definition) are ignored.
-    /// Returns how many live columns the record stores, so the caller can resolve absent
-    /// trailing fields from its bound catalog definition without confusing them with
-    /// explicitly stored NULLs: physical ordinals ascend with the live columns, so the
-    /// stored columns are always a prefix. Visibility is the caller's decision, made
-    /// against its snapshot and the returned version stamps.
+    /// Decodes a stamped record of a table through one of the table's definitions. Every
+    /// physical component up to the definition's <see cref="SqlCatalogTable.PhysicalColumnCount"/>
+    /// that the record stores is walked; a component at a dropped ordinal is skipped without
+    /// being materialized, and components past the definition's physical columns (written under
+    /// a later definition) are ignored. Returns how many live columns the record stores, so the
+    /// caller can resolve absent trailing fields from its bound catalog definition without
+    /// confusing them with explicitly stored NULLs: physical ordinals ascend with the live
+    /// columns, so the stored columns are always a prefix. Visibility is the caller's decision,
+    /// made against its snapshot and the returned version stamps.
     /// </summary>
+    /// <remarks>
+    /// Every caller reads the record from the table's own page chain, so a record that does not
+    /// decode is damaged, not another object's or reclaimed (#1362), and every defect throws: a
+    /// record too short for its stamp header, an object-id prefix that names another object, a
+    /// malformed or truncated component, a live column's component that is neither NULL nor of
+    /// the column's storage type, and a value outside its type's range. The caller knows the
+    /// record's location and reports it as corrupt. A component of another type cannot be a
+    /// version the engine wrote: every value is coerced to its column's type before it is
+    /// encoded, and no DDL changes a column's type or reuses a physical ordinal.
+    /// </remarks>
     /// <param name="record">The stored record.</param>
     /// <param name="table">The definition to decode through.</param>
     /// <param name="writer">The record's writer stamp.</param>
     /// <param name="deleter">The record's deleter stamp.</param>
     /// <param name="storedColumnCount">How many of the definition's live columns the record stores.</param>
-    /// <returns>The live columns' values, by position in <see cref="SqlCatalogTable.Columns"/>, or null.</returns>
-    internal static object?[]? TryDecode(
+    /// <returns>The live columns' values, by position in <see cref="SqlCatalogTable.Columns"/>.</returns>
+    /// <exception cref="DatabaseTypeException">The record is not a version of the table that decodes through the definition.</exception>
+    internal static object?[] Decode(
         ReadOnlySpan<byte> record,
         SqlCatalogTable table,
         out TransactionSequence writer,
         out TransactionSequence deleter,
         out int storedColumnCount)
     {
-        writer = default;
-        deleter = default;
         storedColumnCount = 0;
 
         if (record.Length < StampHeaderSize)
         {
-            return null;
+            throw new DatabaseTypeException(
+                $"The record holds {record.Length} bytes, fewer than its {StampHeaderSize}-byte version-stamp header.");
         }
 
         (writer, deleter) = ReadStamps(record);
 
-        var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
-
-        if ((ulong)reader.ReadInt64() != table.ObjectId)
+        try
         {
-            return null;
-        }
+            var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
+            ulong objectId = (ulong)reader.ReadInt64();
 
-        var values = new object?[table.Columns.Count];
-        var dropped = table.DroppedColumnOrdinals;
-
-        for (int physical = 0, next = 0; physical < table.PhysicalColumnCount && !reader.IsAtEnd; physical++)
-        {
-            // A record that ends early was written before the columns it lacks were added.
-            if (next < dropped.Count && dropped[next] == physical)
+            if (objectId != table.ObjectId)
             {
-                next++;
-                reader.Skip();
-                continue;
+                throw new DatabaseTypeException(
+                    $"The record's object-id prefix names object {objectId}, not the table's object {table.ObjectId}.");
             }
 
-            values[storedColumnCount++] = ReadValue(ref reader);
-        }
+            var values = new object?[table.Columns.Count];
+            var dropped = table.DroppedColumnOrdinals;
 
-        return values;
+            for (int physical = 0, next = 0; physical < table.PhysicalColumnCount && !reader.IsAtEnd; physical++)
+            {
+                // A record that ends early was written before the columns it lacks were added.
+                if (next < dropped.Count && dropped[next] == physical)
+                {
+                    next++;
+                    reader.Skip();
+                    continue;
+                }
+
+                values[storedColumnCount] = ReadValue(ref reader, table.Columns[storedColumnCount].Type.Type);
+                storedColumnCount++;
+            }
+
+            return values;
+        }
+        catch (Exception exception) when (exception is ArgumentException or OverflowException)
+        {
+            // A temporal component outside its type's range, or a decimal beyond decimal's: the
+            // component is well formed, but no value of its type was ever encoded as it.
+            throw new DatabaseTypeException($"A component holds a value outside its type: {exception.Message}", exception);
+        }
     }
 
     /// <summary>
@@ -265,11 +286,24 @@ internal static class SqlRowCodec
         }
     }
 
-    private static object? ReadValue(ref DatabaseKeyReader reader)
+    /// <summary>
+    /// Reads one live column's component: NULL, or a value of the column's storage type, which
+    /// <see cref="AppendValue"/> chose from the same column type. The typed read checks the
+    /// component's type tag, so a component of any other type fails it.
+    /// </summary>
+    /// <param name="reader">The reader, positioned at the component.</param>
+    /// <param name="type">The column's type.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="DatabaseTypeException">The component is malformed, truncated, or of another type.</exception>
+    private static object? ReadValue(ref DatabaseKeyReader reader, DatabaseType type)
     {
-        return reader.PeekType() switch
+        if (reader.PeekType() == DatabaseType.Null)
         {
-            DatabaseType.Null => reader.ReadNull(),
+            return reader.ReadNull();
+        }
+
+        return type switch
+        {
             DatabaseType.Boolean => reader.ReadBoolean(),
             DatabaseType.Int8 => reader.ReadInt8(),
             DatabaseType.Int16 => reader.ReadInt16(),
@@ -278,15 +312,16 @@ internal static class SqlRowCodec
             DatabaseType.Float32 => reader.ReadFloat32(),
             DatabaseType.Float64 => reader.ReadFloat64(),
             DatabaseType.Decimal => reader.ReadDecimal(),
-            DatabaseType.String => reader.ReadString(out _),
-            DatabaseType.Binary => reader.ReadBinary(),
+            DatabaseType.String or DatabaseType.Json => reader.ReadString(out _),
+            DatabaseType.Binary or DatabaseType.JsonBinary => reader.ReadBinary(),
             DatabaseType.Date => reader.ReadDate(),
             DatabaseType.Time => reader.ReadTime(),
             DatabaseType.DateTime => reader.ReadDateTime(),
             DatabaseType.DateTimeOffset => reader.ReadDateTimeOffset(),
             DatabaseType.TimeSpan => reader.ReadTimeSpan(),
             DatabaseType.Guid => reader.ReadGuid(),
-            var other => throw new DatabaseException($"Malformed row: unexpected component type {other}."),
+            _ => throw new DatabaseTypeException(
+                $"A {reader.PeekType()} component is stored for a column of type {type}, which stores only NULL."),
         };
     }
 }
