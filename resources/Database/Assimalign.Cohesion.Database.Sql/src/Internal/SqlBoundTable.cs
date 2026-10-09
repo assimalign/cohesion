@@ -7,9 +7,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// One table version with its persisted expressions parsed and bound: the CHECK predicates in
-/// declaration order and the value each column DEFAULT resolves from. Built once per
+/// declaration order and the value each column DEFAULT supplies. Built once per
 /// <see cref="SqlCatalogTable"/> instance by <see cref="SqlBoundTableCache"/>, so the write and
-/// read paths never parse catalog text.
+/// read paths never parse catalog text or convert a DEFAULT again.
 /// </summary>
 internal sealed class SqlBoundTable
 {
@@ -18,8 +18,8 @@ internal sealed class SqlBoundTable
     /// <summary>Initializes a bound table version.</summary>
     /// <param name="table">The table version the expressions were bound against.</param>
     /// <param name="checks">The bound CHECK constraints, in declaration order.</param>
-    /// <param name="defaultValues">Each column's DEFAULT literal value by ordinal; null where the column declares none.</param>
-    internal SqlBoundTable(SqlCatalogTable table, IReadOnlyList<SqlBoundCheck> checks, IReadOnlyList<string?> defaultValues)
+    /// <param name="defaultValues">Each column's bound DEFAULT by ordinal; null where the column declares none.</param>
+    internal SqlBoundTable(SqlCatalogTable table, IReadOnlyList<SqlBoundCheck> checks, IReadOnlyList<SqlBoundExpression?> defaultValues)
     {
         Table = table;
         _checks = checks;
@@ -33,10 +33,12 @@ internal sealed class SqlBoundTable
     internal IReadOnlyList<SqlBoundCheck> Checks => _checks;
 
     /// <summary>
-    /// Gets each column's DEFAULT literal value text by ordinal — the value the column's
-    /// coercion converts — or null where the column declares no default.
+    /// Gets each column's DEFAULT by ordinal, bound once
+    /// (<see cref="SqlPlanExecutor.BindDefault"/>): a <see cref="SqlBoundConstant"/> holding the
+    /// literal already converted to the column's type, or a <see cref="SqlBoundFailure"/> raising the
+    /// conversion's failure each time the default is used; null where the column declares none.
     /// </summary>
-    internal IReadOnlyList<string?> DefaultValues { get; }
+    internal IReadOnlyList<SqlBoundExpression?> DefaultValues { get; }
 
     /// <summary>Finds the bound form of one of this version's CHECK constraints.</summary>
     /// <param name="constraint">A CHECK constraint of <see cref="Table"/>.</param>

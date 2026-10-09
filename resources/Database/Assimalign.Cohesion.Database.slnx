@@ -412,6 +412,9 @@
 		<File Path="Assimalign.Cohesion.Database.Sql/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Database.Sql/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql/samples/">
+		<Project Path="Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/Assimalign.Cohesion.Database.Sql.Benchmarks.csproj" />
+	</Folder>
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql/src/">
 		<Project Path="Assimalign.Cohesion.Database.Sql/src/Assimalign.Cohesion.Database.Sql.csproj" />
 	</Folder>

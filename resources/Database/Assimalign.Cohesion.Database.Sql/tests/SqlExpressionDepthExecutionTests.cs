@@ -866,6 +866,94 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
+    /// Every walk after the parse (planning, binding the bound expression tree, evaluation) needs
+    /// less stack per level than the parser, so the parser is what limits how deeply a statement
+    /// nests on a thread: the first depth a thread cannot run fails in the parser (SQL0007), never in
+    /// a later walk. A binder that kept every case of its walk in one recursive frame once refused
+    /// statements 10 to 23% shallower than the parser had read them (E1 review). The thread is 1 MB,
+    /// where an optimized build nests about a thousand levels; the debug build's parser frames are
+    /// so large that only an optimized build, which CI runs, can expose a later walk costlier than
+    /// the parser.
+    /// </summary>
+    /// <param name="statement">The statement, with <c>{0}</c> where the nested expression goes.</param>
+    /// <param name="open">What each level opens with.</param>
+    /// <param name="core">The innermost operand.</param>
+    /// <param name="close">What each level closes with.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: the parser, not a later walk, limits how deeply a statement nests on a thread")]
+    [InlineData("SELECT {0} FROM t", "-(", "a", ")")]
+    [InlineData("SELECT {0} FROM t", "CASE WHEN a > 0 THEN ", "a", " ELSE 0 END")]
+    [InlineData("SELECT id FROM t ORDER BY {0}", "ABS(", "a", ")")]
+    [InlineData("SELECT id FROM t WHERE {0}", "(a = 1 OR ", "a = 2", ")")]
+    [InlineData("SELECT id FROM t WHERE {0} > 0", "a + (", "a", ")")]
+    [InlineData("SELECT b, COUNT(*) FROM t GROUP BY b HAVING {0} > 0", "COALESCE(NULL, ", "MAX(a)", ")")]
+    public async Task Statement_DeepestOnThread_ShouldBeLimitedByTheParser(string statement, string open, string core, string close)
+    {
+        // Arrange
+        const int stack = 1024;
+        await using var engine = CreateEngine(limit: SqlQueryParserOptions.MaximumExpressionNestingLimit);
+        var database = await engine.CreateDatabaseAsync("depth");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT, a INT, b INT)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 1, 1), (2, 2, 2)");
+        string Nested(int depth) => string.Format(CultureInfo.InvariantCulture, statement, Repeat(open, depth) + core + Repeat(close, depth));
+        Exception? Run(int depth) => RunOnThread(stack, () => RowsAsync(session, Nested(depth)).GetAwaiter().GetResult()).Failure;
+
+        // Act: tiered compilation shrinks the walks' frames as they warm up, so the deepest depth can
+        // grow between one search and the next check; search again until the next depth fails.
+        int deepest = 0;
+        Exception? failure = null;
+        for (int attempt = 0; attempt < 5 && failure is null; attempt++)
+        {
+            deepest = DeepestOnThread(depth => Run(depth) is null);
+            failure = Run(deepest + 1);
+        }
+
+        // Assert
+        deepest.ShouldBeLessThan(SqlQueryParserOptions.MaximumExpressionNestingLimit - 2);
+        var tooComplex = failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
+        AssertStatementTooComplex(tooComplex);
+        tooComplex.InnerException!.Message.ShouldStartWith("SQL parse error SQL0007:", Case.Sensitive,
+            $"Depth {deepest + 1} ran out of stack after the parse: {tooComplex.InnerException}");
+        (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
+    }
+
+    /// <summary>
+    /// A persisted CHECK binds when the database opens on any thread that can read its definition
+    /// back: binding needs less stack per level than the parser, so the open never refuses a
+    /// definition it could load (E1 review: a binder whose recursive frame held every case refused
+    /// a CHECK the parser had read, and the database did not open). The definition is the deepest
+    /// the parser reads back on a 1 MB thread, less 5% for the frames between the open and its parse.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a CHECK the open can read back on a thread binds on that thread")]
+    public async Task BindCatalog_CheckTheParserReadsBack_ShouldBindOnTheSameThread()
+    {
+        // Arrange
+        const int stack = 1024;
+        static string Predicate(int depth) => Repeat("ABS(", depth) + "qty" + Close(depth) + " < 100";
+        bool Loads(int depth)
+            => RunOnThread(stack, () => SqlPersistedExpression.Load(Predicate(depth), "CHECK constraint 'ck' on table 'dbo.c'")).Failure is null;
+        int readable = DeepestOnThread(Loads);
+        for (int attempt = 0; attempt < 5 && Loads(readable + 1); attempt++)
+        {
+            readable = DeepestOnThread(Loads); // the parser warmed up between the search and the check
+        }
+        int depth = readable * 95 / 100;
+        await using var engine = CreateEngine(limit: SqlQueryParserOptions.MaximumExpressionNestingLimit);
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        OnLargeStack(async () => await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Predicate(depth)}))"))
+            .Status.ShouldBe(QueryResultStatus.Success);
+        string? canonical = Table(database, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression;
+
+        // Act
+        var open = RunOnThread(stack, () => { new SqlBoundTableCache(database.Catalog).BindCatalog(); return true; });
+
+        // Assert
+        canonical.ShouldBe(Predicate(depth));
+        open.Failure.ShouldBeNull();
+    }
+
+    /// <summary>
     /// Over the wire the hostile statement is refused: a ParseFailure (SQL0006) where the
     /// server's thread reaches the limit, which a release build always does, or COHSQLE004 where
     /// the thread runs out of stack first, as 256 parentheses can in a debug build. Either way the
@@ -1047,6 +1135,34 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         thread.Start();
         thread.Join();
         return (result, failure);
+    }
+
+    /// <summary>The deepest nesting, by binary search over 0..4096 levels, that <paramref name="runs"/> on its thread.</summary>
+    /// <param name="runs">Whether work nested this deep completes; true at depth 0.</param>
+    /// <returns>The deepest depth that completes.</returns>
+    private static int DeepestOnThread(Func<int, bool> runs)
+    {
+        int low = 0;
+        int high = SqlQueryParserOptions.MaximumExpressionNestingLimit;
+        if (runs(high))
+        {
+            return high;
+        }
+
+        while (high - low > 1)
+        {
+            int middle = (low + high) / 2;
+            if (runs(middle))
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
     }
 
     private static void AssertStatementTooComplex(DatabaseException failure)

@@ -21,11 +21,16 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
-        var sourceEvaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings,
-            defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
-        var groups = new Dictionary<object?[], AggregateState[]>(new GroupKeyComparer(
-            plan.Keys.Select(expression => sourceEvaluator.ResolveCollation(expression)).ToArray()));
-        if (plan.Keys.Count == 0)
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
+        var keys = plan.Keys;
+        var aggregates = plan.Aggregates;
+        var keyCollations = new Collation[keys.Count];
+        for (int i = 0; i < keyCollations.Length; i++)
+        {
+            keyCollations[i] = keys[i].Collation.Resolve(_subqueryValues);
+        }
+        var groups = new Dictionary<object?[], AggregateState[]>(new GroupKeyComparer(keyCollations));
+        if (keys.Count == 0)
         {
             // The implicit global group exists even on empty input.
             groups.Add([], CreateStates());
@@ -38,7 +43,11 @@ internal sealed partial class SqlPlanExecutor
             {
                 row[i] = source.GetValue(i);
             }
-            var key = plan.Keys.Select(expression => sourceEvaluator.Evaluate(expression, row)).ToArray();
+            var key = keys.Count == 0 ? [] : new object?[keys.Count];
+            for (int i = 0; i < key.Length; i++)
+            {
+                key[i] = evaluator.Evaluate(keys[i].Value, row);
+            }
             if (!groups.TryGetValue(key, out var states))
             {
                 states = CreateStates();
@@ -46,14 +55,12 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < states.Length; i++)
             {
-                var argument = plan.Aggregates[i].Call.Arguments[0];
-                states[i].Add(argument is SqlStarExpression ? 1L : sourceEvaluator.Evaluate(argument, row));
+                // COUNT(*) counts every row: its operand is a non-null sentinel, not a value.
+                states[i].Add(aggregates[i].Argument is { } argument ? evaluator.Evaluate(argument, row) : CountedRow);
             }
         }
 
-        int projectionStart = plan.Keys.Count + plan.Aggregates.Count;
-        var evaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings, plan.ValueOrdinals,
-            _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        int projectionStart = keys.Count + aggregates.Count;
         var matches = new List<object?[]>();
         foreach (var (key, states) in groups)
         {
@@ -71,14 +78,14 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 row[projectionStart + i] = NormalizeGroupValue(
-                    evaluator.Evaluate(plan.Projections[i].Expression!, row), plan.Projections[i].Type);
+                    evaluator.Evaluate(plan.Projections[i].Value!, row), plan.Projections[i].Type);
             }
             matches.Add(row);
         }
         if (plan.OrderBy.Count > 0)
         {
-            matches = SortRows(matches, plan.OrderBy,
-                evaluator.ForOrdering(plan.Projections, plan.OrderByProjections, projectionStart));
+            // The ordering keys were bound over the grouped row, outputs included.
+            matches = SortRows(matches, plan.OrderBy, evaluator);
         }
         var projected = matches.Select(row => row[projectionStart..]).ToList();
         if (plan.IsDistinct)
@@ -105,9 +112,12 @@ internal sealed partial class SqlPlanExecutor
         }).ToArray();
         return new SqlMaterializedResultSet(columns, window.ToList());
 
-        AggregateState[] CreateStates() => plan.Aggregates.Select(aggregate => new AggregateState(aggregate.Signature,
-            sourceEvaluator.ResolveCollation(aggregate.Call.Arguments[0]))).ToArray();
+        AggregateState[] CreateStates() => aggregates.Select(aggregate => new AggregateState(aggregate.Signature,
+            aggregate.Collation.Resolve(_subqueryValues))).ToArray();
     }
+
+    /// <summary>The operand <c>COUNT(*)</c> accumulates for every row: any non-null value, boxed once.</summary>
+    private static readonly object CountedRow = 1L;
 
     /// <summary>
     /// All five aggregates skip NULL operands. COUNT(*) supplies a non-null
@@ -239,6 +249,23 @@ internal sealed partial class SqlPlanExecutor
     private static object? NormalizeGroupValue(object? value, DatabaseType type)
     {
         if (value is not (sbyte or short or int or long or float or double or decimal))
+        {
+            return value;
+        }
+
+        // A value already of the output type is returned as it is: converting it to its own type
+        // yields the same value and would only box it again.
+        if (type switch
+        {
+            DatabaseType.Int8 => value is sbyte,
+            DatabaseType.Int16 => value is short,
+            DatabaseType.Int32 => value is int,
+            DatabaseType.Int64 => value is long,
+            DatabaseType.Float32 => value is float,
+            DatabaseType.Float64 => value is double,
+            DatabaseType.Decimal => value is decimal,
+            _ => true,
+        })
         {
             return value;
         }

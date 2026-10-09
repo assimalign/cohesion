@@ -26,7 +26,7 @@ internal sealed partial class SqlPlanExecutor
             EnsureCurrentDefinition(binding.Table);
         }
 
-        var evaluator = new SqlExpressionEvaluator(plan.Columns, _parameters, plan.Bindings, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
         var matches = new List<object?[]>();
         foreach (var row in EnumerateJoinRows(plan, statement, cancellationToken))
         {
@@ -71,7 +71,7 @@ internal sealed partial class SqlPlanExecutor
             }
             else
             {
-                var values = JoinProbeValues(access, innerBinding, outer);
+                var values = JoinProbeValues(access, outer);
                 if (values is null)
                 {
                     continue;
@@ -96,7 +96,7 @@ internal sealed partial class SqlPlanExecutor
     /// or out-of-range value cannot satisfy the mandatory equality and has no
     /// matches; all other comparisons still run against the original joined row.
     /// </summary>
-    private static object?[]? JoinProbeValues(SqlJoinIndexPath access, SqlTableBinding inner, object?[] outer)
+    private static object?[]? JoinProbeValues(SqlJoinIndexPath access, object?[] outer)
     {
         var values = new object?[access.OuterOrdinals.Count];
         for (int i = 0; i < values.Length; i++)
@@ -107,7 +107,7 @@ internal sealed partial class SqlPlanExecutor
                 return null;
             }
 
-            var column = inner.Table.Columns[FindColumnOrdinal(inner.Table, access.Index.ColumnNames[i])];
+            var column = access.InnerColumns[i];
             try
             {
                 values[i] = CoerceForColumn(original, column);

@@ -18,10 +18,10 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     /// <param name="record">The stored record.</param>
     /// <param name="table">The table version the statement is bound to.</param>
-    /// <param name="defaultValues">That version's bound DEFAULT values, by ordinal.</param>
+    /// <param name="defaults">That version's bound DEFAULTs, by ordinal (<see cref="SqlBoundTable.DefaultValues"/>).</param>
     /// <param name="writer">The record's writer stamp.</param>
     /// <param name="deleter">The record's deleter stamp.</param>
-    private static object?[]? DecodeRow(ReadOnlySpan<byte> record, SqlCatalogTable table, IReadOnlyList<string?> defaultValues,
+    private static object?[]? DecodeRow(ReadOnlySpan<byte> record, SqlCatalogTable table, IReadOnlyList<SqlBoundExpression?> defaults,
         out TransactionSequence writer, out TransactionSequence deleter)
     {
         var values = SqlRowCodec.TryDecode(record, table, out writer, out deleter, out int storedColumnCount);
@@ -32,11 +32,50 @@ internal sealed partial class SqlPlanExecutor
                 // A deleted historical version can predate a NOT NULL addition
                 // to a currently empty table. Nullability validates live rows at
                 // DDL/DML time, never changes the visibility of historical rows.
-                values[ordinal] = defaultValues[ordinal] is string value ? ResolveDefault(table.Columns[ordinal], value) : null;
+                values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : null;
             }
         }
         return values;
     }
+
+    /// <summary>
+    /// Binds a column's persisted DEFAULT once per table version: the literal's value text
+    /// converted to the column's type (<see cref="ResolveDefault"/>), so a decoded row that lacks
+    /// the column and an INSERT that omits it read the converted value instead of converting the
+    /// text again.
+    /// </summary>
+    /// <remarks>
+    /// DDL proves every DEFAULT converts before it publishes one, so the conversion succeeds for any
+    /// catalog the engine wrote. One that does not convert binds as a <see cref="SqlBoundFailure"/>
+    /// that converts it again, and so fails, each time the default is used, as it did before the
+    /// value was bound: the table still opens, and reads and writes that never need the default
+    /// still succeed. The converted value is immutable (a binary column has no literal DEFAULT that
+    /// converts), so every row shares it.
+    /// </remarks>
+    /// <param name="column">The column.</param>
+    /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
+    /// <returns>The bound DEFAULT.</returns>
+    internal static SqlBoundExpression BindDefault(SqlCatalogColumn column, string defaultValue)
+    {
+        try
+        {
+            return new SqlBoundConstant(ResolveDefault(column, defaultValue));
+        }
+        catch (Exception exception) when (exception is not (InsufficientExecutionStackException or OutOfMemoryException))
+        {
+            return DefaultFailure(column, defaultValue);
+        }
+    }
+
+    // Built only on the failure path, so the closure is not allocated for a DEFAULT that converts.
+    private static SqlBoundFailure DefaultFailure(SqlCatalogColumn column, string defaultValue)
+        => new(() => ResolveDefault(column, defaultValue));
+
+    /// <summary>The value a bound DEFAULT supplies: its converted constant, or its conversion failure raised again.</summary>
+    /// <param name="bound">The bound DEFAULT (<see cref="BindDefault"/>).</param>
+    /// <returns>The value.</returns>
+    private static object? DefaultValue(SqlBoundExpression bound)
+        => bound.Kind == SqlBoundExpressionKind.Constant ? ((SqlBoundConstant)bound).Value : ((SqlBoundFailure)bound).Raise();
 
     /// <summary>
     /// Converts a column's DEFAULT value using the same rules for backfill and omitted
@@ -45,8 +84,9 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     /// <param name="column">The column.</param>
     /// <param name="defaultValue">
-    /// The value text of the column's DEFAULT literal, from the bound table version
-    /// (<see cref="SqlBoundTable.DefaultValues"/>), or null when the column declares none.
+    /// The value text of the column's DEFAULT literal, or null when the column declares none. A
+    /// statement's write reads the value bound once per table version (<see cref="BindDefault"/>)
+    /// and calls this only for a column with no DEFAULT; DDL calls it to prove a new DEFAULT converts.
     /// </param>
     private static object? ResolveDefault(SqlCatalogColumn column, string? defaultValue)
     {

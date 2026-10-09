@@ -76,7 +76,8 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (!assigned[ordinal])
                 {
-                    values[ordinal] = ResolveDefault(table.Columns[ordinal], defaults[ordinal]);
+                    // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
+                    values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : ResolveDefault(table.Columns[ordinal], null);
                 }
             }
             rows.Add((SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values));

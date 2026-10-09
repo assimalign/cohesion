@@ -1,6 +1,5 @@
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
-using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
 using Xunit;
@@ -34,10 +33,10 @@ public sealed class SqlPersistedExpressionTests
     public void Canonicalize_UnspellableNode_ShouldRefuse()
     {
         // Arrange
-        var constant = new SqlConstantExpression(1, DatabaseType.Int32);
+        var unspellable = new UnspellableExpression();
 
         // Act
-        var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.Canonicalize(constant, "CHECK constraint 'ck' on table 'dbo.t'"));
+        var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.Canonicalize(unspellable, "CHECK constraint 'ck' on table 'dbo.t'"));
 
         // Assert
         failure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.t' cannot be stored:", Case.Sensitive);
@@ -77,4 +76,13 @@ public sealed class SqlPersistedExpressionTests
     public void LoadDefaultValue_NotALiteral_ShouldFail(string text)
         => Should.Throw<DatabaseException>(() => SqlPersistedExpression.LoadDefaultValue(text, "DEFAULT of column 'c' on table 'dbo.t'"))
             .Message.ShouldContain("is not a literal value", Case.Sensitive);
+
+    /// <summary>An expression node defined outside the language package, which no SQL text spells.</summary>
+    private sealed class UnspellableExpression : SqlExpression
+    {
+        public UnspellableExpression()
+            : base(null)
+        {
+        }
+    }
 }

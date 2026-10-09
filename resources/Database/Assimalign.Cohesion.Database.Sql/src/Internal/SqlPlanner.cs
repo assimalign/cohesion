@@ -76,7 +76,8 @@ internal sealed partial class SqlPlanner
             : bindings.SelectMany(binding => binding.Table.Columns).ToArray();
         var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
             ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation,
+            subquerySlots: _subquerySlots);
 
         if (bindings is not null)
         {
@@ -106,27 +107,29 @@ internal sealed partial class SqlPlanner
             {
                 for (int i = 0; i < columns.Count; i++)
                 {
-                    projections.Add(new SqlProjection(columns[i].Name, i, null, columns[i].Type.Type));
+                    projections.Add(PassThrough(columns[i].Name, i, columns, evaluator));
                 }
             }
             else if (column.Expression is SqlColumnReferenceExpression reference)
             {
                 int ordinal = evaluator.ResolveColumn(reference);
-                projections.Add(new SqlProjection(
-                    column.Alias ?? columns[ordinal].Name, ordinal, null, columns[ordinal].Type.Type));
+                projections.Add(PassThrough(column.Alias ?? columns[ordinal].Name, ordinal, columns, evaluator));
             }
             else
             {
                 ValidateExpression(column.Expression, evaluator, _subqueryTypes);
+                var value = evaluator.Bind(column.Expression, out SqlBoundCollation collation);
                 projections.Add(new SqlProjection(
                     column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
-                    GroupExpressionType(column.Expression, columns, evaluator)));
+                    GroupExpressionType(column.Expression, columns, evaluator)) { Value = value, Collation = collation });
             }
         }
 
+        SqlBoundExpression? where = null;
         if (select.Where is not null)
         {
             ValidateExpression(select.Where, evaluator, _subqueryTypes);
+            where = evaluator.Bind(select.Where);
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
@@ -135,17 +138,21 @@ internal sealed partial class SqlPlanner
             ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes, orderByProjections);
         }
 
+        // Ordering keys that name an output by alias or position read it from the slots that
+        // follow the source row (ProjectAndSortRows); every other key reads the source row.
+        var ordering = BindOrdering(select.OrderBy, evaluator.ForOrdering(projections, orderByProjections, columns.Count));
+
         if (bindings is not null)
         {
-            return new SqlJoinPlan(bindings, columns, select.Joins[0].Condition!, projections,
-                select.Where, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"),
+            return new SqlJoinPlan(bindings, columns, evaluator.Bind(select.Joins[0].Condition!), projections,
+                where, ordering, EvaluateCount(select.Limit, "LIMIT"),
                 EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
                 SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator), orderByProjections);
         }
 
         if (systemView is not null)
         {
-            return new SqlSystemViewPlan(systemView, projections, select.Where, select.OrderBy,
+            return new SqlSystemViewPlan(systemView, projections, where, ordering,
                 EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
                 select.IsDistinct, orderByProjections);
         }
@@ -153,12 +160,37 @@ internal sealed partial class SqlPlanner
         return new SqlSelectPlan(
             table!,
             projections,
-            select.Where,
-            select.OrderBy,
+            where,
+            ordering,
             EvaluateCount(select.Limit, "LIMIT"),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             SelectAccessPath(table!, select.Where), orderByProjections);
+    }
+
+    /// <summary>A projection that passes a source column through, with the collation <c>DISTINCT</c> compares it under.</summary>
+    private static SqlProjection PassThrough(string name, int ordinal, IReadOnlyList<SqlCatalogColumn> columns, SqlExpressionEvaluator scope)
+        => new(name, ordinal, null, columns[ordinal].Type.Type) { Collation = new SqlBoundCollation(scope.ResolveColumnCollation(ordinal)) };
+
+    /// <summary>Binds <c>ORDER BY</c> keys in their ordering scope, each with the collation it sorts under.</summary>
+    /// <param name="orderBy">The keys.</param>
+    /// <param name="scope">The ordering scope (<see cref="SqlExpressionEvaluator.ForOrdering"/>).</param>
+    /// <returns>The bound keys.</returns>
+    private static IReadOnlyList<SqlBoundOrdering> BindOrdering(IReadOnlyList<SqlOrderByColumn> orderBy, SqlExpressionEvaluator scope)
+    {
+        if (orderBy.Count == 0)
+        {
+            return [];
+        }
+
+        var ordering = new SqlBoundOrdering[orderBy.Count];
+        for (int index = 0; index < ordering.Length; index++)
+        {
+            var key = scope.Bind(orderBy[index].Expression, out SqlBoundCollation collation);
+            ordering[index] = new SqlBoundOrdering(key, orderBy[index].IsDescending, collation);
+        }
+
+        return ordering;
     }
 
     // ── Access-path selection (rule-based, by design) ──────────────────
@@ -574,7 +606,22 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, insert.Values!);
+        // Bound with no columns in scope, like the validation above: no reference can resolve to
+        // an ordinal the empty row the executor evaluates them against does not have.
+        var rows = new SqlBoundExpression[insert.Values!.Count][];
+        for (int index = 0; index < rows.Length; index++)
+        {
+            var row = insert.Values[index];
+            var bound = new SqlBoundExpression[row.Count];
+            for (int ordinal = 0; ordinal < bound.Length; ordinal++)
+            {
+                bound[ordinal] = ScopelessEvaluator.Bind(row[ordinal]);
+            }
+
+            rows[index] = bound;
+        }
+
+        return new SqlInsertPlan(table, targetOrdinals, rows);
     }
 
     /// <summary>
@@ -693,7 +740,7 @@ internal sealed partial class SqlPlanner
         var table = ResolveTable(update.Table);
         var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
 
-        var assignments = new List<(int Ordinal, SqlExpression Value)>(update.Assignments.Count);
+        var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
@@ -702,16 +749,18 @@ internal sealed partial class SqlPlanner
                 throw new DatabaseException("Aggregate functions are not allowed in UPDATE SET.");
             }
             ValidateExpression(assignment.Value, evaluator);
-            assignments.Add((ordinal, assignment.Value));
+            assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
         }
 
+        SqlBoundExpression? where = null;
         if (update.Where is not null)
         {
             RejectAggregateInDmlWhere(update.Where);
             ValidateExpression(update.Where, evaluator);
+            where = evaluator.Bind(update.Where);
         }
 
-        return new SqlUpdatePlan(table, assignments, update.Where);
+        return new SqlUpdatePlan(table, assignments, where);
     }
 
     /// <summary>Binds a DELETE's row filter.</summary>
@@ -721,13 +770,16 @@ internal sealed partial class SqlPlanner
     {
         var table = ResolveTable(delete.Table);
 
+        SqlBoundExpression? where = null;
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            ValidateExpression(delete.Where, new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation));
+            var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+            ValidateExpression(delete.Where, evaluator);
+            where = evaluator.Bind(delete.Where);
         }
 
-        return new SqlDeletePlan(table, delete.Where);
+        return new SqlDeletePlan(table, where);
     }
 
     /// <summary>
@@ -1111,19 +1163,28 @@ internal sealed partial class SqlPlanner
     /// An <c>AND</c> or <c>OR</c> chain yields all of its terms at one level, so a walker iterates
     /// a chain of any length instead of recursing once per term. A new walker follows the same
     /// rule.
+    /// <para>
+    /// A node with no operands (a literal, parameter, column, <c>*</c> or subquery) returns the
+    /// shared empty sequence, and a chain or a call its own operand list, so the walkers that visit
+    /// every node of every statement allocate nothing for most of them.
+    /// </para>
     /// </remarks>
-    internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
+    internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
+    {
+        SqlLogicalExpression logical => logical.Operands,
+        SqlFunctionCallExpression function => function.Arguments,
+        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlIsNullExpression or SqlBetweenExpression
+            or SqlInExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
+        _ => [],
+    };
+
+    /// <summary>The operands of a node that has some, in source order (<see cref="Children"/>).</summary>
+    private static IEnumerable<SqlExpression> Operands(SqlExpression expression)
     {
         switch (expression)
         {
             case SqlCollateExpression collate:
                 yield return collate.Operand;
-                break;
-            case SqlLogicalExpression logical:
-                foreach (var operand in logical.Operands)
-                {
-                    yield return operand;
-                }
                 break;
             case SqlBinaryExpression binary:
                 yield return binary.Left;
@@ -1167,12 +1228,6 @@ internal sealed partial class SqlPlanner
                 if (caseExpression.ElseResult is not null)
                 {
                     yield return caseExpression.ElseResult;
-                }
-                break;
-            case SqlFunctionCallExpression function:
-                foreach (var argument in function.Arguments)
-                {
-                    yield return argument;
                 }
                 break;
             case SqlCastExpression cast:

@@ -20,6 +20,16 @@ internal sealed partial class SqlPlanner
     private readonly Dictionary<SqlExpression, DatabaseType> _subqueryTypes = new();
 
     /// <summary>
+    /// The slot every subquery bound while planning this statement fills, keyed by its source node
+    /// and numbered from zero across every nesting level: the expression binder turns each such node
+    /// into a read of its slot (<see cref="SqlBoundSubquery"/>, <see cref="SqlBoundInSubquery"/>).
+    /// </summary>
+    private readonly Dictionary<SqlExpression, SqlSubquerySlot> _subquerySlots = new();
+
+    /// <summary>The number of subquery slots this statement has numbered so far.</summary>
+    private int _subquerySlotCount;
+
+    /// <summary>
     /// Binds each uncorrelated child independently, then binds the ordinary
     /// relational operators over typed slots. Scalar evaluation never runs a query.
     /// </summary>
@@ -72,10 +82,11 @@ internal sealed partial class SqlPlanner
                 throw new DatabaseException($"{(kind == SqlSubqueryKind.Scalar ? "Scalar" : "IN")} subquery requires exactly one output column; found {projections.Count}.");
             }
             var type = kind == SqlSubqueryKind.Exists ? DatabaseType.Boolean : projections[0].Type;
+            var collation = kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child);
+            var slot = new SqlSubquerySlot(_subquerySlotCount++, kind, collation);
             _subqueryTypes[source] = type;
-            queries.Add(new SqlSubqueryBinding(child, source, type,
-                kind == SqlSubqueryKind.Exists ? _catalog.DefaultCollation : SubqueryCollation(child),
-                kind, negated));
+            _subquerySlots[source] = slot;
+            queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated));
         }
     }
 
