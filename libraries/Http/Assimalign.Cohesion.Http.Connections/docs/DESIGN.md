@@ -1526,7 +1526,7 @@ Whether the pseudo-header fields make a complete request is judged afterwards, b
 | Rule | Applies to | Failure |
 | --- | --- | --- |
 | No pseudo-header field repeats (§8.3) | every request | stream `PROTOCOL_ERROR` |
-| `:protocol` only on CONNECT, which then carries `:scheme`, `:path` and `:authority` (RFC 8441 §4) | a request with `:protocol` | connection `PROTOCOL_ERROR` |
+| `:protocol` is not empty, appears only on CONNECT, and that CONNECT then carries `:scheme`, `:path` and `:authority` (RFC 8441 §4, RFC 9110 §5.6.2) | a request with `:protocol` | stream `PROTOCOL_ERROR` |
 | A `:path` that is present is not empty (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:method` is present (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:scheme` and `:path` are present (§8.3.1) | every request but a classic CONNECT (§8.5) | stream `PROTOCOL_ERROR` |
@@ -3070,6 +3070,10 @@ rules:
 - **Uniqueness.** A pseudo-header MUST NOT repeat.
 - **Required fields.** A non-CONNECT request MUST carry `:method`,
   `:scheme`, and a non-empty `:path`.
+- **Extended CONNECT.** A `:protocol` that is present is not empty, appears
+  only on a CONNECT, and that CONNECT carries `:scheme`, `:path`, and
+  `:authority` (the shared `HttpFieldNormalization.ValidateExtendedConnect`;
+  see "Extended CONNECT (`:protocol`)").
 - **Path.** The `:path` must percent-decode to a legal path (see
   "Request-target percent-decoding (h1/h2/h3 parity)"): a decoded space,
   control character, `?`, `#`, or NUL, an illegal literal character, or a
@@ -3181,15 +3185,28 @@ Recognition (`:protocol`), validation, and the `IsExtendedConnect` /
 
 ### Deterministic validation (RFC 8441 §4 / RFC 9220)
 
+- A **present but empty** `:protocol` is malformed on every method. A
+  protocol name is a token, `1*tchar` (RFC 9110 §5.6.2), so `""` names no
+  protocol (#1369). Only an absent field means "not an extended CONNECT";
+  before #1369 an empty value passed as absent, and on a `GET` the exchange
+  controls then reported `CanAcceptTunnel`.
 - `:protocol` on a **non-CONNECT** request is malformed.
 - An extended CONNECT (CONNECT + `:protocol`) MUST also carry `:scheme`,
   `:path`, and `:authority`; a missing one is malformed.
 - `:protocol` MUST NOT appear more than once.
 
-A violation fails deterministically — never a silent downgrade. HTTP/2
-surfaces it as the same field-section failure the receive loop maps to a
-connection `PROTOCOL_ERROR` (GOAWAY); HTTP/3 resets the offending stream
-with `H3_MESSAGE_ERROR` (the connection survives).
+A violation fails deterministically — never a silent downgrade. It is a
+malformed request, so both versions reset only the offending stream and keep
+serving the connection: HTTP/2 with `RST_STREAM(PROTOCOL_ERROR)` (RFC 9113
+§8.1.1, as for the other pseudo-header rules; until #1369 it closed the
+connection with `GOAWAY(PROTOCOL_ERROR)`), HTTP/3 with `H3_MESSAGE_ERROR`
+(RFC 9114 §4.1.2).
+
+As defense in depth the exchange controls do not trust the head alone:
+`Http2ExchangeControl` and `Http3ExchangeControl` decide at dispatch, through
+`HttpFieldNormalization.IsExtendedConnect`, that the exchange is a `CONNECT`
+with a non-empty `:protocol`. `CanAcceptTunnel` is `false` and
+`AcceptTunnelAsync` refuses as not an extended CONNECT for anything else.
 
 ### Advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL`
 

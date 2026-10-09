@@ -158,11 +158,13 @@ internal static class Http3HeaderCodec
         }
 
         // RFC 8441 §4 / RFC 9220 §3 — validate extended CONNECT (the :protocol
-        // pseudo-header): it is only valid on a CONNECT, and an extended CONNECT
-        // MUST also carry :scheme, :path, and :authority. A violation is a
-        // malformed request (RFC 9114 §4.1.2); the receive loop drops the
-        // offending stream without tearing down the connection. The cross-field
-        // rule is shared with HTTP/2 via HttpFieldNormalization.
+        // pseudo-header): a present :protocol must name a protocol (RFC 9110
+        // §5.6.2, so never empty), it is only valid on a CONNECT, and an extended
+        // CONNECT MUST also carry :scheme, :path, and :authority. A violation is a
+        // malformed request (RFC 9114 §4.1.2): the caller resets the offending
+        // stream with H3_MESSAGE_ERROR without tearing down the connection, as
+        // HTTP/2 resets its stream with PROTOCOL_ERROR. The cross-field rule is
+        // shared with HTTP/2 via HttpFieldNormalization.
         string? extendedConnectViolation = HttpFieldNormalization.ValidateExtendedConnect(
             method, schemeValue, pathValue, authority, protocol);
         if (extendedConnectViolation is not null)
@@ -184,7 +186,8 @@ internal static class Http3HeaderCodec
         contentLength = ParseContentLength(headers);
 
         // RFC 8441 §4 / RFC 9220 §3 — the head carries :protocol only once it passed the extended
-        // CONNECT validation above, so a non-null value always means a valid extended CONNECT.
+        // CONNECT validation above, which rejects an empty value and any method but CONNECT, so a
+        // non-null value always means a valid extended CONNECT with a non-empty protocol name.
         return new TransportHttpRequestHead(
             host,
             path,

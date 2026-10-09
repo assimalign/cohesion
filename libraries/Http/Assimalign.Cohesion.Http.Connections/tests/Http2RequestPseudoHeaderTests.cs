@@ -17,7 +17,9 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// <c>:path</c> never empty. A request that breaks the rule is malformed: its stream is reset with
 /// <c>PROTOCOL_ERROR</c> before it reaches the application (RFC 9113 §8.1.1), nothing is defaulted, and
 /// the connection keeps serving its other streams. CONNECT keeps its own rules (RFC 9113 §8.5,
-/// RFC 8441 §4).
+/// RFC 8441 §4), and a request that breaks the extended CONNECT rules — an empty <c>:protocol</c>,
+/// a <c>:protocol</c> on another method, an extended CONNECT missing a pseudo-header — is malformed
+/// in the same way.
 /// </summary>
 public class Http2RequestPseudoHeaderTests
 {
@@ -67,6 +69,57 @@ public class Http2RequestPseudoHeaderTests
         // Arrange — the repeat sits among the pseudo-header fields, ahead of every regular field.
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
         (string Name, string Value)[] fields = [.. Http2TestPeer.Get("/malformed"), (name, value), ("x-after", "kept")];
+
+        // Act
+        IHttpContext next = await SendMalformedThenValidAsync(peer, fields);
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A request with an empty :protocol should reset only its stream")]
+    [InlineData("GET")]
+    [InlineData("CONNECT")]
+    public async Task ReceiveAsync_OnEmptyProtocol_ShouldResetStreamWithProtocolError(string method)
+    {
+        // Arrange — RFC 9110 §5.6.2: a protocol name is a token (1*tchar), so an empty :protocol names
+        // no protocol and the request is malformed on any method (RFC 8441 §4, #1369).
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        (string Name, string Value)[] fields = Http2TestPeer.Request(method, "/chat", (":protocol", string.Empty));
+
+        // Act
+        IHttpContext next = await SendMalformedThenValidAsync(peer, fields);
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A :protocol on a request other than CONNECT should reset only its stream")]
+    public async Task ReceiveAsync_OnProtocolWithoutConnect_ShouldResetStreamWithProtocolError()
+    {
+        // Arrange — RFC 8441 §4: :protocol is only valid on a CONNECT.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        (string Name, string Value)[] fields = Http2TestPeer.Request("GET", "/malformed", (":protocol", "websocket"));
+
+        // Act
+        IHttpContext next = await SendMalformedThenValidAsync(peer, fields);
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: An extended CONNECT missing a required pseudo-header should reset only its stream")]
+    [InlineData(":scheme")]
+    [InlineData(":path")]
+    [InlineData(":authority")]
+    public async Task ReceiveAsync_OnExtendedConnectMissingPseudoHeader_ShouldResetStreamWithProtocolError(string missing)
+    {
+        // Arrange — RFC 8441 §4: unlike a classic CONNECT, an extended CONNECT MUST carry :scheme, :path
+        // and :authority.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        (string Name, string Value)[] fields = Http2TestPeer.Request("CONNECT", "/chat", (":protocol", "websocket"))
+            .Where(field => field.Name != missing)
+            .ToArray();
 
         // Act
         IHttpContext next = await SendMalformedThenValidAsync(peer, fields);

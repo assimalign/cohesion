@@ -23,12 +23,17 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
 {
     private readonly Http3ConnectionContext _connection;
     private readonly Http3Context _context;
+    private readonly bool _isExtendedConnect;
     private int _tunnelAcceptCalled;
 
     public Http3ExchangeControl(Http3ConnectionContext connection, Http3Context context)
     {
         _connection = connection;
         _context = context;
+        // RFC 9220 §3 — defense in depth over the head validation: only a CONNECT that carries a
+        // non-empty :protocol may become a tunnel. Captured at dispatch, before the application can
+        // see the request or rewrite its method.
+        _isExtendedConnect = HttpFieldNormalization.IsExtendedConnect(context.Request.Method.Value, context.ExtendedConnectProtocol);
     }
 
     /// <inheritdoc />
@@ -66,7 +71,7 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
 
     /// <inheritdoc />
     public bool CanAcceptTunnel =>
-        _context.ExtendedConnectProtocol is not null
+        _isExtendedConnect
         && Volatile.Read(ref _tunnelAcceptCalled) == 0
         && !_context.CancelRequested
         && !HasResponseStarted;
@@ -79,7 +84,7 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
     /// </remarks>
     public async ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
     {
-        if (_context.ExtendedConnectProtocol is null)
+        if (!_isExtendedConnect)
         {
             throw new InvalidOperationException(HttpExtendedConnectRules.NotExtendedConnectMessage);
         }

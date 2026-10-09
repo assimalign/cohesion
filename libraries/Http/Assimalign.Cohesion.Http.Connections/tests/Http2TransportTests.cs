@@ -597,42 +597,9 @@ public class Http2TransportTests
         httpContext.Features.Get<IHttpExtendedConnectFeature>().ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR")]
-    public async Task Http2_OnProtocolPseudoHeaderWithoutConnect_ShouldGoAway()
-    {
-        // RFC 8441 §4 — :protocol is only valid on CONNECT; on any other method
-        // the request is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            1,
-            0x4 | 0x1,
-            (":method", "GET"),
-            (":protocol", "websocket"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"));
-
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an extended CONNECT missing :path with PROTOCOL_ERROR")]
-    public async Task Http2_OnExtendedConnectMissingPath_ShouldGoAway()
-    {
-        // RFC 8441 §4 — an extended CONNECT MUST include :scheme, :path, and
-        // :authority. Omitting :path is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            1,
-            0x4 | 0x1,
-            (":method", "CONNECT"),
-            (":protocol", "websocket"),
-            (":scheme", "https"),
-            (":authority", "api.test"));
-
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
+    // A :protocol on a method other than CONNECT, an empty :protocol, and an extended CONNECT missing a
+    // pseudo-header are malformed requests, reset per stream (RFC 9113 §8.1.1): see
+    // Http2RequestPseudoHeaderTests.
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a non-SETTINGS first client frame with PROTOCOL_ERROR")]
     public async Task Http2_OnFirstClientFrameNotSettings_ShouldGoAwayProtocolError()

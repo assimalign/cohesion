@@ -89,4 +89,67 @@ public class HttpFieldNormalizationTests
 
         combined.Count.ShouldBe(2);
     }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: An empty :protocol is an extended CONNECT violation on every method")]
+    [InlineData("CONNECT")]
+    [InlineData("GET")]
+    public void ValidateExtendedConnect_OnEmptyProtocol_ShouldReturnViolation(string method)
+    {
+        // Arrange — RFC 9110 §5.6.2: a protocol name is a token (1*tchar), so "" names no protocol.
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateExtendedConnect(method, "https", "/chat", "api.test", string.Empty);
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain("':protocol'");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: An absent :protocol is not validated")]
+    public void ValidateExtendedConnect_OnAbsentProtocol_ShouldReturnNull()
+    {
+        // Arrange — a classic CONNECT carries only :method and :authority (RFC 9113 §8.5).
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateExtendedConnect("CONNECT", null, null, "api.test:443", null);
+
+        // Assert
+        violation.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A complete extended CONNECT is valid")]
+    public void ValidateExtendedConnect_OnCompleteExtendedConnect_ShouldReturnNull()
+    {
+        // Act
+        string? violation = HttpFieldNormalization.ValidateExtendedConnect("CONNECT", "https", "/chat", "api.test", "websocket");
+
+        // Assert
+        violation.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A :protocol on a method other than CONNECT is a violation")]
+    public void ValidateExtendedConnect_OnProtocolWithoutConnect_ShouldReturnViolation()
+    {
+        // Act
+        string? violation = HttpFieldNormalization.ValidateExtendedConnect("GET", "https", "/", "api.test", "websocket");
+
+        // Assert
+        violation.ShouldNotBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Only a CONNECT with a non-empty :protocol is an extended CONNECT")]
+    [InlineData("CONNECT", "websocket", true)]
+    [InlineData("CONNECT", "", false)]
+    [InlineData("CONNECT", null, false)]
+    [InlineData("GET", "websocket", false)]
+    [InlineData("GET", "", false)]
+    [InlineData(null, "websocket", false)]
+    public void IsExtendedConnect_ShouldRequireConnectAndNonEmptyProtocol(string? method, string? protocol, bool expected)
+    {
+        // Act
+        bool isExtendedConnect = HttpFieldNormalization.IsExtendedConnect(method, protocol);
+
+        // Assert
+        isExtendedConnect.ShouldBe(expected);
+    }
 }

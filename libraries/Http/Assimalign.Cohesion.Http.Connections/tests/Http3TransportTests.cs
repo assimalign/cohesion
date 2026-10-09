@@ -557,6 +557,38 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "api.test")));
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: A request with an empty :protocol should reset its stream with H3_MESSAGE_ERROR while other streams are served")]
+    [InlineData("GET")]
+    [InlineData("CONNECT")]
+    public async Task Http3_OnEmptyProtocol_ShouldResetStreamWithMessageErrorAndServeOthers(string method)
+    {
+        // Arrange — RFC 9110 §5.6.2: a protocol name is a token (1*tchar), so an empty :protocol names
+        // no protocol and the request is malformed on any method (RFC 9220 §3, RFC 9114 §4.1.2, #1369).
+        TestConnection malformed = new(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", method),
+            (":protocol", string.Empty),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test")));
+        TestConnection sibling = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ok", "https", "a"));
+        TestMultiplexedConnection connection = new(malformed, sibling);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        // Act
+        bool dispatched = await enumerator.MoveNextAsync();
+
+        // Assert — the malformed stream never became an exchange; the sibling was the first dispatched.
+        dispatched.ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/ok");
+        malformed.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
+        connection.State.ShouldBe(ConnectionState.Open);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Enabling the dynamic table advertises QPACK capacity and blocked streams")]
     public async Task Http3_OnDynamicTableEnabled_ShouldAdvertiseCapacityAndBlockedStreams()
     {

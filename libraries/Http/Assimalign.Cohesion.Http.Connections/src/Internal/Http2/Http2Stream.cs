@@ -900,11 +900,10 @@ internal sealed class Http2Stream
     /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> for a malformed request, reset per stream
     /// (RFC 9113 §8.1.1): a decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3), a
     /// pseudo-header field that is repeated, a required one that is missing, an empty <c>:path</c>
-    /// (RFC 9113 §8.3.1), or a <c>:path</c> that does not decode to a legal path.
-    /// </exception>
-    /// <exception cref="Http2ConnectionException">
-    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when the head violates the extended
-    /// CONNECT rules of RFC 8441 §4.
+    /// (RFC 9113 §8.3.1), a <c>:path</c> that does not decode to a legal path, or a head that
+    /// violates the extended CONNECT rules of RFC 8441 §4 (an empty <c>:protocol</c>, a
+    /// <c>:protocol</c> on a method other than <c>CONNECT</c>, or an extended CONNECT missing
+    /// <c>:scheme</c>, <c>:path</c>, or <c>:authority</c>).
     /// </exception>
     /// <exception cref="HPackDecodingException">
     /// The block is not valid HPACK, or its decoded list exceeds the advertised
@@ -960,11 +959,14 @@ internal sealed class Http2Stream
         }
 
         // RFC 8441 §4 / RFC 9220 — validate extended CONNECT before materializing
-        // the request: the :protocol pseudo-header is only valid on a CONNECT, and
-        // an extended CONNECT MUST also carry :scheme, :path, and :authority. A
-        // violation is a malformed request, which RFC 9113 §8.1.1 treats as a
-        // connection-level PROTOCOL_ERROR (GOAWAY). The cross-field rule is shared
-        // with HTTP/3 via HttpFieldNormalization so both versions reject the same set.
+        // the request: a present :protocol must name a protocol (RFC 9110 §5.6.2, so
+        // never empty), it is only valid on a CONNECT, and an extended CONNECT MUST
+        // also carry :scheme, :path, and :authority. A violation is a malformed
+        // request, which RFC 9113 §8.1.1 treats as a stream error of type
+        // PROTOCOL_ERROR, the same as the §8.3.1 checks below; the connection keeps
+        // serving its other streams (HTTP/3 drops the stream with H3_MESSAGE_ERROR).
+        // The cross-field rule is shared with HTTP/3 via HttpFieldNormalization so
+        // both versions reject the same set.
         string? extendedConnectViolation = HttpFieldNormalization.ValidateExtendedConnect(
             decodedHeaders.Method,
             decodedHeaders.Scheme,
@@ -973,7 +975,10 @@ internal sealed class Http2Stream
             decodedHeaders.Protocol);
         if (extendedConnectViolation is not null)
         {
-            throw new Http2ConnectionException(Http2ErrorCode.ProtocolError, extendedConnectViolation);
+            throw new Http2StreamException(
+                StreamId,
+                Http2ErrorCode.ProtocolError,
+                $"The HTTP/2 request on stream {StreamId} is malformed: {extendedConnectViolation}");
         }
 
         // RFC 9113 §8.3.1 — every request carries :method, and every request but a CONNECT carries

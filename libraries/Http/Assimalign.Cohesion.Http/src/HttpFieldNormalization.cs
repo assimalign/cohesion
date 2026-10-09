@@ -107,10 +107,15 @@ public static class HttpFieldNormalization
 
     /// <summary>
     /// Determines whether a request is an <em>extended CONNECT</em> (RFC 8441 /
-    /// RFC 9220): a <c>CONNECT</c> request that carries the <c>:protocol</c>
-    /// pseudo-header. Shared by HTTP/2 and HTTP/3 so both recognize the
-    /// extension identically.
+    /// RFC 9220): a <c>CONNECT</c> request that carries a non-empty
+    /// <c>:protocol</c> pseudo-header. Shared by HTTP/2 and HTTP/3 so both
+    /// recognize the extension identically.
     /// </summary>
+    /// <remarks>
+    /// An empty <c>:protocol</c> is not a protocol name (a token is
+    /// <c>1*tchar</c>, RFC 9110 §5.6.2), so it never identifies an extended
+    /// CONNECT; <see cref="ValidateExtendedConnect"/> rejects it as malformed.
+    /// </remarks>
     /// <param name="method">The decoded <c>:method</c> value, or <see langword="null"/>.</param>
     /// <param name="protocol">The decoded <c>:protocol</c> value, or <see langword="null"/>.</param>
     /// <returns><see langword="true"/> when the request is an extended CONNECT.</returns>
@@ -122,28 +127,45 @@ public static class HttpFieldNormalization
 
     /// <summary>
     /// Validates the <c>:protocol</c> pseudo-header against the extended CONNECT
-    /// rules shared by HTTP/2 and HTTP/3 (RFC 8441 §4, RFC 9220 §3): the
-    /// <c>:protocol</c> field is only valid on a <c>CONNECT</c> request, and an
-    /// extended CONNECT MUST also include <c>:scheme</c>, <c>:path</c>, and
-    /// <c>:authority</c>. Returns a description of the violation, or
-    /// <see langword="null"/> when the request is well-formed (including the
-    /// common case where <c>:protocol</c> is absent).
+    /// rules shared by HTTP/2 and HTTP/3 (RFC 8441 §4, RFC 9220 §3): a present
+    /// <c>:protocol</c> field must carry a protocol name, it is only valid on a
+    /// <c>CONNECT</c> request, and an extended CONNECT MUST also include
+    /// <c>:scheme</c>, <c>:path</c>, and <c>:authority</c>. Returns a
+    /// description of the violation, or <see langword="null"/> when the request
+    /// is well-formed (including the common case where <c>:protocol</c> is
+    /// absent).
     /// </summary>
+    /// <remarks>
+    /// Only <see langword="null"/> means the field is absent. A present but
+    /// empty <c>:protocol</c> is a violation on every method: a protocol name
+    /// is a token, which is <c>1*tchar</c> (RFC 9110 §5.6.2), so an empty value
+    /// names no protocol and the request is malformed.
+    /// </remarks>
     /// <param name="method">The decoded <c>:method</c> value, or <see langword="null"/>.</param>
     /// <param name="scheme">The decoded <c>:scheme</c> value, or <see langword="null"/>.</param>
     /// <param name="path">The decoded <c>:path</c> value, or <see langword="null"/>.</param>
     /// <param name="authority">The decoded <c>:authority</c> value, or <see langword="null"/>.</param>
-    /// <param name="protocol">The decoded <c>:protocol</c> value, or <see langword="null"/>.</param>
+    /// <param name="protocol">
+    /// The decoded <c>:protocol</c> value, or <see langword="null"/> when the field is absent.
+    /// </param>
     /// <returns>
     /// A human-readable violation message, or <see langword="null"/> when valid.
     /// Callers raise their own protocol-appropriate error from the message.
     /// </returns>
     public static string? ValidateExtendedConnect(string? method, string? scheme, string? path, string? authority, string? protocol)
     {
-        if (string.IsNullOrEmpty(protocol))
+        if (protocol is null)
         {
             // No :protocol field — not an extended CONNECT; nothing to validate.
             return null;
+        }
+
+        // RFC 9110 §5.6.2 — a protocol name is a token (1*tchar); an empty
+        // :protocol names no protocol, so the request is malformed whatever its
+        // method (RFC 8441 §4, RFC 9220 §3).
+        if (protocol.Length == 0)
+        {
+            return "The ':protocol' pseudo-header MUST carry a protocol name; an empty value is not a token (RFC 9110 §5.6.2, RFC 8441 §4).";
         }
 
         // RFC 8441 §4 — the :protocol pseudo-header is only defined on a

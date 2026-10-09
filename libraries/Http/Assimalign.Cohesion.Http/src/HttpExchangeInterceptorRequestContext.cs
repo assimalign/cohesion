@@ -64,9 +64,9 @@ public sealed class HttpExchangeInterceptorRequestContext
     /// request, including every HTTP/1.1 request and a classic <c>CONNECT</c>.
     /// </summary>
     /// <remarks>
-    /// The transport sets it only after validating the request as an extended CONNECT: the method is
-    /// <c>CONNECT</c> and the request also carries <c>:scheme</c>, <c>:path</c> and
-    /// <c>:authority</c>. A non-<see langword="null"/> value therefore identifies a request that may be
+    /// The transport sets it only after validating the request as an extended CONNECT: the value is not
+    /// empty, the method is <c>CONNECT</c>, and the request also carries <c>:scheme</c>, <c>:path</c>
+    /// and <c>:authority</c>. A non-<see langword="null"/> value therefore identifies a request that may be
     /// answered with a stream tunnel (<see cref="IHttpExchangeControl.AcceptTunnelAsync"/>), which
     /// <see cref="Method"/> alone cannot tell apart from a classic <c>CONNECT</c>.
     /// </remarks>
