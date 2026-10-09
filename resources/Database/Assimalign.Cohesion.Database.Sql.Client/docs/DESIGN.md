@@ -114,7 +114,9 @@ exchange, a disposed connection: kind and code empty). A cancellation, which is 
 surfaces, writes `CommandStop` with `Cancelled` and no failure. The failure is captured by an
 exception filter that declines it and written from the `finally`, so it reaches the caller unchanged.
 A command fails with an Error whatever its cause, a statement the server rejects included (owner
-question Q1 of the event-source plan).
+question Q1 of the event-source plan). As `System.Net.Http`'s `RequestStop`, `CommandStop` is
+written only for a command whose `CommandStart` was written, so a listener that attaches mid-command
+sees no stop without its start; event 3 is written either way.
 
 **The failure rule.** The statement text and the parameter values are never written (Q3), and nor is
 the server's message: a parse error's quotes a fragment of the statement, a literal included
@@ -128,7 +130,8 @@ the timestamp its observer receives, so the events add only `IsEnabled` checks w
 `SqlClientEventSourceTests` checks the name, the strict manifest, a succeeding and a failing command
 under an observer whose every hook throws (each event once, in order, with its payload, the failure's
 stop after it, no statement text and no server message), a cancelled command (a `Cancelled` stop and
-no failure), and that start and stop need the `Commands` keyword. The test assembly's
+no failure), that start and stop need the `Commands` keyword, and, by direct writes, an uncoded
+failure (empty kind and code) and a stop written only after a written start. The test assembly's
 observers override the hooks as `protected internal`, which the project's test-only
 `InternalsVisibleTo` requires (CS0507); an application overrides them as `protected`.
 

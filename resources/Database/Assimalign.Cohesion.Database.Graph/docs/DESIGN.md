@@ -1128,6 +1128,9 @@ bound on an oversized startup), a reopen with an aborted writer (a `Success` sto
 error over the wire (event 12 once, by code and type; the root's `StatementStart` and
 `StatementFailed` not at all for that session) and in process (the root's `StatementFailed` once,
 event 12 not at all), and a peer that resets its TCP connection while its session idles and while
-the server writes (a transport reason, never `SessionFaulted`). Not yet driven by a real
+the server writes (a transport reason, never `SessionFaulted`; the write case, reset once the
+peer's unread pongs stop growing, accepts only `TransportFailed` or `ConnectionAborted`, so it
+fails if the reset stops reaching a send). Not yet driven by a real
 operation: `SessionCleanupFailed` (no test double makes the session's own close fail) and a
-recovery that throws.
+recovery that throws (no fault-injection seam reaches `RecoverIndexesAsync` inside the open), whose
+`Error` stop is checked by a direct write.

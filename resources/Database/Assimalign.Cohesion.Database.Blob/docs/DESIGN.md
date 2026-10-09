@@ -1009,7 +1009,9 @@ driver (every handshake refusal code, a timeout at a read and inside the authent
 on an oversized startup), the `COHDBB003` refusal at the handshake and at an exchange, a disposed
 engine's refusals at the handshake and at the accept, a read of a missing blob (its failure by
 code and type, no blob name in any event), and a peer that resets its TCP connection while its
-session idles and while the server writes (a transport reason, never `SessionFaulted`). Not yet driven by a real operation: `SessionCleanupFailed`,
+session idles and while the server writes (a transport reason, never `SessionFaulted`; the write
+case, reset once the peer's unread pongs stop growing, accepts only `TransportFailed` or
+`ConnectionAborted`, so it fails if the reset stops reaching a send). Not yet driven by a real operation: `SessionCleanupFailed`,
 `HostTransactionAbortFailed` and the guarded stream's `TransferFailed`, which need test doubles
 that fail a disposal, an abort or a stream's completion; they are covered by the allocation check
 and, for the payload and bounds, by a direct write.

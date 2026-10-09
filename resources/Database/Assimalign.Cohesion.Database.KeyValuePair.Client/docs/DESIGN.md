@@ -94,15 +94,18 @@ is needed, and none is done. **Every start has a stop**: the command writes its 
 or an uncoded failure (an overlapping exchange, a disposed connection), `CommandStop` with
 `Cancelled` and no failure for a cancellation, which is how a timeout surfaces. A command fails
 with an Error whatever its cause; a `MalformedResult` the typed operation raises after a completed
-response is not a command failure. Event 4 makes visible an observer failure the client swallows.
+response is not a command failure. As `System.Net.Http`'s `RequestStop`, `CommandStop` is written
+only for a command whose `CommandStart` was written; event 3 is written either way. Event 4 makes
+visible an observer failure the client swallows.
 No counters. The command path already takes the timestamp its observer receives, so the events add
 only `IsEnabled` checks while nobody listens.
 
 `KeyValueClientEventSourceTests` checks the name, the strict manifest, a put and a refused scan
 under an observer whose every hook throws (each event once, in order, with its payload, the
 failure's stop after it, and no key, value or command text), a cancelled command (a `Cancelled`
-stop), and a write-write conflict whose server message names the key, which neither event 3 nor
-the core's events write. The test assembly's observers override the hooks as
+stop), a write-write conflict whose server message names the key, which neither event 3 nor
+the core's events write, and, by direct writes, an uncoded failure (empty kind and code) and a stop
+written only after a written start. The test assembly's observers override the hooks as
 `protected internal`, which the project's test-only `InternalsVisibleTo` requires (CS0507).
 
 ## Materialized scans, AOT, and non-goals

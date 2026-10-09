@@ -199,6 +199,8 @@ after event 3 when the copy fails (with the code the shared client gives it: its
 failure, `ProtocolViolation` for malformed frames, `Internal` otherwise), `Cancelled` when the
 caller disposes the stream early or cancels it. Each failure is captured by an exception filter
 that declines it and written once the throwing call unwound, so it reaches the caller unchanged.
+As `RequestStop`, `TransferStop` is written only for a transfer whose `TransferStart` was written
+(the download exchange carries that flag to its copy); event 3 is written either way.
 
 Event 4 reports a failure the listing's cleanup swallows only when its consumer never saw it (it
 stopped reading early): the failure the enumeration already surfaced, and the cancellation the
@@ -215,8 +217,10 @@ is read without boxing the result. No counters.
 `BlobClientEventSourceTests` checks the name, the strict manifest, each member's transfer once (the
 download's stop with its received bytes, and a refused download's failure followed by its `Error`
 stop), an upload refused over an existing blob, a download abandoned before its first read and a
-cancelled metadata read (each a `Cancelled` stop and no failure), no blob name in any event, and
-event 4 from a scripted listing whose worker fails after the consumer stopped taking items.
+cancelled metadata read (each a `Cancelled` stop and no failure), a metadata read refused by the
+client itself while a download holds the exchange (an empty code and `InvalidOperationException`,
+then an `Error` stop), a failure whose start was not written (no stop), no blob name in any event,
+and event 4 from a scripted listing whose worker fails after the consumer stopped taking items.
 
 ## Scope and verification
 

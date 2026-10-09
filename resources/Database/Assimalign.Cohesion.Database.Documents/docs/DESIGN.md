@@ -873,4 +873,5 @@ failure itself; the stop's `status` follows the area's ending convention
 the stop alone. No counters. The start reads its timestamp only while it is written.
 `DocumentDatabaseEventSourceTests` checks the name, the strict manifest, a reopen with an aborted
 writer, a create, and that neither write allocates while nobody listens; a recovery that throws
-is not driven by a test yet (no fault-injection seam reaches `RecoverIndexesAsync`).
+is not driven by a test yet (no fault-injection seam reaches `RecoverIndexesAsync`), so its
+`Error` stop is checked by a direct write.

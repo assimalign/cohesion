@@ -820,7 +820,7 @@ events check `EventKeywords.None`.
 | 5 | `CommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `exceptionMessage` (the flush failure's: the inner exception's message) | `TransactionCoordinator.CommitAsync`, on `TransactionCommitUnconfirmedException` |
 | 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle |
 | 7 | `LockWaitStart` | Verbose | Locks | `database`, `transactionSequence`, `resource`, `mode` | `LockManager`, when a request is queued |
-| 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow |
+| 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow, only for a wait whose `LockWaitStart` was written (`System.Net.Http`'s `RequestStop` shape); `SlowLockWait` is written either way, so a listener that attached during a long wait still learns how long it lasted |
 | 9 | `SlowLockWait` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `thresholdMilliseconds` | with 8, written before it, when the wait lasted at least the threshold |
 | 10 | `LockWaitsAbandoned` | Warning | — | `database`, `cause` (the `StorageOfflineCause` name) | `LockManager.Abandon`, from `AbandonLockWaits`, once per lock manager |
 | 11 | `UndoDeferred` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager`, when an abort's undo failed: the writer keeps its locks until a retry completes it |

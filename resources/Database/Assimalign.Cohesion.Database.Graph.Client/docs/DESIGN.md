@@ -115,8 +115,12 @@ reached the server's terminal count; `Error`, after event 3, for a failed open o
 `Cancelled` for a cancellation or for a caller that stopped reading and disposed the enumerator
 early, with the paths read by then. An iterator cannot catch around a `yield`, so the open and each
 read capture their own failure, and the iterator's `finally` writes the stop. Its start and stop are
-written by different steps of the enumerator, so an activity-tracking tool sees the stop on the
-consumer's flow rather than nested under the start.
+written by different steps of the enumerator, each on its consumer's execution context, where the
+start's activity is not current; so while the start was written, the enumerator captures the
+start's execution context and writes the end in it (`ExecutionContext.Run`, allocating only then),
+and an activity-tracking tool sees `QueryStop` close the activity `QueryStart` opened. As
+`System.Net.Http`'s `RequestStop`, a stop is written only for a start that was written, so a
+listener that attaches mid-query sees no stop without its start; event 3 is written either way.
 
 The statement text and the parameter values are never written, nor is the server's message: a GQL
 parse error's quotes a fragment of the statement, so event 3 writes the wire code and the
@@ -126,7 +130,11 @@ the source. No counters.
 `GraphClientEventSourceTests` checks the name, the strict manifest, one event per query of each
 member, a refused statement included (its failure, then its `Error` stop, with no statement text and
 no server message), a path query its caller stopped reading (a `Cancelled` stop with the paths read),
-and a cancelled query (a `Cancelled` stop and no failure).
+a cancelled query (a `Cancelled` stop and no failure), a path query the server refused
+(`ParseFailure`, then an `Error` stop with no paths), a query refused by the client itself because a
+path query holds the exchange (an empty code and `InvalidOperationException`), a failure whose start
+was not written (no stop), and, under `TplEventSource` activity tracking, a path query's stop
+carrying its start's activity id whether its caller read every path or stopped early.
 
 ## Concrete types (concrete-types plan, phase 5, #1261)
 

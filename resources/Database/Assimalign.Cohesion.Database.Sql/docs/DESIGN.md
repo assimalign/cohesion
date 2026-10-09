@@ -2348,6 +2348,8 @@ events 1-7 and 9 once each with their payloads over real sessions on the in-memo
 handshake refusal code (the refused data-storage format over a file-backed engine), a timeout at
 a read and inside the authenticator, and the bound on an oversized startup; a peer that resets
 its TCP connection while its session idles and while the server writes (a transport reason, never
-`SessionFaulted`); and a connection whose disposal throws (`SessionClosed` once, the gauge
+`SessionFaulted`; the write case, reset once the peer's unread pongs stop growing, accepts only
+`TransportFailed` or `ConnectionAborted`, so it fails if the reset stops reaching a send); and a
+connection whose disposal throws (`SessionClosed` once, the gauge
 restored). `SessionCleanupFailed` is covered only by the allocation check: no test double makes
 the session's own close fail yet.
