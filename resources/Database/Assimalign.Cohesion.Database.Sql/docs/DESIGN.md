@@ -617,6 +617,30 @@ version had passed an instance method as a LINQ predicate in the planner's aggre
 allocating a delegate per checked value (168 bytes per Q7 statement); the checks walk their
 children by index instead.
 
+**The review's re-measurement.** The same harness and method, published from `ff07eb5a` (b),
+part 2's head `9bc25a8a` (p) and the reviewed head (e), on a machine other agents were loading
+(every case ran about 50% slower than in the campaigns above, so only the ratios mean anything).
+Medians of per-process medians, nanoseconds per row:
+
+| Campaign | Q1 | Q2 | Q3 | Control Q6C |
+| --- | --- | --- | --- | --- |
+| 8 three-way rounds, every case, e / b | +2.5% | +2.6% | +2.4% | −3.4% |
+| 16 two-way rounds, e / b | +6.0% | +4.7% | +6.0% | +0.6% |
+| 16 two-way rounds, e / p | +0.8% | +0.7% | −1.1% | −2.6% |
+
+The review's changes cost nothing measurable on the per-row path (e against p is inside the
+control's spread); E2 as a whole sits at the 5% gate against `ff07eb5a`, under it in one campaign
+and just over it for Q1 and Q3 in the other, so the gate still wants a quiet machine. No bytes are
+added per row (Q1 1,015.6, Q2 927.6, Q3 1,040.4 against 1,041.8). Q4 is within 3.6% of Q1; Q5T
+and Q5L agree; Q6 costs nothing per row (911.6 bytes against Q6C's 911.5, −10.4% against
+`ff07eb5a`). Q7 adds 8 bytes per statement to part 2's 24 (the evaluator's one field for typing
+memory) and Q7R saves 16 (a BOOLEAN result's shared box). Q8 and Q8C measure as part 2 does in
+time, but under NativeAOT a build allocates about 160 KB more than at `9bc25a8a` (4.36 MB against
+4.20 MB) while the JIT build allocates 18 KB less: publishing variants pins the difference to
+`SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
+instrumented harness drops to +35 KB, which points at ILC code generation (inlining and stack
+allocation decisions) rather than at an allocation the change makes; it is not yet explained.
+
 ## Compiled-schema provisioning
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
