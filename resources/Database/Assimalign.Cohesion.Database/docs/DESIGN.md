@@ -952,8 +952,11 @@ as event 1 of the worker that asked and as event 17, with the database's name. A
 failure took offline is not a root event: the engines report it through
 `DatabaseEngine.OfflineDatabases` and health, every refusal carries the failure that took it offline
 (`DatabaseOfflineException`'s inner `StorageOfflineException`, its `Cause` and its I/O error), and
-the storage that went offline reports it in its own source (`Assimalign.Cohesion.Database.Storage`,
-`StorageOffline`, batch B2 of the plan). The root cannot write that transition without breaking the
+the storage that went offline reports it in its own source: Storage's `StorageOffline` (event 10,
+Error, with the cause and the device failure's type and message;
+[Storage `DESIGN.md`](../../Assimalign.Cohesion.Database.Storage/docs/DESIGN.md#diagnostics)) is the
+record of every device-failure offline transition, and the Transactions source's
+`LockWaitsAbandoned` follows it from the same hook. The root cannot write that transition without breaking the
 event-source convention: an engine model sees it in its storage's `OnOffline` hook, outside the
 root, and the root may expose no public entry point into this internal source
 (`.claude/rules/event-source.md`, rule 2). The hosting module's source reports the application's

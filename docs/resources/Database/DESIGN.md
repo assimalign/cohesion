@@ -410,33 +410,81 @@ durable record of its events. The decisions every source shares:
 - **Payload hygiene.** Never statement text, parameter values, keys, values, document or blob
   content, authentication evidence, connection strings or tokens. Identifiers (engine, database,
   storage, container, index and principal names, session and transaction ids, protocol and
-  diagnostic codes) are fine; an exception is its type's full name and its `Message`, except where
-  the message can quote the statement: parse errors quote the token they stopped at, string
-  literals included, and the models' aborted-transaction refusals repeat the failed operation's
-  message. A statement or command failure is written by its diagnostic code or exception type only
-  (the root's `StatementFailed`, `TransactionAborted` and aborted `TransactionCommitFailed`).
+  diagnostic codes) are fine. A name or text a peer sent (a startup's database and principal, a
+  refusal's detail, a protocol violation) is cut to 256 characters for a name and 1024 for a text,
+  marked with `...`, wherever it is written. A lock resource is its kind and object id only, never
+  an entry's id, which for a key lock is the key's hash (Transactions `DESIGN.md`).
+- **One failure rule.** An operation's failure (a statement, a commit, a command, a query or a
+  transfer) is written by its **code** (the protocol error code or the diagnostic code; empty when
+  the failure has none) and its **exception type** (the full name; empty for a failed result that
+  threw nothing), never by a message, whoever wrote the message: the server, a parser or the
+  engine. Those messages quote what the operation carried: a parse error quotes the token it
+  stopped at, string literals included; every model's aborted-transaction refusal repeats the failed
+  operation's message; the key-value server names a conflicting key in hexadecimal; the Blob engine
+  names the blob. So no source redacts a message; none writes one. The events this governs: root 28
+  `StatementFailed`, 32 `TransactionAborted` and 33 `TransactionCommitFailed`; Client 7
+  `ExchangeFailed`; Sql.Client and KeyValuePair.Client 3 `CommandFailed`; Graph.Client 3
+  `QueryFailed`; Blob.Client 3 `TransferFailed` and 4 `ListCleanupFailed`; Graph 12
+  `StatementParseFailed`; Blob 13 `TransferFailed`. Lifecycle, device and infrastructure failures
+  keep the type and the `Message`: a storage gone offline, I/O and unconfirmed commits, worker
+  failures, an engine's disposal, a database's create, open or drop, a server's start, dial and
+  handshake failures, a broken connection, a protocol violation, an authenticator's failure, a
+  session fault or cleanup failure.
+- **One ending rule: every `Start` has a `Stop` on every path**, as `System.Net.Http`'s
+  `RequestStart`, `RequestFailed` and `RequestStop` do. The `Stop` carries `status`, a
+  `QueryResultStatus` name: `Success`; `Error`, written after the pair's `Failed` event where one is
+  catalogued; or `Cancelled`, for a cancellation or for work its caller abandoned (a streamed result
+  disposed early), with no `Failed` event. It is written from a `finally` or on every exit, so an
+  activity-tracking tool always sees the pair close, and a failure is captured by an exception
+  filter that declines it and written once the throwing frame unwound, never from the filter (a
+  filter runs before the thrower's `finally` blocks release their locks). The pairs: the root's
+  `StatementStart`/`Stop`, `WorkerPassStart`/`Stop` and `EngineDisposeStart`/`Stop`; Storage's
+  `RecoveryStart`/`Stop` and `CheckpointStart`/`Stop` (`Success` or `Error`: neither can be
+  cancelled); Graph's and Documents' `IndexRecoveryStart`/`Stop`; and the four client pairs
+  (`CommandStart`/`Stop`, `QueryStart`/`Stop`, `TransferStart`/`Stop`). The one exception is the
+  Transactions `LockWaitStop`, whose `outcome` (`Granted`, `Cancelled`, `Ended`, `Abandoned`) is a
+  domain outcome finer than a status. Lifetimes that cross flows (`Opened`/`Closed`) are not pairs
+  and carry their own close reason.
+- **A peer that hangs up is not a fault** (plan D9). The four model servers classify a failure that
+  reaches a session pump with one rule, in identical copies: a `ConnectionException`, a
+  `SocketException`, or an `IOException` wrapping either closes the session with `TransportFailed`
+  or `ConnectionAborted`; a bare `IOException`, which can be the storage device's, stays a
+  `SessionFaulted`. A session leaves its server exactly once, whatever its cleanup throws.
+- **Events written under a lock** are named in each project's Diagnostics section (Storage's pool
+  events and `StorageOffline`, the Indexing split events under the tree latch, Transactions'
+  `LockWaitsAbandoned` under the storage's offline hook); a listener's synchronous work runs there.
 - **Thresholds are EventSource arguments**, not public API: `SlowStatementThresholdMs` (root) and
-  `SlowLockWaitThresholdMs` (Transactions), 1000 ms by default.
+  `SlowLockWaitThresholdMs` (Transactions), 1000 ms by default. Each enabling session sets its
+  source's threshold, and any session's disable restores the default.
 
-| Event source (= assembly) | Type | Batch | Reports |
-| --- | --- | --- | --- |
-| `Assimalign.Cohesion.Database` | `DatabaseEventSource` | existed; B1 | Engine, database, worker, server, server-session handshake, session, statement and explicit-transaction lifecycle; worker failures and give-ups; `current-sessions` ([Database DESIGN.md](../../../resources/Database/Assimalign.Cohesion.Database/docs/DESIGN.md#diagnostics)) |
-| `Assimalign.Cohesion.Database.Storage` | `StorageEventSource` | B2 | Recovery, checkpoints, write-back, group commit, a storage gone offline, buffer-pool pressure, checksum failures; 8 counters |
-| `Assimalign.Cohesion.Database.Transactions` | `TransactionEventSource` | B3 | Kernel transactions, deadlocks, lock waits, deferred undo, recovery analysis, deferred checkpoints, version purge; 6 counters |
-| `Assimalign.Cohesion.Database.Indexing` | `IndexEventSource` | B3 | Index DDL, format and corruption failures, invariant violations, page splits, writer purges |
-| `Assimalign.Cohesion.Database.Protocol` | `ProtocolEventSource` | B4 | Frames read and written (Verbose, `Frames`) |
-| `Assimalign.Cohesion.Database.Security` | `DatabaseSecurityEventSource` | B4 | Authenticator verdicts and failures |
-| `Assimalign.Cohesion.Database.Client` | `DatabaseClientEventSource` | B4 | Connections, dial and handshake failures, broken connections, pool rent and return; 4 counters |
-| `Assimalign.Cohesion.Database.Sql.Client` | `SqlClientEventSource` | B4 | Commands, observer failures |
-| `Assimalign.Cohesion.Database.KeyValuePair.Client` | `KeyValueClientEventSource` | B4 | Commands, observer failures |
-| `Assimalign.Cohesion.Database.Graph.Client` | `GraphClientEventSource` | B4 | Queries |
-| `Assimalign.Cohesion.Database.Blob.Client` | `BlobClientEventSource` | B4 | Transfers, list cleanup failures |
-| `Assimalign.Cohesion.Database.Sql` | `SqlDatabaseEventSource` | B5; D | The server and its sessions; statement planning and model-owned provisioning after the redesign |
-| `Assimalign.Cohesion.Database.KeyValuePair` | `KeyValueDatabaseEventSource` | B5 | The server and its sessions |
-| `Assimalign.Cohesion.Database.Graph` | `GraphDatabaseEventSource` | B5 | The server and its sessions, index recovery on open, wire-path parse failures |
-| `Assimalign.Cohesion.Database.Blob` | `BlobDatabaseEventSource` | B5 | The server and its sessions, per-database and engine-wide refusals, transfers |
-| `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | B5 | Index recovery on open |
-| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | existed; D | Reopening offline databases; the application's build, start, stop, commands, admin endpoint and health after the hosting redesign |
+The 17 sources. **Owner** is the project that owns the source and its design record (each
+project's `docs/DESIGN.md`, "Diagnostics", linked), and the batch that added or extended it.
+
+| Event source (= assembly) | Type | Owner | Batch | Reports |
+| --- | --- | --- | --- | --- |
+| `Assimalign.Cohesion.Database` | `DatabaseEventSource` | [Database (root)](../../../resources/Database/Assimalign.Cohesion.Database/docs/DESIGN.md#diagnostics) | existed; B1 | Engine, database, worker, server, server-session handshake, session, statement and explicit-transaction lifecycle; worker failures and give-ups; `current-sessions` |
+| `Assimalign.Cohesion.Database.Storage` | `StorageEventSource` | [Database.Storage](../../../resources/Database/Assimalign.Cohesion.Database.Storage/docs/DESIGN.md#diagnostics) | B2 | Recovery, checkpoints, write-back, group commit, a storage gone offline, buffer-pool pressure, checksum failures; 8 counters |
+| `Assimalign.Cohesion.Database.Transactions` | `TransactionEventSource` | [Database.Transactions](../../../resources/Database/Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#diagnostics) | B3 | Kernel transactions, deadlocks, lock waits, deferred undo, recovery analysis, deferred checkpoints, version purge; 6 counters |
+| `Assimalign.Cohesion.Database.Indexing` | `IndexEventSource` | [Database.Indexing](../../../resources/Database/Assimalign.Cohesion.Database.Indexing/docs/DESIGN.md#diagnostics) | B3 | Index DDL, format and corruption failures, invariant violations, page splits, writer purges |
+| `Assimalign.Cohesion.Database.Protocol` | `ProtocolEventSource` | [Database.Protocol](../../../resources/Database/Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#diagnostics) | B4 | Frames read and written by the stream reader and writer (Verbose, `Frames`) |
+| `Assimalign.Cohesion.Database.Security` | `DatabaseSecurityEventSource` | [Database.Security](../../../resources/Database/Assimalign.Cohesion.Database.Security/docs/DESIGN.md#diagnostics) | B4 | Authenticator verdicts and failures |
+| `Assimalign.Cohesion.Database.Client` | `DatabaseClientEventSource` | [Database.Client](../../../resources/Database/Assimalign.Cohesion.Database.Client/docs/DESIGN.md#diagnostics) | B4 | Connections, dial and handshake failures, broken connections, pool rent and return, coded exchange failures; 4 counters |
+| `Assimalign.Cohesion.Database.Sql.Client` | `SqlClientEventSource` | [Database.Sql.Client](../../../resources/Database/Assimalign.Cohesion.Database.Sql.Client/docs/DESIGN.md#diagnostics) | B4 | Commands, observer failures |
+| `Assimalign.Cohesion.Database.KeyValuePair.Client` | `KeyValueClientEventSource` | [Database.KeyValuePair.Client](../../../resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/DESIGN.md#diagnostics) | B4 | Commands, observer failures |
+| `Assimalign.Cohesion.Database.Graph.Client` | `GraphClientEventSource` | [Database.Graph.Client](../../../resources/Database/Assimalign.Cohesion.Database.Graph.Client/docs/DESIGN.md#diagnostics) | B4 | Queries |
+| `Assimalign.Cohesion.Database.Blob.Client` | `BlobClientEventSource` | [Database.Blob.Client](../../../resources/Database/Assimalign.Cohesion.Database.Blob.Client/docs/DESIGN.md#diagnostics) | B4 | Transfers, list cleanup failures |
+| `Assimalign.Cohesion.Database.Sql` | `SqlDatabaseEventSource` | [Database.Sql](../../../resources/Database/Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#diagnostics) | B5; D | The server and its sessions; statement planning and model-owned provisioning after the redesign |
+| `Assimalign.Cohesion.Database.KeyValuePair` | `KeyValueDatabaseEventSource` | [Database.KeyValuePair](../../../resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions |
+| `Assimalign.Cohesion.Database.Graph` | `GraphDatabaseEventSource` | [Database.Graph](../../../resources/Database/Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, index recovery on open, wire-path parse failures |
+| `Assimalign.Cohesion.Database.Blob` | `BlobDatabaseEventSource` | [Database.Blob](../../../resources/Database/Assimalign.Cohesion.Database.Blob/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, per-database and engine-wide refusals, transfer failures |
+| `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | [Database.Documents](../../../resources/Database/Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#diagnostics) | B5 | Index recovery on open |
+| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | [Database.Hosting](../../../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) | existed; D | Reopening offline databases; the application's build, start, stop, commands, admin endpoint and health after the hosting redesign |
+
+The integration pass after B5 applied the failure and ending rules above to every source, and the
+root's activity-nesting test (`DatabaseActivityNestingTests`) checks the plan's section 8 claim: an
+in-process Sql INSERT under activity tracking writes the kernel's `TransactionBegun`,
+`TransactionCommitted` and its commit's Storage event inside the root's `StatementStart`/`Stop`,
+under the statement's activity id.
 
 `D` is the batch that follows the owner's redesign of the Hosting builder, schema provisioning and
 engine extensibility; nothing in those files is instrumented before it lands. The projects that get
