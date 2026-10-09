@@ -311,17 +311,8 @@ public sealed partial class GraphStore
     private Found? ReadAt(ulong location, TransactionSnapshot snapshot)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
-        ReadOnlyMemory<byte> bytes;
-        if (!_storage.FreeSpaceMap.IsAllocated(page)) { return null; }
-        try
-        {
-            using var handle = _storage.PageManager.GetPage(page);
-            if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != 2) { return null; }
-            bytes = _storage.ReadEntry(page, slot);
-        }
-        catch (SlottedPageException) { return null; }
-        catch (ArgumentOutOfRangeException) { return null; }
-        catch (StorageIOException) when (!_storage.FreeSpaceMap.IsAllocated(page)) { return null; }
+        // A reclaimed location reads as a stale reference; CRC and I/O errors propagate (#1342).
+        if (!_storage.TryReadRecord(page, slot, 2, out var bytes)) { return null; }
         if (bytes.Length < 26) { throw new StorageCorruptionException("Truncated graph record."); }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (!snapshot.IsVisible(writer) || (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))) { return null; }

@@ -406,33 +406,10 @@ public sealed class GraphCatalog
             for (int index = versions.Count - 1; index >= 0; index--)
             {
                 var reference = versions[index];
-                ReadOnlyMemory<byte> bytes;
-                if (!_storage.FreeSpaceMap.IsAllocated(reference.PageId))
-                {
-                    versions.RemoveAt(index);
-                    continue;
-                }
-                try
-                {
-                    using var handle = _storage.PageManager.GetPage(reference.PageId);
-                    if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != 0)
-                    {
-                        versions.RemoveAt(index);
-                        continue;
-                    }
-                    bytes = _storage.ReadEntry(reference.PageId, reference.SlotIndex);
-                }
-                catch (SlottedPageException)
-                {
-                    versions.RemoveAt(index);
-                    continue;
-                }
-                catch (ArgumentOutOfRangeException)
-                {
-                    versions.RemoveAt(index);
-                    continue;
-                }
-                catch (StorageIOException) when (!_storage.FreeSpaceMap.IsAllocated(reference.PageId))
+                // A reclaimed location (a deleted or reverted slot, a freed page, a page
+                // reused by another owner or as a non-data page) is a stale reference;
+                // CRC and I/O errors propagate (#1342).
+                if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes))
                 {
                     versions.RemoveAt(index);
                     continue;

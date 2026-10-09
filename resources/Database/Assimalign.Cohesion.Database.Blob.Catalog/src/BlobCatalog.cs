@@ -367,23 +367,14 @@ public sealed class BlobCatalog
         for (int i = versions.Count - 1; i >= 0; i--)
         {
             var reference = versions[i];
-            ReadOnlyMemory<byte> bytes;
-            try
-            {
-                bytes = _storage.ReadEntry(reference.PageId, reference.SlotIndex);
-            }
-            catch (SlottedPageException)
+            // Only a reclaimed location (a deleted or reverted slot, an owner-zero page the
+            // purge freed or the allocator reused) and a changed identity invalidate a cached
+            // physical reference. CRC and I/O exceptions deliberately propagate (#1342).
+            if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes))
             {
                 versions.RemoveAt(i);
                 continue;
             }
-            catch (ArgumentOutOfRangeException)
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            // CRC and I/O exceptions deliberately propagate. Only reclaimed slots
-            // and changed identities invalidate a cached physical reference.
             if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
             {
                 throw new BlobCatalogException("Truncated blob catalog record.");

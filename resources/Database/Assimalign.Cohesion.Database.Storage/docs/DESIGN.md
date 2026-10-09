@@ -431,14 +431,17 @@ instead of dereferencing it:
   owns, so they hold the page to its full invariant: the slot directory fits the body,
   the free-data end lies between the body start and the slot directory, and the slot
   being changed addresses bytes inside the record area.
-- **Reads** (`ReadSlot`, `GetSlotLength`) can run beside the page's single writer — a
-  scan takes a pin, not a latch — so they enforce only what holds in every state a
+- **Reads** (`ReadSlot`, `GetSlotLength`, `TryReadSlot`) can run beside the page's single
+  writer — a scan takes a pin, not a latch — so they enforce only what holds in every state a
   well-formed page passes through: the slot index lies inside a directory a page can
   hold, and the record lies inside the page body. That is what keeps a read inside the
   buffer. A read racing a change can still see a torn record — stale bytes, or a
   corruption error if it catches a rollback's page restore half-way, where it used to
   read past the buffer — which is the content-isolation question page latches would
-  answer; the layers above own it today.
+  answer; the layers above own it today. A reader that walks slots uses `TryReadSlot`,
+  which reads the slot count and one snapshot of the slot entry and copies the record from
+  that snapshot: a slot deleted or reverted between two separate reads would otherwise fail
+  the read ("Reading a record through a reference", below).
 - **Relocation needs the whole record.** An update that outgrows its slot appends the
   record at the free-data end and leaves the old bytes as dead space, so it requires
   the record's full length in free space and leaves the page untouched when it does
@@ -517,6 +520,58 @@ object ids, so a table scan stops decoding the whole database.
   (the reserved bitmap-FSM page type) so freeing can be a metadata write; until
   that lands, chains keep releases proportional to the object, which is already
   incomparably better than the previous permanent leak.
+
+### Reading a record through a reference (#1342)
+
+An index entry, a catalog directory reference and a version-ledger entry name a record by
+(page, slot), and the record can be reclaimed beneath the reference: the version purge deletes
+the slot, a bracket rollback restores a pre-image without it, or the emptied page is freed and
+then reallocated, to another owner or as an index node. `Storage.TryReadRecord` is the one place
+that tells a reclaimed location from a page that cannot be read. It checks each kind of
+reclamation positively and returns `false`; every other failure throws:
+
+| The location | Checked by | Result |
+|---|---|---|
+| Its page was freed | `StoragePageManager.TryGetPage`, which checks `FreeSpaceMap.IsAllocated` and pins only an allocated page | `false` |
+| Its page now holds a non-data page, or (owner overload) another owner's records | the page header's type and owner tag, under the pin | `false` |
+| Its slot lies past the slot directory (a rollback reverted it), or is deleted | `SlottedPage.TryReadSlot`, over one snapshot of the slot entry | `false` |
+| Its page fails its checksum, or its header or slot addresses bytes outside the page | the buffer-pool load; the slotted geometry checks | `StorageCorruptionException` |
+| Its page ends inside the stream, or every buffer-pool frame is pinned | the buffer-pool load | `StorageIOException` |
+| The device fails the read | the file handle | its `IOException` |
+
+The type check matters as much as the allocation check: a freed data page that comes back as an
+index node does not have a slot directory, and reading it as one reports corruption that is not
+there. No read failure is classified as reclamation. The allocation check and the pin are not
+atomic, so a page freed after the check, and perhaps reallocated, is pinned anyway; it then fails
+the type, owner or slot check. Catching the pin's "not allocated" failure and checking the map
+again would not do: a page freed and reallocated between the two checks reads as an I/O error,
+which a two-second race test (`StorageRecordReclamationTests`) reproduces on every run. The overload
+without an owner serves the version ledger, which does not know a record's owner and rechecks its
+stamps instead. The checks share the caveat of every pinned read beside the page's single writer
+(above): a read that races a free, a reallocation and a rewrite of the same frame can still see
+torn geometry.
+
+A scan meets the same reclamation without a reference. `StorageUnitIterator` pins a page and
+holds the pin across `MoveNext` calls, but not a latch, so the version purge deletes slots, a
+failed statement's rollback reverts the page to fewer slots, and an emptied page is freed while
+the scan stands on it or between its allocation check and its pin. The iterator pins through
+`TryGetPage` and reads each slot through `TryReadSlot`, so it skips what was reclaimed and still
+fails on a page it cannot read. Until #1342 it read the slot count, the slot's length and the
+slot as three separate reads, and a SQL `UPDATE` or `DELETE` that scanned its target table beside
+the purge failed with "Cannot read a deleted slot", an out-of-range slot index, or "Page N is not
+allocated"; the storage race test fails that way on every run against the old iterator.
+
+Before #1342 each caller classified the exceptions `ReadRecord` threw, and they disagreed. The SQL
+index seek, the key-value lookup and the version ledger caught `StorageException`, so a page that
+failed its checksum read as reclaimed: the seek dropped its rows, the key read as missing, and an
+undo forgot an aborted writer whose stamps were still on the page, so once the page read again
+every snapshot saw the rolled-back write as committed. The Documents and Blob catalogs caught only
+the slot exceptions, so a lookup that reached a reference into a metadata page the purge had freed
+failed with "Page N is not allocated". The Graph catalog and store already made the positive checks
+inline and now call the shared one. PostgreSQL draws the same line in `heap_fetch`: an offset past
+the page's line pointers, or a line pointer that is no longer normal, is "not found"
+(`src/backend/access/heap/heapam.c:1709-1736`), while an invalid page raises
+`ERRCODE_DATA_CORRUPTED` (`src/backend/storage/buffer/bufmgr.c:8889`, `:8913-8919`).
 
 ## The journal (write-ahead log)
 
@@ -1780,9 +1835,9 @@ place: `Compact` is correct now, but compacting moves other records, and scans r
 pages under a pin without a latch, so in-place compaction waits for page latches.
 Under heavy ALTER churn a catalog page fills with dead record images, the record moves
 to another page, and the dead space stays until its page holds no live record.
-Separately, the SQL index seek and the version store treat any
-`StorageException` from a record read as "reclaimed" and skip the record; that now
-includes `StorageCorruptionException`, which deserves to surface rather than hide a row.
+(The SQL index seek and the version store used to read any `StorageException` from a record
+read as reclamation, `StorageCorruptionException` included; #1342 closed that with
+`Storage.TryReadRecord`, "Reading a record through a reference" above.)
 Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` trusts
 the header only because the pool refuses an oversized one at load, and a `Page` built
 over caller memory carries no such check. Each follow-up needs its own work item.
@@ -2117,6 +2172,9 @@ catch the family or the specific failure.
 Engines translate `StorageOfflineException` into the area root's `DatabaseOfflineException`
 with their own code, or into `DatabaseTransactionCommitUnconfirmedException` when
 `CommitRecordWritten` is set.
+A record reclaimed beneath a reference is not an error: `TryReadRecord` returns `false` for it,
+a scan skips it, and both throw only for a page they cannot read, so no caller has to sort
+exception types into "reclaimed" and "failed" (#1342; "Reading a record through a reference").
 
 ## AOT posture
 

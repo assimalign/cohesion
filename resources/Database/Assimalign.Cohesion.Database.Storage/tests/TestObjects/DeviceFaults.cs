@@ -29,9 +29,9 @@ public enum DeviceFault
 /// file header's slots) fails, a write of the journal (since #1252 the drain of its append buffer)
 /// fails, or a durable flush of the journal fails. Each counts the failures it injected, so a test
 /// can wait for a worker to hit the fault. A durable flush of the data file can also stall until
-/// the test releases it, as a device that does not answer an fsync leaves it. Linked into each
-/// engine's test project, whose fault-injecting storage strategy wraps a file set's handles with
-/// them (#1268).
+/// the test releases it, as a device that does not answer an fsync leaves it, and one data page can
+/// rot, reading back with a byte flipped (#1342). Linked into each engine's test project, whose
+/// fault-injecting storage strategy wraps a file set's handles with them (#1268).
 /// </summary>
 /// <remarks>
 /// A failed write writes nothing, and a failed flush leaves the bytes written before it where they
@@ -52,6 +52,30 @@ internal sealed class DeviceFaults
     // Open while durable flushes of the data file go through; closed while they stall.
     private readonly ManualResetEventSlim _dataFlushGate = new(initialState: true);
     private int _stalledDataFlushes;
+
+    // The data page whose reads come back rotten, or -1 for none.
+    private long _rottenPage = -1;
+    private long _rottenPageReads;
+
+    /// <summary>
+    /// Gets or sets the data page every read of which returns its first body byte flipped, as a
+    /// sector that decayed after the page was written, or null for none. The stored bytes are not
+    /// changed, so clearing the fault heals the page; and a page the buffer pool holds is not read,
+    /// so a test evicts the page before it expects the fault to fire (#1342).
+    /// </summary>
+    internal PageId? RottenPage
+    {
+        get
+        {
+            long page = Interlocked.Read(ref _rottenPage);
+            return page < 0 ? null : (PageId)page;
+        }
+
+        set => Interlocked.Exchange(ref _rottenPage, value is { } page ? (long)page : -1L);
+    }
+
+    /// <summary>Gets the number of reads that returned the rotten page with its byte flipped.</summary>
+    internal long RottenPageReads => Interlocked.Read(ref _rottenPageReads);
 
     /// <summary>
     /// Gets or sets whether every write to a data page (page 1 and beyond) of the data file fails:
@@ -163,6 +187,7 @@ internal sealed class DeviceFaults
         FailHeaderWrites = false;
         FailJournalFlushes = false;
         FailJournalWrites = false;
+        RottenPage = null;
         ReleaseDataFlushes();
     }
 
@@ -218,6 +243,22 @@ internal sealed class DeviceFaults
         {
             Interlocked.Increment(ref _pageWriteFailures);
             throw new System.IO.IOException("Injected page write failure.");
+        }
+    }
+
+    private void AfterDataRead(Span<byte> read, long offset)
+    {
+        long page = Interlocked.Read(ref _rottenPage);
+        if (page < 0)
+        {
+            return;
+        }
+
+        long target = (page * Page.Size) + Page.HeaderSize;
+        if (target >= offset && target < offset + read.Length)
+        {
+            read[(int)(target - offset)] ^= 0x5A;
+            Interlocked.Increment(ref _rottenPageReads);
         }
     }
 
@@ -288,10 +329,27 @@ internal sealed class DeviceFaults
 
         public bool SupportsDurableFlush => _inner.SupportsDurableFlush;
 
-        public int Read(Span<byte> buffer, long offset) => _inner.Read(buffer, offset);
+        public int Read(Span<byte> buffer, long offset)
+        {
+            int read = _inner.Read(buffer, offset);
+            if (!_journal)
+            {
+                _faults.AfterDataRead(buffer[..read], offset);
+            }
 
-        public ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
-            => _inner.ReadAsync(buffer, offset, cancellationToken);
+            return read;
+        }
+
+        public async ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+        {
+            int read = await _inner.ReadAsync(buffer, offset, cancellationToken).ConfigureAwait(false);
+            if (!_journal)
+            {
+                _faults.AfterDataRead(buffer.Span[..read], offset);
+            }
+
+            return read;
+        }
 
         public void Write(ReadOnlySpan<byte> buffer, long offset)
         {

@@ -160,6 +160,8 @@ public sealed partial class DocumentCatalog
     /// The index is not visible in <paramref name="snapshot"/>, its physical tree is missing, or a
     /// persisted catalog record is malformed.
     /// </exception>
+    /// <exception cref="StorageCorruptionException">A matching entry's catalog page failed its checksum or is malformed.</exception>
+    /// <exception cref="StorageIOException">A matching entry's catalog page could not be read.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled during the iteration.</exception>
     public async ValueTask<IReadOnlyList<DocumentCatalogEntry>> SearchIndexAsync(Guid collectionId, string indexName,
         object? lower, bool includeLower, object? upper, bool includeUpper, TransactionSnapshot snapshot,
@@ -181,7 +183,16 @@ public sealed partial class DocumentCatalog
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
         {
             var (page, slot) = DocumentStorage.UnpackLocation(cursor.CurrentEntryReference);
-            var bytes = _storage.ReadEntry(page, slot);
+
+            // An entry whose catalog record was reclaimed beneath it (a deleted or reverted slot, an
+            // owner-zero page freed or reallocated) is stale, as in Find; a page that fails its
+            // checksum or cannot be read fails the search (#1342). The identity and stamp checks
+            // below reject a slot that now holds another record.
+            if (!_storage.TryReadRecord(page, slot, 0, out var bytes))
+            {
+                continue;
+            }
+
             var record = DocumentCatalogCodec.Decode(bytes.Span);
             var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
             if (record.Document is { } document && document.CollectionId == collectionId

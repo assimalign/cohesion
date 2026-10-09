@@ -812,9 +812,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
     /// aborted writer whose undo previously failed, then prunes versions below
-    /// the safe bound — the minimum snapshot floor of every open transaction
-    /// (a long-running snapshot pins its view), or the manager's oldest-active
-    /// bound when idle.
+    /// the safe bound — the minimum snapshot floor of every active transaction
+    /// (a long-running snapshot pins its view), or the next sequence when idle.
     /// </summary>
     /// <param name="cancellationToken">
     /// Cancels the pass between writers and prune batches; a rolled-back writer's
@@ -828,7 +827,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// the undo completes. A retry that fails again is rethrown at the end of the pass,
     /// after every deferred writer was attempted and the rest of the pass ran, so a
     /// writer whose undo keeps failing does not stop the reclamation of committed
-    /// tombstones below it; the writer waits for the next pass.
+    /// tombstones below it; the writer waits for the next pass. A writer queued by a
+    /// direct <see cref="VersionStore.PurgeWriterAsync"/> caller is retried the same way,
+    /// and the prune reclaims every tombstone it can read before it throws for one whose
+    /// version page it cannot read (a failed checksum or an I/O error, #1342), which keeps
+    /// that tombstone for the next pass.
     /// </remarks>
     public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
@@ -850,7 +853,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             deferredFailure = ExceptionDispatchInfo.Capture(exception);
         }
 
-        // Writers queued by a direct PurgeWriterAsync caller; the manager owns the rest.
+        // Writers queued by a direct PurgeWriterAsync caller; the manager owns the rest. A failed
+        // undo requeues its writer and is rethrown at the end of the pass, as a deferred one is,
+        // so a version page that cannot be read does not stop the prune below (#1342).
         foreach (ulong writer in _versionStore.PendingAbortedPurges)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -859,8 +864,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 continue;
             }
 
-            total += _versionStore.PurgeWriterAsync(new TransactionSequence(writer), cancellationToken)
-                .AsTask().GetAwaiter().GetResult();
+            try
+            {
+                total += _versionStore.PurgeWriterAsync(new TransactionSequence(writer), cancellationToken)
+                    .AsTask().GetAwaiter().GetResult();
+            }
+            catch (Exception exception) when (exception is not ObjectDisposedException && !cancellationToken.IsCancellationRequested)
+            {
+                deferredFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -879,17 +891,24 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Computes the prune bound no live or future snapshot can see below: the
-    /// minimum <see cref="TransactionSnapshot.Minimum"/> across open
-    /// transactions, or <see cref="TransactionManager.OldestActive"/> when
-    /// none are open. The manager's bound alone is NOT safe under load: a live
-    /// snapshot can hold a <em>lower</em> minimum than the oldest active
-    /// sequence (it captured while an older, since-committed transaction was
-    /// still in flight) and must keep seeing versions that transaction's
-    /// tombstones would otherwise free.
+    /// manager's <see cref="TransactionManager.PruneBound"/>, the minimum of every
+    /// active sequence and of every active snapshot or serializable transaction's
+    /// <see cref="TransactionSnapshot.Minimum"/>, taken atomically with
+    /// <see cref="TransactionManager.BeginAsync"/>. The oldest active sequence alone
+    /// is NOT safe under load: a live snapshot can hold a <em>lower</em> minimum
+    /// (it captured while an older, since-committed transaction was still in
+    /// flight) and must keep seeing versions that transaction's tombstones would
+    /// otherwise free.
     /// </summary>
+    /// <remarks>
+    /// The open transactions this coordinator tracks are not enough on their own: one
+    /// joins them only after the manager began it, and a pass in between would prune
+    /// below its snapshot's minimum (#1342 review). They are still folded in, which
+    /// covers one the manager already ended while its statement still reads.
+    /// </remarks>
     private TransactionSequence GetSafePruneBound()
     {
-        var bound = _manager.OldestActive;
+        var bound = _manager.PruneBound;
 
         // After a reopen the fresh manager's idle bound trails the storage's
         // sequence namespace; the recovered floor is a proven ceiling over

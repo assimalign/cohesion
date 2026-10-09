@@ -372,7 +372,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   re-checks the row's stamps against the same snapshot (defense in depth:
   entries mirror row stamps by the maintenance discipline, so a divergence is
   a bug this filter contains rather than surfaces; a dangling entry under an
-  invisible stamp is skipped, never fetched wrongly). Prefix ranges ride the
+  invisible stamp is skipped, never fetched wrongly). **A dangling entry is
+  told from an unreadable row by a positive check (#1342):** the fetch is
+  `Storage.TryReadRecord` with the table's object id as owner, which skips an
+  entry whose row was reclaimed beneath it (its slot deleted or reverted, its
+  page freed, or the page reallocated to another table or as an index node)
+  and throws for a row page that fails its checksum or cannot be read. Until
+  #1342 the fetch skipped on any `StorageException`, so a corrupt page dropped
+  its rows from the result instead of failing the statement. Prefix ranges ride the
   codec's order preservation: every composite key starting with prefix `P`
   sorts in `[P, successor(P))`; bound inclusivity maps to prefix-successor
   arithmetic on the encoded component. Per-statement observability
@@ -2056,6 +2063,29 @@ does not load fails the open with a `DatabaseException` naming the database, tab
 and constraint or column; one whose call fails its signature carries the
 `COHSQLE006` error in its message and as its inner exception. No runtime
 `ArithmeticException` escapes expression evaluation.
+
+A row page the statement cannot read fails the statement with the storage
+library's own error, on every access path: a page that fails its checksum or
+whose slot geometry is malformed throws `StorageCorruptionException` (carrying
+the page id), a page cut short or a pool with every frame pinned throws
+`StorageIOException`, and a device read error its `IOException`. As for any other
+statement failure, an auto-commit context rolls back and an explicit transaction
+stays active. The scan always failed this way. The index seek (the SELECT seek,
+the join probe and the constraint lookups all fetch through it) did not until
+#1342: it read every `StorageException`
+from the row fetch as "the row was reclaimed beneath its entry" and dropped the
+row. Only a reclaimed row is skipped now, through the positive check
+`Storage.TryReadRecord` makes (see "Seek execution is snapshot-anchored"), as
+PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
+`ERRCODE_DATA_CORRUPTED` for an invalid page. The engine does not wrap these
+storage errors in a `DatabaseException` yet, so over the wire one reaches the
+client as `Internal` and closes the session ("Session state machine", above).
+The scan had the opposite defect: the version purge deleting a slot, or freeing
+a page, while a statement scanned the table (an `UPDATE` or `DELETE` target scan,
+a `SELECT` without a seek) failed the statement with "Cannot read a deleted
+slot", an out-of-range slot index or "Page N is not allocated". The storage scan
+now skips what was reclaimed beneath it and still fails on a page it cannot read
+(Storage DESIGN, "Reading a record through a reference").
 
 ## The MVCC integration (scoped under #862)
 

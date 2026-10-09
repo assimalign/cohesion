@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// Exercises record-space undo through real storage brackets and the shared
@@ -193,6 +195,241 @@ public class RecordSpaceVersionStoreTests
         await coordinator.CommitAsync(reader, CancellationToken.None);
     }
 
+    /// <summary>
+    /// A committed tombstone whose page cannot be read is not a reclaimed one (#1342): the prune
+    /// fails and keeps the candidate for the next pass, where before the fix it read the failure
+    /// as "already gone" and dropped the candidate, leaving the dead version on its page for good.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a version page that cannot be read fails the pass and keeps its candidate (#1342)")]
+    public async Task Prune_VersionPageMalformed_ShouldFailAndKeepTheCandidate()
+    {
+        // Arrange: a committed tombstone below the bound, its slot entry then made to address
+        // bytes past the page.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        (PageId PageId, int SlotIndex) location = default;
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            location = storage.Insert(bracket, Stamped(TransactionSequence.None, deleter.Sequence, 5));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, CancellationToken.None);
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+        byte[] slotEntry;
+        using (var handle = storage.PageManager.GetPage(location.PageId))
+        {
+            var entry = handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4);
+            slotEntry = entry.ToArray();
+            BinaryPrimitives.WriteUInt16LittleEndian(entry, Page.Size - 1);
+        }
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+        int trackedAfterTheFailure = coordinator.VersionStore.TrackedVersionCount;
+        using (var handle = storage.PageManager.GetPage(location.PageId))
+        {
+            slotEntry.CopyTo(handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4));
+        }
+
+        long pruned = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        failure.PageId.ShouldBe(location.PageId);
+        trackedAfterTheFailure.ShouldBe(1);
+        pruned.ShouldBe(1);
+        CountRecords(storage).ShouldBe(0);
+        coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// One unreadable version page must not stop reclamation for the whole record space. Before the
+    /// fix the prune threw at the first candidate it could not read: the batch bracket holding the
+    /// readable candidates rolled back, the batches after it never ran, and every later pass met the
+    /// same page first.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: an unreadable version page keeps its candidate and the pass still reclaims the others (#1342)")]
+    public async Task Prune_OneVersionPageMalformed_ShouldReclaimTheOthersAndKeepIt()
+    {
+        // Arrange: two committed tombstones on pages of their own, the first one's slot entry then
+        // made to address bytes past its page.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var locations = new List<(PageId PageId, int SlotIndex)>();
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            for (int index = 0; index < 2; index++)
+            {
+                var record = new byte[8000];
+                RecordVersionStamp.WriteWriter(record, TransactionSequence.None);
+                var location = storage.Insert(bracket, RecordVersionStamp.WithDeleter(record, deleter.Sequence));
+                coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+                locations.Add(location);
+            }
+
+            return 0;
+        }, CancellationToken.None);
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+        var (unreadable, readable) = (locations[0], locations[1]);
+        readable.PageId.ShouldNotBe(unreadable.PageId);
+        byte[] slotEntry = Malform(storage, unreadable);
+
+        // Act
+        var failure = Should.Throw<StorageCorruptionException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+        bool readableReclaimed = !storage.FreeSpaceMap.IsAllocated(readable.PageId);
+        int trackedAfterTheFailure = coordinator.VersionStore.TrackedVersionCount;
+        Restore(storage, unreadable, slotEntry);
+        long prunedOnceReadable = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        failure.PageId.ShouldBe(unreadable.PageId);
+        readableReclaimed.ShouldBeTrue();
+        trackedAfterTheFailure.ShouldBe(1);
+        prunedOnceReadable.ShouldBe(1);
+        CountRecords(storage).ShouldBe(0);
+        coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// A writer queued by a direct <see cref="VersionStore.PurgeWriterAsync"/> caller whose undo keeps
+    /// failing does not stop the prune: before the fix the pass threw at the queued writer and never
+    /// reached the committed tombstones.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a queued undo that fails again is rethrown after the prune ran (#1342)")]
+    public async Task RunVersionPurgePass_QueuedUndoFailsAgain_ShouldStillPrune()
+    {
+        // Arrange: a committed tombstone below the bound, then a writer whose direct undo failed and
+        // whose retry will fail once more.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            var location = storage.Insert(bracket, Stamped(TransactionSequence.None, deleter.Sequence, 5));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, CancellationToken.None);
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var failing = new FailingIndex(clearFailures: 2);
+        coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, failing, new byte[] { 1 }, 0);
+        await Should.ThrowAsync<IOException>(() => coordinator.VersionStore.PurgeWriterAsync(writer.Sequence).AsTask());
+
+        // Act
+        Should.Throw<IOException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+        int recordsAfterTheFailedPass = CountRecords(storage);
+        var pendingAfterTheFailedPass = coordinator.VersionStore.PendingAbortedPurges.ToArray();
+        coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert: the tombstone was reclaimed by the pass that failed; the writer waited for the next.
+        recordsAfterTheFailedPass.ShouldBe(0);
+        pendingAfterTheFailedPass.ShouldBe([writer.Sequence.Value]);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        failing.Calls.Count(call => call.Operation == "clear").ShouldBe(3);
+        await coordinator.RollbackAsync(writer, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// A transaction the manager has begun is covered by the prune bound from the moment its
+    /// snapshot exists. Before the fix the bound started from the oldest active sequence and was
+    /// lowered only by the coordinator's open transactions, which a new transaction joins after the
+    /// manager began it: a purge in between reclaimed a version the new snapshot still saw. The
+    /// reader here is begun on the manager alone, which is that window's state, held open.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a snapshot the manager began, not yet tracked by the coordinator, keeps the version it sees")]
+    public async Task Prune_SnapshotBegunOnTheManagerAlone_ShouldKeepTheVersionItSees()
+    {
+        // Arrange: a version tombstoned by a writer still in flight when the reader begins, then
+        // the writer commits.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        ulong packed = await TombstoneOneVersion(storage, coordinator, deleter);
+        var reader = await coordinator.Manager.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+
+        // Act
+        long pruned = coordinator.RunVersionPurgePass(CancellationToken.None);
+        var seen = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, reader.Snapshot);
+        await coordinator.Manager.CommitAsync(reader, CancellationToken.None);
+        long prunedAfterTheReader = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert: the reader saw the deleter in flight, so the version stayed until it ended.
+        reader.Snapshot.Minimum.ShouldBe(deleter.Sequence);
+        pruned.ShouldBe(0);
+        seen.HasValue.ShouldBeTrue();
+        prunedAfterTheReader.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A read-committed transaction holds the bound at its own sequence between statements, not at
+    /// the floor it began with: its snapshot is captured afresh on every access. A statement that
+    /// must keep an older floor pins it with a snapshot transaction of its own, which the bound
+    /// covers from its begin.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record prune: a read-committed transaction holds the bound only through a statement's snapshot pin")]
+    public async Task Prune_ReadCommittedTransaction_ShouldHoldTheBoundOnlyThroughAStatementPin()
+    {
+        // Arrange: the read-committed reader begins while the deleter is in flight, and its
+        // statement pins its floor with a snapshot transaction begun first, as the Documents,
+        // Graph and Blob operations do; then the deleter commits.
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        ulong packed = await TombstoneOneVersion(storage, coordinator, deleter);
+        var reader = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+        var pin = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var statement = reader.PinStatementSnapshot();
+        await coordinator.CommitAsync(deleter, CancellationToken.None);
+
+        // Act
+        long prunedDuringTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
+        var seenByTheStatement = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, statement.Snapshot);
+        await coordinator.CommitAsync(pin, CancellationToken.None);
+        long prunedAfterTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert: the statement kept its version; once it ended, the still-active read-committed
+        // transaction did not hold the bound back at its begin-time floor.
+        statement.Snapshot.Minimum.ShouldBe(deleter.Sequence);
+        prunedDuringTheStatement.ShouldBe(0);
+        seenByTheStatement.HasValue.ShouldBeTrue();
+        prunedAfterTheStatement.ShouldBe(1);
+        reader.State.ShouldBe(TransactionState.Active);
+        await coordinator.CommitAsync(reader, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Writes one version, visible to every snapshot, that <paramref name="deleter"/> tombstones,
+    /// and returns its packed location.
+    /// </summary>
+    private static async Task<ulong> TombstoneOneVersion(RecordStorage storage, TransactionCoordinator coordinator, TransactionContext deleter)
+    {
+        (PageId PageId, int SlotIndex) location = default;
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            location = storage.Insert(bracket, Stamped(TransactionSequence.None, deleter.Sequence, 5));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, CancellationToken.None);
+        return storage.PackLocation(location.PageId, location.SlotIndex);
+    }
+
+    private static byte[] Malform(RecordStorage storage, (PageId PageId, int SlotIndex) location)
+    {
+        using var handle = storage.PageManager.GetPage(location.PageId);
+        var entry = handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4);
+        byte[] original = entry.ToArray();
+        BinaryPrimitives.WriteUInt16LittleEndian(entry, Page.Size - 1);
+        return original;
+    }
+
+    private static void Restore(RecordStorage storage, (PageId PageId, int SlotIndex) location, byte[] slotEntry)
+    {
+        using var handle = storage.PageManager.GetPage(location.PageId);
+        slotEntry.CopyTo(handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 4));
+    }
+
     private static byte[] Stamped(TransactionSequence writer, TransactionSequence deleter, byte payload)
     {
         byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
@@ -215,7 +452,12 @@ public class RecordSpaceVersionStoreTests
 
     private sealed class FailingIndex : RecordVersionIndex
     {
-        private bool _failClear = true;
+        private int _clearFailures;
+
+        internal FailingIndex(int clearFailures = 1)
+        {
+            _clearFailures = clearFailures;
+        }
 
         internal List<(string Operation, byte[] Key, ulong EntryReference, TransactionSequence Writer)> Calls { get; } = new();
 
@@ -232,9 +474,9 @@ public class RecordSpaceVersionStoreTests
             cancellationToken.ThrowIfCancellationRequested();
             transaction.IsActive.ShouldBeTrue();
             Calls.Add(("clear", key.ToArray(), entryReference, writer));
-            if (_failClear)
+            if (_clearFailures > 0)
             {
-                _failClear = false;
+                _clearFailures--;
                 throw new IOException("Injected index undo failure.");
             }
 

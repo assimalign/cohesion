@@ -95,8 +95,11 @@ stable storage; only then does it leave the table and release its locks as a set
 commit whose record cannot be written aborts, ending the transaction the way a
 rollback does (state `Faulted`; see "Ending a transaction" below), and surfaces
 `TransactionAbortedException`. A commit whose record was written but whose durable
-flush failed is different, and is described next. `OldestActive` is the
-pruning bound: `min(active)` or `lastAssigned + 1` when idle. A manager rejects a
+flush failed is different, and is described next. `OldestActive` is
+`min(active)`, or `lastAssigned + 1` when idle. It is not a pruning bound on its own: the
+internal `PruneBound` also takes the minimum of every active snapshot or serializable
+transaction's snapshot, under the lock the begin holds while it captures that snapshot
+("Shared per-database composition", below). A manager rejects a
 context begun on a different manager instance (identity check, not just type check).
 
 ### A commit record that was written but not made durable
@@ -432,6 +435,8 @@ Storage owns the physical journal (`Database.Storage`); the transaction log is t
 
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). `TransactionCommitUnconfirmedException : Exception`, a second independent root, for a commit whose record was written but not made durable: the transaction is committed, so it is deliberately not an abort and not retryable ("A commit record that was written but not made durable", above); engines wrap it in the area's `DatabaseTransactionCommitUnconfirmedException`. Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end, and `ObjectDisposedException` once the manager's disposal began.
 
+The version store throws the storage library's errors unchanged when a version page cannot be read: `PurgeWriterAsync` (a failed undo, which requeues the writer), `PruneAsync` and so `RunVersionPurgePass` (each after reclaiming everything else it can), and `GetVisibleVersionAsync`. A version reclaimed beneath its ledger entry is not one of them (#1342; "Shared per-database composition (#918)", below).
+
 ## The engine binding (first adopter: the SQL engine)
 
 The area's recorded *isolation split-brain* — a complete MVCC manager no engine
@@ -473,7 +478,7 @@ work items under #862). The integration kept this package exactly as shaped:
   timer (#910): it retries the undo of rolled-back writers whose inline undo
   failed, releasing each writer once its undo completes (#1226, "Ending a
   transaction" above), and `PruneAsync` below the safe snapshot bound — the minimum
-  snapshot floor across open transactions, not `OldestActive` alone, which
+  snapshot floor across active transactions, not `OldestActive` alone, which
   can trail a live snapshot's view (see the Sql DESIGN.md for the recorded
   bound decision). With that, all four §3.8 steps are implemented.
 
@@ -508,11 +513,41 @@ The seam follows the executable differences between the original implementations
 `RecordSpaceVersionStore` is a ledger over actual records, not a second payload
 store. Logical rollback deletes created versions and clears tombstones only
 when their current stamps match the recorded writer. A failed physical statement
-can leave stale ledger entries; missing/reverted slots remain harmless through
-the original `StorageException`/`ArgumentOutOfRangeException` handling and stamp
-rechecks. Committed tombstones enter the prunable set. Pruning requires
+can leave stale ledger entries; they stay harmless because the store reads a
+ledger location with `Storage.TryReadRecord`, which reports a reclaimed location
+(a deleted or reverted slot, a freed page, a page reallocated as a non-data page)
+as nothing to do, and the stamp rechecks reject a location another writer reused.
+Committed tombstones enter the prunable set. Pruning requires
 `deleter < safeBound` and rechecks the current deleter before deleting. Index
 undo stays in recorded order, including its original accounting semantics.
+
+A version page the store cannot read is not a reclaimed location (#1342): the
+undo or the prune throws the storage error (`StorageCorruptionException` for a
+page that fails its checksum or is malformed, `StorageIOException`, or the
+device's `IOException`). A failed undo requeues the writer for the purge worker,
+which keeps it in flight and its versions hidden until a retry completes. A prune
+keeps the candidate it cannot read, reclaims every other candidate and commits
+their batches, and then throws the first such failure; `RunVersionPurgePass`
+likewise attempts every queued writer and runs the prune before it rethrows a
+failed undo. One unreadable page therefore costs one tombstone or one writer, not
+the whole record space's reclamation: a prune that stopped at the page would roll
+back the batch beside it and never reach the ones after it, on every pass. The
+failure still reaches the purge worker, which reports it and retries with backoff.
+PostgreSQL's `VACUUM` errors out of the relation instead: its heap pass reads each
+block through the buffer manager (`src/backend/access/heap/vacuumlazy.c:1401`),
+which raises `ERRCODE_DATA_CORRUPTED` for an invalid page
+(`src/backend/storage/buffer/bufmgr.c:8889`, `:8913-8919`). The per-candidate split
+is affordable here because a prune candidate is one record, not a page to rewrite.
+Before #1342 the store read
+every `StorageException` as "the slot is gone": an undo that met an unreadable
+page forgot the aborted writer with its version still on the page, and once the
+page read again every snapshot read the rolled-back write as committed
+(`TransactionCoordinatorRollbackTests`, the malformed-page case); a prune
+dropped the candidate and left the dead version on its page for good. The
+ledger's reads go through the storage the store brackets, not through
+`TransactionRecordSpace.Read`: classifying a location needs the page header and
+the free-space map, which the record-space seam does not expose, and every
+record space reads the same slotted record the storage returns.
 
 ### Ending a transaction under a running statement
 
@@ -732,10 +767,32 @@ journal it reads is a `StorageJournal` (the `IStorageJournal` interface, and wit
 `ReadAll` fallback for custom journals, is gone). Only sequence classification survives
 iteration; physical page-image payloads are not retained.
 
-The safe prune bound starts at `max(manager.OldestActive, recoveredSequenceFloor)`
+The safe prune bound starts at `max(manager.PruneBound, recoveredSequenceFloor)`
 and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
 while an older writer was active can retain a floor below the current oldest
-active transaction, so using only the manager's bound would reclaim visible data.
+active transaction, so using only the oldest active sequence would reclaim visible data.
+`PruneBound` is the minimum of every active sequence and every active snapshot or
+serializable transaction's snapshot `Minimum`, read under the manager lock that `BeginAsync` holds while it
+assigns the sequence, captures the snapshot and enters the active table, so it covers a
+transaction from the moment its snapshot exists. The bound used to start from
+`OldestActive` and take snapshot floors only from the coordinator's open contexts, which a
+transaction joins after the manager's begin returns. A purge pass in that window pruned
+below the new snapshot's floor: the reader then found neither the reclaimed version nor its
+successor, whose writer it saw in flight, and read an existing record as absent. An
+adversarial probe (six readers looking documents up, one writer, a purge loop, 20 seconds)
+read 121 of 5.7 million existing documents as absent with the old bound and none of about
+four million, in each of two runs, with this one
+(`Prune_SnapshotBegunOnTheManagerAlone_ShouldKeepTheVersionItSees` reproduces the window's
+state deterministically). A read-committed transaction adds only its sequence: its
+`Snapshot` is captured afresh on every access, so between statements it holds the bound no
+further back than itself, as a PostgreSQL backend resets its `xmin` once it holds no snapshot
+(`src/backend/utils/time/snapmgr.c:937-955`). A read-committed statement view
+(`PinStatementSnapshot`) keeps the floor of the moment it was pinned, which the manager does
+not track, so a statement that must keep it while older writers commit pins it with a
+snapshot transaction of its own, begun before the view: the Documents, Graph and Blob
+operations do (`BlobReadCommittedTests` holds both halves: the pin keeps the version while
+the stream is open, and the next pass reclaims it once the stream ends, with the
+read-committed transaction still active).
 The purge pass retries failed abort undo before pruning, exactly as before. A retry that
 fails again no longer ends the pass: the pass still prunes, and rethrows the retry's
 failure at its end. A writer still deferred stays in the active table, so the bound never

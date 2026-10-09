@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,6 +11,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
@@ -185,6 +187,56 @@ public class TransactionCoordinatorRollbackTests
         await coordinator.CommitAsync(probe);
         await InsertAsync(coordinator, storage, next);
         await coordinator.CommitAsync(next);
+    }
+
+    /// <summary>
+    /// A version whose page cannot be read is not a reclaimed version (#1342). The undo fails
+    /// instead of skipping it, so the writer stays in flight and hidden until the purge pass
+    /// undoes it. Before the fix the undo read the failure as "the slot is gone, nothing to undo"
+    /// and released the writer with its version still on the page: once the page read again,
+    /// every snapshot read the rolled-back write as committed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: a version page that cannot be read keeps the writer hidden until the purge pass undoes it (#1342)")]
+    public async Task RollbackAsync_VersionPageMalformed_ShouldKeepTheWriterHiddenUntilThePurgePassUndoesIt()
+    {
+        // Arrange: the writer's version, then its slot entry made to address bytes past the page.
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await BeginWriterAsync(coordinator, storage);
+        var (pageId, slotIndex) = storage.LastInserted;
+        var location = storage.PackLocation(pageId, slotIndex);
+        byte[] slotEntry = MalformSlotEntry(storage, pageId, slotIndex);
+
+        // Act
+        await coordinator.RollbackAsync(writer);
+        var probe = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        Exception? unreadable = null;
+        try
+        {
+            await coordinator.VersionStore.GetVisibleVersionAsync(0, location, probe.Snapshot);
+        }
+        catch (Exception exception)
+        {
+            unreadable = exception;
+        }
+
+        RestoreSlotEntry(storage, pageId, slotIndex, slotEntry);
+        bool writerVisible = probe.Snapshot.IsVisible(writer.Sequence);
+        var visibleOnceReadable = await coordinator.VersionStore.GetVisibleVersionAsync(0, location, probe.Snapshot);
+        var pendingBeforeThePass = coordinator.VersionStore.PendingAbortedPurges;
+        long undone = coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert: the caller's transaction ended, but its undo was deferred rather than skipped,
+        // so the version stayed hidden until the pass removed it.
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        writerVisible.ShouldBeFalse();
+        visibleOnceReadable.ShouldBeNull();
+        pendingBeforeThePass.ShouldBe([writer.Sequence.Value]);
+        unreadable.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe(pageId);
+        undone.ShouldBe(1);
+        RecordCount(storage).ShouldBe(0);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        await coordinator.CommitAsync(probe);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: recovery classifies a writer without an abort record as aborted")]
@@ -1152,6 +1204,25 @@ public class TransactionCoordinatorRollbackTests
             coordinator.VersionStore.RecordCreated(context.Sequence, pageId, slotIndex);
             return 0;
         });
+
+    /// <summary>
+    /// Points a slot entry's offset at the last byte of its page, so the record it describes runs
+    /// past the page: the slotted read reports the page malformed. Returns the entry's bytes.
+    /// </summary>
+    private static byte[] MalformSlotEntry(Storage.Storage storage, PageId pageId, int slotIndex)
+    {
+        using var handle = storage.PageManager.GetPage(pageId);
+        var entry = handle.Page.AsSpan().Slice(Page.Size - ((slotIndex + 1) * 4), 4);
+        byte[] original = entry.ToArray();
+        BinaryPrimitives.WriteUInt16LittleEndian(entry, Page.Size - 1);
+        return original;
+    }
+
+    private static void RestoreSlotEntry(Storage.Storage storage, PageId pageId, int slotIndex, byte[] original)
+    {
+        using var handle = storage.PageManager.GetPage(pageId);
+        original.CopyTo(handle.Page.AsSpan().Slice(Page.Size - ((slotIndex + 1) * 4), 4));
+    }
 
     private static int RecordCount(Storage.Storage storage)
     {

@@ -31,10 +31,22 @@ check their reference arguments themselves. Public metadata records are immutabl
 Opening scans only owner-zero metadata pages, building directories keyed by ordinal collection
 name, `(collectionId, documentId)`, and `(collectionId, indexName)`. Directories retain physical
 version references. Every lookup rereads record stamps and identity: rollback, purge, and slot
-reuse cannot silently stale the directory. CRC and I/O failures propagate. Reclaimed slots and
-reused identities invalidate cached references. Reads choose the newest visible writer whose
+reuse cannot silently stale the directory. Each reread is `Storage.TryReadRecord` with owner
+zero, which reports a reclaimed location (a deleted or reverted slot, a metadata page the purge
+freed, a page reallocated to a content chain or as an index node) without reading it; that
+reference, and one whose identity changed, is dropped from the directory. CRC and I/O failures
+propagate. Until #1342 the lookup caught only the slot exceptions, so once the purge freed a
+metadata page every lookup that reached one of its references failed with "Page N is not
+allocated": 250 versions of one document and a purge pass were enough. Reads choose the newest visible writer whose
 deleter is not visible. Enumeration is ordinal name/identity order, independent of insertion,
 page allocation, or B+Tree scan order.
+
+`SearchIndexAsync` fetches the catalog record behind each visible index entry the same way:
+`TryReadRecord` with owner zero skips an entry whose record was reclaimed beneath it, the
+collection and stamp checks reject a slot that now holds another record, and a page that fails
+its checksum or cannot be read fails the search. Until #1342 the search read the record without
+the reclamation check, so an entry over a deleted slot failed the search with "Cannot read a
+deleted slot", and one over a freed page with "Page N is not allocated", instead of being skipped.
 
 Collections carry `DatabaseObjectOwner` plus an optional owning schema. `Schema` requires a
 nonempty schema name. The engine creates live-session collections as `Adhoc` and rejects
