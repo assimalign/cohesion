@@ -2288,6 +2288,9 @@ statement's outcome, the engine, its databases and its workers are the root sour
 Storage sources'. The Key-value, Graph and Blob servers write events 1-9 with the same ids, names
 and payloads from their own sources (plan, D2), so one provider list and one log query cover the
 four servers.
+The conventions every Database source shares (the failure rule, the ending rule, peer hang-ups,
+bounded peer-sent names) are in the area's
+[`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |

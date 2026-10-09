@@ -782,6 +782,9 @@ databases and its workers are the root source's (`Assimalign.Cohesion.Database`)
 transactions, locks and storage are the Transactions and Storage sources'. The SQL, Graph and
 Blob servers write events 1-9 with the same ids, names and payloads from their own sources
 (plan, D2), so one provider list and one log query cover the four servers.
+The conventions every Database source shares (the failure rule, the ending rule, peer hang-ups,
+bounded peer-sent names) are in the area's
+[`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |

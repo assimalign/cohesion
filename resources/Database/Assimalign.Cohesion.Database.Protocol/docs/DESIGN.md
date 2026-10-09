@@ -133,6 +133,9 @@ The child root reports through one internal event source named for its assembly,
 Verbose frame trace under the `Frames` keyword (`0x1`), so a tool takes it alone with
 `dotnet-trace collect --providers Assimalign.Cohesion.Database.Protocol:0x1:5`. A frame carries its
 message type and payload length, never its payload.
+The protocol writes no failure events (a frame failure is its catcher's, below); the conventions
+every Database source shares are in the area's
+[`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
