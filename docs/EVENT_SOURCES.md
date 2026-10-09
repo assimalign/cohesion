@@ -61,6 +61,9 @@ A NativeAOT application compiles EventSource out unless it opts back in:
 ```
 
 Without it, no tool and no forwarder receives any event; the libraries behave identically either way.
+No Cohesion SDK changes the .NET SDK default. The Database project templates set the property in the
+generated csproj, so a new database executable keeps its engine's events and can delete the line to
+opt out (owner decision, 2026-10-09).
 
 ## Cohesion event sources
 

@@ -439,7 +439,8 @@ durable record of its events. The decisions every source shares:
   per-request handler answered, and since each model translates its own statement failures into
   the `DatabaseException` family those handlers answer, what reaches it is expected to be an engine
   defect. It is therefore the one `Error` event whose message could carry an untranslated statement
-  exception's text (owner review item, 2026-10-08).
+  exception's text. The owner kept the message on 2026-10-09: a path that leaks statement data
+  into it is a missing translation in its model, fixed there.
 - **One ending rule: every `Start` has a `Stop` on every path**, as `System.Net.Http`'s
   `RequestStart`, `RequestFailed` and `RequestStop` do. The `Stop` carries `status`, a
   `QueryResultStatus` name: `Success`; `Error`, written after the pair's `Failed` event where one is

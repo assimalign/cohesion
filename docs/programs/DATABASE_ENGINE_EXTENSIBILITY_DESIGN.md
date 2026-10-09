@@ -1,6 +1,8 @@
 # Database engine extensibility, provisioning and composition: design
 
-**Status:** proposed; needs owner decisions 49 to 73 (§13) before any phase starts · **Created:** 2026-10-08 ·
+**Status:** approved; the owner accepted decisions 49 to 73 (§13) on 2026-10-09, answers inline,
+with one follow-up proposed under 49 (49a, awaiting the owner; it lands in B2). Phases B1 and E1
+start from here · **Created:** 2026-10-08 ·
 **Owner:** Chase Crawford
 **Answers:** the owner's request of 2026-10-08 (Database Hosting items 1 to 3, Provisioning, Event
 Source Tracing) · **Rules:** `.claude/rules/database-area.md`, `.claude/rules/resource-areas.md`,
@@ -1344,64 +1346,143 @@ Numbering continues the plan of record's table. Each line is the question, then 
 49. **Provisioning point.** Inside the model engine's `Build`/`BuildAsync`, so application Build
     performs I/O outside `StartupTimeout`; or at a root `StartAsync` hook Hosting calls before
     servers? *Recommend:* engine Build, as asked; no root lifecycle member.
+
+    >My Decision: I'm fine with at `Build`/`BuildAsync`. However, this may be due to my ignorance, but I am concerned that when we start implementing the ability to run schema migrations. A database that could have a terabyte of data could take a while and I am wondering if the engine build could hang up the host at all.
+
+    **49a (proposed 2026-10-09, awaiting the owner; lands in B2).** The concern holds. [Certain]
+    Four of the planner's operations cost time in proportion to the table: `AddIndex` and
+    `AddConstraint` on a populated table scan every row (an index also builds its whole tree), and
+    an `AlterColumn` that tightens a column checks or rewrites every row
+    (`Sql.Schema/src/SqlSchemaMigrationPlanner.cs:117`, `:134-143`, `:177`, `:209`). Inside
+    `builder.Build()` they run with no timeout and, in the hosted path, no cancellation, before the
+    admin endpoint listens. [Likely] An orchestrator's liveness probe then fails, the process is
+    killed mid-step and restarted, and the restart plans the same step again: a restart loop, not
+    only a slow start. Proposal:
+    - Build runs every step whose cost does not depend on the data: create a table, add a nullable
+      column, every drop (catalog-only since #1241), and any step on an empty table.
+    - A step whose cost grows with the data is recorded as pending in the catalog, and Build
+      returns. Before the engine accepts work, an engine-owned provisioning worker takes that
+      table's lock, so no write slips in ahead of it; it then runs the step as DDL does today.
+      Only that table waits; the rest of the database serves.
+    - Health reports the database Degraded with the step and its progress until the step
+      finishes, and provisioning events report its start, progress and end. A failed deferred step
+      takes that database offline with a coded error, as a failed Build step does today.
+    - A per-database option keeps every step inline, for tests and small databases.
+    - Build observes the host's shutdown token, so stopping during recovery or provisioning
+      cancels cleanly instead of being killed.
+
+    Precedents: Neo4j creates an index in the `POPULATING` state and fills it in the background
+    (`community/kernel-api/src/main/java/org/neo4j/internal/kernel/api/InternalIndexState.java:29`);
+    PostgreSQL has `CREATE INDEX CONCURRENTLY` (`src/backend/commands/indexcmds.c:429`) and
+    `NOT VALID` constraints validated later (`src/backend/commands/tablecmds.c:3266`). An index build
+    that lets writers continue on the same table, as `CONCURRENTLY` does, is a later work item.
+
 50. **The `DatabaseInstance` capability.** Delete `SupportsSchemaProvisioning`, `ApplySchemaAsync`,
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence
     to "`DatabaseInstance` has no capability member", recorded in O34a? *Recommend:* yes.
+    > Agree with recommendation
 51. **Ownership vocabulary.** Keep `DatabaseObjectOwner` and `DatabaseObjectLockedException` in the
     root (four catalogs persist them), moving the file out of `Provisioning/`? *Recommend:* keep.
+    > Agree
 52. **Builder shape.** Three levels; the engine name a mandatory first argument of every model verb
     and of `CreateBuilder(name)`; the root seam's nameless `AddEngine` replaced by
     `AddEngine(name, factory)`; the model-verb callback loses `IDatabaseApplicationContext`?
     *Recommend:* yes.
+    > Agree with recommendation, but can you expand on your reasoning a little more.
+
+    **Reasoning (2026-10-09).**
+    - *The name must be known before the factory runs.* [Certain] Today's nameless
+      `AddEngine(Func<…>)` learns an engine's name only from the engine its factory returns, so
+      Hosting finds a duplicate after construction (`Hosting/src/DatabaseApplicationBuilder.cs:466`).
+      Once the factory provisions (decision 49), a duplicate would be found only after a second
+      engine had opened, recovered and migrated databases, possibly under the same data path. A
+      name-first registration refuses the duplicate at the `AddSql` call, before any I/O, as the
+      named overload already does (`:755`).
+    - *One source of truth.* [Certain] The name lives today in each options type's `EngineName`
+      (103 files set it) and can disagree with the registration. It feeds the default data path,
+      health check names, control-plane command targets, the resource manifest and every trace's
+      `engineName`. Written once as the verb's first argument, it cannot disagree.
+    - *The root seam must carry it.* `AddEngine(name, factory)` is the member every model verb
+      calls, so the seam is where Hosting reserves the name; a model verb cannot reserve it any
+      other way without referencing Hosting (COHRES001).
+    - *The callback loses `IDatabaseApplicationContext`.* [Certain] It runs while the application
+      is being built, when that context has no engines yet, and the five templates and the
+      SampleHost all discard it. What a callback could want from it, configuration and
+      environment, is already in scope as `builder.Configuration` and `builder.Environment`.
+      Keeping it couples engine configuration to host infrastructure, against the separation the
+      owner asked for. Code that needs the container uses the lower-level
+      `builder.AddEngine(name, context => …)`, whose build context carries the built
+      `ServiceProvider`.
 53. **Imperative apply.** Keep `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)` public for tools,
     Studio and tests? *Recommend:* keep, on the sealed leaf.
+    > Agree
 54. **Legacy registration paths.** Delete `DatabaseApplicationOptions.Engines`, `.Servers` and
     `.Services`, the options constructor and `CreateBuilder(DatabaseApplicationOptions)`?
     *Recommend:* yes, one path per kind of thing.
+    > Agree
 55. **Provisioning modes.** `Apply` (default) and `Verify` only? *Recommend:* yes; `Verify` is
     opt-in per database, not per environment.
+    > Agree
 56. **Declared databases.** Refuse `DropDatabaseAsync` of a declared database, and refuse an
     existing database whose collation differs from the declared one? *Recommend:* refuse both.
+    > Agree
 57. **Schema lambdas.** Delete `SqlSchemaBuilder.Function<…>`, `Trigger<…>` and `Extension`, their
     compiled records, and the SDK canonicalizer? None has ever executed. *Recommend:* delete in B1.
+    > Agree
 58. **Principals.** Remove `Principal(...)` from the five templates in B1, and refuse schema
     principals at engine Build (before I/O) until principal and grant DDL is its own item?
     *Recommend:* yes.
+    > Agree
 59. **SDK artifacts and format.** One schema artifact per declared database, the inline
     `database.Schema(...)` anchor, document format `v2`, and the one-time hash change?
     *Recommend:* yes.
+    > Agree
 60. **Function abstraction shape.** Abstract NVI bases plus static typed factories over `SqlValue`
     (recommended), typed generic bases over `object?`, or sealed delegate descriptors?
     *Recommend:* the first.
+    > Agree
 61. **Function scope.** Engine-registered functions and types visible in every database of the
     engine, like SQLite and DuckDB, rather than opted into per database like PostgreSQL's
     `CREATE EXTENSION`? *Recommend:* engine-wide.
+    > Agree. If the developer want sepparation they can instantiate a separate engine in the same process.
 62. **Names.** One flat namespace; an exact duplicate (name and parameter types), a built-in's
     included, refused; new overloads allowed; no replacing or removing standard-library functions
     in iteration 1? *Recommend:* yes.
+    > Agree
 63. **Registration defaults.** Typed registration defaults to `Volatile` and
     `ReturnsNullOnNullInput`, so a developer must mark a function `Immutable` before a CHECK or
     folding uses it? *Recommend:* yes; it fails loudly instead of silently.
+    > Agree
 64. **CHECK admission.** `Immutable` functions only in CHECK (and later index expressions and
     generated columns), stricter than PostgreSQL and SQLite? *Recommend:* yes; relaxing later is
     free, tightening later breaks stored definitions.
+    > Agree 
 65. **A missing native function.** The database opens; writes that evaluate the definition fail
     with `COHSQLE009`; engine Build fails for a declared database? *Recommend:* yes, and amend the
     SQL DESIGN's persisted-definition rule.
+    > Agree
 66. **Special forms.** COALESCE, NULLIF, CASE, CAST and EXTRACT stay evaluator nodes, listed in
     `sys.functions`? *Recommend:* yes.
+    > Agree
 67. **Built-in parity.** E2 keeps today's permissive UPPER, LOWER, LENGTH and ABS behavior, and
     tightening to typed overloads is a separate change? *Recommend:* yes.
+    > Agree
 68. **Types in iteration 1.** Domains and a cast registry only; physical types, collations and
     operators deferred? *Recommend:* yes.
+    > Agree
 69. **Raw SQL.** `CREATE FUNCTION … RETURN expr` (SQL body only, no native alias), `CREATE DOMAIN`,
     and declared forward-only checksummed scripts? *Recommend:* yes, in E4.
+    > Agree
 70. **Sequencing.** The bound expression tree (E1) lands before the evaluator moves onto the ABI, with
     the per-row-lookup fallback if it slips? *Recommend:* yes.
+    > Agree
 71. **Error codes.** Allocate `COHSQLE007` (a function failed), `COHSQLE008` (ambiguous call,
     SQLSTATE 42725) and `COHSQLE009` (a persisted definition names an unregistered function)?
     *Recommend:* yes.
+    > Agree
 72. **P7.** Fold the template, SampleHost and cohesion-examples work into B1, leaving P7 the
     ApplicationModel verification and Studio's typed fields after B3? *Recommend:* yes.
+    > Agree
 73. **Revision gate.** An optional monotonic schema revision that refuses a downgrade?
     *Recommend:* not in iteration 1; the destructive gate covers the damaging cases.
+    > Agree

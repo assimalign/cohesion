@@ -4,5 +4,9 @@
          Generates resource.json, Resource.g.cs and ResourceControlPlane.g.cs; Assimalign.Cohesion.Database.ApplicationModel
          owns the generated default control plane. Without it this is a plain executable that a gateway cannot reference. -->
     <CohesionApplicationModel>disabled</CohesionApplicationModel>
+    <!-- Keeps the Database engine's EventSource tracing in a NativeAOT or trimmed publish, so dotnet-trace,
+         dotnet-counters and the log forwarder still receive its events. The .NET SDK default removes EventSource
+         support from such builds; delete this line to accept that default. -->
+    <EventSourceSupport>true</EventSourceSupport>
   </PropertyGroup>
 </Project>
