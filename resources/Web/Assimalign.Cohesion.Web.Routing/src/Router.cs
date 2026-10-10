@@ -21,7 +21,9 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// are evaluated ahead of unconstrained ones, and registration order breaks the remaining ties. This means a
 /// literal segment always wins over a parameter segment regardless of the order the routes were registered.
 /// A candidate whose host constraints the request host does not satisfy is skipped entirely — it neither
-/// matches nor contributes to a 405 — so the request falls through to other candidates. Method handling
+/// matches nor contributes to a 405 — so the request falls through to other candidates. The request host is
+/// the effective host (<see cref="HttpContextForwardedExtensions.EffectiveHost"/>): the host a trusted proxy
+/// forwarded when the forwarded-headers middleware ran ahead of routing, otherwise the wire host. Method handling
 /// follows RFC 9110: a path that matches with an unacceptable method yields
 /// <see cref="RouteMatchStatus.MethodNotAllowed"/> (405) with the acceptable methods, and a <c>HEAD</c>
 /// request is served by a matching <c>GET</c> route when <c>HEAD</c> is not explicitly mapped.
@@ -30,6 +32,7 @@ public sealed class Router : IRouter
 {
     private readonly IReadOnlyList<IRouterRoute> _routes;
     private readonly Candidate[] _ordered;
+    private readonly bool _hasHostConstraints;
 
     /// <summary>
     /// Creates a new router from the supplied route collection.
@@ -46,6 +49,7 @@ public sealed class Router : IRouter
 
         _routes = routes.ToImmutableList();
         _ordered = BuildCandidates(_routes);
+        _hasHostConstraints = Array.Exists(_ordered, candidate => candidate.Hosts is not null);
         LinkGenerator = new RouterLinkGenerator(_routes);
     }
 
@@ -124,7 +128,11 @@ public sealed class Router : IRouter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        HttpHost host = context.Request.Host;
+        // Host constraints select on the host the client addressed: behind a trusted proxy that rewrites
+        // Host, the forwarded host, never the upstream name the proxy dialed (#1077). Without an
+        // IHttpForwardedFeature it is the wire host. A router without host-constrained candidates never
+        // reads it, so it pays no feature lookup.
+        HttpHost host = _hasHostConstraints ? context.EffectiveHost : default;
         List<HttpMethod>? allowed = null;
 
         for (int i = 0; i < _ordered.Length; i++)

@@ -51,8 +51,16 @@ public static class RouterConventionBuilderExtensions
         /// <exception cref="Exceptions.RoutePatternException">A host is not a well-formed host constraint.</exception>
         /// <exception cref="InvalidOperationException">The route table has already been built.</exception>
         /// <remarks>
+        /// <para>
         /// A route-level declaration replaces a group-level one rather than merging with it, because
         /// the router reads the last <see cref="RouteHostMetadata"/> in the route's metadata.
+        /// </para>
+        /// <para>
+        /// The router matches the effective host (<c>context.EffectiveHost</c>): behind a trusted proxy,
+        /// the host the client addressed, which <c>UseForwardedHeaders</c> resolves; otherwise the wire
+        /// host. Register <c>UseForwardedHeaders</c> ahead of <c>UseRouting</c> when a proxy rewrites
+        /// <c>Host</c>, or the routes match the name the proxy dialed.
+        /// </para>
         /// </remarks>
         public TBuilder RequireHost(params string[] hosts)
         {

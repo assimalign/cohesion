@@ -38,7 +38,9 @@ models were set aside on 2026-07-10.
 - Supports **host-constrained routes** (exact hosts, `*.wildcard` subdomains, `host:port`,
   IPv6 literals) declared as endpoint metadata and evaluated during candidate selection:
   non-matching hosts fall through to other candidates, and host-constrained routes outrank
-  unconstrained ties.
+  unconstrained ties. The host matched is the effective one (`context.EffectiveHost` from
+  `Http.Forwarded`): the host a trusted proxy forwarded when `UseForwardedHeaders` runs ahead of
+  routing, otherwise the wire host.
 - Keeps routing state **per application** (no process-wide shared builder), so multiple web
   applications hosted in one process have fully isolated route tables.
 - Generates **outbound URLs** (`ILinkGenerator`): routes register a unique, case-insensitive

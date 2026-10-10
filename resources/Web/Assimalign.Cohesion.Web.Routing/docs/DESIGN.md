@@ -164,9 +164,10 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
 | IPv6 literal | `[::1]`, `[2001:db8::1]:443` | brackets are the canonical form; comparison strips them, so `::1` denotes the same constraint |
 
 - Host comparison is **case-insensitive** (RFC 9110 §4.2.3 / RFC 3986 §3.2.2); ports compare exactly.
-- A port constraint requires the port to be **explicit** in the request's `Host` value. A request
-  whose host omits the port (an implied scheme default) does not satisfy a port-constrained route —
-  the matcher compares against the Host header as sent, mirroring ASP.NET `RequireHost`.
+- A port constraint requires the port to be **explicit** in the request host. A request whose host
+  omits the port (an implied scheme default) does not satisfy a port-constrained route — the matcher
+  compares against the host as the client sent it, mirroring ASP.NET `RequireHost`. Behind a trusted
+  proxy that is the forwarded host, port included (see "Which host" below).
 - The constraints in one `RouteHostMetadata` are **OR-combined**: the request host must satisfy any
   one of them.
 - Patterns are parsed **once, at metadata construction** (`RouteHostConstraint.Parse`/`TryParse`);
@@ -215,7 +216,48 @@ path and method, and candidate-selection concerns layer on top in the router.
 host; it never rejects a request. Validating the request host against an allowlist (→ 400) is the
 separate host-filtering middleware's job (#781). The two compose: the middleware guards the edge,
 and whatever it admits is routed — possibly onto host-constrained endpoints — by this matcher.
-Neither duplicates the other.
+Neither duplicates the other, and both read the same host (below).
+
+### Which host: the effective host (#1077)
+
+The router matches host constraints against `context.EffectiveHost`, the feature-first read from
+`Assimalign.Cohesion.Http.Forwarded` (owner decision 3 in `docs/programs/HTTP_WEB_PROGRAM_PLAN.md`
+§7.4):
+
+- With `UseForwardedHeaders` registered ahead of `UseRouting` and a trusted proxy that forwarded a
+  host, it is that forwarded host: the authority the client addressed.
+- Otherwise it is the wire host (`IHttpRequest.Host`, as the transport resolved it): no
+  forwarded-headers middleware, an untrusted peer, a hop that forwarded no host, or forwarded-headers
+  registered after routing. `X-Forwarded-Host` from a client is never read directly; only the trust
+  walk can make it the effective host.
+
+**Why the effective host.** Before #1077 the router read `IHttpRequest.Host`. Behind a proxy that
+rewrites `Host` to its upstream name and forwards the client's host in `X-Forwarded-Host` or
+`Forwarded: host=`, that has two consequences:
+
+- Routes constrained to a public host stop matching and answer 404. That failure is closed.
+- The admin-on-internal-host pattern opens. A route constrained to the internal name the proxy
+  dials matches **every** public request the proxy forwards, so a gate meant for internal callers
+  admits remote clients.
+
+`Web.HostFiltering` already validated the effective host (#1050). With both on the effective host,
+the host the allowlist bounds is the host routing selects on.
+
+**Cost.** Reading the effective host is a feature lookup. The router computes once, at construction,
+whether any candidate declares hosts, and a router without host-constrained candidates never reads
+the host at all.
+
+**Dependency.** `Web.Routing` takes a public `CohesionProjectReference` on `Http.Forwarded`, the
+contract-only package that owns `IHttpForwardedFeature` and the `Effective*` members. It is outside
+the Web area, so the hosting-isolation rule does not constrain it, and the trust model stays in
+`Web.ForwardedHeaders`, which routing does not reference. `App.Web` already ships `Http.Forwarded`.
+`App.Database` and `App.IdentityHub`, which carry `Web.Routing` privately, list it as a private
+member.
+
+`RouteHostForwardedTests` runs the real forwarded-headers middleware ahead of `UseRouting`, from a
+known proxy address that rewrote `Host`. It pins the forwarded-host match, the internal-host route a
+rewritten public request must not reach, and the wire-host fallback without `UseForwardedHeaders` and
+from an untrusted peer.
 
 ### Ordering (the documented tie-break)
 

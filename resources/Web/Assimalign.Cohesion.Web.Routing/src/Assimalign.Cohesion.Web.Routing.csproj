@@ -4,5 +4,9 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- Host-constrained candidates (RequireHost) match context.EffectiveHost: the host a trusted
+		     proxy forwarded, else the wire host. Outside the Web area, so unconstrained by the
+		     hosting-isolation rule. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 	</ItemGroup>
 </Project>

@@ -128,6 +128,7 @@ The Web feature libraries that consume the effective view (#1050, owner decision
 what the ordering contract protects:
 
 - **Before `next`** — `Web.HttpsPolicy` redirection, `Web.HostFiltering`,
+  `Web.Routing`'s host-constrained route selection (`RequireHost`, #1077),
   `Web.Compression`'s BREACH guard, `Web.Caching`'s primary key, `Web.RateLimiting`'s
   client-address partition, and the `Secure` decisions of `Web.Sessions` and
   `Web.Authentication.Cookie` (taken when the cookie is issued). These must run after

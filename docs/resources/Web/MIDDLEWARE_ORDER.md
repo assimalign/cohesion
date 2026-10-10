@@ -49,7 +49,7 @@ flowchart TD
 | 13 | `UseStaticFiles` | Web.StaticFiles | Ahead of `UseRouting`, so an existing file is served without routing or authentication. |
 | 14 | `UseAuthentication` | Web.Authentication | Anywhere ahead of `UseAuthorization`. In this position, branches and middleware ahead of routing also see `context.User`. |
 | 15 | `UseSessions` | Web.Sessions | After `UseCookiePolicy`, which applies the policy to the session cookie. The session loads on first use, so a request that never touches it costs nothing. |
-| 16 | `UseRouting` | Web.Routing | Publishes the matched endpoint and calls `next`; the pipeline terminal runs the endpoint. Every middleware after it can read the endpoint. |
+| 16 | `UseRouting` | Web.Routing | Publishes the matched endpoint and calls `next`; the pipeline terminal runs the endpoint. Every middleware after it can read the endpoint. `RequireHost` routes match the effective host, so behind a proxy that rewrites `Host` routing must follow `UseForwardedHeaders`. |
 | 17 | `UseCors` | Web.Cors | Ahead of every middleware that can reject a preflight. A preflight carries no credentials, so authorization would answer it `401`, a rate limit `429` and antiforgery `400`. |
 | 18 | `UseAuthorization` | Web.Authorization | After authentication, and ahead of output caching so an unauthorized request is never served from the cache. |
 | 19 | `UseRequestTimeouts` | Web.RequestTimeouts | Ahead of the work it bounds. The rate limiter waits for a permit on the request's cancellation token, so a timeout here also cuts off a request still queued for a permit. |

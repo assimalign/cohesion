@@ -83,14 +83,12 @@ merely skips a route candidate. Use filtering to bound the hosts the
 application answers *at all*, and host-constrained routes to fan traffic
 across the hosts inside that boundary.
 
-One asymmetry is known and recorded: behind a proxy that forwards a host,
-filtering validates the *effective* host (below) while routing's host
-constraints still match the *wire* host (`Router.Match` reads
-`IHttpRequest.Host`). The two agree whenever the proxy passes the client's
-`Host` through; when it rewrites `Host` and forwards the original in
-`X-Forwarded-Host`, host-constrained routes see the upstream authority. Moving
-routing onto the effective host is left to the routing rework (Stage 6 of the
-HTTP/Web program), not changed here.
+Both read the same host: filtering validates the *effective* host (below), and
+routing's host constraints match it too (#1077). Behind a proxy that rewrites
+`Host` and forwards the original in `X-Forwarded-Host`, the host the allowlist
+admits is therefore the host the routes select on, never the upstream
+authority the proxy dialed. Until #1077 routing matched the wire host, so the
+two disagreed behind such a proxy.
 
 ## Validating the forwarded host (`Web.ForwardedHeaders`, #778; #1050)
 
