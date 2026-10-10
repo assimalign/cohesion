@@ -9,9 +9,10 @@ registers. It never references `Database.Hosting`, an engine package, a gateway
 implementation, or a platform object model.
 
 An enabled `Sdk.Database` executable produces `cohesion/resource/v1` at build time.
-Generated gateway code passes that `ResourceManifest` to `AddDatabase(...)`; the
-ApplicationModel package does not reconstruct endpoint, mount, artifact, or lifecycle
-facts from conventions.
+`Sdk.Gateway` generates a typed `Manifests.<Name>` for it, and the gateway's `Program.cs`
+passes that `ResourceManifest` to this package's hand-written `AddDatabase(...)` verb (the
+SDK generates no per-resource verb); the ApplicationModel package does not reconstruct
+endpoint, mount, artifact, or lifecycle facts from conventions.
 
 ## Manifest-backed resource
 
@@ -77,7 +78,8 @@ IDatabaseResourceDescriptor database = builder.AddDatabase(
     });
 ```
 
-Generated gateway verbs supply the manifest and expose the same optional typed options;
+A gateway passes the generated `Manifests.<Name>` and, optionally, the same typed options
+(`builder.AddDatabase(Manifests.OrdersDatabase, new DatabaseResourceOptions { ... })`);
 application authors normally do not load the JSON themselves.
 
 ## Default control plane
@@ -93,6 +95,33 @@ neither package references the other.
 The accepted kinds are `database.add-database` and `database.add-principal`. The typed
 descriptor verbs record these declarations; Hosting owns their mutation handlers.
 
+## Engine-declared and command-declared databases
+
+A database executable owns databases in two ways, and this package sees only the second:
+
+- **Declared by the engine's builder** in the target's `Program.cs`
+  (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`).
+  The engine opens or creates each one, and a SQL engine provisions its schema, before the
+  engine's build returns, so it exists before the control plane accepts a command. The
+  declaration owns it: the engine refuses to drop it (owner decision 56 of 2026-10-09).
+- **Declared by a gateway command**, `descriptor.AddDatabase(name, engine)`. Hosting's handler
+  creates an empty database on the running engine (no schema; a SQL database gets the binary
+  default collation) and records it under the command's key; deleting the command drops it.
+
+The two never share a database. A command that names a database the engine already holds,
+an engine-declared one included, is rejected (`cannot claim existing database`), because
+this declaration did not create it; names compare as the engine compares them, ignoring
+case. The design of record keeps this refusal unchanged
+(`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.6), and
+`ResourceCommandHostingTests` in Database.Hosting pins it for a builder-declared database.
+A database whose schema is code therefore belongs on the engine builder; the command is for
+an empty database the deployment, not the program, decides to add.
+
+The `engine` field is the engine's name as the target registers it: the first argument of
+its model verb (`AddSql("orders-sql", …)`), written once since the builder redesign (owner
+decision 52). Omitted, it selects the target's sole engine; with two or more engines the
+handler rejects the command and asks for a name.
+
 ## Dependency and AOT posture
 
 COHAM001 constrains the complete production dependency closure to
@@ -102,6 +131,14 @@ COHAM001 constrains the complete production dependency closure to
 records and ordinary loops only. Golden serialization goes through
 `ResourcePlanJsonContext`; there is no reflection, assembly scanning, runtime code
 generation, runtime database dependency, or platform SDK dependency.
+
+The concrete-first program (`database-area.md`) and the engine builder redesign left this
+package unchanged, which phase 7 of the concrete-types plan verified: its built closure is
+exactly the list above plus `System.Security.Cryptography.ProtectedData`, with no other
+Database assembly (no root, model or engine), and `IDatabaseResourceDescriptor` is one of the five
+interfaces the area keeps. It stays an interface because it extends the library-owned
+`IResourceCommandDescriptor`, the pattern of every area's `I<Area>ResourceDescriptor`; the
+concrete-first rule covers engine models, not orchestration.
 
 ## Non-goals
 

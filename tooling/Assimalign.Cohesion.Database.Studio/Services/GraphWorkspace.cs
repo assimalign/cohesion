@@ -19,6 +19,7 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// <summary>Graph (GQL): embedded session or <c>Graph.Client</c>, with row and path dispatch.</summary>
 internal sealed partial class GraphWorkspace : LanguageWorkspace
 {
+    private GraphDatabaseSession? _session;
     private GraphClient? _client;
     private GraphConnection? _connection;
     private string? _wireDatabase;
@@ -26,6 +27,23 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
     public GraphWorkspace(ConnectionMode mode, StudioEngines engines, EndPoint? wireEndPoint)
         : base(StudioModel.Graph, mode, engines, wireEndPoint)
     {
+    }
+
+    public override GraphDatabaseEngine Engine => Engines.Graph;
+
+    public override GraphDatabaseSession? Session => _session;
+
+    protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
+    {
+        GraphDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
+        _session = await opened.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override DatabaseSession? DetachSession()
+    {
+        GraphDatabaseSession? session = _session;
+        _session = null;
+        return session;
     }
 
     public override string LanguageName => "GQL";

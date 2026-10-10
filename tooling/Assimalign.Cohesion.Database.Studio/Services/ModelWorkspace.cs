@@ -22,6 +22,12 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// explicit transactions for embedded sessions. All operations are serialized through one gate
 /// because an engine session runs one operation at a time.
 /// </summary>
+/// <remarks>
+/// The shared operations run on the root bases' public members (<see cref="DatabaseEngine"/>,
+/// <see cref="DatabaseSession"/>). Each model's workspace owns the typed engine and session: it
+/// overrides <see cref="Engine"/> and <see cref="Session"/> covariantly and opens its session
+/// through the typed engine (<see cref="OpenSessionAsync"/>), so no workspace downcasts.
+/// </remarks>
 internal abstract class ModelWorkspace : IAsyncDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -40,14 +46,15 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
     public StudioEngines Engines { get; }
 
-    public DatabaseEngine Engine => Engines.Get(Model);
+    /// <summary>The model's in-process engine; each workspace returns it typed.</summary>
+    public abstract DatabaseEngine Engine { get; }
 
     public EndPoint? WireEndPoint { get; }
 
     public string? CurrentDatabase { get; private set; }
 
-    /// <summary>The embedded session; null in wire modes.</summary>
-    public DatabaseSession? Session { get; private set; }
+    /// <summary>The embedded session; null in wire modes. Each workspace returns it typed.</summary>
+    public abstract DatabaseSession? Session { get; }
 
     /// <summary>Database create/drop/list needs the engine; an external server exposes no such verbs over the wire.</summary>
     public bool CanManageDatabases => Mode != ConnectionMode.WireExternal;
@@ -181,8 +188,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
             if (Mode == ConnectionMode.Embedded)
             {
-                DatabaseInstance database = await Engine.OpenDatabaseAsync(name, token).ConfigureAwait(false);
-                Session = await database.CreateSessionAsync(token).ConfigureAwait(false);
+                await OpenSessionAsync(name, token).ConfigureAwait(false);
             }
             else
             {
@@ -244,16 +250,27 @@ internal abstract class ModelWorkspace : IAsyncDisposable
     protected virtual Task EndWireTransactionAsync(bool commit, CancellationToken cancellationToken)
         => throw new NotSupportedException($"{Model.DisplayName} has no wire transaction verbs; explicit transactions are embedded-only.");
 
-    /// <summary>Opens a short-lived embedded session on the current database (loopback/embedded only).</summary>
-    protected async Task<DatabaseSession> OpenAdminSessionAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Opens <paramref name="database"/> on the typed engine and keeps a session on it as
+    /// <see cref="Session"/> (embedded mode). The current session, if any, is already closed.
+    /// </summary>
+    protected abstract Task OpenSessionAsync(string database, CancellationToken cancellationToken);
+
+    /// <summary>Forgets <see cref="Session"/> and returns it for the caller to dispose; null when none is open.</summary>
+    protected abstract DatabaseSession? DetachSession();
+
+    /// <summary>
+    /// The current database, for a short-lived admin session opened on the engine (loopback/embedded
+    /// only): an external server exposes no catalog/admin verbs over the wire.
+    /// </summary>
+    protected string RequireAdminDatabase()
     {
         if (!CanManageDatabases)
         {
             throw new NotSupportedException("An external server exposes no catalog/admin verbs for this model over the wire.");
         }
 
-        DatabaseInstance database = await Engine.OpenDatabaseAsync(RequireDatabase(), cancellationToken).ConfigureAwait(false);
-        return await database.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+        return RequireDatabase();
     }
 
     protected abstract Task OpenWireAsync(string database, EndPoint endPoint, CancellationToken cancellationToken);
@@ -276,9 +293,8 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
     private async Task CloseCurrentAsync()
     {
-        if (Session is { } session)
+        if (DetachSession() is { } session)
         {
-            Session = null;
             try
             {
                 await session.DisposeAsync().ConfigureAwait(false);

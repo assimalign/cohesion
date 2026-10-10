@@ -98,6 +98,11 @@ internal sealed class SmokeRunner
         var embedded = new SqlWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            if (await DeclaredDatabaseAsync("sql/declared", embedded).ConfigureAwait(false))
+            {
+                await DeclaredSqlSchemaAsync("sql/declared", embedded).ConfigureAwait(false);
+            }
+
             const string scope = "sql/embedded";
             if (!await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -108,6 +113,8 @@ internal sealed class SmokeRunner
                 "CREATE TABLE smoke_t (id BIGINT PRIMARY KEY, name TEXT NOT NULL); INSERT INTO smoke_t (id, name) VALUES (1, 'alpha'), (2, 'beta'); SELECT id, name FROM smoke_t ORDER BY id;",
                 outcomes => Expect(outcomes[1].AffectedCount == 2, $"insert affected {outcomes[1].AffectedCount}")
                     ?? ExpectRows(outcomes[2], 2, row => row[1] == "beta")).ConfigureAwait(false);
+
+            await RegisteredFunctionsStepAsync(scope, embedded, "smoke_t", rows: 2, lastInitial: "B", product: "2").ConfigureAwait(false);
 
             await StepAsync(scope, "transaction-api-rollback", async () =>
             {
@@ -143,6 +150,9 @@ internal sealed class SmokeRunner
                     outcomes => Expect(outcomes[1].AffectedCount == 3, $"insert affected {outcomes[1].AffectedCount}")
                         ?? ExpectRows(outcomes[2], 2, row => row[1] == "three")).ConfigureAwait(false);
 
+                // The server runs statements on the same engine, so the registered functions answer over the wire too.
+                await RegisteredFunctionsStepAsync(scope, wire, "smoke_w", rows: 3, lastInitial: "T", product: "6").ConfigureAwait(false);
+
                 await ScriptStepAsync(scope, "begin-rollback-statements", wire,
                     "BEGIN; INSERT INTO smoke_w (id, name) VALUES (4, 'four'); ROLLBACK; SELECT COUNT(*) FROM smoke_w;",
                     outcomes => ExpectRows(outcomes[3], 1, row => row[0] == "3")).ConfigureAwait(false);
@@ -169,6 +179,8 @@ internal sealed class SmokeRunner
         var embedded = new DocumentWorkspace(engines);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("documents/declared", embedded).ConfigureAwait(false);
+
             const string scope = "documents/embedded";
             if (!await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -210,6 +222,8 @@ internal sealed class SmokeRunner
         var embedded = new GraphWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("graph/declared", embedded).ConfigureAwait(false);
+
             const string scope = "graph/embedded";
             if (!await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -265,6 +279,8 @@ internal sealed class SmokeRunner
         var embedded = new KeyValueWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("keyvalue/declared", embedded).ConfigureAwait(false);
+
             const string scope = "keyvalue/embedded";
             if (await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -347,6 +363,8 @@ internal sealed class SmokeRunner
         var embedded = new BlobWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("blob/declared", embedded).ConfigureAwait(false);
+
             const string scope = "blob/embedded";
             if (await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -406,6 +424,76 @@ internal sealed class SmokeRunner
             return true;
         }).ConfigureAwait(false);
     }
+
+    // ---------------------------------------------------------------- declared databases and registered functions
+
+    /// <summary>
+    /// The database every engine's builder declares (<see cref="StudioEngines.DeclaredDatabase"/>)
+    /// exists once the engine is built, the engine refuses to drop it, and it opens like any other.
+    /// </summary>
+    private async Task<bool> DeclaredDatabaseAsync(string scope, ModelWorkspace workspace)
+    {
+        bool declared = await StepAsync(scope, "declared-database", async () =>
+        {
+            IReadOnlyList<string> names = await workspace.ListDatabasesAsync(discoverOnDisk: false).ConfigureAwait(false);
+            Require(names.Contains(StudioEngines.DeclaredDatabase, StringComparer.OrdinalIgnoreCase),
+                $"'{StudioEngines.DeclaredDatabase}' not listed after the engine's build ({string.Join(", ", names)})");
+            try
+            {
+                await workspace.DropDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
+            }
+            catch (DatabaseObjectLockedException)
+            {
+                // The declaration owns the database: the drop is refused, and the database stays.
+                return true;
+            }
+
+            throw new InvalidOperationException($"DROP of the declared database '{StudioEngines.DeclaredDatabase}' was not refused.");
+        }).ConfigureAwait(false);
+
+        return declared && await StepAsync(scope, "use-declared-database", async () =>
+        {
+            await workspace.UseDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
+            return true;
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The SQL engine provisioned the declared database's typed schema at its build, and the CHECK
+    /// that schema declares calls a registered function. Leaves the table empty, so a reused data
+    /// root runs it again.
+    /// </summary>
+    private async Task DeclaredSqlSchemaAsync(string scope, SqlWorkspace workspace)
+    {
+        string table = StudioSqlExtensions.NotesTable;
+        await ScriptStepAsync(scope, "provisioned-schema", workspace,
+            $"DELETE FROM {table}; INSERT INTO {table} (Id, Title) VALUES (1, 'Ada Lovelace'); SELECT Id, {StudioSqlExtensions.InitialsFunction}(Title) FROM {table}; DELETE FROM {table};",
+            outcomes => Expect(outcomes[1].AffectedCount == 1, $"insert affected {outcomes[1].AffectedCount}")
+                ?? ExpectRows(outcomes[2], 1, row => row[1] == "AL")).ConfigureAwait(false);
+
+        await ScriptStepAsync(scope, "check-calls-registered-function", workspace,
+            $"INSERT INTO {table} (Id, Title) VALUES (2, '   ');",
+            outcomes => Expect(outcomes[0].Failed && NamesCheck(outcomes[0]),
+                $"a title with no word was not refused by {StudioSqlExtensions.NotesCheck}: {Describe(outcomes[0])}"),
+            allowFailures: true).ConfigureAwait(false);
+
+        static bool NamesCheck(StatementOutcome outcome)
+            => (outcome.Error ?? string.Empty).Contains(StudioSqlExtensions.NotesCheck, StringComparison.OrdinalIgnoreCase)
+                || outcome.Diagnostics.Any(diagnostic => diagnostic.Message.Contains(StudioSqlExtensions.NotesCheck, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The functions <see cref="StudioSqlExtensions"/> registers resolve like built-ins: a scalar per
+    /// row, an aggregate over the table, and both listed in <c>COHESION_SCHEMA.FUNCTIONS</c>.
+    /// </summary>
+    private Task RegisteredFunctionsStepAsync(string scope, SqlWorkspace workspace, string table, int rows, string lastInitial, string product)
+        => ScriptStepAsync(scope, "registered-functions", workspace,
+            $"SELECT id, {StudioSqlExtensions.InitialsFunction}(name) FROM {table} ORDER BY id; " +
+            $"SELECT {StudioSqlExtensions.ProductFunction}(id) FROM {table}; " +
+            "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME;",
+            outcomes => ExpectRows(outcomes[0], rows, row => row[1] == lastInitial)
+                ?? ExpectRows(outcomes[1], 1, row => row[0] == product)
+                ?? ExpectRows(outcomes[2], 2, row => row[0] == StudioSqlExtensions.ProductFunction));
 
     // ---------------------------------------------------------------- shared steps
 

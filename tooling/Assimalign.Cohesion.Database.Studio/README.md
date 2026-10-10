@@ -22,9 +22,35 @@ recreated in each model):
 ```
 
 It prints one `PASS`/`FAIL`/`SKIP` line per step, mirrors them to `studio-smoke.log` next to the
-exe, and exits non-zero when a step fails. It covers, per model, create/insert/query embedded and
-over loopback TCP, transactions, the catalog, and every Samples script. UI crashes are logged to
-`studio-crash.log` next to the exe; the UI marks them handled and keeps running.
+exe, and exits non-zero when a step fails. It covers, per model, the declared `studio` database
+(listed after the engine's build, its drop refused, opened), create/insert/query embedded and
+over loopback TCP, transactions, the catalog, and every Samples script; for SQL also the declared
+database's provisioned schema and its CHECK, and the registered functions embedded and over the
+wire. A run over a fresh temporary root gives 98 passed, 0 failed, 1 skipped (Documents has no
+wire); a second run over the same `dataRoot` takes the engines' open path and gives the same. UI
+crashes are logged to `studio-crash.log` next to the exe; the UI marks them handled and keeps
+running.
+
+## Engines
+
+`StudioEngines` composes one engine per model through its model's builder, as a `Program.cs`
+does: `XDatabaseEngine.CreateBuilder("studio-<model>")`, `Options.RootPath` set to
+`<data root>\<model>`, and `AddDatabase("studio")`, so every engine opens or creates a `studio`
+database while it is built and refuses to drop it. It holds each engine typed
+(`SqlDatabaseEngine`, `DocumentDatabaseEngine`, `GraphDatabaseEngine`, `KeyValueDatabaseEngine`,
+`BlobDatabaseEngine`), and each model's workspace overrides `Engine` and `Session` with its typed
+engine and session, so nothing in the Studio casts from the root `DatabaseEngine` or
+`DatabaseSession`.
+
+The SQL engine also gets the Studio's own extension (`StudioSqlExtensions`), written the way an
+application packages one, as extension members on `SqlDatabaseEngineBuilder`:
+
+- `AddStudioFunctions()` registers `studio_initials(TEXT) -> TEXT` (immutable: the upper-case first
+  letter of each word) and the aggregate `studio_product(BIGINT) -> BIGINT` through
+  `sql.Functions`, the collection the built-ins are registered in.
+- `AddStudioDatabase("studio")` declares the database with a typed schema: a `notes` table
+  (`Id`, `Title`) whose CHECK `ck_notes_initials` calls `studio_initials`, so the engine's build
+  provisions the table and binds that CHECK to the registered function before it returns.
 
 ## Modes (Workspace page)
 
@@ -46,7 +72,9 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
   `TokenLexer` reads, so comments and quotes end where the engines end them, and the text is sent as
   typed, CR line breaks included), result grid (tap a row for full values, Copy TSV),
   Messages with status, affected count, elapsed ms and every diagnostic (click one to select it in the
-  editor), catalog explorer (click a highlighted entry to insert a query), session history, Samples.
+  editor), catalog explorer (click a highlighted entry to insert a query; SQL also lists the
+  registered functions from `COHESION_SCHEMA.FUNCTIONS`), session history, Samples (SQL's
+  "Registered functions" calls them over the sample tables).
   Diagnostics come from the engine and from a local parse with the language package, because
   `ExecuteAsync(string)` throws on the first parse error. SQL over the wire sends BEGIN/COMMIT/ROLLBACK
   for the transaction buttons. Graph **Auto** mode sends `MATCH ... RETURN <one variable>` through
@@ -61,6 +89,8 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 ## Known gaps (Studio)
 
 - Wire (external) cannot list/create/drop databases, run KEYSPACES, or manage blob containers.
+- The declared `studio` database cannot be dropped: its engine's builder declares it. Remove the
+  declaration in `StudioEngines.Create` first.
 - No statement parameters; no cancellation of a statement the engine does not observe.
 - Graph index creation is only `GraphSchema.CreateIndexAsync`, not exposed here (GQL has no index DDL).
 - Settings are not persisted between runs.

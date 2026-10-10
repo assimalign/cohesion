@@ -7,7 +7,7 @@ start from here · **Created:** 2026-10-08 ·
 **Answers:** the owner's request of 2026-10-08 (Database Hosting items 1 to 3, Provisioning, Event
 Source Tracing) · **Rules:** `.claude/rules/database-area.md`, `.claude/rules/resource-areas.md`,
 `.claude/rules/event-source.md` · **Plan of record:**
-[DATABASE_CONCRETE_TYPES_PLAN.md](DATABASE_CONCRETE_TYPES_PLAN.md) (decisions 27 to 48; P7 on hold)
+[DATABASE_CONCRETE_TYPES_PLAN.md](DATABASE_CONCRETE_TYPES_PLAN.md) (decisions 27 to 48; P7 landed after B3)
 **Branch:** every phase branches from the integration branch
 `claude/database-inventory-sql-expansion-aa27d1` (draft PR #1168) and merges back.
 
@@ -1254,6 +1254,9 @@ script checksum refusal; the catalog format tests.
 
 **P7, re-scoped (decision 72).** The template, SampleHost and cohesion-examples casts leave in B1.
 P7 keeps the ApplicationModel verification and Studio's typed fields, after B3.
+*Landed* (the plan of record's §7, "P7, as landed"): Database.ApplicationModel needed no code
+change beyond its documentation; §5.6's declared-name refusal is now pinned by a Hosting test, and Studio holds every
+engine and session typed, declares a database on each engine and registers two SQL functions.
 
 ## 10. Performance measurement plan
 

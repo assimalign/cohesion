@@ -45,6 +45,7 @@ internal sealed record BlobItem(BlobProperties Properties)
 /// </summary>
 internal sealed class BlobWorkspace : ModelWorkspace
 {
+    private BlobDatabaseSession? _session;
     private BlobClient? _client;
     private BlobConnection? _connection;
     private string? _wireDatabase;
@@ -58,9 +59,25 @@ internal sealed class BlobWorkspace : ModelWorkspace
 
     public bool CanManageContainers => Mode != ConnectionMode.WireExternal;
 
-    // The session runs its own container operations (option B, concrete-types plan §6.6); the
-    // cast from the root-typed session goes with ModelWorkspace's retype (phase 7).
-    private BlobDatabaseSession BlobSession => (BlobDatabaseSession)RequireSession();
+    public override BlobDatabaseEngine Engine => Engines.Blob;
+
+    public override BlobDatabaseSession? Session => _session;
+
+    // The session runs its own container operations (option B, concrete-types plan §6.6).
+    private BlobDatabaseSession BlobSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
+    protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
+    {
+        BlobDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
+        _session = await opened.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override DatabaseSession? DetachSession()
+    {
+        BlobDatabaseSession? session = _session;
+        _session = null;
+        return session;
+    }
 
     protected override async Task OpenWireAsync(string database, EndPoint endPoint, CancellationToken cancellationToken)
     {
@@ -108,10 +125,12 @@ internal sealed class BlobWorkspace : ModelWorkspace
             return await action(BlobSession, cancellationToken).ConfigureAwait(false);
         }
 
-        DatabaseSession admin = await OpenAdminSessionAsync(cancellationToken).ConfigureAwait(false);
+        // A short-lived session through the engine: the blob wire has no container verbs.
+        BlobDatabase database = await Engine.OpenDatabaseAsync(RequireAdminDatabase(), cancellationToken).ConfigureAwait(false);
+        BlobDatabaseSession admin = await database.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
         await using (admin.ConfigureAwait(false))
         {
-            return await action((BlobDatabaseSession)admin, cancellationToken).ConfigureAwait(false);
+            return await action(admin, cancellationToken).ConfigureAwait(false);
         }
     }
 

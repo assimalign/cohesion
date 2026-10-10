@@ -11,14 +11,16 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Studio;
 
-/// <summary>SQL: embedded <c>DatabaseSession</c> or the typed <c>Sql.Client</c> over TCP.</summary>
+/// <summary>SQL: embedded <see cref="SqlDatabaseSession"/> or the typed <c>Sql.Client</c> over TCP.</summary>
 internal sealed class SqlWorkspace : LanguageWorkspace
 {
+    private SqlDatabaseSession? _session;
     private SqlClient? _client;
     private SqlConnection? _connection;
     private string? _wireDatabase;
@@ -27,6 +29,23 @@ internal sealed class SqlWorkspace : LanguageWorkspace
     public SqlWorkspace(ConnectionMode mode, StudioEngines engines, EndPoint? wireEndPoint)
         : base(StudioModel.Sql, mode, engines, wireEndPoint)
     {
+    }
+
+    public override SqlDatabaseEngine Engine => Engines.Sql;
+
+    public override SqlDatabaseSession? Session => _session;
+
+    protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
+    {
+        SqlDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
+        _session = await opened.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override DatabaseSession? DetachSession()
+    {
+        SqlDatabaseSession? session = _session;
+        _session = null;
+        return session;
     }
 
     public override string LanguageName => "SQL";
@@ -226,6 +245,18 @@ internal sealed class SqlWorkspace : LanguageWorkspace
             }
         }
 
+        // The engine's catalog, the same for every database: list only what the application
+        // registered (StudioSqlExtensions), since the standard library is the same everywhere.
+        TabularResult functions = await QueryTableAsync(
+            "SELECT FUNCTION_NAME, FUNCTION_KIND, PARAMETER_TYPES, RETURN_TYPE FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME;", cancellationToken).ConfigureAwait(false);
+        lines.Add(new CatalogLine($"Registered functions ({functions.Rows.Count})", IsHeader: true));
+        foreach (string[] function in functions.Rows)
+        {
+            string name = functions.Get(function, "FUNCTION_NAME");
+            lines.Add(new CatalogLine(
+                $"{name}({functions.Get(function, "PARAMETER_TYPES")}) -> {functions.Get(function, "RETURN_TYPE")}  {functions.Get(function, "FUNCTION_KIND")}", 1, $"{name}("));
+        }
+
         lines.Add(new CatalogLine("System relations", IsHeader: true));
         foreach (string relation in _systemRelations)
         {
@@ -245,6 +276,7 @@ internal sealed class SqlWorkspace : LanguageWorkspace
         "INFORMATION_SCHEMA.CHECK_CONSTRAINTS",
         "COHESION_SCHEMA.INDEXES",
         "COHESION_SCHEMA.OBJECT_OWNERSHIP",
+        "COHESION_SCHEMA.FUNCTIONS",
     ];
 
     private static string Qualify(string schema, string name)
@@ -289,10 +321,15 @@ internal static class SqlSamples
             SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, IS_UNIQUE, IS_PRIMARY_KEY FROM COHESION_SCHEMA.INDEXES ORDER BY TABLE_NAME, INDEX_NAME;
             SELECT TABLE_NAME, OBJECT_TYPE, OBJECT_NAME, OWNER, OWNING_SCHEMA FROM COHESION_SCHEMA.OBJECT_OWNERSHIP;
             """),
-        new("6. Diagnostics demo (expected errors)", """
+        new("6. Registered functions", """
+            SELECT id, name, studio_initials(name) AS initials FROM customers WHERE id <= 3 ORDER BY id;
+            SELECT studio_product(id) AS product, COUNT(*) AS n FROM customers WHERE id <= 4;
+            SELECT FUNCTION_NAME, FUNCTION_KIND, PARAMETER_TYPES, RETURN_TYPE, VOLATILITY FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME;
+            """),
+        new("7. Diagnostics demo (expected errors)", """
             SELECT name FROM customers UNION SELECT item FROM orders;
             """),
-        new("7. Cleanup", """
+        new("8. Cleanup", """
             DROP TABLE IF EXISTS orders;
             DROP TABLE IF EXISTS customers;
             """),
