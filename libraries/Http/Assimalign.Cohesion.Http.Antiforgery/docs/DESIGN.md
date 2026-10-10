@@ -128,6 +128,15 @@ The package reads the cookie token from `request.Cookies` and writes it to
 `request.Headers[header]`. It does not re-implement cookie parsing or form
 parsing.
 
+The cookie token's `Path` is `HttpAntiforgeryOptions.CookiePath`.
+`HttpCookieOptions.Path` refuses a value outside the RFC 6265 `path-value`
+grammar (#1153), and the token's cookie options are built each time a token
+is stored, so the service checks `CookiePath` when `HttpAntiforgery.Create`
+builds it and throws `ArgumentException` there. A path such as `/tenant;x`
+or `/café` fails the application at composition (`AddAntiforgery` in
+`Web.Antiforgery` creates the service when it registers) instead of
+answering every token issue with a 500.
+
 The cookie token is marked essential by default
 (`HttpAntiforgeryOptions.CookieIsEssential`), so a cookie-consent policy
 (Web.CookiePolicy) emits it before the user consents: without it, no unsafe

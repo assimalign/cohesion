@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -330,6 +331,45 @@ public class HttpAntiforgeryTests
         TestHttpContext post = new(HttpMethod.Post);
         post.SetRequestCookie(options.CookieName, reused.CookieToken!);
         post.SetRequestHeader(options.HeaderName, reused.RequestToken!);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A CookiePath outside path-value fails when the service is created, not when a token is stored")]
+    [InlineData("/tenant;x")] // ';' would add an attribute to the Set-Cookie line
+    [InlineData("/café")] // not a US-ASCII CHAR
+    [InlineData("/a\r\nb")] // CR LF
+    public void Create_CookiePathOutsideGrammar_ShouldThrowAtCreation(string cookiePath)
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookiePath = cookiePath };
+
+        // Act
+        ArgumentException fromOptions = Should.Throw<ArgumentException>(() => HttpAntiforgery.Create(options));
+        ArgumentException fromConfigure = Should.Throw<ArgumentException>(
+            () => HttpAntiforgery.Create(configure => configure.CookiePath = cookiePath));
+
+        // Assert
+        fromOptions.ParamName.ShouldBe("options");
+        fromOptions.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath");
+        fromOptions.InnerException.ShouldBeOfType<ArgumentException>().ParamName.ShouldBe("Path");
+        fromConfigure.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Create: A CookiePath in path-value is accepted and reaches the cookie token")]
+    [InlineData("/")]
+    [InlineData("/app/v1")]
+    [InlineData("/caf%C3%A9")] // the percent-encoded form of the refused '/café'
+    public void Create_CookiePathInGrammar_ShouldStoreCookieTokenUnderPath(string cookiePath)
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookiePath = cookiePath };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Path.ShouldBe(cookiePath);
     }
 
     private static HttpCookie StoredCookie(TestHttpContext context, string name)

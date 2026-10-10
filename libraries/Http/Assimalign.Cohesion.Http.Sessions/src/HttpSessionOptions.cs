@@ -21,6 +21,14 @@ public sealed class HttpSessionOptions
     /// Gets or sets the path scope for the session cookie. Defaults to
     /// <c>/</c>.
     /// </summary>
+    /// <remarks>
+    /// The value must be an RFC 6265 <c>path-value</c>: US-ASCII with no
+    /// <c>;</c> and no control characters, since the session cookie is
+    /// written through the cookie model, which refuses any other path.
+    /// <c>UseSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses
+    /// such a value when it registers the middleware, not when a session is
+    /// established.
+    /// </remarks>
     public string CookiePath { get; set; } = "/";
 
     /// <summary>

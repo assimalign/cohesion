@@ -42,7 +42,10 @@ public static class SessionPipelineExtensions
         /// <param name="configure">An optional callback to configure the cookie name/path/HttpOnly flag and the idle timeout.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive.</exception>
+        /// <exception cref="ArgumentException">
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive, or the configured
+        /// <see cref="HttpSessionOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
+        /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(Action<HttpSessionOptions>? configure = null)
             => builder.UseSessions(new InMemoryHttpSessionStore(), configure);
 
@@ -53,7 +56,10 @@ public static class SessionPipelineExtensions
         /// <param name="configure">An optional callback to configure the cookie name/path/HttpOnly flag and the idle timeout.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive.</exception>
+        /// <exception cref="ArgumentException">
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive, or the configured
+        /// <see cref="HttpSessionOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
+        /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(IHttpSessionStore store, Action<HttpSessionOptions>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -67,6 +73,22 @@ public static class SessionPipelineExtensions
                 throw new ArgumentException(
                     $"HttpSessionOptions.IdleTimeout must be positive; got {options.IdleTimeout}.",
                     nameof(configure));
+            }
+
+            // The session cookie is built each time a session is established, and HttpCookieOptions refuses
+            // a Path outside the RFC 6265 path-value grammar (#1153). Checking the path here fails the
+            // application at composition instead of failing every session establishment with a 500.
+            try
+            {
+                _ = new HttpCookieOptions { Path = options.CookiePath };
+            }
+            catch (ArgumentException exception)
+            {
+                // The value is not echoed: it may hold the control character that made it invalid.
+                throw new ArgumentException(
+                    "HttpSessionOptions.CookiePath is not an RFC 6265 path-value: it must be US-ASCII with no ';' and no control characters. Percent-encode any other character.",
+                    nameof(configure),
+                    exception);
             }
 
             return builder.Use(new SessionMiddleware(store, options));

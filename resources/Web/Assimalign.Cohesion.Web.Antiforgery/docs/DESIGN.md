@@ -271,6 +271,11 @@ package keeps the engine's in-memory key and says plainly that it is for develop
 - **`UseAntiforgery` without `AddAntiforgery` fails the start.** The middleware resolves the registration
   from the application context when the pipeline is built, so a missing registration is an
   `InvalidOperationException` at startup, not a 500 on the first protected post.
+- **A malformed cookie path fails the registration.** `AddAntiforgery` creates the service when it
+  registers, and `Http.Antiforgery` checks `HttpAntiforgeryOptions.CookiePath` against the RFC 6265
+  `path-value` grammar when the service is created (#1153). A path such as `/tenant;x` is an
+  `ArgumentException` from `AddAntiforgery`, and nothing is registered, instead of a 500 on every token
+  issue.
 
 ## Ordering
 
@@ -335,7 +340,8 @@ last-wins metadata in both directions, the preflight skip, the problem+json body
 abort, validation with the exchange's service, a custom header, and a missing registration failing the
 build. `tests/AntiforgeryRegistrationTests.cs` covers protector selection: restart survival with a
 provider, restart invalidation without one, the pinned purpose chain, rejection of another purpose's
-payloads and of tampered tokens, the explicit protector winning, and last-registration-wins.
+payloads and of tampered tokens, the explicit protector winning, last-registration-wins, and a malformed
+cookie path failing the registration.
 `tests/AntiforgeryEndToEndTests.cs` and `tests/AntiforgeryRouteConventionTests.cs` run over the in-memory
 `WebApplicationTestFactory` with the real router: the cookie-and-header and form-token flows, a token
 replayed without its cookie, safe methods, a real CORS preflight, fail-closed dispatch with the middleware

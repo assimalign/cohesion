@@ -23,6 +23,23 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
     public HttpAntiforgeryService(HttpAntiforgeryOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // The cookie token's options are built each time a token is stored, and HttpCookieOptions refuses
+        // a Path outside the RFC 6265 path-value grammar (#1153). Checking the path here fails the
+        // application at composition instead of failing every token issue with a 500.
+        try
+        {
+            _ = new HttpCookieOptions { Path = options.CookiePath };
+        }
+        catch (ArgumentException exception)
+        {
+            // The value is not echoed: it may hold the control character that made it invalid.
+            throw new ArgumentException(
+                "HttpAntiforgeryOptions.CookiePath is not an RFC 6265 path-value: it must be US-ASCII with no ';' and no control characters. Percent-encode any other character.",
+                nameof(options),
+                exception);
+        }
+
         _options = options;
 
         // The pluggable protector seam supersedes the static Key. When no protector is

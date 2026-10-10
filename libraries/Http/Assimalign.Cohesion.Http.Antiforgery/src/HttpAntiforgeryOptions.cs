@@ -111,6 +111,13 @@ public sealed class HttpAntiforgeryOptions
     /// Gets or sets the path scope applied to the cookie token. Defaults to
     /// <c>/</c>.
     /// </summary>
+    /// <remarks>
+    /// The value must be an RFC 6265 <c>path-value</c>: US-ASCII with no
+    /// <c>;</c> and no control characters, as
+    /// <see cref="HttpCookieOptions.Path"/> requires. Both
+    /// <see cref="HttpAntiforgery"/> <c>Create</c> overloads refuse any other
+    /// value when they create the service, not when a token is stored.
+    /// </remarks>
     public string CookiePath { get; set; } = "/";
 
     /// <summary>

@@ -38,6 +38,21 @@ public class AntiforgeryRegistrationTests
         services.Container.Count.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AddAntiforgery: A CookiePath outside path-value should fail at registration, not at token issue")]
+    public void AddAntiforgery_CookiePathOutsideGrammar_ShouldThrowAtRegistration()
+    {
+        // Arrange
+        ServiceProviderBuilder services = new();
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(
+            () => services.AddAntiforgery(options => options.CookiePath = "/tenant;x"));
+
+        // Assert — the verb composes the service eagerly, so nothing is registered that would fail per request.
+        exception.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath");
+        services.Container.Count.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AddAntiforgery: Should register the service as an IHttpFeature singleton")]
     public void AddAntiforgery_Default_ShouldRegisterAntiforgeryFeatureSingleton()
     {

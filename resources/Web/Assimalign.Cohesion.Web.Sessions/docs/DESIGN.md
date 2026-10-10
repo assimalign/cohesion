@@ -96,7 +96,11 @@ The session-id cookie is built through the hardened `Http.Cookies` model with se
   behind a TLS-terminating proxy.
 - **Session-scoped** — no `Max-Age`/`Expires`; the cookie clears when the browser session ends, and
   server-side idle timeout governs true expiry.
-- **Name / Path** — from `HttpSessionOptions.CookieName` / `CookiePath`.
+- **Name / Path** — from `HttpSessionOptions.CookieName` / `CookiePath`. `HttpCookieOptions.Path`
+  refuses a value outside the RFC 6265 `path-value` grammar (#1153), and the cookie is built each time
+  a session is established, so `UseSessions` checks `CookiePath` when it registers the middleware: a
+  path such as `/tenant;x` or `/café` fails the application at composition instead of answering every
+  session establishment with a 500.
 - **Not essential by default** — `HttpSessionOptions.CookieIsEssential` (default `false`) marks the
   cookie for a cookie-consent policy (Web.CookiePolicy). Under a consent requirement a non-essential
   session cookie is dropped until the user consents, because a session usually holds state that needs
@@ -126,7 +130,8 @@ forwarded-headers middleware must have run by then — registering it first sati
 
 The package defines no exception root; it throws framework `InvalidOperationException` /
 `ArgumentException` for misuse (sessions not enabled, regeneration after the head started, non-positive
-idle timeout). Store I/O surfaces whatever the `IHttpSessionStore` implementation throws.
+idle timeout, a cookie path outside `path-value`). The two option checks run in `UseSessions`, at
+composition. Store I/O surfaces whatever the `IHttpSessionStore` implementation throws.
 
 ## AOT posture
 
@@ -169,3 +174,7 @@ untouched request sets no cookie, and that a cookie-less client starts an indepe
 trusted as a local transport, a forwarded `https` yields a `Secure` session cookie and a spoofed
 `X-Forwarded-Proto` without the middleware does not; at the unit level, a plaintext request from a
 trusted proxy address (the double's connection) and from an untrusted one pin the trust dependency.
+
+`tests/SessionPipelineExtensionsTests.cs` drives `UseSessions` over a capturing pipeline builder: a
+cookie path outside `path-value` (`;`, a non-ASCII character, CR LF) throws at registration and registers
+no middleware, and in-grammar paths, the percent-encoded form included, register it.
