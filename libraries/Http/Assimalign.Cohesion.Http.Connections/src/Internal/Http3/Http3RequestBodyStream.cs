@@ -30,7 +30,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// Content-Length over the frozen cap is rejected before a DATA octet is read; otherwise each DATA frame
 /// is checked when its header arrives, before any of its octets are delivered. A rejection is recorded
 /// (<see cref="RejectedStatusCode"/>) and thrown as <see cref="Http3LimitExceededException"/>; the
-/// send path answers 413 when the response head has not been committed and then stops reading.
+/// send path answers 413 when the response head has not been committed and then stops reading, and
+/// resets the stream with <c>H3_REQUEST_CANCELLED</c> when a streamed response head has been (#1084).
 /// </para>
 /// <para>
 /// <b>Trailer-section size.</b> A trailer section that decodes past

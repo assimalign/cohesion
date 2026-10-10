@@ -1860,7 +1860,8 @@ octets delivered extend the allowance. When the allowance runs out:
   with an `Http3LimitExceededException`. A deadline that fires just as a read completes is
   latched the same way, and the next read reports it.
 - The send path answers the rejection: `408` while the response head is uncommitted, replacing
-  whatever the application staged.
+  whatever the application staged, and a reset with `H3_REQUEST_CANCELLED` once a streamed head
+  is on the wire (#1084).
 
 ### Not covered
 
@@ -3094,6 +3095,17 @@ exchange exists, so the transport writes the bodyless 413 itself. A trailer
 section that decodes past `MaxFieldSectionSize` is rejected the same way and
 answered `431`, provided the response head is still uncommitted.
 
+**A rejection after a streamed head (#1084).** When the application, or a hook,
+committed a streamed response head through the raw sink before the body was
+rejected, no status can follow, and completing the response would hand the
+client a whole-looking response to a request the server refused to receive.
+`SendAsync` consults the body's rejection on both streamed paths, as on the
+buffered one, and resets the stream with `H3_REQUEST_CANCELLED` instead of
+finishing the sink (RFC 9114 §4.1.1: processing began, so not
+`H3_REQUEST_REJECTED`). HTTP/2 resets with `CANCEL` in the same case. A streamed
+response that carries the rejection status itself is complete and finishes
+normally. The `408` of the minimum data rate (#1085) takes the same path.
+
 **Ending the exchange.** The response ends with the stream's FIN (see "Ending
 the request stream at response completion"). If the request was not read to its
 end by then, the transport refuses the rest with `STOP_SENDING(H3_NO_ERROR)`
@@ -3121,6 +3133,7 @@ The signals and their RFC 9114 §8.1 codes:
 | Complete response sent; request not read to its end, and its FIN not yet arrived | `STOP_SENDING` | `H3_NO_ERROR` | RFC 9114 §4.1: the server does not need the rest of a request it fully answered |
 | Unknown or reserved unidirectional stream type | `STOP_SENDING` | `H3_STREAM_CREATION_ERROR` | RFC 9114 §6.2: abort reading, with the code the RFC recommends; the connection is unaffected |
 | Application cancelled the exchange (`IHttpContext.Cancel`) | reset (both directions) | `H3_REQUEST_CANCELLED` | §4.1.1: processing began, so never `H3_REQUEST_REJECTED`, which promises the request was not processed |
+| Request body rejected (`413`, `408`, `431`) after a streamed response head was committed (#1084) | reset (both directions) | `H3_REQUEST_CANCELLED` | §4.1.1: no status can follow the head, and the response cannot be whole without the request the server refused |
 | Refused before dispatch — an interceptor rejection, teardown before dispatch, or assembled but never handed over | reset | `H3_REQUEST_REJECTED` | §4.1.1: no application processing, so the peer may retry |
 | Request head not arrived and decoded within `RequestHeadersTimeout` (#1085) | reset | `H3_REQUEST_REJECTED` | §4.1.1: the request never reached the application, so the peer may retry; the connection keeps serving |
 | Request body below `MinRequestBodyDataRate` (#1085) | `STOP_SENDING` at the deadline, then `408` while the response head is uncommitted | `H3_NO_ERROR` | §4.1: the server needs no more of a request it will answer; RFC 9110 §15.5.9 |

@@ -49,8 +49,9 @@ public abstract class HttpConnectionListenerLimits
     /// per request before the body is read (the <c>Assimalign.Cohesion.Http.RequestLimits</c>
     /// package surfaces it as a typed <c>IHttpMaxRequestBodySizeFeature</c>). Enforced by the
     /// HTTP/1.1 and HTTP/3 request-body reads, where the per-request value freezes at the first body
-    /// read (both answer <c>413</c> while the response head is uncommitted, and HTTP/1.1 then closes
-    /// the connection), and by HTTP/2, which
+    /// read (both answer <c>413</c> while the response head is uncommitted; HTTP/1.1 then closes
+    /// the connection, and HTTP/3 resets a stream whose streamed response had already started with
+    /// <c>H3_REQUEST_CANCELLED</c>), and by HTTP/2, which
     /// freezes the value when the request is dispatched, rejects a larger declared
     /// <c>content-length</c> before reading the body, and answers a body that grows past it on
     /// receipt with <c>413</c> (a stream reset when the response has already started).
@@ -165,7 +166,8 @@ public abstract class HttpConnectionListenerLimits
     /// serving its other streams.</description></item>
     /// <item><description><b>HTTP/3</b> — the lazily read request body. The request stream is stopped
     /// with <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1) and the exchange answered <c>408</c> when
-    /// its response head is uncommitted.</description></item>
+    /// its response head is uncommitted, or the stream reset with <c>H3_REQUEST_CANCELLED</c> when a
+    /// streamed response head is already on the wire.</description></item>
     /// </list>
     /// </remarks>
     public HttpMinDataRate? MinRequestBodyDataRate

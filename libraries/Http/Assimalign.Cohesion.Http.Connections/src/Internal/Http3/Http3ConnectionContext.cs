@@ -2006,10 +2006,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // instead of writing a buffered response.
         if (http3Context.ResponseBodySink is { HasStarted: true } sink)
         {
-            requestBody.RefuseRemainder();
-            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
-            StopReadingRequestStream(requestBody, http3Context.StreamId);
-            await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            await FinishStreamedResponseAsync(http3Context, sink, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -2038,10 +2035,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // then already on the wire) — finalize that response rather than writing a second one.
         if (http3Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
         {
-            requestBody.RefuseRemainder();
-            await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
-            StopReadingRequestStream(requestBody, http3Context.StreamId);
-            await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            await FinishStreamedResponseAsync(http3Context, hookStartedSink, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -2096,6 +2090,37 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         CompleteResponseStreamWrites(http3Context.StreamConnection);
         StopReadingRequestStream(requestBody, http3Context.StreamId);
 
+        await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Finishes a response the application, or a hook, started through the raw sink: its head is on the
+    /// wire, so it is completed with the stream's FIN — unless the transport rejected the request body
+    /// (#1084).
+    /// </summary>
+    /// <remarks>
+    /// A body over the size cap (RFC 9110 §15.5.14), below the minimum data rate (§15.5.9, #1085), or with
+    /// a trailer section over the field-section limit is answered with its status while the head is
+    /// uncommitted. Once a streamed head is on the wire no status can follow it, and the response cannot
+    /// be whole without the request the server refused to receive, so the stream is reset with
+    /// <c>H3_REQUEST_CANCELLED</c> rather than completed: RFC 9114 §4.1.1 — processing began, so never
+    /// <c>H3_REQUEST_REJECTED</c>. HTTP/2 resets the stream with <c>CANCEL</c> in the same case. A
+    /// streamed response that carries the rejection status itself is complete, and is finished like any
+    /// other.
+    /// </remarks>
+    private async ValueTask FinishStreamedResponseAsync(Http3Context http3Context, HttpResponseBodyStream sink, CancellationToken cancellationToken)
+    {
+        Http3RequestBodyStream requestBody = http3Context.RequestBody;
+
+        if (requestBody.RejectedStatusCode is { } rejectedStatus && http3Context.Response.StatusCode != rejectedStatus)
+        {
+            CancelRequestStream(http3Context);
+            return;
+        }
+
+        requestBody.RefuseRemainder();
+        await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        StopReadingRequestStream(requestBody, http3Context.StreamId);
         await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 
