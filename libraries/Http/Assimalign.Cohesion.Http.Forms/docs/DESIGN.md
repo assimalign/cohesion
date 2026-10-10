@@ -54,7 +54,7 @@ and authentication use. Three consequences follow:
 | `context.ReadFormAsync(ct)` | Installs a default `HttpFormFeature` over `context.Request` when none is present, triggers the lazy parse, caches and returns the collection. |
 | `request.Form` (get) | Returns the installed feature's parsed collection, or a shared empty collection when nothing is parsed/attached. |
 | `request.Form` (set) | Pre-attaches a collection: installs an `HttpFormFeature(collection)` when no feature exists, otherwise updates the installed feature's `Form`. |
-| `builder.UseForms()` (Web.Forms) | Middleware that installs the feature and eagerly parses every request so downstream handlers read `request.Form` synchronously. |
+| `builder.UseForms()` (Web.Forms) | Middleware that installs the feature and eagerly parses every request so downstream handlers read `request.Form` synchronously. A form over a limit is answered `413` and a malformed one `400` there, as problem+json, and the rest of the pipeline does not run. |
 
 ## Parser design
 
@@ -186,7 +186,7 @@ conventional shape for a limits record.
 |---------|------|------------|
 | `Assimalign.Cohesion.Http` | Protocol core (wire model, features seam) | `Assimalign.Cohesion.Core` |
 | `Assimalign.Cohesion.Http.Forms` | Form model + streaming parsers + convenience surface | `Assimalign.Cohesion.Http` |
-| `Assimalign.Cohesion.Web.Forms` | `UseForms()` pipeline middleware | `Assimalign.Cohesion.Web`, `…Http.Forms` |
+| `Assimalign.Cohesion.Web.Forms` | `UseForms()` pipeline middleware; answers an unreadable form `413`/`400` | `Assimalign.Cohesion.Web`, `…Web.ProblemDetails`, `…Http.Forms`, `…Http.Streaming` |
 
 Dependency direction is one-way toward the protocol core. The core never
 references this package.

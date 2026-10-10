@@ -131,8 +131,9 @@ the `HttpFormLimitExceededException` the parse records as its `InvalidDataExcept
 message; any other unreadable form is a `400` (`errors` keyed `$form`). Before #1061 both reached the
 exception boundary as a `500`. A body over the transport's own cap is answered `413` by the transport,
 and an over-limit decompressed body by `Web.Compression`; the thunk does not catch either. `UseForms()`
-parses every request eagerly, ahead of the endpoint, so a form it cannot read fails in that middleware
-(and reaches the exception boundary) before the thunk's mapping applies.
+parses every request eagerly, ahead of the endpoint, so a form it cannot read never reaches the thunk:
+the middleware answers it with the same `413` or `400` payload and the endpoint does not run (#1210,
+Web.Forms DESIGN).
 
 ## Return Values (#1059)
 
