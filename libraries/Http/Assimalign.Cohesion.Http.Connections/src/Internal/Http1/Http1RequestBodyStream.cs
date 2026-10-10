@@ -493,15 +493,24 @@ internal sealed class Http1RequestBodyStream : Stream
         // and ChargeChunkFraming holds the lines of the whole body to a total.
         string sizeLine = await ReadFramingLineAsync(_maxFramingLineSize, FramingLine.ChunkSize, cancellationToken).ConfigureAwait(false);
 
-        // RFC 9112 §7.1.1 — strip the optional ";<chunk-ext>" (BWS allowed before the ';').
+        // RFC 9112 §7.1.1 — split off the optional chunk extensions, which start at the first ';'. Only
+        // spaces and tabs (BWS) may stand between the size and the ';'.
         int semicolon = sizeLine.IndexOf(';');
         ReadOnlySpan<char> sizeText = semicolon < 0
             ? sizeLine.AsSpan()
-            : sizeLine.AsSpan(0, semicolon).TrimEnd();
+            : sizeLine.AsSpan(0, semicolon).TrimEnd(" \t");
 
         if (sizeText.IsEmpty)
         {
             throw new InvalidDataException("RFC 9112 §7.1: empty chunk-size.");
+        }
+
+        // The extensions are ignored, but they must keep to their grammar, so nothing that another
+        // parser could read differently, a control character above all, rides inside them.
+        if (semicolon >= 0 && !Http1ChunkExtensions.IsWellFormed(sizeLine.AsSpan(semicolon)))
+        {
+            throw new InvalidDataException(
+                "RFC 9112 §7.1.1: malformed chunk extensions; each is ';' and a token, optionally '=' and a token or a quoted-string, with only spaces and tabs between.");
         }
 
         // chunk-size = 1*HEXDIG — ASCII hex only, no leading sign, no whitespace.
@@ -663,8 +672,18 @@ internal sealed class Http1RequestBodyStream : Stream
     /// <summary>
     /// Reads one CRLF-terminated chunk framing line, holding it to <paramref name="maxLength"/> octets
     /// before its CRLF. An octet past the cap fails the read at once, so a line that never ends costs
-    /// at most the cap, whether the application or the keep-alive drain is reading.
+    /// at most the cap, whether the application or the keep-alive drain is reading. A line ends only at
+    /// CRLF, and a bare CR or a bare LF anywhere in it fails the read as malformed.
     /// </summary>
+    /// <remarks>
+    /// RFC 9112 §2.2 lets a recipient take a bare LF for the end of a line, and requires it to treat a
+    /// bare CR as invalid or as a space. Keeping either inside the line, as this reader once did, is
+    /// neither, and it is a smuggling vector: an intermediary that ends the chunk-size line
+    /// <c>2;\nxx</c> at the LF reads <c>xx</c> as the chunk's data and the next line as the next
+    /// chunk's size, while this reader took the whole of it for one line, so the two disagree about
+    /// where every later chunk, and the next request, starts. Rejecting both is the one reading no
+    /// peer can contradict.
+    /// </remarks>
     /// <param name="maxLength">The most octets the line may hold before its CRLF.</param>
     /// <param name="line">Which line is read, which decides how an over-long one is rejected.</param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
@@ -691,14 +710,18 @@ internal sealed class Http1RequestBodyStream : Stream
                     return builder.ToString();
                 }
 
-                AppendFramingOctet(builder, '\r', maxLength, line);
-                sawCarriageReturn = false;
+                throw new InvalidDataException("RFC 9112 §2.2: a chunk framing line holds a bare CR; a line ends only at CRLF.");
             }
 
             if (b == (byte)'\r')
             {
                 sawCarriageReturn = true;
                 continue;
+            }
+
+            if (b == (byte)'\n')
+            {
+                throw new InvalidDataException("RFC 9112 §2.2: a chunk framing line holds a bare LF; a line ends only at CRLF.");
             }
 
             AppendFramingOctet(builder, (char)b, maxLength, line);

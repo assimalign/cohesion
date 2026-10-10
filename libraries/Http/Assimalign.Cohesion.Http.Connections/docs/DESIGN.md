@@ -1426,6 +1426,26 @@ chunked). Load-bearing invariants:
   by a chunk about half its length. The budget derives from the line cap rather than
   adding a limit, so a listener that raises the cap for long extensions raises the
   total with it.
+- **A framing line ends only at CRLF, and chunk extensions keep to their grammar.**
+  A bare CR or a bare LF anywhere in a chunk-size line, a chunk terminator or a
+  trailer field line fails the body as malformed (`400`, below). RFC 9112 §2.2 lets
+  a recipient take a bare LF for a line's end and requires a bare CR to be treated as
+  invalid or as a space; the reader used to keep both inside the line, which is
+  neither. That was a smuggling vector: in `2;\nxx\r\n45\r\n0\r\n\r\nGET /smuggled ...`
+  the reader took `2;\nxx` for one line, a 2-octet chunk `45`, then a last chunk, and
+  left the smuggled request on the connection, while an intermediary that ends the
+  line at the LF reads a 2-octet chunk `xx` and a 0x45-octet chunk that holds the
+  smuggled request. A trailer line `X-A: 1\n` followed by CRLF split the same way,
+  ending the trailer section early for such an intermediary. Chunk extensions are
+  still ignored, but `Http1ChunkExtensions` checks them against RFC 9112 §7.1.1:
+  `*( BWS ";" BWS token [ BWS "=" BWS ( token / quoted-string ) ] )`, where BWS is
+  spaces and tabs only. Any other octet, every control character but a tab in BWS or
+  a quoted-string, an empty name or value, an unclosed quoted-string, or whitespace
+  that ends the line, fails the body the same way. Only spaces and tabs may stand
+  between the chunk-size and its first `;`; a vertical tab or a no-break space there
+  was trimmed as whitespace before. Control characters other than CR and LF inside a
+  trailer field *value* are left to the field-value rule the header section gets
+  (#1341).
 - **Cap frozen at first read.** `EnsureStarted` (first read) freezes the parse
   context's body-size knob and resolves the cap. Up to that point head hooks
   *and* middleware may raise or lower it via `IHttpMaxRequestBodySizeFeature`. A
