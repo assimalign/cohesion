@@ -118,7 +118,7 @@ second call **before any byte is written**, so a second response can never reach
 1. Resolves the status line (101 for Upgrade, 200 for CONNECT) before side effects.
 2. **Encodes the head before anything else changes (#1183)**: the status line, the response
    headers and cookies the application set before accepting (e.g. `Sec-WebSocket-Accept`), less
-   `Content-Length` and `Transfer-Encoding` — RFC 9112 §9.9 (a 101 carries no body framing) and
+   `Content-Length` and `Transfer-Encoding` — RFC 9112 §6.3, RFC 9110 §15.2.2 (a 101 carries no body framing) and
    RFC 9110 §9.3.6 (a successful CONNECT response must not include them) — then
    `Connection: Upgrade` + `Upgrade: <protocol>` for an upgrade, or no `Connection` header for a
    CONNECT (the tunnel persists — `close` applies to HTTP framing, not the tunnel). The status is

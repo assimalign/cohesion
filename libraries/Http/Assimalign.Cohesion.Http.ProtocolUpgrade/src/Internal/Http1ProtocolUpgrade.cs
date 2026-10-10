@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// that point the transport suppresses its own response and ends keep-alive) and writes the
 /// status line and the connection-specific response headers (<c>Connection: Upgrade</c> +
 /// <c>Upgrade: &lt;protocol&gt;</c> for an upgrade) directly to the surrendered raw stream.
-/// <c>Content-Length</c> / <c>Transfer-Encoding</c> are scrubbed unconditionally — RFC 9112 §9.9
+/// <c>Content-Length</c> / <c>Transfer-Encoding</c> are scrubbed unconditionally — RFC 9112 §6.3, RFC 9110 §15.2.2
 /// (a 101 has no body framing) and RFC 9110 §9.3.6 (a successful CONNECT response must not
 /// include them) — so the tunnel never starts with stale framing metadata. Any other response
 /// headers and cookies the application set before accepting are emitted with the transition
@@ -123,7 +123,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
     {
         // RFC 9110 §9.3.6 — a successful CONNECT response MUST NOT include Content-Length or
         // Transfer-Encoding; the tunnel carries opaque octets. A 101 is body-less by definition
-        // (RFC 9112 §9.9), so the same scrub applies. Strip both unconditionally.
+        // (RFC 9112 §6.3, RFC 9110 §15.2.2), so the same scrub applies. Strip both unconditionally.
         foreach (HttpHeaderKey key in _forbiddenResponseHeaders)
         {
             _responseHeaders.Remove(key);

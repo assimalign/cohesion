@@ -208,7 +208,7 @@ public class HttpProtocolUpgradeInterceptorTests
         response.ShouldContain("HTTP/1.1 101 Switching Protocols");
         response.ShouldContain("Connection: Upgrade");
         response.ShouldContain("Upgrade: websocket");
-        // RFC 9112 §9.9 — a 101 carries no body framing.
+        // RFC 9112 §6.3, RFC 9110 §15.2.2 — a 101 carries no body framing.
         response.ShouldNotContain("Content-Length");
         response.ShouldNotContain("Transfer-Encoding");
     }

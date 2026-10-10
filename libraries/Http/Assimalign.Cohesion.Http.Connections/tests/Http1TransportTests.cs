@@ -762,7 +762,7 @@ public class Http1TransportTests
         // Act — accept the upgrade and take ownership of the raw duplex stream.
         Stream tunnel = await httpContext.Upgrade!.AcceptAsync();
 
-        // Exactly one 101 with the connection-specific headers and no body framing (RFC 9112 §9.9).
+        // Exactly one 101 with the connection-specific headers and no body framing (RFC 9112 §6.3, RFC 9110 §15.2.2).
         string handshake = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
         handshake.ShouldContain("HTTP/1.1 101 Switching Protocols");
         handshake.ShouldContain("Connection: Upgrade");
