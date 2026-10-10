@@ -27,6 +27,8 @@ public sealed class SqlCascadeSnapshotConflictTests
 {
     private const string Delete = "DELETE FROM p WHERE id = 1";
 
+    private const string CreateGrandchildTable = "CREATE TABLE g (id INT PRIMARY KEY, cid INT, CONSTRAINT fk_g FOREIGN KEY(cid) REFERENCES c(id) ON DELETE CASCADE)";
+
     /// <summary>
     /// The #1363 repro at <see cref="IsolationLevel.Snapshot"/>, in an explicit transaction and in
     /// auto-commit (which runs at <see cref="IsolationLevel.Snapshot"/>): a child writer that
@@ -106,6 +108,139 @@ public sealed class SqlCascadeSnapshotConflictTests
     }
 
     /// <summary>
+    /// The conflict below the first level: the writer changes a grandchild, so the delete waits at
+    /// the child row the grandchild references, passes that child (its snapshot sees it), and fails
+    /// at the grandchild version the writer committed. Nothing in the closure is deleted, the
+    /// grandchild's primary-key entry stays live, and a retry deletes the closure.
+    /// </summary>
+    /// <param name="grandchildChange">The grandchild writer's statement.</param>
+    /// <param name="grandchildKey">The key of the grandchild version the writer commits.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Cascade: A snapshot cascade that reaches a grandchild version newer than its snapshot fails first-updater-wins and deletes nothing (#1370)")]
+    [InlineData("UPDATE g SET id = 105 WHERE id = 100", 105)]
+    [InlineData("INSERT INTO g (id, cid) VALUES (101, 10)", 101)]
+    public async Task Cascade_SnapshotReachesANewerGrandchildVersion_ShouldFailFirstUpdaterWinsAndDeleteNothing(string grandchildChange, int grandchildKey)
+    {
+        // Arrange: a grandchild g(100, 10) under c(10, 1). The writer holds a shared lock on the
+        // child row its grandchild references while the deleter's snapshot is taken.
+        await using var engine = CreateEngine();
+        var database = await CreateDatabaseAsync(engine);
+        await using var setup = await database.CreateSessionAsync();
+        await setup.ExecuteAsync(CreateGrandchildTable, cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync("INSERT INTO g (id, cid) VALUES (100, 10)", cancellationToken: TestTimeout.Token());
+        await using var writerSession = await database.CreateSessionAsync();
+        await using var deleterSession = await database.CreateSessionAsync();
+        var writer = await writerSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        await writerSession.ExecuteAsync(grandchildChange, cancellationToken: TestTimeout.Token());
+        var expectedGrandchildren = await RowsAsync(writerSession, "SELECT id, cid FROM g ORDER BY id");
+        var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+
+        // Act: the delete waits for the child row while the grandchild writer commits.
+        var pending = deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+        await writer.CommitAsync(TestTimeout.Token());
+        var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending);
+        var stateAfter = deleter.State;
+        await deleter.RollbackAsync(TestTimeout.Token());
+
+        var parents = await RowsAsync(setup, "SELECT id FROM p");
+        var children = await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id");
+        var grandchildren = await RowsAsync(setup, "SELECT id, cid FROM g ORDER BY id");
+        var seek = await RowsAsync(setup, $"SELECT id, cid FROM g WHERE id = {grandchildKey}");
+        var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+            await setup.ExecuteAsync($"INSERT INTO g (id, cid) VALUES ({grandchildKey}, 10)", cancellationToken: TestTimeout.Token()));
+        var retried = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var grandchildrenAfterRetry = await RowsAsync(setup, "SELECT id FROM g");
+        await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1)", cancellationToken: TestTimeout.Token());
+        var reinserted = await setup.ExecuteAsync($"INSERT INTO g (id, cid) VALUES ({grandchildKey}, 10)", cancellationToken: TestTimeout.Token());
+
+        // Assert: the conflict names the grandchild table, not the child the walk passed.
+        conflict.ShouldBeOfType<DatabaseTransactionAbortedException>();
+        conflict.Message.ShouldContain("first-updater-wins", Case.Sensitive);
+        conflict.Message.ShouldContain("'dbo.g'", Case.Sensitive);
+        conflict.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        stateAfter.ShouldBe(TransactionState.Active);
+
+        // Nothing was half-deleted, at any level.
+        parents.ShouldBe(["1"]);
+        children.ShouldBe(["10,1"]);
+        grandchildren.ShouldBe(expectedGrandchildren);
+        seek.ShouldBe([$"{grandchildKey},10"]);
+        duplicate.ConstraintKind.ShouldBe("UNIQUE");
+
+        // The retry deletes the three-level closure and frees the grandchild's key.
+        retried.AffectedCount.ShouldBe(1);
+        grandchildrenAfterRetry.ShouldBeEmpty();
+        reinserted.AffectedCount.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The one way the walk reaches a child whose writer is undecided: the deleter's snapshot holds
+    /// a parent version that a committed update has since replaced, and a child writer inserts a
+    /// child under the replacement, locking the replacement rather than the version the deleter
+    /// locks. The cascade fails first-updater-wins at once, without waiting for the writer and
+    /// without claiming the writer committed (it has not), and the writer's own outcome stands.
+    /// </summary>
+    /// <param name="childCommits">Whether the child writer commits, rather than rolls back, after the conflict.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Cascade: A snapshot cascade from a replaced parent version that reaches an in-flight child fails first-updater-wins and deletes nothing (#1370)")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Cascade_SnapshotFromAReplacedParentReachesAnInFlightChild_ShouldFailFirstUpdaterWinsAndDeleteNothing(bool childCommits)
+    {
+        // Arrange: the deleter's snapshot holds p(1); a committed update replaces that version; the
+        // child writer inserts c(12, 1) under the replacement and stays in flight.
+        await using var engine = CreateEngine();
+        var database = await CreateDatabaseAsync(engine);
+        await using var setup = await database.CreateSessionAsync();
+        await setup.ExecuteAsync("ALTER TABLE p ADD COLUMN name INT", cancellationToken: TestTimeout.Token());
+        await using var writerSession = await database.CreateSessionAsync();
+        await using var deleterSession = await database.CreateSessionAsync();
+        var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        var deleterSees = await RowsAsync(deleterSession, "SELECT id FROM p");
+        await setup.ExecuteAsync("UPDATE p SET name = 5 WHERE id = 1", cancellationToken: TestTimeout.Token());
+        var writer = await writerSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        await writerSession.ExecuteAsync("INSERT INTO c (id, pid) VALUES (12, 1)", cancellationToken: TestTimeout.Token());
+
+        // Act: the delete fails while the writer is still in flight; then the writer ends.
+        var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
+            await deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()));
+        var stateAfter = deleter.State;
+        if (childCommits)
+        {
+            await writer.CommitAsync(TestTimeout.Token());
+        }
+        else
+        {
+            await writer.RollbackAsync(TestTimeout.Token());
+        }
+
+        await deleter.RollbackAsync(TestTimeout.Token());
+        var parents = await RowsAsync(setup, "SELECT id, name FROM p");
+        var children = await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id");
+        var retried = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var childrenAfterRetry = await RowsAsync(setup, "SELECT id FROM c");
+        await setup.ExecuteAsync("INSERT INTO p (id) VALUES (1)", cancellationToken: TestTimeout.Token());
+        var reinserted = await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (10, 1), (12, 1)", cancellationToken: TestTimeout.Token());
+
+        // Assert: the retryable conflict, naming the child table and no commit.
+        conflict.ShouldBeOfType<DatabaseTransactionAbortedException>();
+        conflict.Message.ShouldContain("first-updater-wins", Case.Sensitive);
+        conflict.Message.ShouldContain("'dbo.c'", Case.Sensitive);
+        conflict.Message.ShouldNotContain("committed", Case.Sensitive);
+        conflict.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        stateAfter.ShouldBe(TransactionState.Active);
+        deleterSees.ShouldBe(["1"]);
+
+        // The parent's replacement and the children stand as their writers left them; a retry
+        // deletes the closure and frees its keys.
+        parents.ShouldBe(["1,5"]);
+        children.ShouldBe(childCommits ? ["10,1", "12,1"] : ["10,1"]);
+        retried.AffectedCount.ShouldBe(1);
+        childrenAfterRetry.ShouldBeEmpty();
+        reinserted.AffectedCount.ShouldBe(2);
+    }
+
+    /// <summary>
     /// The same race under <see cref="IsolationLevel.ReadCommitted"/>: the statement's snapshot is
     /// not the transaction's, so the cascade deletes the version the writer committed, with its
     /// index entries, and the keys are free again.
@@ -141,6 +276,67 @@ public sealed class SqlCascadeSnapshotConflictTests
         children.ShouldBeEmpty();
         reinserted.AffectedCount.ShouldBe(2);
         (await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id")).ShouldBe(["10,1", "11,1"]);
+    }
+
+    /// <summary>
+    /// The read-committed cascade of the same race, rolled back: the index delete tombstoned the
+    /// entries of child versions the transaction's first snapshot never saw, and the rollback's
+    /// clear-deleter restores them, so every child is live again with its key taken.
+    /// </summary>
+    /// <param name="childChange">The child writer's statement.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Cascade: Rolling back a read-committed cascade that deleted child versions newer than its snapshot restores them with their index entries (#1370)")]
+    [InlineData("UPDATE c SET pid = pid WHERE id = 10")]
+    [InlineData("INSERT INTO c (id, pid) VALUES (11, 1)")]
+    public async Task Cascade_ReadCommittedReachesANewerChildVersionAndRollsBack_ShouldRestoreItsIndexEntries(string childChange)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await CreateDatabaseAsync(engine);
+        await using var setup = await database.CreateSessionAsync();
+        await using var writerSession = await database.CreateSessionAsync();
+        await using var deleterSession = await database.CreateSessionAsync();
+        var writer = await writerSession.BeginTransactionAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        await writerSession.ExecuteAsync(childChange, cancellationToken: TestTimeout.Token());
+        var expectedChildren = await RowsAsync(writerSession, "SELECT id, pid FROM c ORDER BY id");
+        var deleter = await deleterSession.BeginTransactionAsync(IsolationLevel.ReadCommitted, TestTimeout.Token());
+
+        // Act
+        var pending = deleterSession.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token()).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+        await writer.CommitAsync(TestTimeout.Token());
+        var deleted = await pending;
+        var childrenInside = await RowsAsync(deleterSession, "SELECT id FROM c");
+        await deleter.RollbackAsync(TestTimeout.Token());
+
+        var parents = await RowsAsync(setup, "SELECT id FROM p");
+        var children = await RowsAsync(setup, "SELECT id, pid FROM c ORDER BY id");
+        var seeks = new List<string>();
+        var duplicates = new List<string?>();
+        foreach (var child in expectedChildren)
+        {
+            var id = child.Split(',')[0];
+            seeks.AddRange(await RowsAsync(setup, $"SELECT id, pid FROM c WHERE id = {id}"));
+            var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
+                await setup.ExecuteAsync($"INSERT INTO c (id, pid) VALUES ({id}, 1)", cancellationToken: TestTimeout.Token()));
+            duplicates.Add(duplicate.ConstraintKind);
+        }
+
+        var redeleted = await setup.ExecuteAsync(Delete, cancellationToken: TestTimeout.Token());
+        var childrenAfterRedelete = await RowsAsync(setup, "SELECT id FROM c");
+
+        // Assert: the cascade deleted the writer's versions inside the transaction.
+        deleted.AffectedCount.ShouldBe(1);
+        childrenInside.ShouldBeEmpty();
+
+        // The rollback restored every child version and its primary-key entry: the seek agrees with
+        // the scan, and every child key is taken again.
+        parents.ShouldBe(["1"]);
+        children.ShouldBe(expectedChildren);
+        seeks.ShouldBe(expectedChildren);
+        duplicates.ShouldAllBe(kind => kind == "UNIQUE");
+        duplicates.Count.ShouldBe(expectedChildren.Count);
+        redeleted.AffectedCount.ShouldBe(1);
+        childrenAfterRedelete.ShouldBeEmpty();
     }
 
     /// <summary>
@@ -196,7 +392,7 @@ public sealed class SqlCascadeSnapshotConflictTests
         await using var engine = CreateEngine();
         var database = await CreateDatabaseAsync(engine);
         await using var setup = await database.CreateSessionAsync();
-        await setup.ExecuteAsync("CREATE TABLE g (id INT PRIMARY KEY, cid INT, CONSTRAINT fk_g FOREIGN KEY(cid) REFERENCES c(id) ON DELETE CASCADE)", cancellationToken: TestTimeout.Token());
+        await setup.ExecuteAsync(CreateGrandchildTable, cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO p (id) VALUES (2)", cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO c (id, pid) VALUES (11, 1), (20, 2)", cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO g (id, cid) VALUES (100, 10), (101, 11), (200, 20)", cancellationToken: TestTimeout.Token());

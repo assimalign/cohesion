@@ -1698,7 +1698,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   aborts rather than re-targeting the new version — retry is the policy). A
   cascade finds its child rows in latest state, not through the snapshot, so
   under `Snapshot` (and `Serializable`) a cascade that reaches a child version
-  newer than the transaction's snapshot fails the same way
+  the transaction's snapshot does not see fails the same way
   ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)).
   **Why the apply gate and not concurrent appliers with page-conflict retry
   (the recorded page-conflict fallback decision):** page locks release at
@@ -2675,13 +2675,18 @@ overwrite a concurrent update, which is the write-write conflict first-updater-w
 snapshot is fixed, reads the version's writer stamp (`EnsureSnapshotSeesCascadeRow`). A writer
 the snapshot does not see fails the statement with the retryable `TransactionAbortedException`
 ("Write-write conflict on 'dbo.c': ON DELETE CASCADE reached a row version written by
-transaction N, which committed after this transaction's snapshot (first-updater-wins). Retry
-the transaction."), which the session surfaces as `DatabaseTransactionAbortedException`. The
-walk runs in phase one, before the apply bracket opens, so the failed statement wrote nothing:
-an explicit transaction stays active, and an auto-commit statement rolls back. The writer is
-always decided by then: the parent row's lock waited for it, and an aborted writer's versions
-are undone before its locks release. A version the transaction wrote itself is visible to its
-own snapshot, so a transaction that inserts children and then deletes their parent still
+transaction N, which this transaction's snapshot does not see (first-updater-wins). Retry the
+transaction."), which the session surfaces as `DatabaseTransactionAbortedException`. The walk
+runs in phase one, before the apply bracket opens, so the failed statement wrote nothing: an
+explicit transaction stays active, and an auto-commit statement rolls back. The writer is
+usually decided by then: the parent row's lock waited for it, and an aborted writer's versions
+are undone before its locks release. The exception is a statement whose snapshot holds a
+parent version that a committed transaction has since replaced: child writers lock the
+replacement, not the version the statement locked, so the walk can reach a child whose writer
+is still in flight. The statement fails either way, here or at the stale parent's
+latest-version check in phase two, which runs before any row below that parent is deleted
+because the deletion set is built pre-order. A version the transaction wrote itself is visible
+to its own snapshot, so a transaction that inserts children and then deletes their parent still
 cascades. The rows a statement targets directly were found through its snapshot and need no
 check.
 
@@ -2715,10 +2720,14 @@ backstop for any write path that deletes a version it found in latest state.
 `SqlCascadeSnapshotConflictTests` is the regression guard. At `Snapshot`, the #1363 repro and a
 concurrent child insert, in an explicit transaction and in auto-commit, fail first-updater-wins,
 leave the parent, every child and the child's primary-key entry live, and succeed on retry,
-after which the deleted keys can be inserted again. The read-committed form deletes the new
-versions; a `Serializable` context the coordinator begins fails like `Snapshot` (the session
-refuses a `Serializable` BEGIN); and a cascade with no concurrent writer deletes a two-level
-closure, children the transaction inserted itself included, at all three levels.
+after which the deleted keys can be inserted again. A grandchild the writer updated or
+inserted fails the same way one level down, naming the grandchild's table. A deleter whose
+snapshot holds a replaced parent version fails at once on a child still in flight, without
+claiming a commit, whether that writer then commits or rolls back. The read-committed form
+deletes the new versions, and rolling it back restores them with their primary-key entries;
+a `Serializable` context the coordinator begins fails like `Snapshot` (the session refuses a
+`Serializable` BEGIN); and a cascade with no concurrent writer deletes a two-level closure,
+children the transaction inserted itself included, at all three levels.
 
 ## Persisted definitions: canonical text, parsed once
 
@@ -3141,8 +3150,8 @@ never be inserted again. `SqlReadCommittedSnapshotPinTests` pins that case
 (`Cascade_WaitsForAChildWriter_ShouldRemoveTheChildsIndexEntries`). The same
 cascade at `Snapshot` isolation left the entry live too, because the transaction's
 snapshot is fixed there; that was older than #1363. #1370 closed it on both sides:
-the cascade fails first-updater-wins before it deletes a version newer than a fixed
-snapshot, and the index delete matches the reference's live entry by its stamps, so
+the cascade fails first-updater-wins before it deletes a version a fixed snapshot
+does not see, and the index delete matches the reference's live entry by its stamps, so
 no snapshot decides it
 ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)).
 

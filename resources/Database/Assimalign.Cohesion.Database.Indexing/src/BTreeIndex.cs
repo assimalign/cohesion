@@ -220,16 +220,22 @@ public sealed class BTreeIndex
     /// no-op.
     /// </summary>
     /// <remarks>
-    /// The caller holds a write lock that excludes every other writer of the record version the
-    /// reference names (Sql's row lock, KeyValuePair's key lock, the Documents and Graph database
-    /// writer lock) and has checked that version's stamps under it, so the version's writer is
-    /// decided, committed or the caller itself, and the reference's live entry is that
-    /// version's. The match therefore reads the entry's stamps, not the transaction's snapshot:
-    /// a write may delete a version its snapshot does not see, and a match through that snapshot
-    /// finds nothing and leaves the deleted version's entry live, which a unique index then
-    /// reports as a duplicate of every later insert of the key. A Sql cascade at
-    /// <c>Snapshot</c> isolation did exactly that until #1370 (it now fails first-updater-wins
-    /// before it deletes such a version).
+    /// The caller's write locks decide the record version the reference names, and the caller
+    /// has checked that version's stamps under them, so the version's writer is decided,
+    /// committed or the caller itself, and the reference's live entry is that version's.
+    /// KeyValuePair's key lock and the Documents and Graph database writer lock exclude every
+    /// other writer of the version outright. Sql takes no row lock on a version it creates, so
+    /// its row lock does not exclude a version's creator: a Sql statement deletes rows it found
+    /// through its snapshot, whose writers are committed or itself, and rows a cascade found
+    /// below them, whose writers the parent-row lock of its referential protocol decides. The
+    /// one case that lock misses, a parent version a committed transaction has since replaced,
+    /// fails the statement before any row found below that version is deleted (the cascade's
+    /// snapshot check, or the phase-two latest-version check on the stale version). The match
+    /// therefore reads the entry's stamps, not the transaction's snapshot: a write may delete a
+    /// version its snapshot does not see, and a match through that snapshot finds nothing and
+    /// leaves the deleted version's entry live, which a unique index then reports as a duplicate
+    /// of every later insert of the key. A Sql cascade at <c>Snapshot</c> isolation did exactly
+    /// that until #1370 (it now fails first-updater-wins before it deletes such a version).
     /// </remarks>
     /// <param name="transaction">The transaction the mutation belongs to.</param>
     /// <param name="key">The key to delete.</param>

@@ -234,13 +234,22 @@ lookup followed them before; the randomized and recovery suites now check, page 
 page, that they mirror the next-leaf links.
 
 **Delete matches by stamps, not by the caller's snapshot (#1370).** Delete tombstones
-the reference's live entry (deleter stamp zero), whoever wrote it. The caller holds a
-write lock that excludes every other writer of the record version the reference
-names (Sql's row lock, KeyValuePair's key lock, the Documents and Graph database
-writer lock) and has checked that version's stamps under it, so the live entry's
-writer is decided, committed or the caller itself, and the entry is that version's.
+the reference's live entry (deleter stamp zero), whoever wrote it. The caller's write
+locks decide the record version the reference names, and the caller has checked that
+version's stamps under them, so the live entry's writer is decided, committed or the
+caller itself, and the entry is that version's. KeyValuePair's key lock and the
+Documents and Graph database writer lock exclude every other writer of the version
+outright. Sql takes no row lock on a version it creates, so its row lock does not
+exclude a version's creator: a Sql statement deletes rows it found through its
+snapshot, whose writers are committed or itself, and rows a cascade found below them,
+whose writers the parent-row lock of its referential protocol decides. The one case
+that lock misses, a parent version a committed transaction has since replaced, fails
+the statement before any row found below that version is deleted: the cascade's
+snapshot check, or the phase-two latest-version check on the stale version, which
+precedes its descendants in the pre-order deletion set.
 Until #1370 the match also required the caller's snapshot to see the entry's writer.
-That added nothing a lock did not already give, and it failed silently: a write that
+That added nothing the caller's locks and checks did not already give, and it failed
+silently: a write that
 deletes a version newer than its snapshot (a Sql cascade at `Snapshot` isolation,
 which reads child rows in latest state) matched nothing, the record was tombstoned
 with its entry still live, and a unique index then refused every later insert of the

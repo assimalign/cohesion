@@ -104,6 +104,17 @@ internal sealed partial class SqlPlanExecutor
     //     released a reference to that row has been decided by the time the read
     //     happens.
     //
+    // The guarantee holds while the locked row is the parent's live version. A
+    // statement whose snapshot holds a version that a committed transaction has
+    // since replaced locks that stale version, while new child writers lock the
+    // replacement, so its read can return a child whose writer is still in flight.
+    // Such a statement writes nothing below the stale version: a cascade under a
+    // fixed snapshot fails on that child (`EnsureSnapshotSeesCascadeRow`), a
+    // RESTRICT or key-change check reports it as a violation, and otherwise the
+    // stale version fails its phase-two `EnsureLatestVersion`, which comes before
+    // every row found below it because the cascade builds its deletion set
+    // pre-order.
+    //
     // Table-grain locks stay intent-only: `IntentShared` on the adjacent tables a
     // statement reads for constraint purposes, which is compatible with other
     // writers' `IntentExclusive` and blocks only table-grain DDL. Two transactions
@@ -602,12 +613,16 @@ internal sealed partial class SqlPlanExecutor
     /// The transaction-snapshot crosscheck of a cascade (#1370). Under a snapshot fixed at the
     /// transaction's begin (<see cref="IsolationLevel.Snapshot"/> and
     /// <see cref="IsolationLevel.Serializable"/>), a child row the walk reached in latest state
-    /// must be a version that snapshot sees. A version it does not see was written by a
-    /// transaction that committed after the snapshot: the parent row's exclusive lock waited for
-    /// every writer of a row referencing it, and an aborted writer's versions are undone before
-    /// its locks release. Deleting that version would overwrite an update the transaction never
-    /// saw, so the statement fails with the retryable write-write conflict, first-updater-wins,
-    /// before it writes anything.
+    /// must be a version that snapshot sees. A version it does not see is a write the
+    /// transaction never read. Usually its writer committed after the snapshot: the parent row's
+    /// exclusive lock waited for every writer of a row referencing it, and an aborted writer's
+    /// versions are undone before its locks release. The exception is a statement whose snapshot
+    /// holds a parent version that a committed transaction has since replaced: child writers
+    /// lock the replacement, not the version this statement locked, so the walk can reach a
+    /// child whose writer is still in flight (the referential-locking note above). Either way
+    /// deleting that version would overwrite a write the transaction never saw, so the statement
+    /// fails with the retryable write-write conflict, first-updater-wins, before it writes
+    /// anything.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -632,7 +647,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="table">The child row's table.</param>
     /// <param name="location">The child row's location, exclusively locked by the statement.</param>
     /// <param name="statement">The executing statement.</param>
-    /// <exception cref="TransactionAbortedException">The child version is newer than the transaction's snapshot.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer.</exception>
     private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement)
     {
         if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
@@ -645,7 +660,7 @@ internal sealed partial class SqlPlanExecutor
         {
             throw new TransactionAbortedException(
                 $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version written by transaction {writer}, " +
-                "which committed after this transaction's snapshot (first-updater-wins). Retry the transaction.");
+                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
         }
     }
 
