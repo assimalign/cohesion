@@ -422,17 +422,31 @@ transactions that had left and missed the ones that came, so two transactions co
 each other with neither edge in the graph, and both waited until something canceled one of
 them. A granted or canceled request also dropped every edge of its owner, those of the owner's
 other queued requests with them. The #1370 review's SQL stress runs saw two to five waits per
-run pass 10 s. A probe of that workload that read the lock table every 50 ms, run for 60 s on
-`19b1a495`, saw 40, and every wait over 1 s was one of them: 11 were the members of two- and
-three-transaction cycles whose edges the graph had lost, and the other 29 waited behind those.
-In one such cycle a cascading `DELETE` holds the exclusive lock on a parent row and waits for a
-child row. The child row was granted, at its previous holder's release, to an `UPDATE` that
-re-parents the child and was queued ahead of the delete. That update then waits for the shared
-lock on the parent row, and the delete's only recorded edge named the previous holder. No
-holder of a long wait was waiting for anything but a lock of this table. The committed probe
-(`SqlLockWaitTests` in `Database.Sql`, Release, 60-second runs) saw 40, 40 and 56 waits pass
-10 s on `19b1a495`; with the fix it saw none in five runs, and no wait reach 1 s (about 75,000
-commits, 26,000 lock waits and 1,300 deadlock victims a run).
+run pass 10 s. The committed probe of that workload (`SqlLockWaitTests` in `Database.Sql`,
+Release, 60-second runs) was run twice on `19b1a495` with a diagnostic that reported each wait
+still queued after 1 s: the holders the table showed, whether the recorded graph had an edge to
+each, what each holder was queued for in turn, and whether the table held a cycle through the
+waiter. Each run saw 40 waits pass 10 s and none end between 1 and 10 s, and all 80 are
+accounted for. Twenty were the members of ten two-transaction cycles; the other 60 were queued,
+directly or through a chain, behind a member. In every cycle one member's recorded edge named a
+transaction that had released the resource, which another transaction now held, so the graph
+had one edge of the cycle and the detector never saw it. Each cycle lasted until the probe
+canceled a wait at 12 s. Nine were the referential cycle the Sql engine's lock order allows (its
+DESIGN.md, "Referential enforcement locks parent rows"): a cascading `DELETE` holds a parent row
+and waits for a child row, while a child writer holds the child row and waits, in its
+foreign-key check, for the shared lock on the parent row. In one of them an `UPDATE` of the
+child had queued for the parent row while another transaction held it; that transaction's
+release granted the row to the cascade, queued ahead of the update, and the update's only edge
+still named the transaction that had left. The tenth was two child-table writers in explicit
+transactions, each holding the row the other's next statement needed. In seven of the nine
+referential cycles the child writer's edge was the stale one, in two the cascade's. Every
+transaction a long wait reported was itself in a statement
+waiting for a lock of this table, never committing, between statements or idle, and every queued
+request had a conflicting holder: no long wait came from a lock held across another kind of
+wait, and none from a lost wake-up. With the fix, five 60-second runs of the same probe saw no
+wait reach 1 s (72,674 to 81,287 commits, 24,948 to 28,165 lock waits and 1,256 to 1,447
+deadlock victims a run), nor did a 300-second run of the fixed lock manager under the base's Sql
+engine (298,671 commits, 5,294 deadlock victims).
 
 Now the lock manager keeps only each owner's queued requests, and the search reads the edges from
 the table as it stands. The requester waits for every owner that holds, in a conflicting mode,
@@ -484,10 +498,11 @@ else. The kernel's other waits keep to that:
 a stronger mode, so a stream of shared grants can keep an exclusive request waiting for as long
 as the stream lasts. PostgreSQL queues a request behind a conflicting one and pays for it with
 soft edges and the queue rearrangement its detector does to resolve them (`deadlock.c`,
-`TopoSort`). A 60-second run of the probe's workload with one parent row, two cascading deleters
-and eight child writers saw no wait reach 1 s (73,277 commits, 2,295 deadlock victims), so the
-grant rule stays as it is. The probe is what would show a starved request: a wait that passes
-10 s while its holders change.
+`TopoSort`). A 60-second Release run of the probe's workload concentrated on one parent row, with
+two cascading deleters and eight child writers (`COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE=1,2,8`),
+saw no wait reach 1 s (122,459 commits, 27,751 lock waits, 1,400 deadlock victims), so the grant
+rule stays as it is. The probe is what would show a starved request: a wait that passes 10 s
+while its holders change.
 
 **A wait still queued at the threshold is reported (#1390).** `SlowLockWait` is written as a wait
 ends, so a wait that never ended was never reported. A request that queues while a listener takes

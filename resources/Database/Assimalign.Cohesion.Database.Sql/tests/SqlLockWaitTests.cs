@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Tracing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -106,13 +107,15 @@ public sealed class SqlLockWaitTests
 
     /// <summary>
     /// A snapshot cascade that waited for the lock of a child version whose writer then rolled
-    /// back, which the stress probe below met once deadlocks no longer stalled its workload. The
+    /// back, which the stress probe below met, rarely, once deadlocks no longer stalled its workload. The
     /// cascades start from parent versions their snapshots hold but committed updates replaced, so
     /// they reach a child the writer is still inserting under the replacements (#1370). The first
     /// cascade locks the child and fails first-updater-wins, keeping the lock; the second waits for
     /// it, and meanwhile the writer rolls back and its undo deletes the version. The second must
-    /// fail first-updater-wins as well: it read the slot with a read that throws for a deleted slot,
-    /// and failed with the storage's <c>SlottedPageException</c>.
+    /// fail first-updater-wins as well: it read the slot with a read that throws for a slot that is
+    /// gone, and on <c>19b1a495</c> failed with the storage's <c>StorageIOException</c> ("Page 7 is
+    /// not allocated": the undo emptied the child table's only page and freed it). The probe met
+    /// the same race once as <c>SlottedPageException</c>, for a deleted slot on a page still in use.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Cascade: A snapshot cascade whose child version was rolled back while it waited for the row fails first-updater-wins, not with a storage error (#1390)")]
     public async Task Cascade_SnapshotChildVersionRolledBackWhileTheCascadeWaited_ShouldFailFirstUpdaterWins()
@@ -170,9 +173,12 @@ public sealed class SqlLockWaitTests
     /// <summary>
     /// The stress probe (<see cref="SqlLockWaitProbe"/>): the #1370 review's workload, run until the
     /// lock manager has broken enough of its deadlocks, then drained. No wait may last 10 s; before
-    /// the fix a 60-second run on the base saw 40 that did. Set
-    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_SECONDS</c> to run it longer, and
-    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_REPORT</c> to append its report to a file.
+    /// the fix each 60-second run on the base saw 40 that did. Set
+    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_SECONDS</c> to run it longer,
+    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE</c> to "parents,deleters,childWriters" for
+    /// another workload ("1,2,8" concentrates it on one parent row, the starvation measurement in
+    /// the Transactions DESIGN.md), and <c>COHESION_DATABASE_LOCK_WAIT_PROBE_REPORT</c> to append
+    /// its report to a file.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lock waits: Cascading deletes, child writers and the purge never leave a lock wait 10 s long (#1390)")]
     public async Task Workload_CascadesChildWritersAndThePurge_ShouldNeverWaitTenSeconds()
@@ -181,10 +187,13 @@ public sealed class SqlLockWaitTests
         double seconds = double.TryParse(Environment.GetEnvironmentVariable("COHESION_DATABASE_LOCK_WAIT_PROBE_SECONDS"), out double configured) && configured > 0
             ? configured
             : 3;
+        int[] shape = Environment.GetEnvironmentVariable("COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE") is { Length: > 0 } configuredShape
+            ? configuredShape.Split(',').Select(value => int.Parse(value, CultureInfo.InvariantCulture)).ToArray()
+            : [SqlLockWaitProbe.DefaultParents, 3, 5];
 
         // Act
-        var result = await SqlLockWaitProbe.RunAsync(TimeSpan.FromSeconds(seconds));
-        string report = $"SQL lock-wait probe, {seconds} s:{Environment.NewLine}{result}";
+        var result = await SqlLockWaitProbe.RunAsync(TimeSpan.FromSeconds(seconds), shape[0], shape[1], shape[2]);
+        string report = $"SQL lock-wait probe, {seconds} s, {shape[0]} parents, {shape[1]} deleters, {shape[2]} child writers:{Environment.NewLine}{result}";
         _output.WriteLine(report);
         if (Environment.GetEnvironmentVariable("COHESION_DATABASE_LOCK_WAIT_PROBE_REPORT") is { Length: > 0 } path)
         {

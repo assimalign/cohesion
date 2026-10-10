@@ -2630,9 +2630,13 @@ caught, a cascade queued for a child row behind an `UPDATE` that re-parents the 
 release of the row's holder granted the row to the update, queued first; and the update then
 waited for the shared lock on the parent row the cascade holds. The cascade's only edge named
 the holder that had left, so both statements waited until something canceled them. The #1370
-review's stress runs saw two to five such waits pass 10 s per run. The detector now reads its
-edges from the lock table as it stands (`Database.Transactions` DESIGN.md, "The wait-for graph
-is read from the table"); the lock order is unchanged. `SqlLockWaitTests` builds the cycle step
+review's stress runs saw two to five such waits pass 10 s per run, and the probe below saw 40 in
+each of two 60-second runs on `19b1a495`: the members of ten two-transaction cycles, and the
+statements queued behind them. Nine were cascade-against-child-writer cycles like this one (the
+child writer's edge was the stale one seven times, the cascade's twice); the tenth was two child
+writers in explicit transactions. The detector now reads its edges from the lock table as it
+stands (`Database.Transactions` DESIGN.md, "The wait-for graph is read from the table"); the
+lock order is unchanged. `SqlLockWaitTests` builds the cycle step
 by step (an `UPDATE` of the child row stands in for the cascade's lock on it), and runs the
 review's workload as a stress probe that fails on any wait of 10 s.
 
@@ -2739,9 +2743,11 @@ for the child's lock, and its undo deletes the version (or its failed statement'
 restores the page without it). The check reads the slot with `TryReadRecord`, and a version that
 is gone fails the statement with the same conflict, naming no writer ("... reached a row version
 that was rolled back after the walk found it ..."). Until #1390 it read the slot with `ReadRow`,
-and the statement failed with the storage's `SlottedPageException` (or an
-`ArgumentOutOfRangeException` for a slot past a restored page's last); the #1390 stress probe met
-it about once a minute (`SqlLockWaitTests` builds the race step by step). A version the
+and the statement failed with the storage's exception: `SlottedPageException` for a deleted slot,
+`ArgumentOutOfRangeException` for a slot past a restored page's last, or `StorageIOException`
+("Page 7 is not allocated" in the step-by-step test on `19b1a495`) when the undo emptied the page
+and freed it. The #1390 stress probe met it rarely (one `SlottedPageException` in its early runs,
+none in six minutes of later ones), so `SqlLockWaitTests` builds the race step by step. A version the
 transaction wrote itself is visible to its own snapshot, so a transaction that inserts children
 and then deletes their parent still cascades. The rows a statement targets directly were found
 through its snapshot and need no check.

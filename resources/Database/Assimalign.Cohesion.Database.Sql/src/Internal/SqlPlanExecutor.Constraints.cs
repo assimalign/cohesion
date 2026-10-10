@@ -650,9 +650,12 @@ internal sealed partial class SqlPlanExecutor
     /// without it. The snapshot never saw such a version either, so the statement fails with the
     /// same conflict. Until the #1390 stress probe found it, the check read the slot with
     /// <c>ReadRow</c>, which throws for a deleted or reverted slot, and the statement failed with
-    /// the storage's exception instead (<c>SlottedPageException</c>, or
-    /// <c>ArgumentOutOfRangeException</c> for a slot past the restored page's last). The probe
-    /// met it about once a minute once deadlocks no longer stalled its workload.
+    /// the storage's exception instead: <c>SlottedPageException</c> for a deleted slot,
+    /// <c>ArgumentOutOfRangeException</c> for a slot past the restored page's last, or
+    /// <c>StorageIOException</c> ("Page N is not allocated") when the undo emptied the page and
+    /// freed it. <c>TryReadRecord</c> reports all three as a record that is gone. The race is rare
+    /// under the probe's workload (one <c>SlottedPageException</c> in its early runs, none in six
+    /// minutes of later ones), so <c>SqlLockWaitTests</c> builds it step by step.
     /// </para>
     /// </remarks>
     /// <param name="table">The child row's table.</param>

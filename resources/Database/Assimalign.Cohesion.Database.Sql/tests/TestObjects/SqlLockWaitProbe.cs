@@ -35,15 +35,17 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 /// than hanging it.
 /// </para>
 /// <para>
-/// On the base (<c>19b1a495</c>), three 60-second Release runs saw 40, 40 and 56 waits pass 10 s:
-/// the members of two- and three-transaction cycles whose wait-for edges the lock manager had lost,
-/// and the waits queued behind them (#1390). With the fix, five runs saw no wait reach 1 s.
+/// On the base (<c>19b1a495</c>), two 60-second Release runs saw 40 waits pass 10 s each and none
+/// end between 1 and 10 s: the members of ten two-transaction cycles, in each of which one member's
+/// recorded wait-for edge named a transaction that had released the resource, and the waits queued
+/// behind them (#1390). With the fix, five 60-second runs saw no wait reach 1 s (72,674 to 81,287
+/// commits and 1,256 to 1,447 deadlock victims a run).
 /// </para>
 /// </remarks>
 internal sealed class SqlLockWaitProbe
 {
-    /// <summary>The parent rows the cascades delete and the children reference.</summary>
-    internal const int Parents = 6;
+    /// <summary>The parent rows the cascades delete and the children reference, unless a run names its own.</summary>
+    internal const int DefaultParents = 6;
 
     /// <summary>The child keys.</summary>
     internal const int Children = 30;
@@ -75,6 +77,7 @@ internal sealed class SqlLockWaitProbe
 
     private readonly SqlDatabase _database;
     private readonly string _name;
+    private readonly int _parents;
     private readonly Worker[] _workers;
     private readonly ConcurrentDictionary<long, int> _sequenceWorkers = new();
     private readonly ConcurrentDictionary<long, Wait> _waiting = new();
@@ -89,20 +92,23 @@ internal sealed class SqlLockWaitProbe
     private long _violations;
     private long _waits;
 
-    private SqlLockWaitProbe(SqlDatabase database, string name, int workers)
+    private SqlLockWaitProbe(SqlDatabase database, string name, int parents, int workers)
     {
         _database = database;
         _name = name;
+        _parents = parents;
         _workers = Enumerable.Range(0, workers).Select(id => new Worker(id, this)).ToArray();
     }
 
     /// <summary>Runs the probe and returns what it saw.</summary>
     /// <param name="duration">The shortest time the workers run before the run may stop.</param>
+    /// <param name="parents">The parent rows: fewer concentrate the cascades and the foreign-key checks on fewer rows.</param>
     /// <param name="deleters">The workers that delete and re-insert parents, which cascade.</param>
     /// <param name="childWriters">The workers that write children and grandchildren.</param>
     /// <returns>The result.</returns>
-    internal static async Task<SqlLockWaitProbeResult> RunAsync(TimeSpan duration, int deleters = 3, int childWriters = 5)
+    internal static async Task<SqlLockWaitProbeResult> RunAsync(TimeSpan duration, int parents = DefaultParents, int deleters = 3, int childWriters = 5)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(parents, 1);
         string name = "lock-wait-probe-" + Guid.NewGuid().ToString("N");
         await using var engine = SqlDatabaseEngine.Create("lock-wait-probe", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync(name);
@@ -111,12 +117,12 @@ internal sealed class SqlLockWaitProbe
             await setup.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY, v INT)");
             await setup.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT, v INT, CONSTRAINT fk_c FOREIGN KEY(pid) REFERENCES p(id) ON DELETE CASCADE)");
             await setup.ExecuteAsync("CREATE TABLE g (id INT PRIMARY KEY, cid INT, CONSTRAINT fk_g FOREIGN KEY(cid) REFERENCES c(id) ON DELETE CASCADE)");
-            await setup.ExecuteAsync("INSERT INTO p (id, v) VALUES " + string.Join(", ", Enumerable.Range(1, Parents).Select(id => $"({id}, 0)")));
-            await setup.ExecuteAsync("INSERT INTO c (id, pid, v) VALUES " + string.Join(", ", Enumerable.Range(1, Children).Select(id => $"({id}, {id % Parents + 1}, 0)")));
+            await setup.ExecuteAsync("INSERT INTO p (id, v) VALUES " + string.Join(", ", Enumerable.Range(1, parents).Select(id => $"({id}, 0)")));
+            await setup.ExecuteAsync("INSERT INTO c (id, pid, v) VALUES " + string.Join(", ", Enumerable.Range(1, Children).Select(id => $"({id}, {id % parents + 1}, 0)")));
             await setup.ExecuteAsync("INSERT INTO g (id, cid) VALUES " + string.Join(", ", Enumerable.Range(1, Grandchildren).Select(id => $"({id}, {id})")));
         }
 
-        var probe = new SqlLockWaitProbe(database, name, deleters + childWriters);
+        var probe = new SqlLockWaitProbe(database, name, parents, deleters + childWriters);
         using var listener = new Listener(probe);
         using var stop = new CancellationTokenSource();
         var workers = probe._workers.Select(worker => Task.Run(() => probe.RunWorkerAsync(worker, deleter: worker.Id < deleters, stop.Token))).ToArray();
@@ -279,9 +285,9 @@ internal sealed class SqlLockWaitProbe
         }
     }
 
-    private static List<string> DeleterStatements(Random random)
+    private List<string> DeleterStatements(Random random)
     {
-        int parent = random.Next(1, Parents + 1);
+        int parent = random.Next(1, _parents + 1);
         var statements = new List<string> { $"DELETE FROM p WHERE id = {parent}", $"INSERT INTO p (id, v) VALUES ({parent}, 0)" };
         int children = random.Next(0, 4);
         for (int i = 0; i < children; i++)
@@ -297,14 +303,14 @@ internal sealed class SqlLockWaitProbe
         return statements;
     }
 
-    private static List<string> ChildStatements(Random random)
+    private List<string> ChildStatements(Random random)
     {
         var statements = new List<string>();
         int count = random.Next(1, 4);
         for (int i = 0; i < count; i++)
         {
             int child = random.Next(1, Children + 1);
-            int parent = random.Next(1, Parents + 1);
+            int parent = random.Next(1, _parents + 1);
             int grandchild = random.Next(1, Grandchildren + 1);
             statements.Add(random.Next(7) switch
             {
