@@ -2,11 +2,13 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Hosting</RootNamespace>
 	</PropertyGroup>
-	<!-- Web-area dependency rule: the hosting/runtime module references only the root
-	     Assimalign.Cohesion.Web project, its own hosting family (O35), and non-Web-area libraries. Feature libraries
-	     (authentication, routing, results, ...) are NEVER referenced here - the App.Web
-	     shared framework delivers them to applications, and their builder verbs ship in
-	     their own packages. See resources/Web/README.md. -->
+	<!-- Web-area dependency rule: today the hosting/runtime module references the root
+	     Assimalign.Cohesion.Web project, its own hosting family (O35), and non-Web-area libraries.
+	     COHRES002 (relaxed 2026-10-09) lets it reference any other Web library except Web.Testing,
+	     Web.ApplicationModel, the App.Web producers, and harnesses - but only for runtime machinery
+	     it composes itself: the App.Web shared framework delivers features to applications, their
+	     builder verbs ship in their own packages, and every reference added here ships its closure
+	     in all 18 area frameworks. See resources/Web/README.md. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />

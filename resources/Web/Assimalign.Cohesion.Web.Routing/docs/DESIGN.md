@@ -531,8 +531,9 @@ generator produces for it. That inconsistency is fixed with #1056.
 The endpoint runs at the pipeline's terminal; there is no `UseEndpoints` step. An explicit dispatch
 middleware would silently turn every existing application into a 404 server: its routes would match
 and publish, and nothing would run them. The terminal belongs to the pipeline builder
-(`WebApplication` in Web.Hosting), and COHRES002 forbids Web.Hosting from referencing Web.Routing.
-So the selected endpoint reaches the terminal through a root seam, `IWebEndpointFeature`, which
+(`WebApplication` in Web.Hosting), and when this was designed COHRES002 forbade Web.Hosting from
+referencing Web.Routing (relaxed 2026-10-09, which unblocks moving the endpoint seam here; HTTP/Web
+program plan, decision 32). So the selected endpoint reaches the terminal through a root seam, `IWebEndpointFeature`, which
 carries the delegate to run and the route template telemetry names it by. The route, its values and
 its metadata stay in Web.Routing's `IRouteMatchFeature`. `RouteMatchFeature` implements both
 contracts.
@@ -680,9 +681,9 @@ sequenceDiagram
 
 **Why this seam.** Three alternatives were rejected:
 
-- *Web.Hosting calls into routing at startup.* Web.Hosting may not reference feature libraries
-  (COHRES002), and Web.Routing may reference neither Web.Hosting nor any `Hosting*` library
-  (COHRES001, COHRES004).
+- *Web.Hosting calls into routing at startup.* When this was decided Web.Hosting could not reference
+  feature libraries (COHRES002, relaxed 2026-10-09), and Web.Routing may reference neither
+  Web.Hosting nor any `Hosting*` library (COHRES001, COHRES004).
 - *A new root lifecycle contract*, such as a freeze or application-starting hook on
   `IWebApplication` or on a feature. It adds public surface for something the root contract already
   provides: the component-factory `Use` overload is a composition-time callback that runs exactly

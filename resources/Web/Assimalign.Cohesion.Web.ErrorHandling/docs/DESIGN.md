@@ -72,8 +72,8 @@ Three layers, outermost last:
    response.
 3. **The server's exception isolation (#762, `Web.Hosting`)** — infrastructure protection: an
    exception that escapes even the boundary (or a fault in the boundary/handlers themselves)
-   must not kill the connection loop. The server cannot invoke this hook — the hosting-isolation
-   rule forbids it from referencing this package — and that is by design: its catch is about
+   must not kill the connection loop. The server does not invoke this hook — it does not reference
+   this package (the hosting-isolation rule forbade it until 2026-10-09) — and that is by design: its catch is about
    connection survival, not response shaping, and produces no application payload.
 
 `HandleAsync` assumes an **unstarted response**; a boundary that buffers or wraps enforces
@@ -127,9 +127,10 @@ a head already committed.
 Its motivating source is the **pipeline's bodyless 404 terminal**. The silent `Task.CompletedTask`
 terminal in `WebApplication.Build` (which returned an empty `200` for any unhandled request) now sets a
 bodyless `404 Not Found` when the response reaches it untouched (still `200`, no body, no `Content-Type`,
-no `Location`). That terminal lives in **`Web.Hosting`** and must stay payload-free: the resource
-hosting-isolation rule (COHRES002) forbids the runtime module from referencing `Web.ProblemDetails` (or
-this package), so the runtime can only set the status — this package's opt-in status-code-pages middleware
+no `Location`). That terminal lives in **`Web.Hosting`** and stays payload-free: the runtime module
+does not reference `Web.ProblemDetails` (or this package). The resource hosting-isolation rule (COHRES002)
+forbade it when this was designed, and since the 2026-10-09 relaxation the reference would still ship in
+every framework that carries the module. So the runtime can only set the status — this package's opt-in status-code-pages middleware
 is what turns it into problem+json. A middleware that deliberately produces an empty `200` must be
 terminal (not chain to `next`); a bodyless-`200` fall-through is read as unhandled.
 
@@ -139,7 +140,7 @@ The issue posed the choice: an area-root seam or a feature package. The default 
 it — it renders `Web.ProblemDetails`, and the area root must not reference feature packages, so
 a root-homed hook would either lose its default or invert the dependency direction. This is a
 feature package referencing `Http`, `Web`, and `Web.ProblemDetails`; `Web.Hosting` references
-none of it (COHRES001/002), and applications receive it through the `App.Web` shared framework.
+none of it (COHRES002 forbade that until 2026-10-09), and applications receive it through the `App.Web` shared framework.
 The #881 boundary middleware — a pipeline feature, not runtime code — consumes it as an ordinary
 cross-feature reference.
 

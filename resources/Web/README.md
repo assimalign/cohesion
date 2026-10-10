@@ -22,8 +22,10 @@ The hosting family follows O34 (owner decision, 2026-09-15):
 > (COHRES004) or Web hosting-family integration (COHRES001).**
 > `Web.Hosting.Resources` and `Web.Hosting.Health` integrate the shared Hosting libraries.
 > They may reference Web features and each other, but never the exact `Web.Hosting`
-> runtime module. The module may reference the Web root and its own hosting family
-> (`Web.Hosting.Resources`, `Web.Hosting.Health`) within its area (COHRES002).
+> runtime module. The module may reference any Web library except `Web.Testing`,
+> `Web.ApplicationModel`, the `App.Web` producers, and test, example, sample, and fixture
+> projects (COHRES002, relaxed by owner decision 2026-10-09; before that, only the Web root and
+> its own hosting family).
 > `Web.Testing` exempts `Web.Hosting` and `Web.Hosting.Resources` to drive the runtime and its control plane; `Web.ApplicationModel` retains its
 > COHAM001-fenced `Hosting.Resources` reference.
 
@@ -33,23 +35,32 @@ Why the rule exists:
   logging, and transport wiring. A feature library that referenced it would drag that whole
   composition surface into every consumer and push users toward container-driven design — the
   opposite of the repo's dependency-free feature-package philosophy.
-- **Web.Hosting depends on no feature library** because the `App.Web` framework (members listed in
+- **Web.Hosting references a Web library only when the runtime itself needs it.** Since
+  2026-10-09 the rule permits any Web library outside the exclusions above, so runtime machinery
+  that belongs in its own package (a router the host drives, a server package) no longer has to
+  live in the root. Hosting a feature still needs no reference: the `App.Web` framework (members
+  listed in
   [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props))
-  is what delivers the family to applications: an app using `Sdk.Web` sees every Web assembly
-  without any project wiring, so the runtime never needs compile-time knowledge of the features
-  it hosts. Builder verbs ship with their feature
+  delivers the family to applications, so an app using `Sdk.Web` sees every Web assembly without
+  any project wiring, and builder verbs ship with their feature
   (`AddAuthentication` in Web.Authentication, `AddCookie` in Web.Authentication.Cookie,
   `AddJwtBearer` in Web.Authentication.Bearer, `AddRouting`/`UseRouting` in Web.Routing, …) and
   compose against the root project's `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder`
-  seams.
+  seams. Each reference `Web.Hosting` takes ships its closure in every framework that carries
+  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks.
+- **The exclusions** follow from earlier decisions: `Web.Testing` references `Web.Hosting`, so the
+  reverse is a cycle; the realization-plan design keeps the runtime off `Web.ApplicationModel`
+  (generated code in the consumer executable joins the two); the `App.Web` producers are packaging
+  shells that reference `Web.Hosting`; and harnesses never ship.
 
 **The rule is build-enforced — centrally, for every resource area.** The Web rule is the local
 instance of the repo-wide *resource hosting-isolation rule* in
 `build/Targets/Build.Rules.targets` (prose: `.claude/rules/resource-areas.md`): each
 `resources/<Area>/` ships one `Assimalign.Cohesion.<Area>.Hosting`, no library in the area may
 reference it (`COHRES001`, checked against both the project-reference graph and the resolved
-assembly closure), and the hosting module may directly reference no same-area library except the
-area root and its own hosting family (`COHRES002`). A project with a sanctioned, user-approved exception opts out
+assembly closure), and the hosting module may directly reference any same-area library except
+the area's `Testing`, `ApplicationModel`, `ApplicationModel.Orchestration`, framework producers,
+and harness projects (`COHRES002`). A project with a sanctioned, user-approved exception opts out
 per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
 `Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
 exempt — the rule constrains shipped libraries, not harnesses — and every Web library builds in
@@ -71,7 +82,9 @@ A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is n
 2. **Framework membership** — a `CohesionFrameworkAssembly` line in
    [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props),
    plus any new outside-area transitive dependencies App does not carry. Validate by packing
-   `resources/Web/Assimalign.Cohesion.Web.Runtime` (hard-fails on unresolvable assemblies).
+   `resources/Web/Assimalign.Cohesion.Web.Runtime` (hard-fails on unresolvable assemblies). If
+   `Web.Hosting` references the new library, add its closure as a private member of the 17 other
+   area frameworks that carry `Web.Hosting` privately, too.
 3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx`,
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root
    `Assimalign.Cohesion.slnx`.
@@ -80,7 +93,7 @@ A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is n
 5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
    stabilizes), and a row in the project map below.
 
-The runtime consumes the root and its hosting family; feature libraries remain rooted in Web. Arrows show references.
+The runtime consumes the root and its hosting family; feature libraries remain rooted in Web. COHRES002 would also let it reference other Web libraries, and today it references none. Arrows show references.
 
 ```mermaid
 flowchart LR

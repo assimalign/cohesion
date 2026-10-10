@@ -839,7 +839,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20, and adopted decision 21 in the review of decision 20's follow-ups the same day. Decision 31 proposes an answer to decision 5, pending the owner's date.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20, and adopted decision 21 in the review of decision 20's follow-ups the same day. Decision 31 proposes an answer to decision 5, pending the owner's date. The owner made decision 32 on 2026-10-09.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -915,6 +915,21 @@ Decisions 22–31 line up Stages 11–14 (2026-10-09). The integrator made them 
     - Certificate authentication goes in a new `Web.Authentication.Certificate` (#1305).
     - Transport rejections are reported through a Meter and an EventSource (#1300).
     - Decision 5 is answered the same way: Web v1 is gated on Stages 11 and 12, not on `DELIVERY_ROADMAP.md`'s 2026-10-15. The owner sets the new date at the Stage 12 review.
+
+Decision 32 is the owner's, made on 2026-10-09 after the lineup.
+
+32. **COHRES002 relaxed (owner decision, 2026-10-09).** The owner: "I decided I'm going to change the build rule. I am going to allow the Hosting project to be able reference all `Web.*` projects, or more generically all the `<Area>.*` projects. This makes more sense."
+    - **The rule now:** an area's exact hosting module may reference any library in its own area. Until now it could reference only the area root and its own hosting family.
+    - **Four exclusions, which follow from earlier decisions.** The build still rejects a hosting-module reference to each:
+      - `<Area>.Testing`. It references the hosting module, so the reverse reference would be a cycle.
+      - `<Area>.ApplicationModel` and `<Area>.ApplicationModel.Orchestration`. The realization-plan design keeps the runtime off both; COHAM001 and the Orchestration rules bound the other direction.
+      - The framework producers `<Area>.Refs` and `<Area>.Runtime`. They are packaging shells that reference the hosting module.
+      - Test, example, sample and fixture projects. They are harnesses.
+    - COHRES001, COHRES003, COHRES004 and COHAM001 are unchanged. `CohesionHostingIsolationExemptions` still waives COHRES002, which now matters only for the excluded categories.
+    - **The framework-closure consequence.** Each reference a hosting module takes ships its closure in every framework that carries the module. `Web.Hosting` is a private member of all 17 other area frameworks, so each reference it takes is a membership change in all of them. A hosting module references only what the runtime needs.
+    - **What it unblocks.** The Web root's features can leave the root: the endpoint and path base to `Web.Routing`, and the request id, response completion and drain to a new `Web.Server`, both referenced by `Web.Hosting`.
+    - **What it does not change.** Feature registration verbs still move to `builder.Services` through component integration, a separate approved change. Registering a feature never needs a hosting-module reference to it.
+    - Recorded in `build/Targets/Build.Rules.targets`, `.claude/rules/resource-areas.md`, `.claude/rules/web-area.md` and `resources/Web/README.md`.
 
 ### 7.5 Lineup
 

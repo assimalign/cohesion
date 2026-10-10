@@ -11,8 +11,12 @@ nothing resolves services per request.
 2026-07-10, recorded in `resources/Web/README.md`): no Web feature library
 references this package — a feature that did would drag the DI/configuration
 composition surface into every consumer — and this package references **no**
-Web feature library. It references the root `Assimalign.Cohesion.Web` abstractions,
-its own hosting family under O35, and non-Web infrastructure. Applications still see the whole Web family because the
+Web feature library today. It references the root `Assimalign.Cohesion.Web` abstractions,
+its own hosting family under O35, and non-Web infrastructure. The rule as adopted forbade this
+module's references to Web features too; since its relaxation (COHRES002, owner decision
+2026-10-09) the module may reference any Web library except `Web.Testing`, `Web.ApplicationModel`,
+the `App.Web` producers, and harnesses, and takes such a reference only for runtime machinery it
+composes itself, because each one ships in all 18 area frameworks. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
 verbs ship with their features (`AddAuthentication` moved to
 `Web.Authentication`, `AddCookie`/`AddJwtBearer` to their handler packages) and
@@ -580,7 +584,8 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
 | The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
 
-**How `http.route` reaches the span.** `Web.Hosting` may not reference `Web.Routing` (COHRES002),
+**How `http.route` reaches the span.** `Web.Hosting` does not reference `Web.Routing` (COHRES002
+forbade it when this was designed, until the 2026-10-09 relaxation),
 so the template travels through the root's `IWebEndpointFeature`, which already carries the
 selected endpoint to the pipeline terminal. Its default member `RouteTemplate` is `null`; routing's
 matched route returns its template with a leading `/` (Web.Routing DESIGN, "The route template the
@@ -745,7 +750,7 @@ terminal reached only when every registered middleware chained to `next`.
 published the root's `IWebEndpointFeature`, the terminal runs that endpoint. That is
 where a matched route's handler runs, after every middleware registered behind
 `UseRouting`, and where routing's 405 is written. The terminal reads only the root
-seam; it cannot see `Web.Routing` (COHRES002). The terminal is the root's
+seam; this module does not reference `Web.Routing` (COHRES002 forbade it until 2026-10-09). The terminal is the root's
 `WebApplicationTerminal.InvokeAsync` (#1056), shared with every non-rejoining pipeline
 branch, so the application and its branches agree on what "unhandled" means.
 
@@ -758,9 +763,10 @@ status, a written body/content type, or a redirect `Location` — is left as-is.
 
 Two deliberate properties:
 
-- **Payload-free by necessity.** The resource hosting-isolation rule (COHRES002)
-  forbids this runtime module from referencing the Web feature libraries, including
-  `Web.ProblemDetails`, so the terminal can only *set the status*. Turning the
+- **Payload-free.** This runtime module references no Web feature library, `Web.ProblemDetails`
+  included: the resource hosting-isolation rule (COHRES002) forbade it when the fallback was
+  written, and since the 2026-10-09 relaxation such a reference would still ship in every
+  framework that carries this module. So the terminal can only *set the status*. Turning the
   bodyless 404 into an RFC 9457 problem+json body is the job of the opt-in
   `UseStatusCodePages()` middleware in `Web.ErrorHandling`, which the application
   composes over the top.
@@ -863,8 +869,8 @@ body whose response cannot be framed is logged without either, and an applicatio
 - **Host filtering.** Allowed-hosts enforcement ships as the
   `Assimalign.Cohesion.Web.HostFiltering` feature package (`UseHostFiltering`,
   registered at the front of the application's pipeline). The runtime module deliberately has no
-  knowledge of it — the hosting-isolation rule forbids the reference, and
-  pipeline composition is the application's, not the host's.
+  knowledge of it — pipeline composition is the application's, not the host's (the
+  hosting-isolation rule also forbade the reference until 2026-10-09).
 The Web resource's composition root: the `WebApplicationBuilder` /
 `WebApplication` surface that wires the `Assimalign.Cohesion.Http.Connections`
 transport, the request pipeline, DI, logging, and configuration into a runnable
@@ -914,7 +920,7 @@ which preserves filler behavior. A known port gates all paths, including bare pr
 
 This module consumes the plain `Hosting` lifecycle plus the opt-in `Hosting.Resources`
 runtime/control-plane and `Hosting.Health` contribution contracts. It never references
-`Web.ApplicationModel` or `Web.Health`, preserving COHRES002. The no-argument and options
+`Web.ApplicationModel` (a COHRES002 exclusion) or `Web.Health`. The no-argument and options
 overloads remain plain applications: they install no control-plane terminal, so the ordinary
 bodyless-404 fallback handles those paths.
 
@@ -1202,7 +1208,7 @@ No other interceptor ships by default. Parse-time features under design
 their packages land, but each is an explicit opt-in. The WebSocket policy
 (origins, keep-alive defaults, the drain close) is not an interceptor: it is
 `UseWebSockets`, a middleware in `Web.WebSockets`, which this module does not
-reference (COHRES002).
+reference; the application composes it.
 
 ## TLS convenience surface
 
@@ -1472,6 +1478,8 @@ That export is logs. The server's spans and HTTP metrics are emitted on their ow
 The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*`
 library. `Web.Hosting.Resources` and `Web.Hosting.Health` own reusable hosting
 integration. They never reference this runtime module. COHRES002 permits this
-module to reference the Web root and its own hosting family, and it consumes
+module to reference any Web library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web`
+producers, and harnesses (owner decision 2026-10-09). It references the Web root and its own
+hosting family, and it consumes
 `Web.Hosting.Resources` for the enabled resource's control-plane terminal
 (`Internal/EnabledResourcePipeline.cs`).

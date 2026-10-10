@@ -48,7 +48,9 @@ what is deliberately not emitted.
 
 ## Dependencies and hosting family
 
-The module references the Web root and its own hosting family within its area (COHRES002), together with
+Within its area the module references the Web root and its own hosting family. COHRES002 would
+let it reference any Web library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web`
+producers, and harnesses (owner decision 2026-10-09). It also references
 Cohesion's hosting, configuration, DI, logging, and transport infrastructure. Its
 `Hosting.Resources` and `Hosting.Health` integrations are runtime concerns; the
 Web root references no hosting library. The reusable `Web.Hosting.Resources` and

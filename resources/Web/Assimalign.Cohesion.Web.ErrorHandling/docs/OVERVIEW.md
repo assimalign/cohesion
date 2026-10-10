@@ -67,8 +67,8 @@ await hook.HandleAsync(context, exception, context.RequestCancelled);
   `404`, an unsupported media type's `415` — are each feature's normal response path and must
   never arrive here as exceptions.
 - **The bodyless 404 terminal lives in `Web.Hosting`.** The pipeline's unhandled-request terminal
-  can only set a payload-free `404` (the hosting-isolation rule keeps `Web.ProblemDetails` out of
-  the runtime module); `UseStatusCodePages()` here is what upgrades it to problem+json.
+  can only set a payload-free `404` (the runtime module does not reference `Web.ProblemDetails`);
+  `UseStatusCodePages()` here is what upgrades it to problem+json.
 - **The payload** is `Web.ProblemDetails`' scope; this package renders it.
 
 Design rationale lives in [DESIGN.md](DESIGN.md).

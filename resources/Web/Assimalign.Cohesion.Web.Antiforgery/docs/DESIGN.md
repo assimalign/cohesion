@@ -291,8 +291,8 @@ static property read inside the interceptor it already generates.
   unsafe request" switch. Unrouted requests have no endpoint to protect.
 - **Tokens in the query string.** Only the header and the form field are read; a token in a URL leaks
   through logs and `Referer`.
-- **Automatic pipeline placement.** `Web.Hosting` may not reference feature packages (COHRES002), so the
-  application registers `UseAntiforgery` itself; routing's fail-closed check catches a missing one.
+- **Automatic pipeline placement.** `Web.Hosting` references no feature package (COHRES002 forbade it
+  until 2026-10-09), so the application registers `UseAntiforgery` itself; routing's fail-closed check catches a missing one.
 - **Key storage.** Where keys live and how they are shared is `Security.DataProtection`'s and the
   deployment's concern (#806–#808).
 

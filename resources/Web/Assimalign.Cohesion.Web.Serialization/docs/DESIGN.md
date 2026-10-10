@@ -188,7 +188,7 @@ outcome, not a fault).
 A feature package on the area root's seams, per `.claude/rules/resource-areas.md`: it
 references `Assimalign.Cohesion.Http` + `Assimalign.Cohesion.Web` only, ships its builder verbs
 itself, and is delivered to applications through the `App.Web` shared framework.
-`Web.Hosting` never references it (COHRES002) — the runtime seeds whatever features the
+`Web.Hosting` does not reference it — the runtime seeds whatever features the
 builder registered, with no compile-time knowledge of this package.
 
 ## Non-goals

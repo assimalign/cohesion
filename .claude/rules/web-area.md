@@ -7,8 +7,10 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 ## The dependency rule (build-enforced)
 
 > **`Assimalign.Cohesion.Web.Hosting` is the runtime module — no Web-area library may reference
-> it, and it may reference no Web-area library except the root `Assimalign.Cohesion.Web`
-> and its own hosting family (`Web.Hosting.Resources`, `Web.Hosting.Health`).**
+> it, and it may reference any Web-area library except `Web.Testing`, `Web.ApplicationModel`,
+> the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test, example, sample, and fixture
+> projects.** (COHRES002, relaxed by owner decision 2026-10-09; before that, `Web.Hosting` could
+> reference only the root `Assimalign.Cohesion.Web` and its own hosting family.)
 
 - A Web feature library (`Assimalign.Cohesion.Web.<Feature>`) may reference: the root
   `Assimalign.Cohesion.Web`, **other Web feature libraries**, and anything outside the Web area
@@ -24,9 +26,13 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   never the exact `Web.Hosting` module. The exact module may consume its own hosting family
   under COHRES002. Roots and features may not reference the hosting
   family (COHRES001) or shared Hosting libraries (COHRES004).
-- **Never reference a Web feature library from `Web.Hosting`.** Applications get the whole family
-  through the `App.Web` shared framework (via `Sdk.Web`), so the runtime needs no compile-time
-  knowledge of the features it hosts.
+- **`Web.Hosting` references a Web library only when the runtime itself needs it** — runtime
+  machinery it composes, such as a router it drives or a server package. COHRES002 permits any
+  Web library but the exclusions above. Applications still get the whole family through the
+  `App.Web` shared framework (via `Sdk.Web`), and feature registration still ships with the
+  feature, so hosting a feature never needs the reference. Every reference costs more than one
+  framework: `Web.Hosting` is a private member of all 17 other area frameworks, so its new
+  reference's closure must be added to each of them.
 - Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` and
   `Web.Hosting.Resources` (the test factory drives the concrete runtime and its control plane), declared via `CohesionHostingIsolationExemptions` in its own
   csproj. Do not add others without the deviation protocol (`deviations.md`) — see
@@ -34,7 +40,7 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 
 **Enforcement:** this is the Web instance of the repo-wide **resource hosting-isolation rule** —
 see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002`/`COHRES004` build errors, the
-two-layer check semantics, COHRES002 own-hosting-family exclusion, and the per-project `CohesionHostingIsolationExemptions` opt-out
+two-layer check semantics, COHRES002's excluded categories (direct references only), and the per-project `CohesionHostingIsolationExemptions` opt-out
 (deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
 csproj). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
 executes in CI. The two framework producers, `Assimalign.Cohesion.Web.Refs` and
@@ -75,7 +81,10 @@ are updated (each has bitten before):
    lists don't already carry. Validate with
    `dotnet pack resources/Web/Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj`
    (its collection target hard-fails on unresolvable assemblies). Exclusions from the list are
-   documented in that file's comment.
+   documented in that file's comment. **If `Web.Hosting` references the new library**, its closure
+   also becomes a `CohesionFrameworkPrivateAssembly` in every other area's
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (all 17 carry
+   `Web.Hosting` privately); pack each of those producers too.
 3. **Solutions** — entries in `resources/Web/Assimalign.Cohesion.Web.slnx`,
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root `Assimalign.Cohesion.slnx`
    (src, tests, docs files).

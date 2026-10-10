@@ -147,9 +147,9 @@ only. No reflection, no configuration binding, no service location.
 
 ## Non-goals
 
-- **No hosting integration.** The package must not (and cannot, per the
-  build-enforced hosting-isolation rule) be referenced by `Web.Hosting`;
-  front-of-pipeline placement is the application's registration-order
+- **No hosting integration.** `Web.Hosting` does not reference the package
+  (the build-enforced hosting-isolation rule forbade it until its 2026-10-09
+  relaxation); front-of-pipeline placement is the application's registration-order
   responsibility, not a hosting guarantee.
 - **No port-aware allowlisting** — host validation is host-identity; which
   ports are served is a listener/binding concern.

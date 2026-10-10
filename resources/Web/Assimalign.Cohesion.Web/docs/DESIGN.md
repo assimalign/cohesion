@@ -9,8 +9,9 @@ builds against — the application/builder contracts (`IWebApplication`,
 `IWebApplicationMiddleware`, the `WebApplicationMiddleware` delegate), and the server
 seam (`IWebApplicationServer`). Feature packages compose against these; the runtime
 module (`Web.Hosting`) implements them; the build-enforced hosting-isolation rule
-(`resources/Web/README.md`, `.claude/rules/resource-areas.md`) keeps the two directions
-from ever meeting in a library's dependency graph.
+(`resources/Web/README.md`, `.claude/rules/resource-areas.md`) keeps every library off the
+runtime module (COHRES001). Since its 2026-10-09 relaxation (COHRES002) the runtime module may
+reference a Web library it needs; no feature depends on it either way.
 
 The root is deliberately **contracts-only**. Features — their models, options, builder
 verbs, and middleware — live in per-concern `Assimalign.Cohesion.Web.<Feature>`
@@ -59,7 +60,9 @@ runs `IWebEndpointFeature.Endpoint` when the feature is present, and otherwise a
 builder's unhandled-request behavior (`WebApplication`'s bodyless 404).
 
 The feature is a root seam because the terminal belongs to the pipeline builder, which lives in
-`Web.Hosting`, and COHRES002 forbids that module from referencing `Web.Routing`. It carries the
+`Web.Hosting`, and COHRES002 forbade that module from referencing `Web.Routing` when the seam was
+designed. The rule was relaxed on 2026-10-09 (owner decision), which unblocks moving the endpoint
+seam to `Web.Routing` (HTTP/Web program plan, decision 32); until that move it stays here. It carries the
 delegate to run and one string, `RouteTemplate`: the low-cardinality template the default server's
 telemetry names the endpoint by (`http.route`, #1064). The server reads both at the same seam for
 the same reason. `RouteTemplate` is a default interface member returning `null`, so a selector
