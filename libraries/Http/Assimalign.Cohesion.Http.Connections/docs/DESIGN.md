@@ -1328,11 +1328,14 @@ answers with `400`. Either way the connection closes:
   transport then answers it with `400`, like any other malformed chunked body.
 - **A chunk-size line** is `chunk-size [chunk-ext]`, and a chunk extension is
   BWS, tokens, and quoted strings (RFC 9112 §7.1.1), so it holds no control
-  character but HTAB either. `ReadChunkSizeAsync` applies
-  `IndexOfInvalidControlCharacter` to the whole line before it drops the
-  extension. Without that, `2;<LF>xx` was read here as the size 2 with an
-  ignored extension, while a hop that ends the line at the bare LF reads the
-  size line `2;` and then the data `xx`; `5<CR>` passed as 5 because
+  character but HTAB either. Each part of the line is checked once, before the
+  extension is dropped: the framing line reader refuses a bare CR or LF anywhere
+  in it (see "A framing line ends only at CRLF" under `Http1RequestBodyStream`),
+  the size must be HEXDIG only, and `Http1ChunkExtensions` applies the core
+  token rule to each name and token value and `IndexOfInvalidControlCharacter`
+  to each quoted string. Without these, `2;<LF>xx` was read here as the size 2
+  with an ignored extension, while a hop that ends the line at the bare LF reads
+  the size line `2;` and then the data `xx`; `5<CR>` passed as 5 because
   `TrimEnd()` stripped the bare CR. The BWS before `;` is trimmed as SP and HTAB
   only, so `5\xA0;x` is not the size 5.
 - **Lines are decoded as Latin-1**, one character per octet, so obs-text
@@ -1360,13 +1363,13 @@ answers with `400`. Either way the connection closes:
   HTTP/2 and HTTP/3 `:authority`.
 
 A rejection message never quotes text that can still hold a control character.
-A request-line, field-line, chunk-size-line, or `Host` rejection gives the
-offending octet in hex, and a field-line one names the field, which is a token:
-the raw text can hold CR, LF, or NUL, and a log that copied it would be open to
-injection. The chunk terminator
-check counts the octets it found before the CRLF instead of quoting them. A
-message that does quote a value, such as a bad transfer coding, length, or chunk
-size, quotes one these checks have already passed.
+A request-line, field-line, chunk-size, or `Host` rejection gives the offending
+octet in hex, and a field-line one names the field, which is a token: the raw
+text can hold CR, LF, or NUL, and a log that copied it would be open to
+injection. A chunk-size line, a chunk terminator, and malformed chunk extensions
+are rejected without quoting any of the line. A message that does quote a
+value, such as a bad transfer coding or length, quotes one these checks have
+already passed.
 
 ### The two-phase read timeout
 
@@ -1514,11 +1517,15 @@ chunked). Load-bearing invariants:
   `*( BWS ";" BWS token [ BWS "=" BWS ( token / quoted-string ) ] )`, where BWS is
   spaces and tabs only. Any other octet, every control character but a tab in BWS or
   a quoted-string, an empty name or value, an unclosed quoted-string, or whitespace
-  that ends the line, fails the body the same way. Only spaces and tabs may stand
+  that ends the line, fails the body the same way. The octet classes are the core
+  field rule (#1341): a name or token value is `HttpFieldNormalization.IsValidFieldName`,
+  and a quoted string's content, its quoted pairs included, passes
+  `IndexOfInvalidControlCharacter`. Only spaces and tabs may stand
   between the chunk-size and its first `;`; a vertical tab or a no-break space there
-  was trimmed as whitespace before. Control characters other than CR and LF inside a
+  was trimmed as whitespace before. This reader is the one place a bare CR or LF in
+  a framing line is refused; control characters other than CR and LF inside a
   trailer field *value* are left to the field-value rule the header section gets
-  (#1341).
+  (#1341), and nothing else rechecks the chunk-size line.
 - **Cap frozen at first read.** `EnsureStarted` (first read) freezes the parse
   context's body-size knob and resolves the cap. Up to that point head hooks
   *and* middleware may raise or lower it via `IHttpMaxRequestBodySizeFeature`. A

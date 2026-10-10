@@ -241,7 +241,8 @@ quirks.
     produced by a Latin-1 decode and is left to the encoder that writes it.
 
   Callers: today, HTTP/1.1's `Http1FieldLine`, for headers and chunked
-  trailers. #1183 brings the response writers on all three
+  trailers, and `Http1ChunkExtensions`, for the tokens and quoted strings of
+  chunk extensions. #1183 brings the response writers on all three
   versions, the `Http.ProtocolUpgrade` 101 writer included. #1376 brings the
   HTTP/2 and HTTP/3 decoders and `HttpTrailerFieldRules`. A check in the
   header collection alone would not be enough: any `IHttpHeaderCollection`

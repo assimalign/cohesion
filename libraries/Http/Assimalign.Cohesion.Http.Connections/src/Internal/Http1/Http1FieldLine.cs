@@ -21,11 +21,13 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// The value loses its optional whitespace, SP and HTAB only (RFC 9110 §5.6.3); any other character
 /// at either end, a no-break space or a vertical tab among them, belongs to the value (#1341). A
 /// value that then holds NUL, CR, LF, or any other control character but HTAB is rejected
-/// (RFC 9110 §5.5): the line reader ends a line only at CRLF, so a bare CR or LF arrives here, and an
-/// intermediary that ends the line at it would read a different field. Both halves come from the
-/// core field rule (<see cref="HttpFieldNormalization"/>), the one the response writers (#1183) and
-/// the HTTP/2 and HTTP/3 decoders (#1376) are to share. The line is decoded as Latin-1, so an
-/// obs-text octet (<c>%x80-FF</c>) reaches the value intact.
+/// (RFC 9110 §5.5): the head's line reader ends a line only at CRLF, so a bare CR or LF arrives here
+/// in a header line, and an intermediary that ends the line at it would read a different field. A
+/// trailer line never carries one this far: the chunk framing line reader refuses a bare CR or LF
+/// itself (#1375), so for a trailer this check meets the other control characters only. Both halves
+/// come from the core field rule (<see cref="HttpFieldNormalization"/>), which the chunk extensions
+/// share and the response writers (#1183) and the HTTP/2 and HTTP/3 decoders (#1376) are to share.
+/// The line is decoded as Latin-1, so an obs-text octet (<c>%x80-FF</c>) reaches the value intact.
 /// </para>
 /// </remarks>
 internal static class Http1FieldLine

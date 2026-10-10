@@ -495,20 +495,16 @@ internal sealed class Http1RequestBodyStream : Stream
         string sizeLine = await ReadFramingLineAsync(_maxFramingLineSize, FramingLine.ChunkSize, cancellationToken).ConfigureAwait(false);
 
         // RFC 9112 §7.1.1 — a chunk-size line is chunk-size, then chunk-ext: BWS, token, and
-        // quoted-string, none of which carries a control character but HTAB. The framing line ends
-        // only at CRLF, so a bare CR or LF stays in it, and the extension is otherwise ignored: an
-        // intermediary that ends the line at a bare LF reads "2;<LF>xx" as the size "2;" and the data
-        // "xx", where this reader would read the size 2 with an extension. The whole line is checked
-        // before the extension is dropped (#1341). The octet is named in hex, never quoted.
-        int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(sizeLine);
-        if (invalid >= 0)
-        {
-            throw new InvalidDataException(
-                $"RFC 9112 §7.1.1: a chunk-size line holds the control character 0x{(int)sizeLine[invalid]:X2} at offset {invalid}.");
-        }
-
-        // RFC 9112 §7.1.1 — strip the optional ";<chunk-ext>". BWS before the ';' is SP and HTAB only
-        // (RFC 9110 §5.6.3): TrimEnd() would also strip a no-break space, and accept "5\xA0;x" as 5.
+        // quoted-string, none of which carries a control character but HTAB. Each part of the line is
+        // checked once, before the extension is dropped, so an intermediary that reads "2;<LF>xx" as
+        // the size line "2;" and the data "xx" can never disagree with this reader (#1341, #1375):
+        // ReadFramingLineAsync has already refused a bare CR or LF anywhere in the line, the size
+        // below must be HEXDIG only, and Http1ChunkExtensions holds the extensions to their grammar
+        // with the core token and field-value rules. No rejection quotes the line: a control
+        // character it holds is named in hex.
+        //
+        // Strip the optional ";<chunk-ext>". BWS before the ';' is SP and HTAB only (RFC 9110
+        // §5.6.3): TrimEnd() would also strip a no-break space, and accept "5\xA0;x" as 5.
         int semicolon = sizeLine.IndexOf(';');
         ReadOnlySpan<char> sizeText = semicolon < 0
             ? sizeLine.AsSpan()
@@ -527,10 +523,12 @@ internal sealed class Http1RequestBodyStream : Stream
                 "RFC 9112 §7.1.1: malformed chunk extensions; each is ';' and a token, optionally '=' and a token or a quoted-string, with only spaces and tabs between.");
         }
 
-        // chunk-size = 1*HEXDIG — ASCII hex only, no leading sign, no whitespace.
+        // chunk-size = 1*HEXDIG — ASCII hex only, no leading sign, no whitespace. Neither rejection
+        // quotes the size: the octets after the one that fails it are unchecked, and can be controls.
         int value = 0;
-        foreach (char c in sizeText)
+        for (int index = 0; index < sizeText.Length; index++)
         {
+            char c = sizeText[index];
             int digit;
             if (c >= '0' && c <= '9')
             {
@@ -547,7 +545,7 @@ internal sealed class Http1RequestBodyStream : Stream
             else
             {
                 throw new InvalidDataException(
-                    $"RFC 9112 §7.1: chunk-size '{sizeText.ToString()}' contains non-hex character '{c}'.");
+                    $"RFC 9112 §7.1: the chunk-size holds the non-hex octet 0x{(int)c:X2} at offset {index}.");
             }
 
             // A single chunk-size is bounded by Int32; the accumulated body is separately bounded by
@@ -555,7 +553,7 @@ internal sealed class Http1RequestBodyStream : Stream
             if (value > (int.MaxValue - digit) / 16)
             {
                 throw new InvalidDataException(
-                    $"RFC 9112 §7.1: chunk-size '{sizeText.ToString()}' overflows Int32.");
+                    $"RFC 9112 §7.1: the chunk-size overflows Int32 at its hex digit {index + 1}.");
             }
             value = (value * 16) + digit;
         }

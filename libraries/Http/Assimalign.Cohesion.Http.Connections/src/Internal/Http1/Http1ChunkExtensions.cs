@@ -20,12 +20,19 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// smuggled. So every control character except a horizontal tab in a quoted-string or in the
 /// whitespace between the parts fails the line, as does any other octet the grammar does not allow
 /// where it stands.
+/// <para>
+/// The checks are the core field rule (<see cref="HttpFieldNormalization"/>, #1341), the one the
+/// header and trailer field lines get: a name or a token value is
+/// <see cref="HttpFieldNormalization.IsValidFieldName"/>, and a quoted-string's content passes
+/// <see cref="HttpFieldNormalization.IndexOfInvalidControlCharacter"/>. A bare CR or LF never
+/// arrives here: the chunk framing line reader refuses it first.
+/// </para>
 /// </remarks>
 internal static class Http1ChunkExtensions
 {
-    // RFC 9110 §5.6.2 — tchar, the characters of a token.
-    private static readonly SearchValues<char> _tokenChars = SearchValues.Create(
-        "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+    // The octets that end a token inside chunk-ext: BWS, the next extension's ';', and the '=' before
+    // a value. Whatever stands before one of them must be a whole token.
+    private static readonly SearchValues<char> _tokenDelimiters = SearchValues.Create(" \t;=");
 
     /// <summary>
     /// Whether <paramref name="extensions"/>, the part of a chunk-size line after the chunk-size,
@@ -92,61 +99,65 @@ internal static class Http1ChunkExtensions
         return position;
     }
 
+    /// <summary>
+    /// Skips the token (RFC 9110 §5.6.2) that starts at <paramref name="position"/>: the text up to
+    /// the next BWS, ';' or '=' must be one, which the core field-name rule decides. Any other octet,
+    /// a DQUOTE or a control character among them, fails the token.
+    /// </summary>
     private static bool TrySkipToken(ReadOnlySpan<char> text, ref int position)
     {
-        int start = position;
-
-        while (position < text.Length && _tokenChars.Contains(text[position]))
+        ReadOnlySpan<char> rest = text[position..];
+        int length = rest.IndexOfAny(_tokenDelimiters);
+        if (length < 0)
         {
-            position++;
+            length = rest.Length;
         }
 
-        return position > start;
+        if (!HttpFieldNormalization.IsValidFieldName(rest[..length]))
+        {
+            return false;
+        }
+
+        position += length;
+        return true;
     }
 
     /// <summary>
     /// Skips a quoted-string (RFC 9110 §5.6.4) that starts at <paramref name="position"/>, its quotes
     /// included.
     /// </summary>
+    /// <remarks>
+    /// <c>qdtext = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text</c> and
+    /// <c>quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )</c>: once the DQUOTE that ends the string
+    /// and the backslash of each pair are set aside, every octet left is any octet but a control
+    /// character other than HTAB, which is the core field-value rule. The line is decoded as Latin-1,
+    /// so no character above U+00FF reaches it.
+    /// </remarks>
     private static bool TrySkipQuotedString(ReadOnlySpan<char> text, ref int position)
     {
-        position++;
+        int contentStart = position + 1;
+        int index = contentStart;
 
-        while (position < text.Length)
+        while (index < text.Length)
         {
-            char c = text[position];
+            char c = text[index];
 
             if (c == '"')
             {
-                position++;
-                return true;
-            }
-
-            if (c == '\\')
-            {
-                // quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-                if (position + 1 == text.Length || !IsQuotedPairOctet(text[position + 1]))
+                if (HttpFieldNormalization.IndexOfInvalidControlCharacter(text[contentStart..index]) >= 0)
                 {
                     return false;
                 }
 
-                position += 2;
-                continue;
+                position = index + 1;
+                return true;
             }
 
-            // qdtext = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
-            if (!IsQuotedPairOctet(c))
-            {
-                return false;
-            }
-
-            position++;
+            // A quoted-pair takes the octet after its backslash whatever it is, a DQUOTE included; a
+            // backslash that ends the line leaves the string unclosed.
+            index += c == '\\' ? 2 : 1;
         }
 
         return false;
     }
-
-    // HTAB, SP, VCHAR (%x21-7E) or obs-text (%x80-FF): every octet but the other controls and DEL.
-    // As qdtext it also excludes DQUOTE and "\", which the caller handles before asking.
-    private static bool IsQuotedPairOctet(char c) => c is '\t' or (>= ' ' and <= '~') or (>= '\u0080' and <= 'ÿ');
 }
