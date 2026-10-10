@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -18,12 +19,16 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// Verifies the HTTP/3 minimum request-body data rate (#1085): a body the peer holds back past the grace
 /// period fails the read, the request stream is stopped with <c>STOP_SENDING(H3_NO_ERROR)</c>
 /// (RFC 9114 §4.1), and the exchange is answered <c>408</c> (RFC 9110 §15.5.9) while its response head is
-/// uncommitted. A peer that keeps the rate is never rejected, and a CONNECT tunnel may idle.
+/// uncommitted. A peer that keeps the rate is never rejected, and a CONNECT tunnel may idle. A <c>408</c>
+/// head that a <c>BeforeResponseHead</c> hook leaves unsendable is refused like any other (#1183): nothing
+/// reaches the wire, and the exchange keeps the connection busy until its replacement is sent.
 /// </summary>
 public class Http3RequestBodyDataRateTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _keepAlive = TimeSpan.FromMilliseconds(300);
     private static readonly HttpMinDataRate _rate = new(bytesPerSecond: 100, gracePeriod: TimeSpan.FromMilliseconds(300));
+    private static readonly HttpHeaderKey _injectedField = new("x-injected");
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate: A body held back should fail the read, stop the stream with H3_NO_ERROR, and be answered 408")]
     public async Task ReadBody_OnBodyBelowRate_ShouldStopWithNoErrorAndAnswer408()
@@ -49,6 +54,54 @@ public class Http3RequestBodyDataRateTests
             HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
         frames.Count.ShouldBe(1);
         HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload)[":status"].ShouldBe("408");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate: A 408 head a BeforeResponseHead hook makes unsendable should be refused, keep the connection open, and be replaced by the 408")]
+    public async Task SendAsync_OnBodyBelowRateWithHookRefusedHead_ShouldKeepConnectionOpenAndAnswer408()
+    {
+        // Arrange — the peer holds the body back, and a response interceptor's BeforeResponseHead hook adds
+        // a value no head may carry. HTTP/3 replaces the staged response with its 408 before it runs the
+        // hooks, so the hook's field lands in the 408's own head: only HTTP/3 can refuse that head.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 =>
+            {
+                http3.Limits.MinRequestBodyDataRate = _rate;
+                http3.Limits.KeepAliveTimeout = _keepAlive;
+                http3.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+            },
+            static options => options.Interceptors.Add(new FieldInjectingInterceptor()));
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
+        IHttpContext context = await peer.NextContextAsync();
+        Task<bool> next = peer.MoveNextAsync();
+        await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[16]).AsTask().WaitAsync(_timeout));
+        context.Response.StatusCode = HttpStatusCode.InternalServerError;
+
+        // Act — the 408's head is refused, and the replacement is not sent for three keep-alive periods.
+        HttpException refusal = await Should.ThrowAsync<HttpException>(() => peer.ConnectionContext.SendAsync(context).AsTask());
+        await Task.Delay(_keepAlive * 3);
+
+        // Assert — nothing reached the wire, and the refused exchange still runs, so the connection is
+        // busy and not closed.
+        refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        context.HasResponseStarted.ShouldBeFalse();
+        request.Input.TryRead(out _).ShouldBeFalse();
+        next.IsCompleted.ShouldBeFalse();
+
+        // The host's replacement is answered with the transport's 408, the only frame on the stream. The
+        // hooks ran once, so the field is not added again; the exchange then ends, and the idle
+        // connection is closed after the keep-alive deadline.
+        context.Response.Headers.Clear();
+        context.Response.Body = new MemoryStream();
+        context.Response.StatusCode = HttpStatusCode.InternalServerError;
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
+        frames.Count.ShouldBe(1);
+        Dictionary<string, string> head = HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload);
+        head[":status"].ShouldBe("408");
+        head.ShouldNotContainKey("x-injected");
+        (await next).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate: A body that keeps the rate should be read in full")]
@@ -106,5 +159,20 @@ public class Http3RequestBodyDataRateTests
         using MemoryStream received = new();
         await body.CopyToAsync(received);
         return received.ToArray();
+    }
+
+    /// <summary>
+    /// A response interceptor whose <c>BeforeResponseHead</c> hook adds a field value carrying CR LF, which
+    /// every head encoder refuses (#1183, CWE-113).
+    /// </summary>
+    private sealed class FieldInjectingInterceptor : HttpExchangeInterceptor
+    {
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
+
+        public override ValueTask BeforeResponseHeadAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
+        {
+            context.Headers[_injectedField] = "a\r\nLocation: /evil";
+            return ValueTask.CompletedTask;
+        }
     }
 }
