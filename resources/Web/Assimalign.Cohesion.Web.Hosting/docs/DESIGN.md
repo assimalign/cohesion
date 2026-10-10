@@ -825,31 +825,93 @@ server carries:
 - The pipeline build records how many features it stamps (`WebApplicationContext.StampedFeatureCount`).
   The default server resolves the pipeline before it composes the listener, so the count is known.
   A pipeline passed to `AddPipeline` stamps none, so the count is the host's four.
-- The count is set before user `UseServer` configurations run, as the default interceptors are. A
-  host whose middleware installs features on every exchange can raise it there:
-  `options.ExchangeFeatureCapacity += 2`.
-- Features only some exchanges carry are not counted: the upgrade and extended CONNECT features,
-  the route match and endpoint that routing installs on a matched request, and the TLS feature built
-  on first read. The dictionary rounds its size up to a prime, which often leaves room for them.
-  When it does not, the collection grows exactly as it did before.
+- The count is set before user `UseServer` configurations run, as the default interceptors are, so a
+  configuration sees it and can add to it. After the last configuration the server rounds the result
+  up (see "Rounding" below) and hands that to the listener.
 - `WebApplicationExchangeFeatureCapacityTests` pins the count. A plain request on HTTP/1.1 and HTTP/2
-  carries exactly as many features as the capacity, so the test fails if the server starts installing
+  carries exactly as many features as are counted, so the test fails if the server starts installing
   another feature on every exchange without counting it.
 
+#### What the count leaves out
+
+The count covers only what the host knows every exchange carries. Middleware install features as an
+exchange passes through them, and in an ordinary application those sit on most exchanges:
+
+- **Routing** installs one feature on every matched request. `RouteMatchFeature` implements both
+  `IRouteMatchFeature` and `IWebEndpointFeature` under the one name `IWebEndpointFeature`, so it takes
+  one slot; a 405 takes the same slot with `MethodNotAllowedEndpointFeature`. In a routed application
+  a matched request is the ordinary exchange. A `Map` branch also installs `IWebPathBaseFeature` on
+  each request that enters it.
+- **One feature on every exchange that passes through:** `UseForwardedHeaders`,
+  `UseResponseCompression` (not on a `HEAD`, nor over HTTPS unless `EnableForHttps` is set),
+  `UseSecurityHeaders`, `UseRequestTimeouts`, `UseRateLimiting`, `UseSessions`, `UseOutputCache` and
+  `UseForms`.
+- **Up to two:** `UseAuthentication` installs `IAuthenticationResultFeature` on every exchange when a
+  default authenticate scheme is configured, and `IAuthenticationFeature` too on each exchange that
+  authenticates. `UseCookiePolicy` installs `ICookieConsentFeature` and its
+  `IHttpResponseCookieFeature`.
+- **Only some exchanges:** the upgrade and extended CONNECT features, the WebSocket policy feature on a
+  handshake, the rewrite feature on a rewritten request, the exception feature on a failure, and the
+  TLS feature built on first read.
+
+The server cannot count these itself: the transport learns only a number (owner decision 20), and
+the pipeline's middleware are opaque delegates. A host adds one slot in a listener configuration for
+each feature its middleware install on an ordinary exchange, for example
+`options.ExchangeFeatureCapacity += 3` for routing, `UseResponseCompression` and `UseSecurityHeaders`.
+
+#### Rounding: an overflow never costs more than not presizing
+
+The dictionary rounds the size it is given up to a prime, and outgrown, it grows to the smallest prime
+at least twice its size. An unsized dictionary therefore grows through 3, 7, 17, 37, 89, 197, 431 and
+919 slots. A size between two of those grows to another size between them, and that overflow costs
+more than never presizing. Handing the transport the exact count did that whenever the count's prime
+fell between two of those sizes and the uncounted features pushed an exchange past it. With seven
+application features the count is eleven. A matched request carries a twelfth feature, routing's, which grows an 11-slot dictionary to
+23 slots. That is 144 B more per request than the unsized collection, which grows through 3, 7 and 17.
+
+So after the last listener configuration the server rounds the capacity up to the smallest of those
+sizes that holds it (`WebApplicationServerBuilder.RoundExchangeFeatureCapacity`). From there an overflow
+grows exactly as an unsized dictionary does, so an exchange carrying any number of uncounted features
+never allocates more than it would without presizing. A configuration that sets `0` opts out, and `0`
+stays `0`. Rounding last matters: rounding the host's count first and letting a configuration add slots
+to it would land between the sizes again.
+
+The price is unused slots when the count falls between two sizes and nothing overflows: eight counted
+features take a 17-slot dictionary where 11 slots would do (168 B more), and twenty take 37 where 23
+would do (392 B more). Those slots are what the first uncounted feature lands in.
+
+`WebApplicationExchangeFeatureCapacityTests` pins the rounding. For a range of application feature
+counts it stamps every count from one past the host's count to twice the rounded capacity onto a
+collection sized as the server sizes it, and asserts that this allocates no more than an unsized
+collection holding the same features. Another test adds slots in a listener configuration, fills a real
+exchange to the rounded capacity on HTTP/1.1 and HTTP/2, and asserts that this allocates nothing.
+
 Measured with a loopback `HttpClient` in the same process, so the client's allocations are
-included, a plain `GET` through the default server allocates (median of five rounds of 20,000):
+included, a plain `GET` through the default server allocates the bytes below (median of five rounds of
+20,000). "Uncounted" is how many more features the terminal middleware installs on every exchange,
+standing in for routing's route match and the `Use*` features above. "Unsized" sets the capacity to
+`0`, the state before #1381; "exact" hands the transport the count unrounded, as the first version of
+this change did; "rounded" is the shipped behavior.
 
-| Application features | HTTP/1.1 before | HTTP/1.1 after | HTTP/2 before | HTTP/2 after |
-| --- | --- | --- | --- | --- |
-| 0 | 13,048 B | 12,920 B | 10,862 B | 10,724 B |
-| 4 | 13,608 B | 13,064 B | 11,440 B | 10,869 B |
-| 8 | 13,640 B | 13,264 B | 11,458 B | 11,069 B |
-| 16 | 14,792 B | 13,496 B | 12,608 B | 11,301 B |
+| Application features | Uncounted | HTTP/1.1 unsized | HTTP/1.1 exact | HTTP/1.1 rounded | HTTP/2 unsized | HTTP/2 exact | HTTP/2 rounded |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 | 13,056 B | 12,920 B | 12,920 B | 10,875 B | 10,725 B | 10,724 B |
+| 4 | 0 | 13,616 B | 13,064 B | 13,232 B | 11,433 B | 10,869 B | 11,036 B |
+| 8 | 0 | 13,648 B | 13,264 B | 13,265 B | 11,453 B | 11,069 B | 11,069 B |
+| 16 | 0 | 14,800 B | 13,496 B | 13,887 B | 12,622 B | 11,301 B | 11,695 B |
+| 4 | 4 | 13,648 B | 13,792 B | 13,264 B | 11,462 B | 11,595 B | 11,071 B |
+| 7 | 1 | 13,648 B | 13,792 B | 13,264 B | 11,453 B | 11,597 B | 11,068 B |
+| 16 | 1 | 14,808 B | 13,504 B | 13,895 B | 12,611 B | 11,309 B | 11,703 B |
+| 16 | 4 | 14,832 B | 14,896 B | 13,920 B | 12,637 B | 12,701 B | 11,725 B |
 
-Sixteen application features now cost 576 B over none on HTTP/1.1, where they cost 1,744 B: the
-exchange allocates one dictionary of the right size instead of growing through four. An
-application with no features saves 128 B too, because the host's own four features no longer grow
-the collection past three slots.
+The exact count beat not presizing until an uncounted feature overflowed it, and then it lost: seven
+application features plus a route match cost 144 B more than unsized, and sixteen plus four cost 64 B
+more. Rounded, no row costs more than unsized. Rounding gives back part of the gain where the count
+falls between two sizes and nothing overflows (168 B at four application features, 391 B at sixteen),
+and it saves 528 B over the exact count on the routed seven-feature application. Sixteen application
+features with four uncounted cost 1,000 B over a featureless application on HTTP/1.1, where unsized
+they cost 1,776 B. An application with no features saves 136 B, because the host's own four features
+no longer grow the collection past three slots.
 
 ## The pipeline terminal — endpoint dispatch and the bodyless 404 fallback (#881, #1054)
 

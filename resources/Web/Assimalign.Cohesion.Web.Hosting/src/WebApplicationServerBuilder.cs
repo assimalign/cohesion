@@ -29,6 +29,16 @@ public sealed class WebApplicationServerBuilder
     /// </summary>
     internal const int HostFeatureCount = 4;
 
+    /// <summary>
+    /// The sizes an unsized feature collection's dictionary passes through as it grows: three slots,
+    /// then each time the runtime's smallest hash-table prime at least twice the previous size. A
+    /// collection created at one of these sizes and then outgrown grows to the next one, exactly as an
+    /// unsized collection does, so it never allocates more than an unsized collection holding the same
+    /// features. A size between two of these (11, 23, 29, 47, ...) grows to another size between them,
+    /// and its overflow costs more than never presizing (#1381).
+    /// </summary>
+    private static ReadOnlySpan<int> UnsizedGrowthSizes => [3, 7, 17, 37, 89, 197, 431, 919];
+
     private readonly WebApplicationBuilder _builder;
     private readonly List<Action<IServiceProvider, HttpConnectionListenerOptions>> _configurations = new();
 
@@ -74,17 +84,21 @@ public sealed class WebApplicationServerBuilder
             // The pipeline is resolved first: building it counts the application features it stamps
             // onto every exchange, which the listener needs to size each exchange's features.
             IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
-            int featureCapacity = HostFeatureCount + _builder.StampedFeatureCount;
+            int featureCount = HostFeatureCount + _builder.StampedFeatureCount;
 
             IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
                 ApplyDefaultInterceptors(options);
-                options.ExchangeFeatureCapacity = featureCapacity;
+                options.ExchangeFeatureCapacity = featureCount;
 
                 foreach (var action in _configurations)
                 {
                     action.Invoke(serviceProvider, options);
                 }
+
+                // Rounded last, so the slots a configuration added for its middleware's features are
+                // rounded with the host's count.
+                options.ExchangeFeatureCapacity = RoundExchangeFeatureCapacity(options.ExchangeFeatureCapacity);
             });
 
             return new WebApplicationServer(new WebApplicationServerOptions
@@ -174,6 +188,16 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// Configures the default web server's HTTP connection listener.
     /// </summary>
+    /// <remarks>
+    /// The server's default interceptors and its
+    /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> are set before
+    /// <paramref name="configure"/> runs. The capacity counts the features the server installs on every
+    /// exchange and the application features the pipeline stamps onto it. A middleware that installs
+    /// its own feature on every exchange, such as routing on a matched request or response compression,
+    /// is not counted; add one slot for each (<c>options.ExchangeFeatureCapacity += 1</c>). After every
+    /// configuration has run, the server rounds the capacity up to a size from which an exchange that
+    /// carries more features still allocates no more than an unsized collection would.
+    /// </remarks>
     /// <param name="configure">The listener configuration callback.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
@@ -187,6 +211,11 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// Configures the default web server's HTTP connection listener using application services.
     /// </summary>
+    /// <remarks>
+    /// Runs in registration order after the server's defaults, as described for
+    /// <see cref="UseServer(Action{HttpConnectionListenerOptions})"/>, including the rounding of
+    /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> after the last configuration.
+    /// </remarks>
     /// <param name="configure">The callback that receives the service provider and listener options.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
@@ -246,5 +275,36 @@ public sealed class WebApplicationServerBuilder
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+    }
+
+    /// <summary>
+    /// Rounds the number of features an exchange is expected to carry up to the smallest of
+    /// <see cref="UnsizedGrowthSizes"/> that holds it. The count leaves out the features middleware
+    /// install as an exchange passes through, such as routing's route match on every matched request,
+    /// so an exchange can carry more than it. Sized on that chain, the overflow grows the collection as
+    /// an unsized one grows and never costs more than leaving it unsized. The price is unused slots when
+    /// the count falls between two sizes (#1381).
+    /// </summary>
+    /// <param name="featureCount">The features an ordinary exchange is expected to carry.</param>
+    /// <returns>
+    /// The capacity to size each exchange's feature collection for. <c>0</c>, which leaves the
+    /// collection unsized, stays <c>0</c>, and a count above the largest size is returned unchanged.
+    /// </returns>
+    internal static int RoundExchangeFeatureCapacity(int featureCount)
+    {
+        if (featureCount == 0)
+        {
+            return 0;
+        }
+
+        foreach (int size in UnsizedGrowthSizes)
+        {
+            if (featureCount <= size)
+            {
+                return size;
+            }
+        }
+
+        return featureCount;
     }
 }
