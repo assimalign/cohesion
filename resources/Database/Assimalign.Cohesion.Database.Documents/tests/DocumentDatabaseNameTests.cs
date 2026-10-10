@@ -56,7 +56,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         // Assert: one database, with its document, reporting the spelling it was created with.
         (await ReadAsync(opened, document)).ShouldBe("sales-document");
         again.ShouldBeSameAs(opened);
-        opened.Name.ToString().ShouldBe("sales", Case.Sensitive);
+        opened.Name.ToString().ShouldBe("sales");
         AssertDirectories(onDisk, "sales");
         await engine.DisposeAsync();
     }
@@ -103,7 +103,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("sales", Token()));
         (await ListAsync(engine)).ShouldBeEmpty();
         var recreated = await engine.CreateDatabaseAsync("Sales", Token());
-        recreated.Name.ToString().ShouldBe("Sales", Case.Sensitive);
+        recreated.Name.ToString().ShouldBe("Sales");
         await engine.DisposeAsync();
     }
 

@@ -6,6 +6,8 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -35,8 +37,8 @@ public sealed class DatabaseFileNamesTests
         string directory = DatabaseFileNames.GetDirectory(_root, name);
 
         // Assert
-        directory.ShouldBe(Path.Combine(_root, "sales"), Case.Sensitive);
-        DatabaseFileNames.GetStorageName(name).ShouldBe("sales", Case.Sensitive);
+        directory.ShouldBe(Path.Combine(_root, "sales"));
+        DatabaseFileNames.GetStorageName(name).ShouldBe("sales");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Database names: names that differ otherwise than by case map to different directories (#1392)")]
@@ -94,15 +96,15 @@ public sealed class DatabaseFileNamesTests
             // Assert: both sets are files of the database's own directory.
             foreach (string file in new[] { catalog.Data, catalog.Journal, catalog.Backup, data.Data, data.Journal, data.Backup })
             {
-                Path.GetDirectoryName(file).ShouldBe(directory, Case.Sensitive);
+                Path.GetDirectoryName(file).ShouldBe(directory);
                 foreach (string other in names)
                 {
                     string.Equals(file, DatabaseFileNames.GetDirectory(_root, other), StringComparison.OrdinalIgnoreCase).ShouldBeFalse();
                 }
             }
 
-            catalog.Data.ShouldBe(Path.Combine(directory, "catalog.dat"), Case.Sensitive);
-            data.Data.ShouldBe(Path.Combine(directory, "sql.dat"), Case.Sensitive);
+            catalog.Data.ShouldBe(Path.Combine(directory, "catalog.dat"));
+            data.Data.ShouldBe(Path.Combine(directory, "sql.dat"));
         }
 
         DatabaseFileNames.GetDirectory(_root, "sales.catalog").ShouldNotBe(DatabaseFileNames.GetDirectory(_root, "sales"));
@@ -219,7 +221,7 @@ public sealed class DatabaseFileNamesTests
         }
 
         // Assert
-        new string(allowed.ToArray()).ShouldBe(new string(Allowed.Order().ToArray()), Case.Sensitive);
+        new string(allowed.ToArray()).ShouldBe(new string(Allowed.Order().ToArray()));
         allowed.ShouldAllBe(character => character >= ' ' && windowsRefuses.IndexOf(character) < 0 && unixRefuses.IndexOf(character) < 0);
     }
 
@@ -237,7 +239,7 @@ public sealed class DatabaseFileNamesTests
         string reported = DatabaseFileNames.GetOpenedName(requested, stored);
 
         // Assert: never the caller's spelling unless it is the stored one.
-        reported.ShouldBe(expected, Case.Sensitive);
+        reported.ShouldBe(expected);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Database names: only a lower-case directory that follows the rule is a database's directory (#1392)")]

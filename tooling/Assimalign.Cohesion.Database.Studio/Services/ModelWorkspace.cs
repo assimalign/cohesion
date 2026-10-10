@@ -108,6 +108,8 @@ internal abstract class ModelWorkspace : IAsyncDisposable
     /// <summary>
     /// Lists the engine's databases. SQL and Key-Value only enumerate databases opened in this
     /// process, so <paramref name="discoverOnDisk"/> also tries to open each folder under the model root.
+    /// A database's folder is the lower case of its name and holds every file set it has, its
+    /// catalog included (#1392), so each folder is one database, listed by the name it reports.
     /// </summary>
     public Task<IReadOnlyList<string>> ListDatabasesAsync(bool discoverOnDisk, CancellationToken cancellationToken = default)
         => RunExclusiveAsync<IReadOnlyList<string>>(async token =>
@@ -131,15 +133,17 @@ internal abstract class ModelWorkspace : IAsyncDisposable
                     foreach (string directory in Directory.EnumerateDirectories(root))
                     {
                         string name = System.IO.Path.GetFileName(directory);
-                        if (names.Contains(name) || name.EndsWith(".catalog", StringComparison.OrdinalIgnoreCase))
+                        if (names.Contains(name))
                         {
                             continue;
                         }
 
                         try
                         {
-                            await Engine.OpenDatabaseAsync(name, token).ConfigureAwait(false);
-                            names.Add(name);
+                            // The name the database reports is the spelling it was created with,
+                            // not the lower-case folder it was found in.
+                            DatabaseInstance opened = await Engine.OpenDatabaseAsync(name, token).ConfigureAwait(false);
+                            names.Add(opened.Name.ToString());
                         }
                         catch (Exception)
                         {

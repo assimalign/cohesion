@@ -54,7 +54,7 @@ public sealed class GraphDatabaseNameTests : IDisposable
         // Assert: one database, with its node, reporting the spelling it was created with.
         (await ReadAsync(opened, node)).ShouldBe("sales-node");
         again.ShouldBeSameAs(opened);
-        opened.Name.ToString().ShouldBe("sales", Case.Sensitive);
+        opened.Name.ToString().ShouldBe("sales");
         AssertDirectories(onDisk, "sales");
         await engine.DisposeAsync();
     }
@@ -101,7 +101,7 @@ public sealed class GraphDatabaseNameTests : IDisposable
         await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("sales", TestTimeout.Token()));
         (await ListAsync(engine)).ShouldBeEmpty();
         var recreated = await engine.CreateDatabaseAsync("Sales", TestTimeout.Token());
-        recreated.Name.ToString().ShouldBe("Sales", Case.Sensitive);
+        recreated.Name.ToString().ShouldBe("Sales");
         await engine.DisposeAsync();
     }
 

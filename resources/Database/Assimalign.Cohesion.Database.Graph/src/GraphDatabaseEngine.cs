@@ -368,8 +368,11 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// </summary>
     /// <param name="name">The name of the database.</param>
     /// <param name="database">When this method returns true, the database.</param>
-    /// <returns>True when the database is open in the engine; otherwise false.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
+    /// <returns>
+    /// True when the database is open in the engine, under any spelling of its name; otherwise
+    /// false, for a name that breaks the database-name rule too, since no such database is ever open.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <remarks>
     /// An overload of the base's <see cref="DatabaseEngine.TryGetDatabase"/>, not a <c>new</c>

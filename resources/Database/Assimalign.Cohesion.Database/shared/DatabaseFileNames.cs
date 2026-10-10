@@ -21,10 +21,12 @@ namespace Assimalign.Cohesion.Database;
 /// <c>a:b</c> was accepted there and refused on Windows. Now a name valid on one operating system is
 /// valid on every one, and every valid name is a legal directory name on each. The character set
 /// and the length follow RavenDB (<c>src/Raven.Client/Util/ResourceNameValidator.cs:12-14</c> and
-/// <c>:55</c>, <c>MaxDatabaseNameLength</c> at <c>src/Raven.Client/Constants.cs:443</c>), and so do
-/// the dot placement (<c>ResourceNameValidator.cs:25</c>) and the device names
-/// (<c>Constants.cs:278-302</c>). The 128 limit is also the name capacity of a storage header, so
-/// the header keeps every valid name whole (<see cref="GetOpenedName"/>).
+/// <c>:55</c>, <c>MaxDatabaseNameLength</c> at <c>src/Raven.Client/Constants.cs:443</c>), and so
+/// does the dot placement (<c>ResourceNameValidator.cs:25</c>). The device names extend RavenDB's
+/// list (<c>Constants.cs:278-302</c>) with COM0 and LPT0, which Windows reserves too, and apply to
+/// the part before the first dot, where RavenDB compares the whole name
+/// (<c>ResourceNameValidator.cs:65</c>). The 128 limit is also the name capacity of a storage
+/// header, so the header keeps every valid name whole (<see cref="GetOpenedName"/>).
 /// </para>
 /// <para>
 /// <b>The mapping.</b> <see cref="DatabaseName"/> compares ordinally, ignoring case. A database's

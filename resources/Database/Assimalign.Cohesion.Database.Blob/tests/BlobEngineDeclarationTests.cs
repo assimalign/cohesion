@@ -338,6 +338,11 @@ public sealed class BlobEngineDeclarationTests : IDisposable
     [InlineData("../escaped")]
     [InlineData("nested/escaped")]
     [InlineData("nested\\escaped")]
+    [InlineData("a:b")]
+    [InlineData("CON")]
+    [InlineData("nul.db")]
+    [InlineData("sales.")]
+    [InlineData("sal\u00E9s")]
     public async Task AddDatabase_NameBreakingTheRule_ShouldBeRefusedAtTheCall(string name)
     {
         // Arrange

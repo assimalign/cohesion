@@ -58,9 +58,30 @@ public sealed class SqlDatabaseNameTests : IDisposable
         // Assert: one database, with its row, reporting the spelling it was created with.
         (await ReadAsync(opened)).ShouldBe([11]);
         again.ShouldBeSameAs(opened);
-        opened.Name.ToString().ShouldBe("sales", Case.Sensitive);
+        opened.Name.ToString().ShouldBe("sales");
         AssertDirectories(onDisk, "sales");
         await engine.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Names: a declaration of 'SALES' opens the database an earlier build created as 'sales' (#1392)")]
+    public async Task BuildAsync_DeclarationInAnotherCase_ShouldOpenTheExistingDatabase()
+    {
+        // Arrange: the key-value model failed exactly this on Ubuntu before #1392, and SQL built
+        // its directory from the declared spelling the same way.
+        await using (var first = await Declare("sales").BuildAsync(TestTimeout.Token()))
+        {
+            first.TryGetDatabase("sales", out SqlDatabase? created).ShouldBeTrue();
+            await WriteAsync(created!, 11);
+        }
+
+        // Act
+        await using var second = await Declare("SALES").BuildAsync(TestTimeout.Token());
+
+        // Assert: opened, not created again beside it.
+        second.TryGetDatabase("SALES", out SqlDatabase? opened).ShouldBeTrue();
+        (await ReadAsync(opened!)).ShouldBe([11]);
+        opened!.Name.ToString().ShouldBe("sales");
+        AssertDirectories(onDisk: true, "sales");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Names: a create of 'SALES' after 'sales' is refused as existing, open or not (#1392)")]
@@ -104,7 +125,7 @@ public sealed class SqlDatabaseNameTests : IDisposable
         AssertDirectories(onDisk);
         await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("sales", TestTimeout.Token()));
         var recreated = await engine.CreateDatabaseAsync("Sales", TestTimeout.Token());
-        recreated.Name.ToString().ShouldBe("Sales", Case.Sensitive);
+        recreated.Name.ToString().ShouldBe("Sales");
         await engine.DisposeAsync();
     }
 
@@ -177,6 +198,13 @@ public sealed class SqlDatabaseNameTests : IDisposable
 
     private SqlDatabaseEngine CreateEngine(bool onDisk)
         => SqlDatabaseEngine.Create("names", onDisk ? new SqlDatabaseEngineOptions { RootPath = _rootPath } : new SqlDatabaseEngineOptions());
+
+    private SqlDatabaseEngineBuilder Declare(string database)
+    {
+        var builder = SqlDatabaseEngine.CreateBuilder("names");
+        builder.Options.RootPath = _rootPath;
+        return builder.AddDatabase(database);
+    }
 
     // Closes a database so the next open reads its files: on disk, the engine restarts over the
     // same root; in memory, the holder disposes the database and the engine keeps its files.
