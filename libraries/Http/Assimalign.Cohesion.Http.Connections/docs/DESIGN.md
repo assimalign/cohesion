@@ -1558,7 +1558,11 @@ message that forces the server into unbounded (or amplified) work:
   `RST_STREAM`s it. Each cycle costs the client one HEADERS + one RST_STREAM but
   makes the server allocate, dispatch, and tear down a stream — and because the
   stream is closed, it never counts against `MAX_CONCURRENT_STREAMS`. Unbounded,
-  this is a CPU/allocation DoS.
+  this is a CPU/allocation DoS. Its server-reset variant, **MadeYouReset
+  (CVE-2025-8671)**, gets the same effect without sending `RST_STREAM`: the client
+  sends a frame that breaks a stream rule (a zero-increment `WINDOW_UPDATE`, an
+  overrun window, a malformed trailer section), and the server resets the stream
+  itself.
 - **CONTINUATION flood.** A HEADERS frame without `END_HEADERS` followed by an
   endless run of `CONTINUATION` frames grew an *unbounded* `MemoryStream` — the
   header block was accumulated with no cap at all. (The request *body* is bounded
@@ -1582,9 +1586,9 @@ a listener is protected out of the box:
 
 | Limit | Default | Enforced by | Vector |
 |---|---|---|---|
-| `MaxStreamsPerConnection` | 100 | advertised `SETTINGS_MAX_CONCURRENT_STREAMS`; `OpenInboundStream` refuses excess with `RST_STREAM(REFUSED_STREAM)`, once the refused stream's header block is decoded (see "Refused streams") | concurrency exhaustion |
+| `MaxStreamsPerConnection` | 100 | advertised `SETTINGS_MAX_CONCURRENT_STREAMS`; `OpenInboundStream` refuses excess with `RST_STREAM(REFUSED_STREAM)`, once the refused stream's header block is decoded (see "Refused streams"). A reset stream keeps its slot until its exchange ends (see "A reset stream keeps its slot until its exchange ends") | concurrency exhaustion |
 | `MaxRequestHeaderListSize` | 16 KB | advertised `SETTINGS_MAX_HEADER_LIST_SIZE`; raw-byte cap in `Http2Stream.AppendHeaderBytes`; decoded-size cap in `HPackDecoder` | CONTINUATION flood + header-list amplification |
-| `MaxResetStreamsPerWindow` | 200 | `ProcessRstStreamFrameAsync` via `Http2FloodGuard` | rapid reset (CVE-2023-44487) |
+| `MaxResetStreamsPerWindow` | 200 | `ProcessRstStreamFrameAsync` (the peer's resets) and `TryProcessFrameAsync` (the server's resets for the peer's stream errors) via `Http2FloodGuard` | rapid reset (CVE-2023-44487), MadeYouReset (CVE-2025-8671) |
 | `MaxSettingsFramesPerWindow` | 100 | `ProcessSettingsFrameAsync` via `Http2FloodGuard` | SETTINGS flood |
 | `MaxPingFramesPerWindow` | 100 | `ProcessPingFrameAsync` via `Http2FloodGuard` | PING flood |
 | `FloodDetectionWindow` | 5 s | the trailing window shared by the three flood counters | — |
@@ -1674,17 +1678,69 @@ trip), so memory tracks live traffic, not the configured maximum. The guard is
 driven solely from the frame pump — the connection's single inbound frame
 processor — so it needs no synchronization.
 
-The rapid-reset counter counts only inbound `RST_STREAM`s that target a stream
-the server has actually opened (or recently retired). Two deliberate
-exclusions keep the accounting honest:
+The reset counter counts the resets the peer causes, in two ways (#1072):
+
+- **The peer's own `RST_STREAM`** on a stream the server has actually opened (or
+  recently retired), in `ProcessRstStreamFrameAsync` — rapid reset.
+- **A `RST_STREAM` the server sends because of the peer's frame** — every stream
+  error the frame pump raises and answers with a reset, in `TryProcessFrameAsync`:
+  a zero-increment `WINDOW_UPDATE`, an overrun flow-control window, a malformed
+  request head or trailer section, a request a request-parse interceptor rejects.
+  This is MadeYouReset (CVE-2025-8671). Before #1072 these resets were free, so a
+  client could churn streams at any rate without sending a single `RST_STREAM`.
+
+Three deliberate exclusions keep the accounting honest:
 
 - A `RST_STREAM` on a never-opened (idle) stream is a *different* violation —
   the RFC 9113 §6.4 `PROTOCOL_ERROR` handled just below — and is excluded so
   the two failure modes stay distinct.
-- The server's **own** `RST_STREAM(NO_ERROR)` emissions (the routine
-  undrained-body reset on the response path) never pass through
-  `ProcessRstStreamFrameAsync`, so ordinary server operation cannot trip the
-  peer-abuse detector.
+- A **refusal** (`REFUSED_STREAM`, over the concurrency cap or during a graceful
+  close) does not count. The refused stream started no work, and the peer may
+  retry it, so a compliant client that races a slot still held by a reset
+  exchange (see below) is not pushed toward `ENHANCE_YOUR_CALM`. The option's
+  documentation said refusals counted; the code never counted them, and the
+  documentation now says so.
+- The server's resets on its **own** account — the `RST_STREAM(NO_ERROR)` that
+  stops an undrained body after a complete response (RFC 9113 §8.1), the `CANCEL`
+  the application requests, the reset after the transport's `413` — are not raised
+  as stream errors, so ordinary server operation cannot trip the peer-abuse
+  detector.
+
+### A reset stream keeps its slot until its exchange ends
+
+`SETTINGS_MAX_CONCURRENT_STREAMS` is meant to bound the work in flight on a
+connection. A reset — the peer's, or one the server sends — removes the stream
+from the stream table at once, but the exchange it carried keeps running when its
+handler ignores `RequestCancelled`. Before #1072 admission counted the stream
+table alone, so a client could reset streams whose handlers ignore cancellation
+and open new ones, and the running handlers grew without limit, only as fast as
+the reset budget allowed (CVE-2023-44487, and CVE-2025-8671 through server
+resets).
+
+Admission now counts the stream table plus `_retiredExchangeSlots`: the streams
+that left the table while their exchange was still running.
+
+- **When an exchange starts running.** The frame pump marks the stream
+  (`Http2Stream.ExchangeRunning`, through `BeginExchange`) as it hands the
+  exchange to the host, and attaches the exchange to the connection.
+- **When it ends.** `SendAsync` ends the exchange when it returns or throws,
+  whatever it wrote — for a reset stream that is the call that observes the
+  reset. Disposing the exchange ends it too, so a host that never calls
+  `SendAsync` for a reset exchange still gives the slot back. `EndExchange` is
+  idempotent.
+- **Removal.** `RemoveStreamAsync` moves the slot of a running exchange from the
+  table to `_retiredExchangeSlots` (`HoldsRetiredSlot`), under `_syncRoot`, the
+  lock admission reads. Every removal path does this — a peer reset, a reset the
+  server sends, and a response that completed while `SendAsync` is still running
+  its after-response hooks — so the slot is held for exactly as long as the
+  exchange runs, and never twice.
+- **Never dispatched.** A stream reset or refused before the pump handed its
+  exchange over holds no slot after its removal: nothing runs for it.
+
+The cost is that a client cancelling requests whose handlers are slow to stop
+sees `REFUSED_STREAM` until they stop. That is the RFC's own signal that the
+request was not processed and may be retried (RFC 9113 §8.7); the refusal does
+not count toward the reset budget (above), so it never escalates to `GOAWAY`.
 
 ### PING validation
 

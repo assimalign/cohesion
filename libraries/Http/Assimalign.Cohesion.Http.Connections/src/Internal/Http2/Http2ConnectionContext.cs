@@ -117,6 +117,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // The highest client stream id the server accepted, which GOAWAY announces (RFC 9113 §6.8): a
     // refused stream is not one the server will act on. Both ids are guarded by _syncRoot.
     private int _lastAcceptedStreamId;
+    // RFC 9113 §5.1.2 / CVE-2023-44487 — the streams that left the stream table while their exchange
+    // still ran: a peer reset, or a reset the server sent, removes a stream at once, but a handler
+    // that ignores RequestCancelled keeps working. Each such stream keeps its slot against
+    // SETTINGS_MAX_CONCURRENT_STREAMS until its exchange ends (EndExchange), so admission counts the
+    // stream table plus these. Guarded by _syncRoot, with the stream's HoldsRetiredSlot flag.
+    private int _retiredExchangeSlots;
     // RFC 9113 §6.8 — set once a graceful close begins (BeginGracefulClose, or GracefulCloseAsync at
     // teardown). From then on a HEADERS frame that opens a new stream is refused with
     // RST_STREAM(REFUSED_STREAM), and the receive enumeration ends once its queued contexts are read.
@@ -319,6 +325,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     processed.Context.Stream.MarkExchangeCounted();
                     Interlocked.Increment(ref _activeExchangeCount);
 
+                    // RFC 9113 §5.1.2 — from here the stream's concurrency slot is held until the
+                    // exchange ends, whether or not the stream is reset first.
+                    BeginExchange(processed.Context);
+
                     if (!_readyContexts.Writer.TryWrite(processed.Context))
                     {
                         // A graceful close ended the receive enumeration while this stream's header
@@ -462,6 +472,15 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// connection (RFC 9113 §6.8); wire-level transport failures
     /// terminate without GOAWAY.
     /// </summary>
+    /// <remarks>
+    /// A stream error the peer's frame raised counts toward the reset-flood budget like a reset the
+    /// peer sends (CVE-2025-8671, MadeYouReset): a zero-increment <c>WINDOW_UPDATE</c>, an overrun
+    /// flow-control window, a malformed head or trailer section, or a request a request-parse
+    /// interceptor rejects ends the stream for the peer as cheaply as its own <c>RST_STREAM</c> would.
+    /// Over the budget the connection ends with <c>GOAWAY(ENHANCE_YOUR_CALM)</c>. A refusal
+    /// (<c>REFUSED_STREAM</c>) does not count: the refused stream started no work, and the peer may
+    /// retry it.
+    /// </remarks>
     private async Task<FrameProcessOutcome> TryProcessFrameAsync(ReceivedFrame received, CancellationToken cancellationToken)
     {
         try
@@ -471,6 +490,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
         catch (Http2StreamException streamError)
         {
+            if (streamError.ErrorCode != Http2ErrorCode.RefusedStream && _floodGuard.TrackStreamReset())
+            {
+                await TryEmitGoAwayAsync(Http2ErrorCode.EnhanceYourCalm, cancellationToken).ConfigureAwait(false);
+                return new FrameProcessOutcome(context: null, terminate: true);
+            }
+
             await TryEmitRstStreamAsync(streamError.StreamId, streamError.ErrorCode, cancellationToken).ConfigureAwait(false);
             return new FrameProcessOutcome(context: null, terminate: false);
         }
@@ -544,6 +569,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         public bool TerminateConnection { get; }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The exchange ends when this call returns or throws, whatever it wrote: from then on the stream
+    /// no longer holds a concurrency slot it kept only because its exchange was still running
+    /// (<see cref="EndExchange"/>).
+    /// </remarks>
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         if (context is not Http2Context http2Context)
@@ -551,6 +582,22 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/2 connection.");
         }
 
+        try
+        {
+            await SendExchangeAsync(http2Context, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndExchange(http2Context.Stream);
+        }
+    }
+
+    /// <summary>
+    /// Finalizes <paramref name="http2Context"/> on the wire: its buffered or streamed response, its
+    /// tunnel's end, or the reset the application requested.
+    /// </summary>
+    private async ValueTask SendExchangeAsync(Http2Context http2Context, CancellationToken cancellationToken)
+    {
         Http2Stream stream = http2Context.Stream;
 
         // The exchange is already over on the wire: the stream was reset (RFC 9113 §5.4.2 — no
@@ -1212,7 +1259,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         // that targets a stream we have actually opened (or recently retired); a RST on a
         // never-opened stream is handled as the idle-stream PROTOCOL_ERROR below and is a distinct
         // violation, so it is deliberately excluded from the rapid-reset accounting. Over the
-        // per-window budget → GOAWAY(ENHANCE_YOUR_CALM), matching Kestrel's escalation.
+        // per-window budget → GOAWAY(ENHANCE_YOUR_CALM), matching Kestrel's escalation. A reset the
+        // server sends for a stream error the peer's frame raised draws on the same budget
+        // (TryProcessFrameAsync, MadeYouReset).
         if (receivedFrame.Frame.StreamId <= _lastInboundStreamId && _floodGuard.TrackStreamReset())
         {
             throw new Http2ConnectionException(
@@ -1512,13 +1561,15 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // RFC 9113 §5.1.2 — endpoints MUST NOT exceed
                 // SETTINGS_MAX_CONCURRENT_STREAMS. We advertise this in our
                 // local settings; new streams beyond the cap are refused so
-                // the client can back off.
-                else if (_streams.Count >= _localSettings.MaxConcurrentStreams)
+                // the client can back off. A reset stream whose exchange still
+                // runs keeps its slot (CVE-2023-44487): the cap bounds the work
+                // in flight, not only the streams the peer still sees open.
+                else if (_streams.Count + _retiredExchangeSlots >= _localSettings.MaxConcurrentStreams)
                 {
                     refusal = new Http2StreamException(
                         frame.StreamId,
                         Http2ErrorCode.RefusedStream,
-                        $"HTTP/2 stream {frame.StreamId} refused: server's SETTINGS_MAX_CONCURRENT_STREAMS ({_localSettings.MaxConcurrentStreams}) reached.");
+                        $"HTTP/2 stream {frame.StreamId} refused: server's SETTINGS_MAX_CONCURRENT_STREAMS ({_localSettings.MaxConcurrentStreams}) reached, counting reset streams whose exchanges still run.");
                 }
 
                 // RFC 9113 §5.1.1 — the peer has used the id even when the stream is refused, so the
@@ -2132,6 +2183,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
             _streams.Remove(streamId);
 
+            // RFC 9113 §5.1.2 — a stream whose exchange still runs keeps its concurrency slot after
+            // it leaves the table, until the exchange ends (EndExchange).
+            RetainSlotOfRunningExchangeLocked(stream);
+
             // Recorded with the removal, under the same lock, so a HEADERS frame the pump reads next
             // finds the stream either still tracked or remembered as reset — never neither.
             if (resetByServer && !stream.InputCompleted)
@@ -2174,6 +2229,71 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // Wake a draining GracefulCloseAsync. No-op when no close is in
             // progress (the signal is only published while draining).
             _drainSignal?.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Marks the exchange on <paramref name="context"/>'s stream as running, so the stream keeps its
+    /// slot against <c>SETTINGS_MAX_CONCURRENT_STREAMS</c> until the exchange ends, and attaches the
+    /// exchange to this connection so its disposal ends it. Called by the frame pump as it hands the
+    /// exchange to the host.
+    /// </summary>
+    private void BeginExchange(Http2Context context)
+    {
+        context.Connection = this;
+
+        lock (_syncRoot)
+        {
+            Http2Stream stream = context.Stream;
+            stream.ExchangeRunning = true;
+
+            // A stream reset before the exchange reached the host has already left the table.
+            if (!_streams.ContainsKey(stream.StreamId))
+            {
+                RetainSlotOfRunningExchangeLocked(stream);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends the exchange on <paramref name="stream"/>: its <c>SendAsync</c> returned or threw, or its
+    /// context was disposed. A stream that left the stream table while the exchange ran gives back the
+    /// concurrency slot it kept (RFC 9113 §5.1.2). Idempotent, and a no-op for a stream whose exchange
+    /// never reached the host.
+    /// </summary>
+    /// <param name="stream">The stream whose exchange ended.</param>
+    internal void EndExchange(Http2Stream stream)
+    {
+        lock (_syncRoot)
+        {
+            if (!stream.ExchangeRunning)
+            {
+                return;
+            }
+
+            stream.ExchangeRunning = false;
+
+            if (stream.HoldsRetiredSlot)
+            {
+                stream.HoldsRetiredSlot = false;
+                _retiredExchangeSlots--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Keeps the concurrency slot of a stream that is leaving, or has left, the stream table while its
+    /// exchange still runs — a peer reset, a reset the server sent, or a response that completed while
+    /// the host still finalizes it. CVE-2023-44487: a handler that ignores <c>RequestCancelled</c> is
+    /// still work in flight, so the slot stays held until <see cref="EndExchange"/>. Must be called
+    /// while holding <see cref="_syncRoot"/>.
+    /// </summary>
+    private void RetainSlotOfRunningExchangeLocked(Http2Stream stream)
+    {
+        if (stream.ExchangeRunning && !stream.HoldsRetiredSlot)
+        {
+            stream.HoldsRetiredSlot = true;
+            _retiredExchangeSlots++;
         }
     }
 

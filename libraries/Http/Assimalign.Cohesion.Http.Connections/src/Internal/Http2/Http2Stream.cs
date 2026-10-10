@@ -156,6 +156,22 @@ internal sealed class Http2Stream
     /// </summary>
     public bool ReceiveReclaimed { get; set; }
 
+    /// <summary>
+    /// Whether the exchange dispatched on this stream is still running: set when the frame pump hands
+    /// the exchange to the host, cleared when the exchange ends (its <c>SendAsync</c> returns, or its
+    /// context is disposed). While it runs, the stream keeps its slot against
+    /// <c>SETTINGS_MAX_CONCURRENT_STREAMS</c> even after a reset removes it from the stream table
+    /// (RFC 9113 §5.1.2). Guarded by the connection's synchronization root.
+    /// </summary>
+    public bool ExchangeRunning { get; set; }
+
+    /// <summary>
+    /// Whether this stream left the stream table while its exchange was still running, and so holds one
+    /// of the connection's retired-exchange slots until the exchange ends. Guarded by the connection's
+    /// synchronization root.
+    /// </summary>
+    public bool HoldsRetiredSlot { get; set; }
+
     public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow, int maxHeaderBlockSize)
     {
         StreamId = streamId;

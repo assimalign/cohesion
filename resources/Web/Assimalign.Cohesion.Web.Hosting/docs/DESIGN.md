@@ -215,12 +215,12 @@ body afterwards, so a slowly uploading stream no longer delays the streams behin
   `SETTINGS_MAX_CONCURRENT_STREAMS` (`Http2Limits.MaxStreamsPerConnection`, default
   100) with `RST_STREAM(REFUSED_STREAM)`, and HTTP/3 peers cannot open request
   streams beyond the QUIC stream credit (`QuicConnectionListenerOptions.MaxBidirectionalStreamCount`,
-  default 100). One gap remains in the HTTP/2 transport: a peer `RST_STREAM` frees the
-  stream's slot immediately (`Http2ConnectionContext.ProcessRstStreamFrameAsync`),
-  while an application that ignores `RequestCancelled` keeps its task running. The
-  rapid-reset flood guard (`MaxResetStreamsPerWindow`) bounds the rate at which such
-  tasks can accumulate; counting a reset stream against the limit until its
-  application task completes, as Kestrel does, is transport work.
+  default 100). A reset does not reopen the gap on HTTP/2: since #1072 a reset stream,
+  whether the peer or the transport reset it, keeps its slot until its exchange ends,
+  which is when this server's `SendAsync` for it returns or its disposal runs, so an
+  application that ignores `RequestCancelled` still occupies one slot per task (see
+  the transport's `docs/DESIGN.md`, "A reset stream keeps its slot until its exchange
+  ends").
 - **The connection waits for its streams.** `MultiplexedExchangeTracker` is a
   countdown, not a task set: it starts at one (the receive loop's hold), rises as each
   stream starts, falls as each finishes, and the loop gives up its hold when it stops
