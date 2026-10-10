@@ -160,6 +160,60 @@ public class KeyRingReloadThrottleTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - KeyRing: Should resolve a miss whose first lookup ran before another miss's reload published the key")]
+    public void Unprotect_MissLookedUpBeforeAnotherReloadPublished_ShouldResolveFromPublishedSnapshot()
+    {
+        // Arrange
+        CountingKeyRepository repository = new();
+        MutableTimeProvider time = new(_origin);
+        IDataProtector nodeB = CreateNode(repository, time);
+        byte[] rotated = CreateNode(repository, time).Protect(_sample); // node A writes a key B has not loaded
+        using ManualResetEventSlim reached = new(false);
+        using ManualResetEventSlim release = new(false);
+        byte[]? result = null;
+        Exception? failure = null;
+        Thread late = new(() =>
+        {
+            // The pause lands after this miss's snapshot lookup and before it reads the window.
+            time.PauseNextTimestampOnCurrentThread(reached, release);
+            try
+            {
+                result = nodeB.Unprotect(rotated);
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        })
+        {
+            IsBackground = true,
+        };
+
+        late.Start();
+        int baseline;
+        bool joined;
+        try
+        {
+            reached.Wait(_timeout).ShouldBeTrue();
+            baseline = repository.LoadCount;
+            nodeB.Unprotect(rotated).ShouldBe(_sample); // reloads, publishes the key, closes the window
+
+            // Act
+            release.Set();
+            joined = late.Join(_timeout);
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        // Assert
+        joined.ShouldBeTrue();
+        failure.ShouldBeNull();
+        result.ShouldBe(_sample);
+        (repository.LoadCount - baseline).ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - KeyRing: Should unprotect with a known key while a reload runs")]
     public async Task Unprotect_KnownKeyWhileReloadRuns_ShouldNotWait()
     {
@@ -228,7 +282,7 @@ public class KeyRingReloadThrottleTests
         node.Protect(_sample);
         repository.FailLoadsWith(new IOException("The key repository is offline."));
         int baseline = repository.LoadCount;
-        Should.Throw<IOException>(() => node.Unprotect(Forged()));
+        Should.Throw<DataProtectionException>(() => node.Unprotect(Forged()));
 
         // Act
         DataProtectionException exception = Should.Throw<DataProtectionException>(() => node.Unprotect(Forged()));
@@ -236,6 +290,24 @@ public class KeyRingReloadThrottleTests
         // Assert
         exception.Message.ShouldContain("unknown");
         (repository.LoadCount - baseline).ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - KeyRing: Should report a failed unknown-key reload as a data-protection failure carrying the repository's exception")]
+    public void Unprotect_UnknownKeyIdWhenRepositoryReadFails_ShouldThrowDataProtectionExceptionWithCause()
+    {
+        // Arrange
+        CountingKeyRepository repository = new();
+        MutableTimeProvider time = new(_origin);
+        IDataProtector node = CreateNode(repository, time);
+        node.Protect(_sample);
+        IOException offline = new("The key repository is offline.");
+        repository.FailLoadsWith(offline);
+
+        // Act
+        DataProtectionException exception = Should.Throw<DataProtectionException>(() => node.Unprotect(Forged()));
+
+        // Assert
+        exception.InnerException.ShouldBeSameAs(offline);
     }
 
     [Theory(DisplayName = "Cohesion Test [Security.DataProtection] - Options: Should reject a non-positive unknown-key reload interval")]

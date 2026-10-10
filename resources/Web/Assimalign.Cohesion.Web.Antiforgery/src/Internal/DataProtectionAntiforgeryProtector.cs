@@ -21,8 +21,10 @@ namespace Assimalign.Cohesion.Web.Antiforgery.Internal;
 /// <para>
 /// <see cref="TryUnprotect(ReadOnlySpan{byte}, out byte[])"/> is fed untrusted request input. Every
 /// verification and key-lifecycle failure surfaces from the ring as <see cref="DataProtectionException"/>,
-/// which maps to "invalid" here. Anything else, such as an unreadable key repository, is an
-/// infrastructure fault and propagates.
+/// which maps to "invalid" here. So does a key repository the ring cannot read while it looks for a key
+/// the token names and the ring does not hold, because the token's sender chooses that key id. Anything
+/// else is an infrastructure fault and propagates, as does an unreadable key repository from
+/// <see cref="Protect(ReadOnlySpan{byte})"/>.
 /// </para>
 /// </remarks>
 internal sealed class DataProtectionAntiforgeryProtector : IHttpAntiforgeryProtector

@@ -217,10 +217,17 @@ The protector is chosen in this order:
    `IHttpAntiforgeryProtector`.
 
 The adapter maps `DataProtectionException` — every verification and key-lifecycle failure — to
-"invalid", because the engine feeds it untrusted request input. Anything else, such as an unreadable key
-repository, is an infrastructure fault and propagates. This is the adapter
-`Security.DataProtection`'s design promised; it lives here because this package is where the Web
-application composes the two.
+"invalid", because the engine feeds it untrusted request input. That includes a key repository the ring
+cannot read while it looks for a key id the token names and the ring does not hold: the token's sender
+chooses that id, so it must not be able to turn a repository outage into a `500`. Anything else is an
+infrastructure fault and propagates, and so does an unreadable key repository while a token is issued.
+This is the adapter `Security.DataProtection`'s design promised; it lives here because this package is
+where the Web application composes the two.
+
+A forged token cannot make the ring re-read its repository on every request: an unknown key id reloads
+the ring at most once per `DataProtectionOptions.UnknownKeyReloadInterval` (default 30 seconds), and
+known keys never wait on that read (#1155; see `Security.DataProtection`'s DESIGN, "Reloads and the
+unknown-key throttle").
 
 ### Why an explicit provider, not a discovered one
 
@@ -273,7 +280,8 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
 | Rejection after the response head was committed | The exchange is aborted |
 | A protected endpoint dispatched without `UseAntiforgery` having processed it | `InvalidOperationException` at dispatch |
 | `UseAntiforgery` without `AddAntiforgery` | `InvalidOperationException` when the pipeline is built |
-| Key repository unreadable, or another infrastructure fault | Propagates |
+| Key repository unreadable while the ring looks for a key id a token names | `400` `application/problem+json`, as for a forged token |
+| Key repository unreadable while a token is issued, or another infrastructure fault | Propagates |
 
 ## AOT posture
 
@@ -302,9 +310,6 @@ static property read inside the interceptor it already generates.
   so one registration serves both.
 - An `OnRejected` hook, as rate limiting has, for applications that want an HTML error page rather than
   problem+json.
-- The key ring reloads its repository for every payload that names an unknown key id
-  (`KeyRing.ResolveForUnprotect`), so forged tokens can force repeated repository reads; a negative cache
-  or reload throttle belongs in `Security.DataProtection` (filed as #1155).
 
 ## Testing
 

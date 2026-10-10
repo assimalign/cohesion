@@ -29,8 +29,9 @@ namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 /// reload lock, so protecting or unprotecting with a key the ring holds never waits on a
 /// repository read. A payload whose key id is not in the snapshot reloads the repository at
 /// most once per unknown-key reload interval, because the payload's sender chooses that id:
-/// inside the interval an unknown id is reported unknown after one timestamp read, without
-/// the lock.
+/// inside the interval an unknown id is reported unknown after one timestamp read and a second
+/// snapshot lookup, without the lock. Misses that arrive while a reload runs wait for it on the
+/// lock and share its result.
 /// </para>
 /// <para>
 /// Time is read through an injected <see cref="TimeProvider"/> so rotation, grace, and the
@@ -50,8 +51,8 @@ internal sealed class KeyRing
     private volatile FrozenDictionary<Guid, ManagedKey> _keys;
 
     // The TimeProvider timestamp before which an unknown key id may not reload the repository.
-    // Written under _reloadSync and read without it. A stale read only sends a caller to the
-    // lock, where the value is read again.
+    // Written under _reloadSync, after the snapshot of the read it belongs to is published, and
+    // read without it. A stale read only sends a caller to the lock, where the value is read again.
     private long _unknownKeyReloadNotBefore = long.MinValue;
 
     public KeyRing(
@@ -113,7 +114,10 @@ internal sealed class KeyRing
     }
 
     /// <summary>Resolves the key that produced a payload, enforcing revocation and the grace window.</summary>
-    /// <exception cref="DataProtectionException">The key is unknown, revoked, or past its grace window.</exception>
+    /// <exception cref="DataProtectionException">
+    /// The key is unknown, revoked, or past its grace window, or the repository could not be read
+    /// while reloading for an unknown key id.
+    /// </exception>
     public ManagedKey ResolveForUnprotect(Guid keyId)
     {
         if (!_keys.TryGetValue(keyId, out ManagedKey? key))
@@ -144,10 +148,14 @@ internal sealed class KeyRing
     // throttled to one per interval, and callers that miss while it runs share its result.
     private ManagedKey? ReloadForUnknownKey(Guid keyId)
     {
-        // Inside the window a miss costs one timestamp read: no lock, no repository read.
+        // Inside the window a miss costs one timestamp read and one more snapshot lookup: no
+        // lock, no repository read. The caller's first lookup may have run before the reload
+        // that closed the window published its snapshot, so the id is looked up again. That
+        // reload published its snapshot before it wrote the window, so this read of the window
+        // makes that snapshot, or a later one, visible here.
         if (_time.GetTimestamp() < Volatile.Read(ref _unknownKeyReloadNotBefore))
         {
-            return null;
+            return _keys.TryGetValue(keyId, out ManagedKey? published) ? published : null;
         }
 
         lock (_reloadSync)
@@ -164,20 +172,28 @@ internal sealed class KeyRing
                 return null;
             }
 
+            // The window is measured from the read's start, so a key written while the read ran
+            // still resolves within one interval of its write.
+            long notBefore = AddSaturating(started, _unknownKeyReloadInterval);
+
             FrozenDictionary<Guid, ManagedKey> loaded;
             try
             {
                 loaded = LoadKeys();
             }
-            finally
+            catch (Exception exception)
             {
-                // The window is measured from the read's start, so a key written while the read
-                // ran still resolves within one interval of its write. A failed read closes the
-                // window too, so a repository that keeps failing is not read on every miss.
-                Volatile.Write(ref _unknownKeyReloadNotBefore, AddSaturating(started, _unknownKeyReloadInterval));
+                // A failed read closes the window too, so a repository that keeps failing is not
+                // read on every miss. The failure surfaces as the area exception, as it does for
+                // every caller that misses inside the window it closes.
+                Volatile.Write(ref _unknownKeyReloadNotBefore, notBefore);
+                throw new DataProtectionException("The key repository could not be read to resolve the key that produced this payload.", exception);
             }
 
+            // Publish the snapshot before the window, so a miss that sees the window closed also
+            // sees the keys this read loaded.
             _keys = loaded;
+            Volatile.Write(ref _unknownKeyReloadNotBefore, notBefore);
             return loaded.TryGetValue(keyId, out key) ? key : null;
         }
     }

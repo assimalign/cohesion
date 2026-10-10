@@ -47,7 +47,9 @@ public interface IDataProtector : IDataProtectionProvider
     /// <exception cref="DataProtectionException">
     /// The payload is malformed, its authentication tag does not verify, it was produced for a
     /// different purpose, or the key that produced it is unknown, revoked, or aged out of the
-    /// unprotect grace window.
+    /// unprotect grace window. Also thrown, with the repository's exception as
+    /// <see cref="Exception.InnerException"/>, when the key repository cannot be read while the
+    /// ring looks for a key it does not hold.
     /// </exception>
     byte[] Unprotect(ReadOnlySpan<byte> protectedData);
 }
