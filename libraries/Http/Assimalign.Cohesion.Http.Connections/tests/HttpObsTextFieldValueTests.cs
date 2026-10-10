@@ -21,7 +21,9 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// raw or Huffman-coded (RFC 7541 §5.2, RFC 9204 §4.1.2), so an application reads the same string whichever
 /// version carried it. A field name stays a token, and the request target and host stay visible US-ASCII,
 /// as HTTP/1.1 holds its request line and <c>Host</c>: an obs-text octet in <c>:path</c>, <c>:authority</c>,
-/// or <c>Host</c> makes an HTTP/2 or HTTP/3 request malformed, and only its stream is reset.
+/// or <c>Host</c> makes an HTTP/2 or HTTP/3 request malformed, and only its stream is reset. A
+/// <c>Content-Length</c> loses SP and HTAB around its elements and nothing else, so a no-break space or a
+/// next-line octet beside its digits makes an HTTP/3 request malformed, as it gets HTTP/1.1's 400.
 /// </summary>
 public class HttpObsTextFieldValueTests
 {
@@ -102,6 +104,55 @@ public class HttpObsTextFieldValueTests
 
         // Act and Assert
         await AssertHttp3ResetWhileSiblingIsServedAsync(malformedPayload);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - obs-text: An HTTP/3 Content-Length with a no-break space or next-line octet around its digits should reset only its stream")]
+    [InlineData("5 ")]
+    [InlineData("\u00855")]
+    [InlineData("5, 5")]
+    [InlineData("5\u0085,5")]
+    public async Task Http3ReceiveAsync_OnObsTextWhitespaceInContentLength_ShouldResetStreamWithMessageError(string contentLength)
+    {
+        // Arrange — RFC 9110 §5.6.3: OWS is SP and HTAB only. A Unicode trim (StringSplitOptions.TrimEntries)
+        // also strips U+00A0 and U+0085, which QPACK decodes from obs-text, so "5\xA0" was enforced as 5 while
+        // HTTP/1.1 answers it with 400 (#1341) and an intermediary comparing the value exactly sees no length.
+        byte[] malformedPayload = Http3Request(
+            (":method", "POST", false),
+            (":scheme", "https", false),
+            (":path", "/upload", false),
+            (":authority", "api.test", false),
+            ("content-length", contentLength, false));
+
+        // Act and Assert
+        await AssertHttp3ResetWhileSiblingIsServedAsync(malformedPayload);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - obs-text: An HTTP/3 Content-Length list with SP around its elements should still be read")]
+    public async Task Http3ReceiveAsync_OnContentLengthListWithOptionalWhitespace_ShouldReadTheLength()
+    {
+        // Arrange — "5, 5" is two identical values separated by OWS (RFC 9110 §8.6, §5.6.1).
+        byte[] payload = Combine(
+            Http3Request(
+                (":method", "POST", false),
+                (":scheme", "https", false),
+                (":path", "/upload", false),
+                (":authority", "api.test", false),
+                ("content-length", "5, 5", false)),
+            HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello")));
+        TestMultiplexedConnection connection = new(new TestConnection(payload));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        // Act
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        using StreamReader reader = new(enumerator.Current.Request.Body);
+
+        // Assert
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - obs-text: An HTTP/2 field name with an octet above 0x7F should still reset only its stream")]
@@ -207,6 +258,18 @@ public class HttpObsTextFieldValueTests
         enumerator.Current.Request.Path.Value.ShouldBe("/ok");
         malformed.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
         connection.State.ShouldBe(ConnectionState.Open);
+    }
+
+    private static byte[] Combine(params byte[][] parts)
+    {
+        using MemoryStream buffer = new();
+
+        foreach (byte[] part in parts)
+        {
+            buffer.Write(part, 0, part.Length);
+        }
+
+        return buffer.ToArray();
     }
 
     /// <summary>

@@ -2335,12 +2335,20 @@ gets the same two limits in `Http1MessageReader`, which used to throw the same e
 request-line octet check) is answered with `400`, and one longer than 32 characters with `501`,
 the status RFC 9112 §3 gives a method longer than any the server implements.
 
-**Behavior changes (#1334).** Accepted on decision 15's terms:
+**Behavior changes (#1334, #1387).** Accepted on decision 15's terms:
 
 - *Observable by clients.* HTTP/2 and HTTP/3 now reset requests they used to dispatch: `GET *`,
   a `:path` such as `*foo` or `*?x` on any method, a classic CONNECT that carries `:scheme` or
   `:path`, and a classic CONNECT whose `:authority` is absent or is not `host:port`. HTTP/1.1
   already refused all of them.
+- *Observable by clients.* HTTP/2 and HTTP/3 now reset a request with obs-text (an octet above
+  `0x7F`) in `:path`, `:authority`, or `Host` (#1387). HTTP/3 dispatched it before, since QPACK
+  already decoded Latin-1; HTTP/2 dispatched it with each such octet read as `?`. HTTP/3 also
+  resets a request whose `Content-Length` carries `U+0085` or `U+00A0` beside its digits, which it
+  used to enforce as the bare number.
+- *Observable by applications.* On HTTP/2, an obs-text octet in a header value now reaches
+  `Request.Headers` as the Latin-1 character of the same value instead of `?` (#1387), as it
+  already did on HTTP/1.1 and HTTP/3.
 - *Observable by clients.* A `:method` that is not a token or is longer than 32 characters resets
   its HTTP/2 or HTTP/3 stream instead of ending the connection or faulting the receive
   enumeration. On HTTP/1.1 it is answered with `400` or `501` instead of throwing out of
@@ -3222,6 +3230,15 @@ with `400`: an allowlist that trims `api.test\xA0` to `api.test` would admit a h
 routing on the raw octets sees as another. HTTP/3 had that gap since QPACK decoded Latin-1, and the
 ASCII decode gave HTTP/2 a worse one: `/admin\xFFx` became the path `/admin` and the query `x`, the
 split #1341 removed from HTTP/1.1.
+
+A faithful decode also makes a Unicode trim dangerous, as #1341 found on HTTP/1.1:
+`StringSplitOptions.TrimEntries` and `string.Trim()` strip `U+0085` and `U+00A0`, which obs-text now
+reaches a value as. HTTP/3's `Content-Length` parser (`Http3HeaderCodec.ParseContentLength`) split
+with `TrimEntries`, so `content-length: 5\xA0` was enforced as `5` while HTTP/1.1 answers it with `400`
+and the application read `5\xA0` in `Request.Headers`. It now trims `Http1FieldLine.OptionalWhitespace`
+(SP and HTAB) from each list element and nothing else, so such a value is not a decimal and the
+request is malformed (`H3_MESSAGE_ERROR`). HTTP/2 parses a declared length with `NumberStyles.None`,
+which trims nothing.
 
 **A trailer section is judged whole before any of it is published.** HTTP/2 always collected a
 section into a collection of its own and published it once valid; HTTP/3 added each field to
