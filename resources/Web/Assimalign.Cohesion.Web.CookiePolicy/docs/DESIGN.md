@@ -28,6 +28,7 @@ The split is documented on both sides (`Assimalign.Cohesion.Http.Cookies/docs/DE
 | RFC 6265 / 6265bis rule | Owner | Rationale |
 |---|---|---|
 | `cookie-name` token / `cookie-value` octet-grammar validation (anti header-splitting) | **`Http.Cookies`** | A malformed value corrupts the wire regardless of policy. Enforced at `HttpCookie` construction. |
+| `Path` `path-value` / `Domain` `domain-value` grammar (attribute injection, #1153) | **`Http.Cookies`** | Enforced in the `HttpCookieOptions` setters; the policy can rely on both values being well-formed. |
 | Per-cookie size limits (name+value ≤ 4096, attribute value ≤ 1024, bounded attribute count) | **`Http.Cookies`** | Parse robustness; oversized input is ignored while parsing (`HttpCookieLimits`). |
 | 400-day lifetime **cap math** (`HttpCookie.ClampLifetime`) | **`Http.Cookies`** | Pure and clock-free, so it is deterministic to test. |
 | **Applying** the lifetime cap to outbound cookies at emission, against a clock | **`Web.CookiePolicy`** | Overriding an application's explicit lifetime, and reading the clock, is an emission decision. |

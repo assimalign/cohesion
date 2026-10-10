@@ -115,7 +115,7 @@ internal static class HttpCookieGrammar
     /// <see langword="true"/> when, after one optional leading dot, the value
     /// is one or more dot-separated labels of at most 63 letters, digits, and
     /// hyphens that neither start nor end with a hyphen, and is at most 253
-    /// characters long.
+    /// characters long after that optional leading dot.
     /// </returns>
     /// <remarks>
     /// The leading dot is tolerated because a user agent ignores it (RFC 6265

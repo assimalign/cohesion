@@ -67,7 +67,8 @@ public sealed class HttpCookieOptions
     /// <exception cref="ArgumentException">
     /// The value is not a <c>domain-value</c>: it holds <c>;</c>, whitespace, a
     /// control character, or another character outside the label grammar, has
-    /// an empty or over-long label, or is longer than 253 characters.
+    /// an empty or over-long label, or is longer than 253 characters after the
+    /// optional leading dot.
     /// </exception>
     public string? Domain
     {

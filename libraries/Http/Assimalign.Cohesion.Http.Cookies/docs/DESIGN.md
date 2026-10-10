@@ -216,7 +216,8 @@ added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
      as enhanced by RFC 1123 §2.1. That is dot-separated labels of 1–63
      letters, digits and hyphens that neither start nor end with a
      hyphen, at most 253 characters in all. One leading dot is tolerated
-     because a user agent ignores it (RFC 6265 §5.2.3). An empty label, a
+     because a user agent ignores it (RFC 6265 §5.2.3), and it does not
+     count toward the 253. An empty label, a
      trailing dot, an underscore, a port, an IPv6 literal and a
      non-ASCII name are refused; an internationalized name is written as
      its `xn--` A-label.
