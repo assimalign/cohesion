@@ -1311,6 +1311,34 @@ reflection, no runtime codegen, no dynamic dispatch. Trim-safe by construction
   `IHttpRequest` and populating `HttpConditionalRequestContext` is the consuming
   middleware's job.
 
+## Feature lookup by contract (`Get<TFeature>`)
+
+`IHttpFeatureCollection` is keyed by name. `Features.Get<TFeature>()`
+(`HttpFeatureCollectionExtensions`) looks up a contract instead: it returns the
+first installed feature that implements `TFeature`, in enumeration order. That
+order is the local features, then each defaults level's features that no level
+above it hides by name.
+
+- **No allocation on `HttpFeatureCollection`.** Every transport context carries
+  that exact type, and per-request readers call the lookup on every request: the
+  `Http.Forwarded` `Effective*` members, which host filtering, routing's
+  `RequireHost` and rate limiting read, among others. Enumerating through
+  `OfType<TFeature>().FirstOrDefault()` allocated the LINQ iterator and the
+  collection's `yield` enumerator on each call. The lookup now scans the backing
+  dictionaries with their struct enumerators and walks the defaults chain itself
+  (raised by the #1077 review).
+- **The same answer as enumeration.** A defaults-level feature is skipped when a
+  level above installs its name, whatever that level's feature implements, as
+  the enumerator skips it. A defaults source of any other type, a derived
+  `HttpFeatureCollection` included, is enumerated through its own enumerator,
+  because a derived type can re-implement `IEnumerable<IHttpFeature>`. That path
+  allocates as before.
+- **Still `O(n)`.** The scan covers typically fewer than ten features. A caller
+  that needs `O(1)` caches the resolved feature.
+
+`HttpFeatureCollectionTests` pins the zero-allocation lookup and checks the
+shadowing cases against enumeration.
+
 ## Forwarding headers (RFC 7239 `Forwarded` + `X-Forwarded-*`)
 
 The core owns the value objects that parse and serialize the proxy-forwarding

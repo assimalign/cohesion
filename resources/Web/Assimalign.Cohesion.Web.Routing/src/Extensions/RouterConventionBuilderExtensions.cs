@@ -61,6 +61,15 @@ public static class RouterConventionBuilderExtensions
         /// host. Register <c>UseForwardedHeaders</c> ahead of <c>UseRouting</c> when a proxy rewrites
         /// <c>Host</c>, or the routes match the name the proxy dialed.
         /// </para>
+        /// <para>
+        /// <c>RequireHost</c> selects on a host the client asserts, both on the wire and when a proxy
+        /// forwards it, so it is not an access control: any client can send any host the application
+        /// admits. Protect internal endpoints with <c>RequireAuthorization</c>, or with a check on the
+        /// connection's local endpoint
+        /// (<see cref="Assimalign.Cohesion.Http.IHttpConnectionInfo.LocalPort"/>). A port in a
+        /// constraint is likewise compared with the port the client asserted, which proxies often
+        /// drop, so a port-constrained route cannot partition traffic by listener.
+        /// </para>
         /// </remarks>
         public TBuilder RequireHost(params string[] hosts)
         {

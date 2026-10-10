@@ -143,8 +143,9 @@ correctly end-to-end.
 
 ## Host-constrained matching (#788)
 
-Routes can constrain the hosts they serve (multi-tenant hosts, admin-on-internal-host patterns)
-by attaching `RouteHostMetadata` to their endpoint metadata (#150):
+Routes can constrain the hosts they serve (multi-tenant hosts, an admin site on its own host
+name) by attaching `RouteHostMetadata` to their endpoint metadata (#150). A host constraint
+selects a route; it does not control access to it (see "Not an access control" below).
 
 ```csharp
 new Route(HttpMethod.Get, "/dashboard", handler,
@@ -160,14 +161,19 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
 |---|---|---|
 | Exact host | `api.example.com` | that host only |
 | Wildcard subdomain | `*.example.com` | `api.example.com`, `a.b.example.com` — **not** the apex `example.com` |
-| Any host | `*` | every host (useful combined with a port: `*:5000`) |
+| Any host | `*` | every host; `*:8443` matches any host that carries port 8443, the port the client asserted rather than the listener's |
 | IPv6 literal | `[::1]`, `[2001:db8::1]:443` | brackets are the canonical form; comparison strips them, so `::1` denotes the same constraint |
 
 - Host comparison is **case-insensitive** (RFC 9110 §4.2.3 / RFC 3986 §3.2.2); ports compare exactly.
 - A port constraint requires the port to be **explicit** in the request host. A request whose host
   omits the port (an implied scheme default) does not satisfy a port-constrained route — the matcher
   compares against the host as the client sent it, mirroring ASP.NET `RequireHost`. Behind a trusted
-  proxy that is the forwarded host, port included (see "Which host" below).
+  proxy that is the forwarded host (see "Which host" below), so the port is the one the client
+  asserted, not the one the proxy dialed. It is often absent: a client addressing a default port
+  sends none, and some proxies strip it (nginx's `$host`). A port-constrained route that matched the
+  upstream port in the rewritten wire `Host` therefore stops matching proxied traffic once
+  `UseForwardedHeaders` runs. A port constraint cannot partition traffic by listener either: the
+  client chooses the port (see "Not an access control" below).
 - The constraints in one `RouteHostMetadata` are **OR-combined**: the request host must satisfy any
   one of them.
 - Patterns are parsed **once, at metadata construction** (`RouteHostConstraint.Parse`/`TryParse`);
@@ -231,21 +237,24 @@ The router matches host constraints against `context.EffectiveHost`, the feature
   registered after routing. `X-Forwarded-Host` from a client is never read directly; only the trust
   walk can make it the effective host.
 
-**Why the effective host.** Before #1077 the router read `IHttpRequest.Host`. Behind a proxy that
-rewrites `Host` to its upstream name and forwards the client's host in `X-Forwarded-Host` or
-`Forwarded: host=`, that has two consequences:
+**Why the effective host.** A host constraint picks the route for the host the client addressed.
+Before #1077 the router read `IHttpRequest.Host`. Behind a proxy that rewrites `Host` to its upstream
+name and forwards the client's host in `X-Forwarded-Host` or `Forwarded: host=`, every proxied request
+carried the same wire host, so selection followed the proxy's configuration instead of the request:
 
-- Routes constrained to a public host stop matching and answer 404. That failure is closed.
-- The admin-on-internal-host pattern opens. A route constrained to the internal name the proxy
-  dials matches **every** public request the proxy forwards, so a gate meant for internal callers
-  admits remote clients.
+- Routes constrained to a public host stopped matching and answered 404.
+- A route constrained to the upstream name the proxy dials matched every proxied request, whatever
+  host its client addressed.
 
-`Web.HostFiltering` already validated the effective host (#1050). With both on the effective host,
-the host the allowlist bounds is the host routing selects on.
+On the effective host, the routes the proxy's clients address are the ones that match.
+`Web.HostFiltering` already validated the effective host (#1050). With both on it, the host the
+allowlist bounds is the host routing selects on.
 
-**Cost.** Reading the effective host is a feature lookup. The router computes once, at construction,
-whether any candidate declares hosts, and a router without host-constrained candidates never reads
-the host at all.
+**Cost.** Reading the effective host is one `Features.Get<IHttpForwardedFeature>()`: an `O(n)` scan
+of the request's features that allocates nothing on the transport's `HttpFeatureCollection` (`Http`
+DESIGN, "Feature lookup by contract"). The router computes once, at construction, whether any
+candidate declares hosts, and a router without host-constrained candidates never reads the host at
+all. A CORS preflight that falls back to the requested method runs `Match` twice and reads it twice.
 
 **Dependency.** `Web.Routing` takes a public `CohesionProjectReference` on `Http.Forwarded`, the
 contract-only package that owns `IHttpForwardedFeature` and the `Effective*` members. It is outside
@@ -256,8 +265,37 @@ member.
 
 `RouteHostForwardedTests` runs the real forwarded-headers middleware ahead of `UseRouting`, from a
 known proxy address that rewrote `Host`. It pins the forwarded-host match, the internal-host route a
-rewritten public request must not reach, and the wire-host fallback without `UseForwardedHeaders` and
-from an untrusted peer.
+public request for the public host does not reach, the internal-host route a client that asserts the
+internal host does reach, the forwarded port in place of the upstream one (a port the client asserts
+matches; a forwarded host without a port misses a port-constrained route), and the wire-host fallback
+without `UseForwardedHeaders` and from an untrusted peer.
+
+### Not an access control
+
+`RequireHost` selects on a host the client asserts. On the wire the client writes `Host` (or
+`:authority`) itself. Behind a proxy, `X-Forwarded-Host` and `Forwarded: host=` relay that same
+client-chosen value: the usual configurations (nginx's `$host`, Envoy's and Traefik's
+`X-Forwarded-Host`) forward the `Host` the client sent. The trust walk believes the proxy, not the
+value, and `Web.ForwardedHeaders` checks only the value's shape.
+
+So a remote client that sends `Host: admin.internal` to the public proxy reaches a
+`RequireHost("admin.internal")` route. `Web.HostFiltering` does not stop it: the internal callers need
+`admin.internal` on the allowlist, which admits it for every client. A port constraint is no
+different. It compares with the port in the asserted host, not the port the connection arrived on,
+so `*:9090` cannot fence a management listener: a public client that sends
+`Host: www.example.com:9090` matches it.
+
+Protect an internal endpoint with something the client cannot assert:
+
+- authorization on the route or its group (`RequireAuthorization`, `Web.Authorization`), or
+- the connection's local endpoint (`context.ConnectionInfo.LocalPort` or `LocalIp`), which the
+  transport takes from the socket: an internal listener that only internal callers can reach.
+  Check it in a middleware or branch on it with `MapWhen` (the `Web.Hosting.Resources` control plane
+  gates its port this way), or serve internal endpoints from a separate application bound only to
+  that listener.
+
+`RouteHostForwardedTests` pins the matches a client gets when it asserts the internal host or a port
+through a trusted proxy, so nothing comes to rely on the constraint as a gate.
 
 ### Ordering (the documented tie-break)
 

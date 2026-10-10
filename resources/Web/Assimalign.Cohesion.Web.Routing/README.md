@@ -40,7 +40,9 @@ models were set aside on 2026-07-10.
   non-matching hosts fall through to other candidates, and host-constrained routes outrank
   unconstrained ties. The host matched is the effective one (`context.EffectiveHost` from
   `Http.Forwarded`): the host a trusted proxy forwarded when `UseForwardedHeaders` runs ahead of
-  routing, otherwise the wire host.
+  routing, otherwise the wire host. Either way the client asserts it, so a host constraint selects
+  a route and never protects one: guard internal endpoints with authorization or the connection's
+  local endpoint (DESIGN, "Not an access control").
 - Keeps routing state **per application** (no process-wide shared builder), so multiple web
   applications hosted in one process have fully isolated route tables.
 - Generates **outbound URLs** (`ILinkGenerator`): routes register a unique, case-insensitive

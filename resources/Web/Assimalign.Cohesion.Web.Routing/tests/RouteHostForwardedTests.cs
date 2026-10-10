@@ -45,8 +45,8 @@ public class RouteHostForwardedTests
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - Forwarded: A route constrained to the internal host should not match a public request the proxy rewrote to that host")]
     public async Task UseRouting_TrustedProxyRewritesHostToInternalName_ShouldNotMatchInternalRoute()
     {
-        // Arrange — the admin-on-internal-host pattern: the proxy dials the upstream by its internal name,
-        // so every public request arrives with that wire Host.
+        // Arrange — the proxy dials the upstream by its internal name, so every proxied request arrives
+        // with that wire Host whatever host its client addressed. This client addressed the public host.
         RecordingRouterRouteHandler admin = new();
         RecordingRouterRouteHandler site = new();
         TestWebApplication app = CreateApplication(useForwardedHeaders: true);
@@ -58,9 +58,67 @@ public class RouteHostForwardedTests
         // Act
         await app.ExecuteAsync(context);
 
-        // Assert — the public request falls through to the open route; the internal one never runs.
+        // Assert — the request for the public host selects the open route, not the internal-host one.
         admin.WasInvoked.ShouldBeFalse();
         site.WasInvoked.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Forwarded: A client that asserts the internal host through a trusted proxy should match the internal-host route")]
+    public async Task UseRouting_ClientAssertsInternalHostThroughTrustedProxy_ShouldMatchInternalRoute()
+    {
+        // Arrange — RequireHost is not an access control: the forwarded host is the Host the client sent,
+        // relayed by a proxy the application trusts, so a remote client chooses it.
+        RecordingRouterRouteHandler admin = new();
+        RecordingRouterRouteHandler site = new();
+        TestWebApplication app = CreateApplication(useForwardedHeaders: true);
+        IRouterBuilder routes = app.UseRouting();
+        routes.Map(HttpMethod.Get, "/admin", admin).RequireHost("admin.internal");
+        routes.Map(HttpMethod.Get, "/admin", site);
+        TestHttpContext context = CreateRequest(_trustedProxy, "/admin", wireHost: "app.upstream:8080", forwardedHost: "admin.internal");
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        admin.WasInvoked.ShouldBeTrue();
+        site.WasInvoked.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Forwarded: A port constraint should match the port the client asserted, not the port the proxy dialed")]
+    public async Task UseRouting_TrustedProxyForwardsClientPort_ShouldMatchClientPortRoute()
+    {
+        // Arrange — "*:9090" cannot fence a management listener: the client put 9090 in its Host.
+        RecordingRouterRouteHandler management = new();
+        RecordingRouterRouteHandler site = new();
+        TestWebApplication app = CreateApplication(useForwardedHeaders: true);
+        IRouterBuilder routes = app.UseRouting();
+        routes.Map(HttpMethod.Get, "/status", management).RequireHost("*:9090");
+        routes.Map(HttpMethod.Get, "/status", site);
+        TestHttpContext context = CreateRequest(_trustedProxy, "/status", wireHost: "app.upstream:8080", forwardedHost: "www.example.com:9090");
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        management.WasInvoked.ShouldBeTrue();
+        site.WasInvoked.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Forwarded: A port-constrained route should not match a forwarded host that carries no port")]
+    public async Task UseRouting_TrustedProxyForwardsHostWithoutPort_ShouldNotMatchPortConstrainedRoute()
+    {
+        // Arrange — the wire Host carries the upstream port the proxy dialed; the forwarded host carries none.
+        RecordingRouterRouteHandler upstreamPort = new();
+        TestWebApplication app = CreateApplication(useForwardedHeaders: true);
+        app.UseRouting().Map(HttpMethod.Get, "/data", upstreamPort).RequireHost("*:8080");
+        TestHttpContext context = CreateRequest(_trustedProxy, "/data", wireHost: "app.upstream:8080", forwardedHost: "www.example.com");
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        upstreamPort.WasInvoked.ShouldBeFalse();
+        context.GetRouteMatch().ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - Forwarded: Without UseForwardedHeaders RequireHost should match the wire host and ignore X-Forwarded-Host")]
