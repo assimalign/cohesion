@@ -229,15 +229,30 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     }
 
     /// <summary>
-    /// 
+    /// Closes registration and builds the application.
     /// </summary>
-    /// <returns></returns>
+    /// <remarks>
+    /// Every request feature must be registered as an <see cref="IHttpFeature"/> singleton, the way
+    /// <c>IWebApplicationBuilder.AddFeature</c> and the feature packages' <c>builder.Services.Add&lt;Feature&gt;</c>
+    /// verbs register it: the host stamps the same instances onto every exchange, and middleware reads
+    /// them while the pipeline is composed. A scoped or transient <see cref="IHttpFeature"/> registration,
+    /// or a registration under a contract derived from <see cref="IHttpFeature"/>, fails the build.
+    /// </remarks>
+    /// <returns>The built application.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The application has already been built; the options ask for concurrent service start or stop;
+    /// an <see cref="IHttpFeature"/> registration is not a singleton; or a registration's service type
+    /// derives from <see cref="IHttpFeature"/> without being <see cref="IHttpFeature"/>. Each feature
+    /// error names the registration's position in <see cref="Services"/>.
+    /// </exception>
     public WebApplication Build()
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The application has already been built.");
         InvalidOperationException.ThrowIf(
             _options.StartServicesConcurrently || _options.StopServicesConcurrently,
             "Web application servers require serial host lifecycle execution so they start in registration order and stop in reverse order.");
+
+        ValidateFeatureRegistrations();
 
         if (_controlPlane is not null && _resourceContext?.GatewayName is not null &&
             (_controlPlane.ObservedEndpoints.ContainsKey("http") || _controlPlane.ObservedEndpoints.ContainsKey("https")))
@@ -419,6 +434,55 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         }
 
         Server.UseDefaultEndpoints(Configuration, DevelopmentEndPoint);
+    }
+
+    // Owner decision 35 (#1380): a request feature is an IHttpFeature singleton. The pipeline stamps
+    // one snapshot of the IHttpFeature aggregate onto every exchange, and composition-time readers
+    // (UseRouting, UseAntiforgery, the OpenAPI document) resolve the aggregate from the root provider.
+    // One scoped item makes the whole aggregate unresolvable from the root, and a transient item hands
+    // each reader its own instance, so routes mapped into one router are served by another. A
+    // registration under a narrower contract (IRouterFeature, say) never joins the aggregate, so it is
+    // never stamped. The provider's own validation sees neither: this module registers factories and
+    // instances, whose lifetimes and products it does not inspect. Checked before the build adds its
+    // own registrations, so a rejected build leaves the builder as the caller composed it.
+    private void ValidateFeatureRegistrations()
+    {
+        int index = 0;
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IHttpFeature))
+            {
+                if (descriptor.Lifetime != ServiceLifetime.Singleton)
+                {
+                    throw new InvalidOperationException(
+                        $"The request feature registration {DescribeRegistration(descriptor, index)} is " +
+                        $"{descriptor.Lifetime}. A Web application feature must be a singleton: the host stamps " +
+                        "the same feature instances onto every exchange, and middleware such as UseRouting reads " +
+                        "them while the pipeline is composed. Register it with AddSingleton<IHttpFeature>, " +
+                        "IWebApplicationBuilder.AddFeature, or the feature package's builder.Services.Add<Feature> verb.");
+                }
+            }
+            else if (typeof(IHttpFeature).IsAssignableFrom(descriptor.ServiceType))
+            {
+                throw new InvalidOperationException(
+                    $"The registration {DescribeRegistration(descriptor, index)} uses the service type " +
+                    $"{descriptor.ServiceType.FullName}, which derives from IHttpFeature but is not IHttpFeature. " +
+                    "The host stamps only IHttpFeature registrations onto exchanges, so this feature would never " +
+                    "reach a request. Register it as IHttpFeature, with AddSingleton<IHttpFeature> or " +
+                    "IWebApplicationBuilder.AddFeature.");
+            }
+
+            index++;
+        }
+    }
+
+    private static string DescribeRegistration(ServiceDescriptor descriptor, int index)
+    {
+        string implementation = descriptor.ImplementationType?.FullName
+            ?? descriptor.ImplementationInstance?.GetType().FullName
+            ?? "created by a factory";
+
+        return $"builder.Services[{index}] ({descriptor.Lifetime} {descriptor.ServiceType.Name}, implementation {implementation})";
     }
 
     // The explicit option wins, then the ambient resource context, then the application's base

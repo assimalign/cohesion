@@ -104,6 +104,23 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         // resolved per request.
         IHttpFeature[] features = Context.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>().ToArray();
 
+        // Owner decision 35 (#1380): an exchange disposes every disposable feature it carries when it
+        // ends, so a disposable application feature, stamped as one shared instance, would be disposed
+        // after its first request and handed to every later one. Builder-time checks cannot see this:
+        // a factory's product is known only once it is resolved, which is here.
+        foreach (IHttpFeature feature in features)
+        {
+            if (feature is IDisposable or IAsyncDisposable)
+            {
+                throw new InvalidOperationException(
+                    $"The application feature '{feature.Name}' ({feature.GetType().FullName}) is disposable. " +
+                    "The host stamps the same feature instance onto every exchange, and an exchange disposes the " +
+                    "disposable features it carries when it ends, so this instance would be disposed after its " +
+                    "first request. Keep disposable per-request state in a feature that middleware installs on " +
+                    "each exchange.");
+            }
+        }
+
         if (features.Length > 0)
         {
             WebApplicationMiddleware pipeline = middleware;
