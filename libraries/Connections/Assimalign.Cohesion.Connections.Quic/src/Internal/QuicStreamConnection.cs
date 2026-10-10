@@ -35,6 +35,12 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// direction aborted with a code keeps it when <see cref="Abort(Exception)"/> or disposal later ends the
 /// stream with the default code.
 /// </para>
+/// <para>
+/// After <see cref="AbortRead(long)"/> every read of <see cref="Input"/> fails, as the contract requires. The
+/// pipe over the QUIC stream would otherwise hand back octets it had already buffered without touching the
+/// stream, so <see cref="Input"/> is a thin delegating reader that fails a read once the receiving direction
+/// was aborted; a read in flight at the abort fails in <see cref="QuicStream"/> itself.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
@@ -51,6 +57,8 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     private readonly Lock _stateLock = new();
 
     private volatile ConnectionState _state;
+    // Set by AbortRead: every later read of Input fails, buffered octets included.
+    private volatile bool _readAborted;
     private bool _isDisposed;
     private int _closeReported;
 
@@ -63,7 +71,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <param name="localEndPoint">The parent connection's local endpoint.</param>
     /// <param name="remoteEndPoint">The parent connection's remote endpoint.</param>
     /// <param name="streamOptions">The parent-owned shared stream pipe options.</param>
-    /// <param name="defaultStreamErrorCode">The error code used when the stream is aborted.</param>
+    /// <param name="defaultStreamErrorCode">The error code used when the stream is aborted without a caller's code.</param>
     /// <param name="onDisposed">A callback invoked when the stream connection is disposed.</param>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="stream"/>, <paramref name="streamOptions"/>, or
@@ -97,7 +105,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         LocalEndPoint = localEndPoint;
         RemoteEndPoint = remoteEndPoint;
         Input = stream.CanRead
-            ? PipeReader.Create(stream, streamOptions.ReaderOptions)
+            ? new AbortableInput(this, PipeReader.Create(stream, streamOptions.ReaderOptions))
             : PipeReader.Create(Stream.Null);
         Output = stream.CanWrite
             ? PipeWriter.Create(stream, streamOptions.WriterOptions)
@@ -174,6 +182,16 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <inheritdoc />
     public void AbortRead(long errorCode)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
+
+        // Bar reads before the stream is aborted, so no read can return what the abort discards. A
+        // write-only stream has no receiving direction, and its input stays the pre-completed one.
+        if (Direction != ConnectionDirection.WriteOnly)
+        {
+            _readAborted = true;
+        }
+
         AbortDirection(QuicAbortDirection.Read, errorCode);
     }
 
@@ -290,6 +308,64 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         if (Interlocked.Exchange(ref _closeReported, 1) == 0)
         {
             QuicConnectionEventSource.Log.StreamClosed(Id);
+        }
+    }
+
+    // The exception a read reports after this end aborted its receiving direction: the one QuicStream
+    // raises for a read the abort overtakes.
+    private static QuicException ReadAborted()
+        => new(QuicError.OperationAborted, null, "Reading was aborted on this end of the stream.");
+
+    /// <summary>
+    /// The readable stream's <see cref="Input"/>: a <see cref="PipeReader"/> over the QUIC stream that fails
+    /// every read once <see cref="AbortRead(long)"/> abandoned the receiving direction. The pipe it delegates
+    /// to returns octets it has buffered but the holder has not examined without reading the stream, so the
+    /// check is made before each read; a read already waiting on the stream fails in <see cref="QuicStream"/>.
+    /// Everything else passes straight through, so a read before the abort costs one flag check.
+    /// </summary>
+    private sealed class AbortableInput : PipeReader
+    {
+        private readonly QuicStreamConnection _connection;
+        private readonly PipeReader _inner;
+
+        public AbortableInput(QuicStreamConnection connection, PipeReader inner)
+        {
+            _connection = connection;
+            _inner = inner;
+        }
+
+        public override void AdvanceTo(SequencePosition consumed) => _inner.AdvanceTo(consumed);
+
+        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => _inner.AdvanceTo(consumed, examined);
+
+        public override void CancelPendingRead() => _inner.CancelPendingRead();
+
+        public override void Complete(Exception? exception = null) => _inner.Complete(exception);
+
+        public override ValueTask CompleteAsync(Exception? exception = null) => _inner.CompleteAsync(exception);
+
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
+        {
+            return _connection._readAborted
+                ? ValueTask.FromException<ReadResult>(ReadAborted())
+                : _inner.ReadAsync(cancellationToken);
+        }
+
+        public override bool TryRead(out ReadResult result)
+        {
+            if (_connection._readAborted)
+            {
+                throw ReadAborted();
+            }
+
+            return _inner.TryRead(out result);
+        }
+
+        protected override ValueTask<ReadResult> ReadAtLeastAsyncCore(int minimumSize, CancellationToken cancellationToken)
+        {
+            return _connection._readAborted
+                ? ValueTask.FromException<ReadResult>(ReadAborted())
+                : _inner.ReadAtLeastAsync(minimumSize, cancellationToken);
         }
     }
 }

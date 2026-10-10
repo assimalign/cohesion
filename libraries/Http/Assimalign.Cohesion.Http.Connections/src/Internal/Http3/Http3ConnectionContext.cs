@@ -770,11 +770,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // The stream type could not be read — RFC 9114 §6.2 permits
             // abandoning an unparseable unidirectional stream without
             // affecting the connection.
+            await AbandonUnidirectionalStreamAsync(streamConnection).ConfigureAwait(false);
             return null;
         }
 
         if (streamType is null)
         {
+            // The stream ended before its type: nothing to process, so it is released.
+            await AbandonUnidirectionalStreamAsync(streamConnection).ConfigureAwait(false);
             return null;
         }
 
@@ -824,9 +827,42 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     "A client opened a push stream (RFC 9114 §6.2.2).");
 
             default:
-                // RFC 9114 §6.2 — unknown unidirectional stream types are not
-                // an error; the recipient may abandon them.
+                // RFC 9114 §6.2 — an unknown or reserved stream type is not an
+                // error, but its recipient MUST abort reading it or discard its
+                // data, and SHOULD abort with H3_STREAM_CREATION_ERROR.
+                await AbandonUnidirectionalStreamAsync(streamConnection).ConfigureAwait(false);
                 return null;
+        }
+    }
+
+    /// <summary>
+    /// Abandons a peer-initiated unidirectional stream the server will not read — an unknown or reserved
+    /// stream type, or one whose type could not be read (RFC 9114 §6.2): reading is aborted with
+    /// <c>STOP_SENDING(H3_STREAM_CREATION_ERROR)</c>, the code the RFC recommends, and the stream is
+    /// released, so it no longer holds one of the peer's unidirectional-stream credits or the data in its
+    /// flow-control window until the connection closes. On a stream that cannot carry a code the release
+    /// alone stops it, with the driver's default code. Best-effort: a stream already gone has nothing left
+    /// to release.
+    /// </summary>
+    /// <param name="streamConnection">The unidirectional stream.</param>
+    /// <returns>A task that completes once the stream is released.</returns>
+    private static async Task AbandonUnidirectionalStreamAsync(IConnection streamConnection)
+    {
+        StopReadingWithCode(streamConnection, Http3ErrorCode.StreamCreationError);
+
+        try
+        {
+            await streamConnection.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the stream was released with its connection.
+        }
+        catch (ConnectionException)
+        {
+        }
+        catch (Exception exception) when (IsWireLevelFailure(exception))
+        {
         }
     }
 

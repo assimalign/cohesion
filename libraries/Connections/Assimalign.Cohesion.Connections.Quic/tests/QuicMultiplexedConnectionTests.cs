@@ -439,6 +439,39 @@ public class QuicMultiplexedConnectionTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortRead: Later reads should fail even when the pipe still holds received octets")]
+    public async Task AbortRead_WithBufferedOctets_ShouldFailLaterReads()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the server's pipe holds octets it received but the holder has not examined, so a read
+        // could be answered from the buffer without touching the QUIC stream.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            await clientStream.Output.WriteAsync(new byte[] { 2, 3, 4, 5 }, cancellation.Token);
+            await BufferWithoutExaminingAsync(serverStream.Input, 4, cancellation.Token);
+
+            // Act
+            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x42);
+
+            // Assert — the contract: every later read fails, buffered octets included, as on the in-memory driver.
+            QuicException read = await Should.ThrowAsync<QuicException>(
+                async () => await serverStream.Input.ReadAsync(cancellation.Token));
+            read.QuicError.ShouldBe(QuicError.OperationAborted);
+            Should.Throw<QuicException>(() => serverStream.Input.TryRead(out _));
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortWrite: Should send RESET_STREAM with the caller's code")]
     public async Task AbortWrite_WithErrorCode_ShouldSendResetStreamWithTheCode()
     {
@@ -670,6 +703,31 @@ public class QuicMultiplexedConnectionTests
             {
                 return exception;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads until the pipe holds at least <paramref name="count"/> octets, then hands them back unconsumed and
+    /// unexamined, so the pipe's next read can return them without reading the stream.
+    /// </summary>
+    private static async Task BufferWithoutExaminingAsync(PipeReader reader, int count, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            ReadResult result = await reader.ReadAsync(cancellationToken);
+
+            if (result.Buffer.Length >= count)
+            {
+                reader.AdvanceTo(result.Buffer.Start);
+                return;
+            }
+
+            if (result.IsCompleted)
+            {
+                throw new InvalidOperationException($"The stream completed before {count} bytes were received.");
+            }
+
+            reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
         }
     }
 

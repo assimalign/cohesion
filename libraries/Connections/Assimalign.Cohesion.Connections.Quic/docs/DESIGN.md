@@ -158,7 +158,10 @@ is routine for streams released after their owning connection closed.
   self-consistent and RFC-honest on the wire. A listener or factory
   serving a different ALPN protocol overrides the codes alongside
   `ApplicationProtocols`. The defaults apply only where the caller gives
-  no code (see "Application error codes").
+  no code (see "Application error codes"): the stream default on a
+  stream's `Abort(Exception?)`, its disposal, and the completion of its
+  `Input` or `Output`; the close default on the connection's
+  `Abort(Exception?)` and disposal. The options' XML docs say the same.
 
 ## Application error codes
 
@@ -180,6 +183,16 @@ The driver implements the contracts library's two code-carrying facets
   does not fire the stream's `ConnectionClosed`: the `ReadsClosed` or
   `WritesClosed` fault it causes is `OperationAborted`, which the
   peer-closure watch ignores (see "Lifecycle and teardown").
+- **After `AbortRead`, every read fails.** The contract says so, and the
+  in-memory driver does it, but the pipe `PipeReader.Create` builds over
+  the `QuicStream` returns octets it has buffered and the holder has not
+  examined without reading the stream. So a readable stream's `Input` is
+  a thin delegating reader that checks a flag `AbortRead` sets before the
+  stream is aborted, and fails `ReadAsync`, `TryRead`, and
+  `ReadAtLeastAsync` with `QuicException(OperationAborted)`, the error
+  `QuicStream` gives a read the abort overtakes. A read already waiting
+  on the stream fails in `QuicStream` itself. Everything else passes
+  through, so a read costs one flag check.
 - **Aborting a stream that has ended does nothing.** A disposed stream,
   or one whose connection is gone, has nothing to tell the peer, so the
   driver swallows `ObjectDisposedException` and `QuicException` there. A

@@ -45,8 +45,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
 /// particular it never completes the input pipe — on the QUIC driver that would dispose the whole QUIC
 /// stream, response direction included. The send path refuses the rest of an unread request before the
-/// response's FIN (<see cref="RefuseRemainder"/>) and releases the input once the complete response is on
-/// the wire (<see cref="StopReading"/>).
+/// response's FIN unless its FIN has already arrived (<see cref="RefuseRemainder"/>), and releases the input
+/// once the complete response is on the wire (<see cref="StopReading"/>).
 /// </para>
 /// <para>
 /// <b>CONNECT.</b> For a CONNECT request the DATA frames carry tunnel octets rather than a message body
@@ -82,12 +82,14 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private bool _endDelivered;
     private ExceptionDispatchInfo? _failure;
 
-    // Guarded by _gate. _reading marks an in-flight application read; _closed bars any further application
+    // Guarded by _gate. _reading marks an in-flight application read; _probing the transport's end-of-stream
+    // probe (RefuseRemainder), the only other reader of the input pipe; _closed bars any further application
     // read (the remainder was refused, reading was stopped, or the stream was reset); _stopSent records that
     // the remainder was refused with STOP_SENDING(H3_NO_ERROR); _stopRequested asks for the input pipe to be
-    // completed as soon as no read is in flight; and _inputReleased records that it has been — by this
-    // stream, or by the reset that aborted it.
+    // completed as soon as no read or probe is in flight; and _inputReleased records that it has been — by
+    // this stream, or by the reset that aborted it.
     private bool _reading;
+    private bool _probing;
     private bool _closed;
     private bool _stopSent;
     private bool _stopRequested;
@@ -148,8 +150,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     public bool IsReset { get; private set; }
 
     /// <summary>
-    /// Gets a value indicating whether the request stream ended cleanly: the peer's FIN was read, so the
-    /// whole body (and any trailer section) has been read or drained.
+    /// Gets a value indicating whether the request stream ended cleanly: the peer's FIN was read — by a body
+    /// read, or by the end-of-stream probe when the response ends (<see cref="RefuseRemainder"/>) — so no
+    /// further frame can arrive.
     /// </summary>
     public bool IsCompleted => _reader.IsCompleted;
 
@@ -246,20 +249,31 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The HTTP/3 request body stream is read-only.");
 
     /// <summary>
-    /// Refuses what remains of the request once the server no longer needs it — its complete response is
-    /// flushed, or its tunnel is done: the peer is asked to stop sending with
-    /// <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1), and no application read follows. Called before the
+    /// Refuses what remains of the request once the server no longer needs it — its response body is
+    /// flushed (on the streamed path, before its trailers and final flush), or its tunnel is done: the peer
+    /// is asked to stop sending with <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1, which permits stopping
+    /// the request before the response completes), and no application read follows. Called before the
     /// response's FIN, because on the QUIC driver ending the response releases the stream, which would stop
-    /// an unread request with the driver's default code instead — a code .NET's <c>HttpClient</c> reports
-    /// as a failed request even after a complete response. A body read to its end, or a reset stream, needs
-    /// no signal. Idempotent.
+    /// an unread request with the driver's default code instead — a code .NET's <c>HttpClient</c> reports as
+    /// a failed request even after a complete response. A body read to its end, a request whose FIN has
+    /// already arrived, or a reset stream needs no signal. Idempotent.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// A request the handler never read to its end — every GET, whose body it has no reason to read — may
+    /// still have ended: its FIN is often already buffered. So when no read is in flight and the stream sits
+    /// on a frame boundary, the remainder is first probed for the end of the stream, and a FIN found without
+    /// waiting ends the request cleanly: no <c>STOP_SENDING</c>, and, with the QPACK dynamic table enabled,
+    /// no Stream Cancellation (RFC 9204 §4.4.2) when reading stops. A probe that would have to wait is
+    /// failed by the stop itself, and the input is released once it has ended.
+    /// </para>
+    /// <para>
     /// The stop is sent at once, even while a read is in flight (a handler that leaked its reader past the
     /// response): aborting the stream's receiving direction fails that read rather than completing its pipe
     /// underneath it. The input pipe itself is released later, by <see cref="StopReading"/>. On a stream that
-    /// cannot carry a code the call only bars further reads, and the driver stops the peer with its default
-    /// code when the input is released.
+    /// cannot carry a code the call only bars further reads (a pending probe is cancelled), and the driver
+    /// stops the peer with its default code when the input is released.
+    /// </para>
     /// </remarks>
     public void RefuseRemainder()
     {
@@ -267,6 +281,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         {
             return;
         }
+
+        bool probe;
 
         lock (_gate)
         {
@@ -277,6 +293,21 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
             _closed = true;
             _stopSent = true;
+
+            // The probe reads one frame header, so it runs only where the stream is at a frame boundary this
+            // body tracks: no read in flight, no frame partly delivered or skipped, and no failed read that
+            // left the position unknown (a read cancelled inside the trailer section, a rejected frame).
+            probe = !_reading
+                && !_inputReleased
+                && _failure is null
+                && _dataRemaining == 0
+                && _skipRemaining == 0;
+            _probing = probe;
+        }
+
+        if (probe && ProbeEndOfStream())
+        {
+            return;
         }
 
         Http3ConnectionContext.StopReadingWithCode(_streamConnection, Http3ErrorCode.NoError);
@@ -303,7 +334,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
             _closed = true;
             _stopRequested = true;
-            release = !_reading && !_inputReleased;
+            release = !_reading && !_probing && !_inputReleased;
             _inputReleased |= release;
         }
 
@@ -353,7 +384,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         if (Volatile.Read(ref _closed))
         {
-            // The send path stopped reading (or drained and discarded the rest) once the response was
+            // The send path refused the rest of the request, or stopped reading, once the response was
             // complete: the body's remainder was never delivered, so this is not an end of body.
             throw new IOException("The HTTP/3 request body is no longer readable: the server stopped reading the request stream after the response completed.");
         }
@@ -625,7 +656,79 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         lock (_gate)
         {
             _reading = false;
-            release = _stopRequested && !_inputReleased;
+            release = _stopRequested && !_probing && !_inputReleased;
+            _inputReleased |= release;
+        }
+
+        if (release)
+        {
+            CompleteInput();
+        }
+    }
+
+    /// <summary>
+    /// Looks for the end of the request stream without waiting for it (see <see cref="RefuseRemainder"/>).
+    /// When the peer's FIN is already buffered the probe completes at once with no frame, and the stream is
+    /// marked completed. Otherwise it is left pending: the caller's stop fails it on a stream that carries a
+    /// code, and it is cancelled on one that cannot, so it never waits for the peer.
+    /// </summary>
+    /// <returns><see langword="true"/> when the request had already ended, so there is nothing to refuse.</returns>
+    private bool ProbeEndOfStream()
+    {
+        // Cancelling a pending read on the QUIC driver would stop the stream with the driver's default code, so
+        // a stream that carries a code is stopped with H3_NO_ERROR instead, which fails the read.
+        CancellationTokenSource? cancellation = _streamConnection is IMultiplexedStreamAbort ? null : new CancellationTokenSource();
+        ValueTask<Http3FrameHeader?> pending = _reader.ReadFrameHeaderAsync(cancellation?.Token ?? CancellationToken.None);
+
+        if (!pending.IsCompleted)
+        {
+            cancellation?.Cancel();
+            _ = AwaitProbeAsync(pending, cancellation);
+            return false;
+        }
+
+        bool ended;
+
+        try
+        {
+            ended = pending.Result is null;
+        }
+        catch (Exception exception) when (exception is OperationCanceledException || IsStreamFailure(exception))
+        {
+            // The stream failed, or ended inside a frame header: there is no clean end to report.
+            ended = false;
+        }
+
+        cancellation?.Dispose();
+        EndProbe();
+        return ended;
+    }
+
+    private async Task AwaitProbeAsync(ValueTask<Http3FrameHeader?> pending, CancellationTokenSource? cancellation)
+    {
+        try
+        {
+            await pending.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException || IsStreamFailure(exception))
+        {
+            // The stop (or the cancellation) failed the probe, or the stream ended underneath it.
+        }
+        finally
+        {
+            cancellation?.Dispose();
+            EndProbe();
+        }
+    }
+
+    private void EndProbe()
+    {
+        bool release;
+
+        lock (_gate)
+        {
+            _probing = false;
+            release = _stopRequested && !_reading && !_inputReleased;
             _inputReleased |= release;
         }
 

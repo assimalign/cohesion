@@ -501,6 +501,57 @@ public class Http3RequestStreamTests
         await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[1]).AsTask());
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A bodiless request whose FIN has arrived should not be stopped after its response")]
+    public async Task SendAsync_OnBodilessRequestWhoseFinArrived_ShouldNotStopSending()
+    {
+        // Arrange — a GET whose FIN follows its HEADERS frame; the handler never reads its (empty) body.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/resource", "https", "a"));
+        request.Output.Complete();
+
+        IHttpContext context = await peer.NextContextAsync();
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("done"));
+
+        // Act
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+
+        // Assert — the complete response, and no STOP_SENDING: the request had already ended, so there is
+        // nothing to refuse (RFC 9114 §4.1). A stop would fire the client's ConnectionClosed on this driver.
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
+        Encoding.ASCII.GetString(frames.Single(frame => frame.FrameType == (long)Http3FrameType.Data).Payload).ShouldBe("done");
+        request.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A bodiless request whose FIN has arrived should not owe a QPACK Stream Cancellation")]
+    public async Task SendAsync_OnBodilessRequestWhoseFinArrivedWithDynamicTable_ShouldNotEmitStreamCancellation()
+    {
+        // Arrange — with the dynamic table enabled, a request stream whose reading is abandoned owes a Stream
+        // Cancellation on the server's decoder stream (RFC 9204 §4.4.2). A GET whose FIN has arrived (the
+        // pre-filled stream ends after its HEADERS frame) is not abandoned.
+        TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/resource", "https", "a"));
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 =>
+        {
+            http3.QPack.MaxTableCapacity = 4096;
+            http3.QPack.MaxBlockedStreams = 16;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+
+        // Act — the response goes out while the decoder stream is still open.
+        await connectionContext.SendAsync(enumerator.Current).AsTask().WaitAsync(_timeout);
+
+        // Assert — the decoder stream (the second stream the server opened) carries its type prefix only.
+        byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync().WaitAsync(_timeout);
+        decoderOutput.ShouldBe(new byte[] { 0x03 });
+    }
+
     // ------------------------------------------------------------ HEAD
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A HEAD response should carry its headers but no DATA frame")]

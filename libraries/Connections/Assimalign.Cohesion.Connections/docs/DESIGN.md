@@ -262,6 +262,10 @@ The rules:
   for the connection: the first `Abort` or disposal decides the close code.
 - **A half abort leaves the holder's lifecycle alone.** It changes no `State` and does not signal the
   holder's `ConnectionClosed`. The peer's stream reports an abandoned stream, as for any reset (#1329).
+- **After `AbortRead`, every read fails**, a read in flight included, even one that octets the transport
+  has already buffered would satisfy. Both drivers fail such a read (the in-memory driver with
+  `ConnectionAbortedException`, QUIC with `QuicException(OperationAborted)`), so a consumer tested over
+  the in-memory driver cannot come to depend on reading data the abort discarded.
 - **Codes range from 0 to 2^62 - 1**, the values a QUIC variable-length integer carries (RFC 9000 §16).
   Anything else throws `ArgumentOutOfRangeException`. The in-memory driver enforces the same range, so a
   test over it fails where QUIC would.

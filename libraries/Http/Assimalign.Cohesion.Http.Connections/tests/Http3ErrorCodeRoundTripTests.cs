@@ -239,6 +239,33 @@ public class Http3ErrorCodeRoundTripTests
         closed.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.UnexpectedFrame);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Error Codes: A reserved unidirectional stream type should be stopped with H3_STREAM_CREATION_ERROR over real QUIC")]
+    public async Task Receive_OnReservedUnidirectionalStreamTypeOverRealQuic_ShouldStopSendingWithStreamCreationError()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — 0x21 is a reserved stream type (0x1f × N + 0x21). RFC 9114 §6.2: its recipient MUST abort
+        // reading it or discard its data, and SHOULD abort with H3_STREAM_CREATION_ERROR. The client keeps its
+        // side open, as a peer still sending would.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(_ => Task.CompletedTask, cancellationToken);
+        await using QuicConnection connection = await QuicConnection.ConnectAsync(CreateClientOptions(server.BaseUri.Port), cancellationToken);
+        await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional, cancellationToken);
+
+        // Act
+        await stream.WriteAsync(new byte[] { 0x21, 0x00, 0x00 }, cancellationToken);
+
+        // Assert — STOP_SENDING with the code the RFC recommends, not the driver's default.
+        QuicException stop = await Should.ThrowAsync<QuicException>(() => stream.WritesClosed.WaitAsync(cancellationToken));
+        stop.QuicError.ShouldBe(QuicError.StreamAborted);
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.StreamCreationError);
+    }
+
     private static async Task<byte[]> ReadToEndAsync(QuicStream stream, CancellationToken cancellationToken)
     {
         using MemoryStream received = new();

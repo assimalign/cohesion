@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -15,6 +17,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class Http3TransportTests
 {
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a request stream and write response frames")]
     public async Task Http3_OnRequest_ShouldParseRequestStreamAndWriteResponseFrames()
     {
@@ -205,6 +209,34 @@ public class Http3TransportTests
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A reserved unidirectional stream type should be stopped with H3_STREAM_CREATION_ERROR while requests are served")]
+    public async Task Http3_OnReservedUnidirectionalStreamType_ShouldStopReadingWithStreamCreationError()
+    {
+        // Arrange — RFC 9114 §6.2: 0x21 is a reserved stream type (0x1f × N + 0x21). Its recipient MUST abort
+        // reading it or discard its data, and SHOULD abort with H3_STREAM_CREATION_ERROR; the connection is
+        // unaffected. The client keeps the stream open, as a peer still sending would.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        Task<IHttpContext> dispatch = peer.NextContextAsync();
+
+        Connection reserved = await peer.OpenUnidirectionalStreamAsync();
+        TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = reserved.ConnectionClosed.Register(() => stopped.TrySetResult());
+
+        // Act — the reserved stream, then a request on the same connection.
+        await reserved.Output.WriteAsync(new byte[] { 0x21, 0x00, 0x00 });
+
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/after", "https", "a"));
+        request.Output.Complete();
+
+        // Assert — the request is served, and the reserved stream is stopped with the code.
+        (await dispatch.WaitAsync(_timeout)).Request.Path.Value.ShouldBe("/after");
+
+        await stopped.Task.WaitAsync(_timeout);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => reserved.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.StreamCreationError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should open a control stream and emit SETTINGS with ENABLE_CONNECT_PROTOCOL = 1")]

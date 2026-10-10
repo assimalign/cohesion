@@ -2468,7 +2468,7 @@ every inbound stream to processing of its own:
 | unidirectional `0x02` QPACK encoder | accept; with the dynamic table enabled, drain its instructions in the background |
 | unidirectional `0x03` QPACK decoder | accept (the server encodes responses statically, so there is nothing to act on) |
 | unidirectional `0x01` push | connection error `H3_STREAM_CREATION_ERROR` — a client must not push |
-| unidirectional, any other type | abandon — unknown stream types are not an error (RFC 9114 §6.2) |
+| unidirectional, any other type | abandon: stop reading with `STOP_SENDING(H3_STREAM_CREATION_ERROR)` and release the stream — unknown and reserved stream types are not a connection error, but their recipient must abort reading or discard the data (RFC 9114 §6.2). A stream that ends before its type, or whose type cannot be read, is released the same way |
 
 The stream direction is reported by the transport via
 `IConnection.Direction` on each accepted stream (see below); the HTTP
@@ -2690,16 +2690,30 @@ exchange exists, so the transport writes the bodyless 413 itself.
 
 **Ending the exchange.** The response ends with the stream's FIN (see "Ending
 the request stream at response completion"). If the request was not read to its
-end by then, the transport refuses the rest with `STOP_SENDING(H3_NO_ERROR)` as
-soon as the complete response is flushed, before the FIN, and reads nothing
-more (`Http3RequestBodyStream.RefuseRemainder`). A body read still in flight —
-a handler that left one running past its response — fails instead of waiting
-for octets the client will no longer send. The signals and their RFC 9114 §8.1
-codes:
+end by then, the transport refuses the rest with `STOP_SENDING(H3_NO_ERROR)`
+after the response body is flushed (on the streamed path, before its trailers
+and final flush) and before the FIN, and reads nothing more
+(`Http3RequestBodyStream.RefuseRemainder`); RFC 9114 §4.1 permits stopping the
+request before the response completes. A body read still in flight — a handler
+that left one running past its response — fails instead of waiting for octets
+the client will no longer send.
+
+A request the handler never read may still have ended. A GET's FIN usually
+arrives with its HEADERS frame, and nothing reads past HEADERS for a bodiless
+request. So when no read is in flight and the stream sits on a frame boundary,
+`RefuseRemainder` first reads one frame header without waiting. If the FIN is
+already buffered, the read completes at once with no frame and the request has
+ended cleanly. Nothing is refused then: no `STOP_SENDING`, and with the QPACK
+dynamic table enabled no Stream Cancellation (RFC 9204 §4.4.2), which would
+otherwise cost every GET a write on the connection-wide decoder stream. A probe
+that would have to wait is failed by the stop itself. On a stream without the
+code-carrying facet it is cancelled instead, so it never waits for the peer.
+The signals and their RFC 9114 §8.1 codes:
 
 | Situation | Signal | Code | Why |
 |---|---|---|---|
-| Complete response sent; request not read to its end | `STOP_SENDING` | `H3_NO_ERROR` | RFC 9114 §4.1: the server does not need the rest of a request it fully answered |
+| Complete response sent; request not read to its end, and its FIN not yet arrived | `STOP_SENDING` | `H3_NO_ERROR` | RFC 9114 §4.1: the server does not need the rest of a request it fully answered |
+| Unknown or reserved unidirectional stream type | `STOP_SENDING` | `H3_STREAM_CREATION_ERROR` | RFC 9114 §6.2: abort reading, with the code the RFC recommends; the connection is unaffected |
 | Application cancelled the exchange (`IHttpContext.Cancel`) | reset (both directions) | `H3_REQUEST_CANCELLED` | §4.1.1: processing began, so never `H3_REQUEST_REJECTED`, which promises the request was not processed |
 | Refused before dispatch — an interceptor rejection, teardown before dispatch, or assembled but never handed over | reset | `H3_REQUEST_REJECTED` | §4.1.1: no application processing, so the peer may retry |
 | Malformed request (field section, `:path`, Content-Length, trailers) | reset | `H3_MESSAGE_ERROR` | §4.1.2 |
@@ -2743,10 +2757,11 @@ expects, at any upload size, with no wait.
 **Order on the QUIC driver.** Completing a QUIC stream's `Output` or `Input`
 disposes the whole QUIC stream (its pipes are created with `leaveOpen: false`,
 see #1330), and the disposal stops a read direction still open with the default
-code. So the refusal goes out after the response is flushed and before the FIN,
-and the input pipe is released after the FIN (`StopReading`). RFC 9114 §4.1
-allows exactly this order: abort reading, send the complete response, then end
-the sending direction cleanly.
+code. So the refusal goes out after the response body is flushed (on the
+streamed path, before its trailers and final flush) and before the FIN, and the
+input pipe is released after the FIN (`StopReading`). RFC 9114 §4.1 permits
+stopping the request before the response completes: abort reading, finish the
+response, then end the sending direction cleanly.
 
 A **HEAD** response carries its HEADERS frame and no DATA frame or trailer
 section, on the buffered and the streaming path alike (RFC 9110 §9.3.2). The buffered path synthesizes a
@@ -2819,10 +2834,10 @@ and the teardown completion remains the fallback for an exchange that never prod
 response.
 
 With request bodies read lazily, the FIN is also where the request direction is settled.
-If the request was not read to its end, the send path refuses the remainder with
-`STOP_SENDING(H3_NO_ERROR)` through the stream's code-carrying abort, then ends the
-response, then releases the request stream's input (see "Request streams: dispatch at
-HEADERS, lazy body"). The order matters on the QUIC driver: completing the stream's
+If the request was not read to its end and its FIN has not already arrived, the send path
+refuses the remainder with `STOP_SENDING(H3_NO_ERROR)` through the stream's code-carrying
+abort, then ends the response, then releases the request stream's input (see "Request
+streams: dispatch at HEADERS, lazy body"). The order matters on the QUIC driver: completing the stream's
 `Output` releases the whole QUIC stream, so nothing can be read after the FIN, and a
 request direction still open when the stream is released is stopped with the driver's
 default code instead of `H3_NO_ERROR`. A buffered response, a streamed response

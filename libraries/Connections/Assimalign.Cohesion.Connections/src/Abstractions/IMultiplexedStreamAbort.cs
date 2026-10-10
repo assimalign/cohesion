@@ -37,7 +37,8 @@ public interface IMultiplexedStreamAbort
     /// with <paramref name="errorCode"/> (a QUIC <c>STOP_SENDING</c> frame, RFC 9000 §19.5).
     /// </summary>
     /// <remarks>
-    /// A read in flight and every later read fail. The sending direction is unaffected. The call has no effect
+    /// A read in flight and every later read fail, including a read that octets the transport has already
+    /// received and buffered would satisfy. The sending direction is unaffected. The call has no effect
     /// when the receiving direction has already ended: the stream is write-only, its input was completed, it
     /// was aborted or disposed, or its connection is gone.
     /// </remarks>
