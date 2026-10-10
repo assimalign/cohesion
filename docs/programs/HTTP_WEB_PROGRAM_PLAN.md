@@ -287,7 +287,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 11 — Close the remote-triggerable holes
 
-**Status:** delivered 2026-10-10 on the Phase 2 branch and in owner review (§5). Sessions in the same row edit the same files, so they run serially as one session with one commit per issue. The rows run in parallel. Wave 2 starts once wave 1 is integrated.
+**Status:** delivered 2026-10-10 on the Phase 2 branch and reviewed the same day (§5; decisions 37–40). Sessions in the same row edit the same files, so they run serially as one session with one commit per issue. The rows run in parallel. Wave 2 starts once wave 1 is integrated.
 
 | Session | Issues (in order) | Lane | Blocked by | Why |
 |---|---|---|---|---|
@@ -327,7 +327,19 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 12 — Protocol conformance
 
-**Status:** lined up. Gate: Stage 11 reviewed.
+**Status:** in progress (2026-10-10). The owner answered Stage 11's review questions on 2026-10-10 (decisions 37–40): #1384 goes ahead, and #1383 joins it. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
+
+| Session | Issues (in order) | Wave |
+|---|---|---|
+| 1 | #1383 → #1384: the per-request rate seam, then the response data rate | 1 |
+| 2 | #1073 → #1334 → #1387: response framing, request-target validation, and Latin-1 decoding in the codecs | 1 |
+| 3 | #1153 → #1154: the cookie grammar, then the 101 `Set-Cookie` lines | 1 |
+| 4 | #1185, #1204: core Http (`If-Range`, reason phrases) | 1 |
+| 5 | #1298 → #1299: Web.Hosting telemetry | 1 |
+| 6 | #1324: `Location` encoding in HttpsPolicy and StaticFiles, plus the raw-host fallback | 1 |
+| 7 | #1395: the Stage 11 review follow-up to #1380 (an optional generator callback, the `*Components` types removed) | 1 |
+| 8 | #1083 → #1306 → #1330: the HTTP/3 control stream, GOAWAY rejection, QUIC half-close | 2 |
+| 9 | #1378 → #1385: client fault, then `100-continue` on HTTP/2 and HTTP/3 | 2 |
 
 | Issue | Lane | Blocked by | Note |
 |---|---|---|---|
@@ -726,7 +738,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - The guard, published NativeAOT for win-arm64 from a clean worktree at `d244311a`, has no trim or AOT warnings. The native binary passes 36/36 smoke checks, including a WebSocket over HTTP/2 extended CONNECT through the new interceptor.
   - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)): `0dac06b` adds the Http.Tls pages. `1deb713`, `42d29fc` and `86e7148` sync the Http, Web and Connections pages, the server and WebSockets guides, and the 17 area framework tables. Those tables now list Http.ExtendedConnect and cite the Runtime producers' member lists instead of a `frameworks/` folder that no longer exists.
   - **Source corrections** (`35ad42f0`): the Http.WebSockets bare-listener sample now registers the extended CONNECT interceptor on a listener that serves HTTP/2. The docs-site check found the problem.
-- **Stage 11 delivered (2026-10-10), awaiting owner review.** Stage 11 closed the remote-triggerable holes in the Phase 2 follow-up backlog (decisions 22–31), and the owner's Web restructure landed between its two waves (decisions 32–36). Agent sessions built each session in an isolated worktree. Every session was reviewed, its serious findings were challenged by two skeptics, and confirmed ones were fixed. An integrator then cherry-picked each wave and an auditor three-way-checked every session-touched file. Every new regression test was shown to fail before its fix.
+- **Stage 11 delivered (2026-10-10), reviewed by the owner the same day (decisions 37–40).** Stage 11 closed the remote-triggerable holes in the Phase 2 follow-up backlog (decisions 22–31), and the owner's Web restructure landed between its two waves (decisions 32–36). Agent sessions built each session in an isolated worktree. Every session was reviewed, its serious findings were challenged by two skeptics, and confirmed ones were fixed. An integrator then cherry-picked each wave and an auditor three-way-checked every session-touched file. Every new regression test was shown to fail before its fix.
   - **Wave 1** (15 issues):
     - #1072 `99323261`, `85cabef1`: an HTTP/2 reset no longer frees a stream slot while its exchange runs. Server-provoked resets count toward the flood budget (Rapid Reset / MadeYouReset shape).
     - #1075 `7fb8f62e`, `79718e8b`: a cancelled send resets the stream.
@@ -1050,6 +1062,10 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - A disposable feature that a factory produces does not exist until the pipeline is built, so it is rejected there, before the host starts. That covers the builder-template verbs and `AddFeature(factory)`.
     - Request-scoped services for handlers stay a separate future decision: a lazily created scope owned by the server, for a separate service type.
 36. **Presize each exchange's feature collection (owner, 2026-10-09; #1381).** Dictionary resizes are almost all of today's stamping cost: 560 B at 4 features and 1,744 B at 16. The capacity constructor already exists. The other per-request lever, an allocation-free `Get<T>()` (#1337), stays in Stage 14.
+37. **#1384 goes ahead first in Stage 12 (owner, Stage 11 review, 2026-10-10).** Slow-read protection, a minimum response data rate, opens Stage 12. It is triaged for an advisory on decision 24's terms.
+38. **#1383 joins #1384 (owner delegated to the integrator's recommendation, 2026-10-10).** The per-request opt-out for the minimum request-body data rate and the new response rate share one per-request rate seam, so they land in one session, #1383 first. Until then, an HTTP/2 or HTTP/3 upload that pauses gets `408`, as HTTP/1.1 always has.
+39. **The component-integration generator may change (owner, 2026-10-10; #1395).** The builder-template shape takes an optional configure callback. The six Web verbs that #1380 put on static factories move to builder templates wherever a builder can carry them, and their hidden `*Components` types are deleted. This is the owner-approved exception to `component-integration.md`'s "the generator stays semantics-free" rule; the rule records it.
+40. **An advisory for #1066 (owner delegated, 2026-10-10).** In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. Stage 5 fixed it before the advisory practice began. It gets a private draft on decision 24's terms, published with the other Phase 2 advisories.
 
 ### 7.5 Lineup
 
