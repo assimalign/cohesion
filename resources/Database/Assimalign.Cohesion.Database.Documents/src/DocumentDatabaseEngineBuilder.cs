@@ -89,7 +89,10 @@ public sealed class DocumentDatabaseEngineBuilder
     /// <param name="name">The database name, written once.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, or not a single file-name component (the
+    /// database's files live in a directory named for it): refused here, before anything is created.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A build was attempted, or the engine already declares a database of that name (ignoring case,
     /// as database names compare).
@@ -135,6 +138,7 @@ public sealed class DocumentDatabaseEngineBuilder
     /// <exception cref="ArgumentException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="DatabaseException">See <see cref="BuildAsync"/>.</exception>
+    /// <exception cref="Assimalign.Cohesion.Database.Storage.StorageException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="AggregateException">See <see cref="BuildAsync"/>.</exception>
     public DocumentDatabaseEngine Build()
         => Task.Run(async () => await BuildAsync(CancellationToken.None).ConfigureAwait(false)).GetAwaiter().GetResult();
@@ -155,8 +159,11 @@ public sealed class DocumentDatabaseEngineBuilder
     /// anything is created, and the refusal names the engine.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// A declared database exists but cannot be opened (its files or format were refused); the engine
-    /// was disposed.
+    /// A declared database exists but its storage format was refused; the engine was disposed.
+    /// </exception>
+    /// <exception cref="Assimalign.Cohesion.Database.Storage.StorageException">
+    /// A declared database's files could not be read (a damaged header, an I/O failure): the storage
+    /// layer's own exception, which is not a <see cref="DatabaseException"/>; the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>

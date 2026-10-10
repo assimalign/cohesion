@@ -809,7 +809,12 @@ column, constraint or index, an undeclared one, or a column's type or nullabilit
 `SqlDatabaseBuilder` holds one database's default collation, typed schema and
 `SqlProvisioningMode` (`Apply`, the default, or `Verify`, decision 55). `BuildAsync` is the primary
 path; `Build()` bridges it on the thread pool, so it never captures the caller's synchronization
-context. The phases, each seeing only what earlier ones produced:
+context. A database name must be a single file-name component, because the database's files live
+in a directory named for it under `RootPath`: `AddDatabase` refuses `..`, `a/b` and the like at the
+call, and the engine's create, open and drop cores refuse them after the root base's checks
+(`DatabaseFileNames`, shared with every model since the B3 review; before it, a SQL
+`DropDatabaseAsync("../x")` deleted the directory beside the root). The phases, each seeing only
+what earlier ones produced:
 
 ```mermaid
 stateDiagram-v2
@@ -827,9 +832,12 @@ stateDiagram-v2
 ```
 
 1. **Options.** `Options` are checked (the checks of `Create`) and copied, so a later change cannot
-   reach the engine; `Create(options)` copies too, which fixed the write-back worker reading the
+   reach the engine; `Create(name, options)` copies too, which fixed the write-back worker reading the
    caller's `PageWriteBackBatchSize` on every pass. The options carry no engine name (B3): the
    engine is `Name`, and each option refusal names it (`SQL engine '{name}': …`).
+   `PageWriteBackInterval` and `PageWriteBackBatchSize` must be positive (the B3 review, as on
+   every other model): a zero interval spun the write-back worker's wait, and a zero batch failed
+   every pass until the failure policy took the databases offline.
 2. **Function catalog.** `Functions`, the standard library and the application's registrations,
    is frozen into the engine's `SqlFunctionCatalog`; registration closed when the build began
    ([Functions (E2)](#functions-e2)). `Types` lists the built-in types; domains and casts join it in E3.
@@ -1807,7 +1815,7 @@ description + exported registrations), the engine binds them.
 
 ## Engine-owned background workers
 
-The engine is a **data machine**: `Create(options)` returns it operational, with
+The engine is a **data machine**: `Create(name, options)` returns it operational, with
 the five-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
 engine schedules, claims, or configures these loops (the 2026-07-13 redesign

@@ -116,7 +116,7 @@ public sealed class KeyValueEngineDeclarationTests : IDisposable
         // Assert: refused case-insensitively, as database names compare.
         duplicate.Message.ShouldBe("Key-value engine 'declarations' already declares database 'sales'.");
         blank.ParamName.ShouldBe("name");
-        frozen.Message.ShouldBe("Engine 'declarations': composition is frozen after a build attempt.");
+        frozen.Message.ShouldBe("Key-value engine 'declarations': composition is frozen after a build attempt.");
         engine.DeclaredDatabases.ShouldHaveSingleItem().ShouldBe(new DatabaseName("sales"));
     }
 
@@ -241,7 +241,13 @@ public sealed class KeyValueEngineDeclarationTests : IDisposable
         copy.RootPath.ShouldNotBeNull();
         copy.RootPath.ShouldBe(options.RootPath);
         copy.StorageStrategy.ShouldBeSameAs(strategy);
+
+        // Every property, the internal ones included: an option added to either set fails here
+        // until Snapshot copies it and this test checks it.
         typeof(KeyValueDatabaseEngineOptions).GetProperties().Length.ShouldBe(12);
+        typeof(KeyValueDatabaseEngineOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(15);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Declarations: AddServer with options creates a key-value server over the engine, and a server it cannot create fails the build")]
@@ -295,6 +301,86 @@ public sealed class KeyValueEngineDeclarationTests : IDisposable
         created.ServerOptions.ShouldNotBeSameAs(direct);
         created.ServerOptions.MaxSessions.ShouldBe(3);
         await created.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Declarations: the server's options copy keeps every option")]
+    public async Task ServerOptions_Snapshot_ShouldCopyEveryOption()
+    {
+        // Arrange: every server option away from its default.
+        var listener = new InMemoryConnectionListener();
+        var authenticator = Assimalign.Cohesion.Database.Security.DatabaseAuthenticator.AllowAll;
+        var options = new KeyValueDatabaseServerOptions
+        {
+            Listener = listener,
+            Authenticator = authenticator,
+            MaxSessions = 7,
+            AuthenticationTimeout = TimeSpan.FromSeconds(3),
+            IdleTimeout = TimeSpan.FromMinutes(2),
+            ShutdownDrainTimeout = TimeSpan.FromSeconds(4),
+        };
+        await using var engine = KeyValueDatabaseEngine.Create("server-copy", new KeyValueDatabaseEngineOptions());
+
+        // Act
+        var server = KeyValueDatabaseServer.Create(engine, options);
+        var copy = server.ServerOptions;
+
+        // Assert: an option added to the type fails here until Snapshot copies it.
+        copy.ShouldNotBeSameAs(options);
+        copy.Listener.ShouldBeSameAs(listener);
+        copy.Authenticator.ShouldBeSameAs(authenticator);
+        copy.MaxSessions.ShouldBe(options.MaxSessions);
+        copy.AuthenticationTimeout.ShouldBe(options.AuthenticationTimeout);
+        copy.IdleTimeout.ShouldBe(options.IdleTimeout);
+        copy.ShutdownDrainTimeout.ShouldBe(options.ShutdownDrainTimeout);
+        typeof(KeyValueDatabaseServerOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(6);
+        await server.DisposeAsync();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Declarations: a name that is not a single file-name component is refused at the declaration")]
+    [InlineData("..")]
+    [InlineData("../escaped")]
+    [InlineData("nested/escaped")]
+    [InlineData("nested\\escaped")]
+    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    {
+        // Arrange
+        var builder = CreateBuilder("names");
+
+        // Act
+        var refusal = Should.Throw<ArgumentException>(() => builder.AddDatabase(name));
+        await using var engine = await builder.BuildAsync(TestTimeout.Token());
+
+        // Assert: refused like a duplicate, before anything exists, so the build declares nothing.
+        refusal.ParamName.ShouldBe("name");
+        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        engine.DeclaredDatabases.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Declarations: the engine refuses a database name that reaches outside its root path")]
+    public async Task DatabaseCores_NameOutsideTheRoot_ShouldBeRefused()
+    {
+        // Arrange: a database stored beside the engine's root, which a "../victim" drop used to
+        // delete (the strategy combined the name with the root path as given).
+        string root = Path.Combine(_rootPath, "root");
+        string victim = Path.Combine(_rootPath, "victim");
+        Directory.CreateDirectory(victim);
+        await File.WriteAllTextAsync(Path.Combine(_rootPath, "victim.dat"), "kept", TestTimeout.Token());
+        await using var engine = KeyValueDatabaseEngine.Create("escape", new KeyValueDatabaseEngineOptions { RootPath = root });
+
+        // Act
+        var create = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync("../escaped"));
+        var open = await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(".."));
+        var drop = await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync("../victim"));
+
+        // Assert: nothing outside the root was created, opened or deleted.
+        create.ParamName.ShouldBe("name");
+        open.ParamName.ShouldBe("name");
+        drop.ParamName.ShouldBe("name");
+        drop.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        Directory.Exists(Path.Combine(_rootPath, "escaped")).ShouldBeFalse();
+        Directory.Exists(victim).ShouldBeTrue();
     }
 
     private KeyValueDatabaseEngineBuilder CreateBuilder(string name)

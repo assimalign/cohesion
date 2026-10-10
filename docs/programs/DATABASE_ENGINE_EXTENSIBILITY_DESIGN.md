@@ -272,7 +272,7 @@ public sealed class SqlDatabaseEngineBuilder
   `JournalSizeLimit`, `BufferPoolCapacity`, `PageWriteBackInterval`, `PageWriteBackBatchSize`,
   `MaintenanceInterval` and `ExpressionNestingLimit` (`SqlDatabaseEngineBuilder.cs:51-189`). Build
   copies it, so a later mutation cannot reach a running engine. `SqlDatabaseEngine.Create(options)`
-  copies too, which fixes a live defect [Certain]: the engine keeps the caller's object
+  (`Create(name, options)` since B3) copies too, which fixes a live defect [Certain]: the engine keeps the caller's object
   (`Sql/src/SqlDatabaseEngine.cs:93`) and the write-back worker reads `PageWriteBackBatchSize` on
   every pass (`Sql/src/Internal/SqlPageWriteBackWorker.cs:37`).
 - Until B3 removes `EngineName` from the options types, a builder whose `Options.EngineName`
@@ -475,7 +475,7 @@ SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken); 
 ```
 
 Embedded engines get provisioning for the first time: today it exists only as a Hosting service.
-`SqlDatabaseEngine.Create(options)` stays as the standard-library-only path, so the 286 test call
+`SqlDatabaseEngine.Create(options)` (`Create(name, options)` since B3) stays as the standard-library-only path, so the 286 test call
 sites that use it need no rewrite beyond B3's name move.
 
 ### 3.11 The other four models (B3)
@@ -506,6 +506,23 @@ CheckpointInterval must be positive.`). The SQL nesting-limit refusal's paramete
 (`ExpressionNestingLimit`), as every other option's is, instead of `options`. Call sites that set no
 name kept the model's former default (`sql-engine`, `keyvalue-engine`, `graph-engine`,
 `document-engine`, `blob-engine`), so test-visible names did not change.
+
+*B3 review.* Three differences between the models surfaced once the five builders took the same
+inputs, and were closed in B3. (1) The name rule Graph, Documents and Blob always applied (a
+database name is a single file-name component, because its files live in a directory named for
+it) is now shared (`Database/shared/DatabaseFileNames.cs`) and applied by the SQL and key-value
+engines too, in their create, open and drop cores: before, `AddDatabase("../x")` or
+`CreateDatabaseAsync("../x")` on those two wrote files beside the root path, and a SQL
+`DropDatabaseAsync("../x")` deleted that directory without checking it was a database. Every
+builder's `AddDatabase` also checks the rule at the call, so a name the engine would refuse fails
+before the engine exists. (2) SQL and key-value now refuse a `PageWriteBackInterval` or
+`PageWriteBackBatchSize` that is not positive, as the other three did: a zero interval spun the
+worker's wait, and a zero batch failed every write-back pass until the failure policy took the
+databases offline. (3) The builder state's own refusals (frozen composition, the one build
+attempt, a factory that returned null) start with the model as every other B3 message does
+(`Graph engine 'g': composition is frozen after a build attempt.`). A declared database whose files
+cannot be read fails the build with the storage layer's `StorageException`, which is not a
+`DatabaseException`; the builders document it.
 
 ### 3.12 The separation rule
 

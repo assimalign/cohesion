@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <remarks>
 /// The options deliberately carry no engine: servers are per-model and the
 /// composition root supplies the single engine directly
-/// through <see cref="GraphDatabaseServer.Create"/>.
+/// (<see cref="GraphDatabaseServer.Create"/>, or the
+/// <c>engineBuilder.AddServer(configure)</c> and <c>engineBuilder.AddServer(factory)</c> builder verbs).
 /// </remarks>
 public sealed class GraphDatabaseServerOptions
 {

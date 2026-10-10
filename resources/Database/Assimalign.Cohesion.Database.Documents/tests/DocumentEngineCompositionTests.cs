@@ -292,7 +292,7 @@ public sealed class DocumentEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "Engine 'document-engine': a worker factory returned null." : "Engine 'document-engine': a server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Document engine 'document-engine': a worker factory returned null." : "Document engine 'document-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

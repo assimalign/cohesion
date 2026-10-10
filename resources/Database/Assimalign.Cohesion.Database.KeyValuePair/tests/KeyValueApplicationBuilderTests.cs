@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -74,5 +75,42 @@ public class KeyValueApplicationBuilderTests
         // Assert
         put.Applied.ShouldBeTrue();
         Text((await database.GetAsync(session, Bytes("k"), TestTimeout.Token()))!.Value.Value).ShouldBe("v");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValue: a declared database is open when the verb's factory returns, and the engine refuses to drop it")]
+    public async Task AddKeyValue_WithDeclaredDatabase_ShouldOpenItInsideBuildAndRefuseItsDrop()
+    {
+        // Arrange
+        var builder = new RecordingApplicationBuilder();
+        builder.AddKeyValue("kv-declared", kv => kv.AddDatabase("sales"));
+
+        // Act: the verb's factory is what application Build runs.
+        await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
+        var refusal = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await engine.DropDatabaseAsync("SALES"));
+
+        // Assert
+        engine.TryGetDatabase("sales", out KeyValueDatabase? _).ShouldBeTrue();
+        refusal.Operation.ShouldBe("DROP DATABASE");
+        refusal.Message.ShouldStartWith("Key-value engine 'kv-declared' declares database 'sales'", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValue: a declared name the model refuses fails the verb's factory before the engine exists")]
+    public void AddKeyValue_WithInvalidDeclaredName_ShouldFailBeforeTheEngineExists()
+    {
+        // Arrange
+        var builder = new RecordingApplicationBuilder();
+        KeyValueDatabaseEngine? product = null;
+        builder.AddKeyValue("kv-invalid", kv =>
+        {
+            kv.AddWorker(engine => new RecordingWorker(product = engine));
+            kv.AddDatabase("../escaped");
+        });
+
+        // Act
+        var failure = Should.Throw<ArgumentException>(() => builder.MaterializeEngine());
+
+        // Assert
+        failure.ParamName.ShouldBe("name");
+        product.ShouldBeNull();
     }
 }

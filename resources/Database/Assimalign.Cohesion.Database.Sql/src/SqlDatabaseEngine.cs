@@ -247,8 +247,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>;
     /// <see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB pages of at
     /// least 1 MiB; <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/> is negative;
-    /// <see cref="SqlDatabaseEngineOptions.CheckpointInterval"/> or
-    /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/> is not positive;
+    /// <see cref="SqlDatabaseEngineOptions.CheckpointInterval"/>,
+    /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/>,
+    /// <see cref="SqlDatabaseEngineOptions.PageWriteBackInterval"/> or
+    /// <see cref="SqlDatabaseEngineOptions.PageWriteBackBatchSize"/> is not positive;
     /// <see cref="SqlDatabaseEngineOptions.GroupCommitWindow"/> is not positive or is longer than
     /// <see cref="Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow"/>;
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureWindow"/> is not positive or is longer than
@@ -326,6 +328,13 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         DatabaseEngineOptionChecks.ThrowIfNegative(options.CheckpointJournalSize, engine, nameof(options.CheckpointJournalSize));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));
+
+        // The write-back worker waits its interval between passes and hands the batch size to every
+        // storage it writes, which refuses a size that is not positive: a zero interval spins a
+        // core, and a zero batch fails every pass until the failure policy takes the databases
+        // offline. Graph, Documents and Blob refuse both too.
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackInterval, engine, nameof(options.PageWriteBackInterval));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackBatchSize, engine, nameof(options.PageWriteBackBatchSize));
         DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
             nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit), engine);
 
@@ -418,7 +427,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <param name="name">The name of the database to create.</param>
     /// <param name="cancellationToken">Observed before the database is created.</param>
     /// <returns>The newly created database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
@@ -430,7 +439,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <param name="defaultCollation">The collation inherited by columns without an override.</param>
     /// <param name="cancellationToken">Observed before the database is created.</param>
     /// <returns>The created database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="defaultCollation"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
@@ -464,7 +473,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <param name="name">The name of the database to open.</param>
     /// <param name="cancellationToken">Observed before the database is opened, and while the open waits for a holder's close of it.</param>
     /// <returns>The opened database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
@@ -521,6 +530,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
     private ValueTask<DatabaseInstance> CreateDatabaseWithCollationAsync(DatabaseName name, Collation defaultCollation)
     {
+        ValidateName(name);
         lock (_syncRoot)
         {
             // A create that raced the engine's disposal cannot add a database after
@@ -572,6 +582,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <inheritdoc />
     protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
+        ValidateName(name);
         lock (_syncRoot)
         {
             ThrowIfDisposed();
@@ -687,6 +698,12 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     private static SqlDataStorageFormatException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
         => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
+    // The model's name rule, in the create, open and drop cores, after the base's checks of an
+    // empty name, disposal and the token: a database's files live in a directory named for it under
+    // the root path, so a name such as "../other" would reach files outside it. Shared with every
+    // model (DatabaseFileNames); the builder checks it when a database is declared.
+    private static void ValidateName(string name) => DatabaseFileNames.ThrowIfNotSingleComponent(name);
+
     /// <inheritdoc />
     /// <exception cref="DatabaseObjectLockedException">
     /// The engine's builder declared the database (owner decision 56 of 2026-10-09): the declaration
@@ -694,6 +711,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </exception>
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
+        ValidateName(name);
         if (FindDeclaration(name) is { } declared)
         {
             throw DatabaseDeclarations.RefuseDrop(ModelName, Name, declared.Name, nameof(SqlDatabaseEngineBuilder));

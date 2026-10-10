@@ -12,6 +12,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Database.Blob;
 using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.DependencyInjection;
@@ -206,6 +207,54 @@ public sealed class DatabaseCompositionTests
             refusal.Message.ShouldBe("Duplicate database engine name 'same'.");
         }
         borrowed.DisposeCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Verifies the document and blob verbs (B3) open or create the databases their engine builders
+    /// declare inside application Build, before any server starts, and that each built engine
+    /// refuses to drop a declared database (owner decision 56 of 2026-10-09).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: the model verbs open their declared databases, and the engines refuse to drop them")]
+    public async Task Build_WithDeclaredDocumentAndBlobDatabases_ShouldOpenThemAndRefuseTheirDrop()
+    {
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddDocuments("docs", documents => documents.AddDatabase("catalog"));
+        builder.AddBlob("files", blob =>
+        {
+            blob.AddDatabase("assets");
+            blob.AddServer(server => server.Listener = new InMemoryConnectionListener());
+        });
+
+        await using var application = builder.Build();
+        var documents = (DocumentDatabaseEngine)application.Context.GetEngine("docs");
+        var blobs = (BlobDatabaseEngine)application.Context.GetEngine("files");
+        var documentDrop = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await documents.DropDatabaseAsync("CATALOG"));
+        var blobDrop = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await blobs.DropDatabaseAsync("assets"));
+
+        documents.TryGetDatabase("catalog", out DocumentDatabase? _).ShouldBeTrue();
+        blobs.TryGetDatabase("assets", out BlobDatabase? _).ShouldBeTrue();
+        application.Context.Servers.ShouldHaveSingleItem().ShouldBeOfType<BlobDatabaseServer>().Engine.ShouldBeSameAs(blobs);
+        documentDrop.Message.ShouldStartWith("Document engine 'docs' declares database 'catalog'", Case.Sensitive);
+        blobDrop.Message.ShouldStartWith("Blob engine 'files' declares database 'assets'", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Verifies a declared database name the model refuses fails application Build at the
+    /// declaration, before the verb's engine exists, and the engines built before it are disposed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: a declared name the model refuses fails Build and disposes the engines built before it")]
+    public void Build_WithInvalidDeclaredName_ShouldFailAndDisposeEarlierEngines()
+    {
+        DocumentDatabaseEngine? documents = null;
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine("docs", _ => documents = DocumentDatabaseEngine.CreateBuilder("docs").AddDatabase("catalog").Build());
+        builder.AddBlob("files", blob => blob.AddDatabase("../escaped"));
+
+        var failure = Should.Throw<ArgumentException>(() => builder.Build());
+
+        failure.ParamName.ShouldBe("name");
+        failure.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        documents.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
     /// <summary>Verifies a factory that returns a borrowed engine is refused without disposing it.</summary>

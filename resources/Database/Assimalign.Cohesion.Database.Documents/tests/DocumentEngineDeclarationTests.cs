@@ -111,7 +111,7 @@ public sealed class DocumentEngineDeclarationTests : IDisposable
         // Assert: refused case-insensitively, as database names compare.
         duplicate.Message.ShouldBe("Document engine 'declarations' already declares database 'sales'.");
         blank.ParamName.ShouldBe("name");
-        frozen.Message.ShouldBe("Engine 'declarations': composition is frozen after a build attempt.");
+        frozen.Message.ShouldBe("Document engine 'declarations': composition is frozen after a build attempt.");
         engine.DeclaredDatabases.ShouldHaveSingleItem().ShouldBe(new DatabaseName("sales"));
     }
 
@@ -236,7 +236,34 @@ public sealed class DocumentEngineDeclarationTests : IDisposable
         copy.RootPath.ShouldNotBeNull();
         copy.RootPath.ShouldBe(options.RootPath);
         copy.StorageStrategy.ShouldBeSameAs(strategy);
+
+        // Every property, the internal ones included: an option added to either set fails here
+        // until Snapshot copies it and this test checks it.
         typeof(DocumentDatabaseEngineOptions).GetProperties().Length.ShouldBe(12);
+        typeof(DocumentDatabaseEngineOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(15);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Declarations: a name that is not a single file-name component is refused at the declaration")]
+    [InlineData("..")]
+    [InlineData("../escaped")]
+    [InlineData("nested/escaped")]
+    [InlineData("nested\\escaped")]
+    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    {
+        // Arrange
+        var builder = CreateBuilder("names");
+
+        // Act
+        var refusal = Should.Throw<ArgumentException>(() => builder.AddDatabase(name));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+
+        // Assert: refused like a duplicate, before anything exists, rather than by the engine's
+        // open after the engine and its workers were created.
+        refusal.ParamName.ShouldBe("name");
+        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        engine.DeclaredDatabases.ShouldBeEmpty();
     }
 
     private DocumentDatabaseEngineBuilder CreateBuilder(string name)

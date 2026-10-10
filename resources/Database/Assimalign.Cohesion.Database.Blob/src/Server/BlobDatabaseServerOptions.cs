@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <remarks>
 /// The options deliberately carry no engine: servers are per-model and the
 /// composition root supplies the single engine directly
-/// through <see cref="BlobDatabaseServer.Create"/>.
+/// (<see cref="BlobDatabaseServer.Create"/>, or the
+/// <c>engineBuilder.AddServer(configure)</c> and <c>engineBuilder.AddServer(factory)</c> builder verbs).
 /// </remarks>
 public sealed class BlobDatabaseServerOptions
 {

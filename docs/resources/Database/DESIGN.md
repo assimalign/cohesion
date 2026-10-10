@@ -106,7 +106,7 @@ Dependency direction is strictly downward. Model engines depend on kernel projec
 
 ### 3.3 Model engines
 
-Each model root project owns a public engine (`{Model}DatabaseEngine`, static `Create(options)` factory, a sealed leaf of the root `DatabaseEngine` since the concrete-types plan, phase 4) and the model's public database type:
+Each model root project owns a public engine (`{Model}DatabaseEngine`, with a static `Create(name, options)` factory and a `CreateBuilder(name)` builder, a sealed leaf of the root `DatabaseEngine` since the concrete-types plan, phase 4) and the model's public database type:
 
 | Model | Database type | Shape | Language |
 |---|---|---|---|

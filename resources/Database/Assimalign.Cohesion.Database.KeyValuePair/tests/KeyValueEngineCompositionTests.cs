@@ -246,7 +246,7 @@ public sealed class KeyValueEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "Engine 'keyvalue-engine': a worker factory returned null." : "Engine 'keyvalue-engine': a server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Key-value engine 'keyvalue-engine': a worker factory returned null." : "Key-value engine 'keyvalue-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
@@ -395,6 +395,44 @@ public sealed class KeyValueEngineCompositionTests
         built.Message.ShouldStartWith("Key-value engine 'named': CheckpointJournalSize must not be negative.", Case.Sensitive);
         direct.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.MaintenanceInterval));
         direct.Message.ShouldStartWith("Key-value engine 'direct': MaintenanceInterval must be positive.", Case.Sensitive);
+        product.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The write-back worker's cadence and batch size are refused when not positive, as the Graph,
+    /// Documents and Blob engines refuse them: a zero interval spun the worker's wait, and a zero
+    /// batch failed every pass in the storage until the failure policy took the databases offline.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a write-back interval or batch size that is not positive is refused, naming the engine")]
+    [InlineData(nameof(KeyValueDatabaseEngineOptions.PageWriteBackInterval))]
+    [InlineData(nameof(KeyValueDatabaseEngineOptions.PageWriteBackBatchSize))]
+    public void Build_PageWriteBackNotPositive_ShouldBeRefused(string option)
+    {
+        // Arrange
+        var builder = KeyValueDatabaseEngine.CreateBuilder("write-back");
+        KeyValueDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        var options = new KeyValueDatabaseEngineOptions();
+        if (option == nameof(KeyValueDatabaseEngineOptions.PageWriteBackInterval))
+        {
+            builder.Options.PageWriteBackInterval = TimeSpan.Zero;
+            options.PageWriteBackInterval = TimeSpan.FromSeconds(-1);
+        }
+        else
+        {
+            builder.Options.PageWriteBackBatchSize = 0;
+            options.PageWriteBackBatchSize = -1;
+        }
+
+        // Act
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("write-back-direct", options));
+
+        // Assert: refused before the engine existed.
+        built.ParamName.ShouldBe(option);
+        built.Message.ShouldStartWith($"Key-value engine 'write-back': {option} must be positive.", Case.Sensitive);
+        direct.ParamName.ShouldBe(option);
+        direct.Message.ShouldStartWith($"Key-value engine 'write-back-direct': {option} must be positive.", Case.Sensitive);
         product.ShouldBeNull();
     }
 

@@ -99,12 +99,6 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     public string Name => _name;
 
     /// <summary>
-    /// Gets the databases the builder declared through <see cref="AddDatabase"/>, in declaration
-    /// order.
-    /// </summary>
-    public IReadOnlyList<DatabaseName> Databases => _databases;
-
-    /// <summary>
     /// Declares a database the engine owns: the build opens it, or creates it when it does not
     /// exist (<see cref="ProvisionDatabasesAsync"/>), and the built engine refuses to drop it.
     /// </summary>
@@ -114,11 +108,15 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     /// case, as database names compare).
     /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, or not a single file-name component
+    /// (<see cref="DatabaseFileNames"/>): refused here, before anything is created, rather than by
+    /// the engine's open at the build.
+    /// </exception>
     public void AddDatabase(string name)
     {
         EnsureMutable();
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        DatabaseFileNames.ThrowIfNotSingleComponent(name);
         var databaseName = new DatabaseName(name);
         foreach (var declared in _databases)
         {
@@ -193,7 +191,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (Volatile.Read(ref _buildAttempted) != 0)
         {
-            throw new InvalidOperationException($"Engine '{_name}': composition is frozen after a build attempt.");
+            throw new InvalidOperationException($"{_model} engine '{_name}': composition is frozen after a build attempt.");
         }
     }
 
@@ -231,7 +229,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (Interlocked.Exchange(ref _buildAttempted, 1) != 0)
         {
-            throw new InvalidOperationException($"The builder of engine '{_name}' supports one build attempt.");
+            throw new InvalidOperationException($"{_model} engine '{_name}': the builder supports one build attempt.");
         }
     }
 
@@ -268,8 +266,8 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
             try
             {
                 compose(
-                    Produce(engine, _workers, servers: false, $"Engine '{_name}': a worker factory returned null."),
-                    Produce(engine, _servers, servers: true, $"Engine '{_name}': a server factory returned null."));
+                    Produce(engine, _workers, servers: false, $"{_model} engine '{_name}': a worker factory returned null."),
+                    Produce(engine, _servers, servers: true, $"{_model} engine '{_name}': a server factory returned null."));
 
                 // A sequence never read to the end dropped its remaining factories.
                 if (_progress != ComposeProgress.ServersAttached)

@@ -595,7 +595,64 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         copy.RootPath.ShouldNotBeNull();
         copy.RootPath.ShouldBe(options.RootPath);
         copy.StorageStrategy.ShouldBeSameAs(strategy);
+
+        // Every property, the internal ones included: an option added to either set fails here
+        // until Snapshot copies it and this test checks it.
         typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(13);
+        typeof(SqlDatabaseEngineOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(16);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that is not a single file-name component is refused at the declaration")]
+    [InlineData("..")]
+    [InlineData("../escaped")]
+    [InlineData("nested/escaped")]
+    [InlineData("nested\\escaped")]
+    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    {
+        // Arrange
+        var builder = CreateBuilder("names");
+        int configured = 0;
+
+        // Act
+        var refusal = Should.Throw<ArgumentException>(() => builder.AddDatabase(name, _ => configured++));
+        await using var engine = await builder.BuildAsync(TestTimeout.Token());
+
+        // Assert: refused before its callback ran and before anything exists, so the build that
+        // follows declares nothing and nothing is written outside the root.
+        refusal.ParamName.ShouldBe("name");
+        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        configured.ShouldBe(0);
+        engine.DeclaredDatabases.ShouldBeEmpty();
+        Directory.Exists(Path.Combine(Path.GetDirectoryName(_rootPath)!, "escaped")).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: the engine refuses a database name that reaches outside its root path")]
+    public async Task DatabaseCores_NameOutsideTheRoot_ShouldBeRefused()
+    {
+        // Arrange: a directory beside the engine's root, which a "../victim" drop used to delete
+        // (the strategy combined the name with the root path as given, and the drop does not
+        // check that the database exists first).
+        string root = Path.Combine(_rootPath, "root");
+        string victim = Path.Combine(_rootPath, "victim");
+        Directory.CreateDirectory(victim);
+        await using var engine = SqlDatabaseEngine.Create("escape", new SqlDatabaseEngineOptions { RootPath = root });
+
+        // Act
+        var create = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync("../escaped"));
+        var collated = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync("../escaped", Collation.Binary));
+        var open = await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(".."));
+        var drop = await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync("../victim"));
+
+        // Assert: nothing outside the root was created, opened or deleted.
+        create.ParamName.ShouldBe("name");
+        collated.ParamName.ShouldBe("name");
+        open.ParamName.ShouldBe("name");
+        drop.ParamName.ShouldBe("name");
+        drop.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        Directory.Exists(Path.Combine(_rootPath, "escaped")).ShouldBeFalse();
+        Directory.Exists(victim).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a database is declared once per engine, and a reusable schema must name it")]

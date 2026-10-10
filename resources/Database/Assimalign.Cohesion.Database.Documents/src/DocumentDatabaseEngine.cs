@@ -152,9 +152,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// <param name="database">The database a worker pass visited.</param>
     internal bool IsOpen(DocumentDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
-    /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
+    /// <summary>
+    /// Creates a dependency-free builder for the document engine of that name: its options, the
+    /// databases it declares, and its nested worker and server factories.
+    /// </summary>
     /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
-    /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
+    /// <returns>A fresh builder supporting one engine construction attempt; creating it starts nothing.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
@@ -673,15 +676,9 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
         .FirstOrDefault(path => string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase));
 
     // The model's own name rule, in the cores, after the base's checks of an empty name, disposal
-    // and the token: a database's files live in a directory named for it.
-    private static void ValidateName(string name)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\\'))
-        {
-            throw new ArgumentException("A database name must be a single file-name component.", nameof(name));
-        }
-    }
+    // and the token: a database's files live in a directory named for it. The rule is shared with
+    // every model (DatabaseFileNames), and the builder checks it when a database is declared.
+    private static void ValidateName(string name) => DatabaseFileNames.ThrowIfNotSingleComponent(name);
 
     // Under the engine lock: removes a database whose close ended, when the registry still holds
     // that instance (a reopen may have registered a new one of the same name).

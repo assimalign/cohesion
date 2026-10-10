@@ -122,7 +122,7 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         // Assert: refused case-insensitively, as database names compare.
         duplicate.Message.ShouldBe("Graph engine 'declarations' already declares database 'sales'.");
         blank.ParamName.ShouldBe("name");
-        frozen.Message.ShouldBe("Engine 'declarations': composition is frozen after a build attempt.");
+        frozen.Message.ShouldBe("Graph engine 'declarations': composition is frozen after a build attempt.");
         engine.DeclaredDatabases.ShouldHaveSingleItem().ShouldBe(new DatabaseName("sales"));
     }
 
@@ -247,7 +247,13 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         copy.RootPath.ShouldNotBeNull();
         copy.RootPath.ShouldBe(options.RootPath);
         copy.StorageStrategy.ShouldBeSameAs(strategy);
+
+        // Every property, the internal ones included: an option added to either set fails here
+        // until Snapshot copies it and this test checks it.
         typeof(GraphDatabaseEngineOptions).GetProperties().Length.ShouldBe(12);
+        typeof(GraphDatabaseEngineOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(15);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Declarations: AddServer with options creates a graph server over the engine, and a server it cannot create fails the build")]
@@ -301,6 +307,62 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         created.ServerOptions.ShouldNotBeSameAs(direct);
         created.ServerOptions.MaxSessions.ShouldBe(3);
         await created.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Declarations: the server's options copy keeps every option")]
+    public async Task ServerOptions_Snapshot_ShouldCopyEveryOption()
+    {
+        // Arrange: every server option away from its default.
+        var listener = new InMemoryConnectionListener();
+        var authenticator = Assimalign.Cohesion.Database.Security.DatabaseAuthenticator.AllowAll;
+        var options = new GraphDatabaseServerOptions
+        {
+            Listener = listener,
+            Authenticator = authenticator,
+            MaxSessions = 7,
+            AuthenticationTimeout = TimeSpan.FromSeconds(3),
+            IdleTimeout = TimeSpan.FromMinutes(2),
+            ShutdownDrainTimeout = TimeSpan.FromSeconds(4),
+        };
+        await using var engine = GraphDatabaseEngine.Create("server-copy", new GraphDatabaseEngineOptions());
+
+        // Act
+        var server = GraphDatabaseServer.Create(engine, options);
+        var copy = server.ServerOptions;
+
+        // Assert: an option added to the type fails here until Snapshot copies it.
+        copy.ShouldNotBeSameAs(options);
+        copy.Listener.ShouldBeSameAs(listener);
+        copy.Authenticator.ShouldBeSameAs(authenticator);
+        copy.MaxSessions.ShouldBe(options.MaxSessions);
+        copy.AuthenticationTimeout.ShouldBe(options.AuthenticationTimeout);
+        copy.IdleTimeout.ShouldBe(options.IdleTimeout);
+        copy.ShutdownDrainTimeout.ShouldBe(options.ShutdownDrainTimeout);
+        typeof(GraphDatabaseServerOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(6);
+        await server.DisposeAsync();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Declarations: a name that is not a single file-name component is refused at the declaration")]
+    [InlineData("..")]
+    [InlineData("../escaped")]
+    [InlineData("nested/escaped")]
+    [InlineData("nested\\escaped")]
+    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    {
+        // Arrange
+        var builder = CreateBuilder("names");
+
+        // Act
+        var refusal = Should.Throw<ArgumentException>(() => builder.AddDatabase(name));
+        await using var engine = await builder.BuildAsync(TestTimeout.Token());
+
+        // Assert: refused like a duplicate, before anything exists, rather than by the engine's
+        // open after the engine, its workers and its servers were created.
+        refusal.ParamName.ShouldBe("name");
+        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        engine.DeclaredDatabases.ShouldBeEmpty();
     }
 
     private GraphDatabaseEngineBuilder CreateBuilder(string name)

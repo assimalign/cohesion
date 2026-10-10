@@ -777,6 +777,15 @@ Application Build executes its callback. The builder has the SQL builder's engin
   same name (ignoring case) is refused at the call, and the built engine refuses to drop a declared
   database with `DatabaseObjectLockedException` (owner decision 56 of 2026-10-09), through the
   wording the SQL engine uses (`DatabaseDeclarations`, compiled from the root's shared source).
+  A name that is not a single file-name component (`..`, `a/b`, a name holding a character the
+  platform refuses in a file name) is refused at the call too, before the engine exists.
+- The engine applies that name rule in its create, open and drop cores, after the root base's
+  checks (`DatabaseFileNames`, shared with every model; the B3 review). A database's files live in
+  a directory named for it under `RootPath`, so before the rule `CreateDatabaseAsync("../x")` wrote
+  a file set beside the root.
+- `PageWriteBackInterval` and `PageWriteBackBatchSize` must be positive, as on every other model
+  since the B3 review: a zero interval spun the write-back worker's wait, and a zero batch failed
+  every pass in the storage until the failure policy took the databases offline.
 - `AddServer(Action<KeyValueDatabaseServerOptions>)` creates a `KeyValueDatabaseServer` over the
   engine from options the callback configures, and disposes the listener the options carry when
   the server cannot be created; `AddServer(Func<KeyValueDatabaseEngine, DatabaseServer> factory)`
