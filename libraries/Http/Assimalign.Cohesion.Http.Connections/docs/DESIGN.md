@@ -77,8 +77,9 @@ instead of sharing one listener-wide bag. The options are captured **per
 registration** at `Use*` time and closed over by that registration's
 connection-factory builder; two registrations of the same version can carry
 different limits. Cross-version concerns stay listener-wide on
-`HttpConnectionListenerOptions`: the request/response interceptors (snapshotted
-when the `HttpConnectionListener` is constructed) and `BacklogCapacity`.
+`HttpConnectionListenerOptions`: the request/response interceptors and
+`ExchangeFeatureCapacity` (both snapshotted when the `HttpConnectionListener` is
+constructed), and `BacklogCapacity`.
 
 Limits follow the same split. `HttpConnectionListenerLimits` is the abstract
 base holding only the limits meaningful to all three versions
@@ -528,6 +529,27 @@ uses it **directly** — no defaults-wrapper layer, which would add a second
 dictionary probe to every `Get` on the hot path. A `null` collection (the
 fast path) gets a fresh empty one; a foreign `IHttpFeatureCollection`
 implementation is wrapped as a read-through defaults source for safety.
+
+### Sizing the collection: `ExchangeFeatureCapacity` (#1381)
+
+Every exchange's collection is created at one of three sites: the HTTP/1.1
+parser and `HttpRequestInterceptorPipeline` (HTTP/2 and HTTP/3) when an
+interceptor is registered, or the exchange context's constructor on the
+zero-interceptor fast path. All three size it for
+`HttpConnectionListenerOptions.ExchangeFeatureCapacity`, a listener-wide count of
+the features an ordinary exchange is expected to carry. The default, `0`, leaves
+the collection to grow as before. The parse-time collection becomes the
+exchange's own, so it is sized for every feature the exchange will carry, not
+only the hooks'.
+
+The seam is generic on purpose (owner decisions 20 and 36): the transport
+learns a number, not which features a host installs. A host that stamps the
+same features onto every exchange sets it; Web.Hosting does, from its
+application features plus the four it always installs. Without it, a
+host stamping eight features onto a collection that grows from three slots
+pays for the 3-, 7- and 17-slot dictionaries on every exchange. With it, the
+collection allocates one dictionary of the right size, and a feature beyond the
+count still works: the dictionary grows exactly as an unsized one does.
 
 ### Protocol coverage
 

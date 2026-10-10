@@ -960,6 +960,7 @@ internal sealed class Http2Stream
     /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
+    /// <param name="featureCapacity">The number of features the exchange is expected to carry; its feature collection is sized for it.</param>
     /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when a request-parse interceptor rejects the request.
@@ -983,7 +984,8 @@ internal sealed class Http2Stream
         HttpScheme fallbackScheme,
         Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
         IHttpExchangeInterceptor[] interceptors,
-        long? maxRequestBodySize)
+        long? maxRequestBodySize,
+        int featureCapacity)
     {
         if (!HeadersCompleted)
         {
@@ -1156,7 +1158,8 @@ internal sealed class Http2Stream
             requestHead,
             connectionInfo,
             maxRequestBodySize,
-            isConnect).ConfigureAwait(false);
+            isConnect,
+            featureCapacity).ConfigureAwait(false);
 
         // RFC 9110 §15.5.14 — arm the request-body cap. The pipeline froze the knob after the head
         // hooks, so the value is final for the exchange (an IHttpMaxRequestBodySizeFeature is
@@ -1174,6 +1177,7 @@ internal sealed class Http2Stream
             requestHead with { Body = interception.Body },
             connectionInfo,
             requestAborted,
+            featureCapacity,
             interception.Features)
         {
             RequestBody = body,

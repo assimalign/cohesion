@@ -23,6 +23,10 @@ internal static class Http1MessageReader
     /// The listener's snapshotted request-parse interceptors. When empty the parser takes a fast
     /// path with no per-request interception state allocated.
     /// </param>
+    /// <param name="featureCapacity">
+    /// The number of features each exchange is expected to carry; the exchange's feature collection
+    /// is sized for it.
+    /// </param>
     /// <param name="timeProvider">The monotonic clock threaded to the request body's data-rate enforcement.</param>
     /// <param name="readTimeout">
     /// The read-timeout controller. Signalled when the request line begins and once the header
@@ -51,6 +55,7 @@ internal static class Http1MessageReader
         HttpScheme scheme,
         Http1ConnectionListenerOptions.Http1Limits limits,
         IHttpExchangeInterceptor[] interceptors,
+        int featureCapacity,
         TimeProvider timeProvider,
         Http1ReadTimeout readTimeout,
         CancellationToken connectionToken)
@@ -187,13 +192,16 @@ internal static class Http1MessageReader
 
         // Interceptor phase (head hooks). Zero registered interceptors is the fast path: no
         // interception context, no feature collection, no per-request interception allocations —
-        // the transport enforces the listener-wide limits exactly as before the seam existed.
+        // the transport enforces the listener-wide limits exactly as before the seam existed. The
+        // hooks fill the exchange's own collection, so it is sized for every feature the exchange is
+        // expected to carry, not only the hooks' (on the fast path the exchange context creates and
+        // sizes it).
         HttpFeatureCollection? features = null;
         HttpExchangeInterceptorRequestContext? interception = null;
 
         if (interceptors.Length > 0)
         {
-            features = new HttpFeatureCollection();
+            features = new HttpFeatureCollection(featureCapacity);
             interception = new HttpExchangeInterceptorRequestContext
             {
                 Version = HttpVersion.Http11,
@@ -311,6 +319,7 @@ internal static class Http1MessageReader
                 connectionToken,
                 keepAlive,
                 requestBody,
+                featureCapacity,
                 features)
             {
                 AddedResponseInterceptors = interception is { ResponseInterceptors.Count: > 0 } ? interception.ResponseInterceptors : null,

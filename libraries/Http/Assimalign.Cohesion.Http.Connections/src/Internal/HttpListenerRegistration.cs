@@ -15,16 +15,16 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class HttpListenerRegistration
 {
     private readonly Func<IConnectionListener>? _streamListenerFactory;
-    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
-    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
         Func<IConnectionListener>? streamListenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? streamConnectionFactoryBuilder,
         Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
     {
         Protocol = protocol;
         _streamListenerFactory = streamListenerFactory;
@@ -47,14 +47,14 @@ internal sealed class HttpListenerRegistration
     public static HttpListenerRegistration ForStream(
         HttpProtocol protocol,
         Func<IConnectionListener> listenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(protocol, listenerFactory, connectionFactoryBuilder, multiplexedListenerFactory: null, multiplexedConnectionFactoryBuilder: null);
     }
 
     public static HttpListenerRegistration ForMultiplexed(
         Func<IMultiplexedConnectionListener> listenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(HttpProtocol.Http30, streamListenerFactory: null, streamConnectionFactoryBuilder: null, listenerFactory, connectionFactoryBuilder);
     }
@@ -75,16 +75,17 @@ internal sealed class HttpListenerRegistration
 
     /// <summary>
     /// Builds the stream connection factory, binding it to the listener-wide request/response
-    /// interceptors (which are only snapshotted once the listener is constructed); the
-    /// registration's captured per-version options (limits) are already closed over by the
-    /// builder.
+    /// interceptors and per-exchange feature capacity (which are only snapshotted once the listener
+    /// is constructed); the registration's captured per-version options (limits) are already closed
+    /// over by the builder.
     /// </summary>
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
+    /// <param name="featureCapacity">The snapshotted number of features each exchange is expected to carry.</param>
     /// <returns>The stream connection factory.</returns>
-    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity)
     {
-        return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
+        return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors, featureCapacity);
     }
 
     /// <summary>
@@ -98,16 +99,17 @@ internal sealed class HttpListenerRegistration
 
     /// <summary>
     /// Builds the multiplexed (HTTP/3) connection factory, binding it to the listener-wide
-    /// request/response interceptors (which are only snapshotted once the listener is
-    /// constructed); the registration's captured HTTP/3 options are already closed over by the
-    /// builder.
+    /// request/response interceptors and per-exchange feature capacity (which are only snapshotted
+    /// once the listener is constructed); the registration's captured HTTP/3 options are already
+    /// closed over by the builder.
     /// </summary>
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
+    /// <param name="featureCapacity">The snapshotted number of features each exchange is expected to carry.</param>
     /// <returns>The multiplexed connection factory.</returns>
-    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity)
     {
-        return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
+        return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors, featureCapacity);
     }
 
     /// <summary>

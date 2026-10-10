@@ -24,8 +24,9 @@ internal sealed class Http3Context : TransportHttpContext
         IConnection streamConnection,
         long streamId,
         Http3RequestBodyStream requestBody,
+        int featureCapacity,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, features, streamConnection.ConnectionClosed)
+        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, featureCapacity, features, streamConnection.ConnectionClosed)
     {
         StreamConnection = streamConnection;
         StreamId = streamId;

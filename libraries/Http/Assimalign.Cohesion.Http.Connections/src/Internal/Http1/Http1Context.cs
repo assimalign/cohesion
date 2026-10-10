@@ -17,8 +17,9 @@ internal sealed class Http1Context : TransportHttpContext
         CancellationToken requestAborted,
         bool keepAlive,
         Http1RequestBodyStream requestBody,
+        int featureCapacity,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, featureCapacity, features)
     {
         KeepAlive = keepAlive;
         _requestBody = requestBody;

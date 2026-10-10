@@ -57,6 +57,10 @@ internal static class HttpRequestInterceptorPipeline
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
     /// message body; body hooks are skipped when <see langword="true"/>.
     /// </param>
+    /// <param name="featureCapacity">
+    /// The number of features each exchange is expected to carry. The collection the hooks fill
+    /// becomes the exchange's own, so it is sized for all of them, not just the hooks'.
+    /// </param>
     /// <returns>
     /// The hook-populated feature collection (<see langword="null"/> on the zero-interceptor fast
     /// path), the effective cap (<paramref name="maxRequestBodySize"/> unchanged on the fast path),
@@ -74,7 +78,8 @@ internal static class HttpRequestInterceptorPipeline
         TransportHttpRequestHead head,
         HttpConnectionInfo connectionInfo,
         long? maxRequestBodySize,
-        bool isConnect)
+        bool isConnect,
+        int featureCapacity)
     {
         // Zero registered interceptors keeps the exact pre-seam fast path: no context, no feature
         // collection, no hook dispatch, and the request keeps its original body stream. The cap is
@@ -84,7 +89,7 @@ internal static class HttpRequestInterceptorPipeline
             return new HttpRequestInterceptionResult(null, maxRequestBodySize, head.Body);
         }
 
-        HttpFeatureCollection features = new();
+        HttpFeatureCollection features = new(featureCapacity);
         HttpExchangeInterceptorRequestContext context = new()
         {
             Version = version,

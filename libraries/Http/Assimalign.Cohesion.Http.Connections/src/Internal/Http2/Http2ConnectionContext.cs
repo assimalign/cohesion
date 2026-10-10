@@ -168,6 +168,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
 
+    // The number of features each exchange is expected to carry; its feature collection is sized
+    // for them when the stream's context is created.
+    private readonly int _featureCapacity;
+
     // Operator-tunable HTTP/2 abuse limits and the per-connection flood detectors that enforce the
     // frame-rate attack classes (rapid reset, SETTINGS flood, PING flood). See Http2ConnectionListenerOptions.Http2Limits. The
     // guard is driven solely from the frame pump — the connection's single inbound frame
@@ -179,7 +183,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // set its own), advertising the listener's HTTP/3 endpoint. Null when advertisement is off.
     private readonly string? _altSvcHeaderValue;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
@@ -193,7 +197,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         _remoteSettings = new Http2ConnectionSettings();
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
-        _readyContexts = Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
+        _featureCapacity = featureCapacity;
+        _readyContexts =Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = true,
@@ -2009,7 +2014,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 GetScheme(),
                 OnRequestBodyConsumedAsync,
                 _requestInterceptors,
-                _http2Limits.MaxRequestBodySize).ConfigureAwait(false);
+                _http2Limits.MaxRequestBodySize,
+                _featureCapacity).ConfigureAwait(false);
         }
         catch (HPackDecodingException error)
         {

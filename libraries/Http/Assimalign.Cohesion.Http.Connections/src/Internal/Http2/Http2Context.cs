@@ -10,8 +10,9 @@ internal sealed class Http2Context : TransportHttpContext
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
+        int featureCapacity,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http20, requestHead, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http20, requestHead, connectionInfo, requestAborted, featureCapacity, features)
     {
         Stream = stream;
         ExtendedConnectProtocol = requestHead.Protocol;

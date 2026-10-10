@@ -18,6 +18,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly int _featureCapacity;
     private readonly string? _altSvcHeaderValue;
 
     // A graceful close (BeginGracefulClose) and the receive loop meet under this lock: the close marks
@@ -28,12 +29,13 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     private Http1Context? _exchangeInFlight;
     private Http1ReadTimeout? _pendingRead;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
+    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _limits = limits;
         _interceptors = interceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -267,6 +269,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 GetScheme(),
                 _limits,
                 _interceptors,
+                _featureCapacity,
                 _timeProvider,
                 readTimeout,
                 cancellationToken).ConfigureAwait(false);

@@ -65,22 +65,27 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         IHttpExchangeInterceptor[] interceptors = FilterByScope(snapshot, HttpInterceptorScopes.Request);
         IHttpExchangeInterceptor[] responseInterceptors = FilterByScope(snapshot, HttpInterceptorScopes.Response);
 
+        // Every exchange's feature collection is sized for this many features when the transport
+        // creates it, so the features the host stamps on each exchange do not grow it.
+        int featureCapacity = options.ExchangeFeatureCapacity;
+
         HttpProtocol protocols = HttpProtocol.None;
 
         // Each registration carries the factory that turns an accepted transport connection into
         // its protocol-specific HttpConnection; the accept loops dispatch to that factory rather
-        // than switching on the protocol. Factories bind to the listener-wide interceptors here
-        // (once they are snapshotted); each registration's version-specific options (limits,
-        // QPACK) were already captured at Use* time and are closed over by its factory builder.
+        // than switching on the protocol. Factories bind to the listener-wide interceptors and
+        // feature capacity here (once they are snapshotted); each registration's version-specific
+        // options (limits, QPACK) were already captured at Use* time and are closed over by its
+        // factory builder.
         foreach (HttpListenerRegistration registration in options.Registrations)
         {
             if (registration.IsMultiplexed)
             {
-                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(interceptors, responseInterceptors), registration.CreateMultiplexedListener()));
+                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(interceptors, responseInterceptors, featureCapacity), registration.CreateMultiplexedListener()));
             }
             else
             {
-                _streamListeners.Add((registration.CreateStreamConnectionFactory(interceptors, responseInterceptors), registration.CreateStreamListener()));
+                _streamListeners.Add((registration.CreateStreamConnectionFactory(interceptors, responseInterceptors, featureCapacity), registration.CreateStreamListener()));
             }
 
             protocols |= registration.Protocol;

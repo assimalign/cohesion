@@ -25,8 +25,8 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// <c>Use*</c> overloads that accept a configure callback
 /// (<see cref="Http1ConnectionListenerOptions"/>, <see cref="Http2ConnectionListenerOptions"/>,
 /// <see cref="Http3ConnectionListenerOptions"/>); the overloads without a callback register with
-/// conservative defaults. Cross-version concerns — the request/response interceptors and the
-/// accept backlog — remain listener-wide on this type.
+/// conservative defaults. Cross-version concerns — the request/response interceptors, the
+/// accept backlog, and the per-exchange feature capacity — remain listener-wide on this type.
 /// </para>
 /// <para>
 /// TLS is not configured here: compose it onto the listener before registration (for example via
@@ -37,6 +37,7 @@ namespace Assimalign.Cohesion.Http.Connections;
 public sealed class HttpConnectionListenerOptions
 {
     private int _backlogCapacity = 512;
+    private int _exchangeFeatureCapacity;
 
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
 
@@ -116,6 +117,40 @@ public sealed class HttpConnectionListenerOptions
     }
 
     /// <summary>
+    /// Gets or sets the number of features each exchange is expected to carry. The transport sizes
+    /// every exchange's <see cref="HttpFeatureCollection"/> for that many features when it creates it,
+    /// so installing them never grows the collection. Defaults to <c>0</c>, which leaves the
+    /// collection to grow as features are installed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Count every feature an ordinary exchange carries: the ones the registered
+    /// <see cref="Interceptors"/> attach while the request is parsed, and the ones the host and its
+    /// middleware install before the application reads them. A collection that outgrows the
+    /// capacity still works; it grows exactly as an unsized one does. A capacity larger than needed
+    /// costs memory on every exchange, so prefer the count an ordinary exchange carries over the
+    /// largest count any exchange can carry.
+    /// </para>
+    /// <para>
+    /// The value is a sizing hint and changes no behavior. It applies to every protocol the listener
+    /// serves, and like the interceptors it is read once, when the
+    /// <see cref="HttpConnectionListener"/> is constructed.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the assigned value is negative.
+    /// </exception>
+    public int ExchangeFeatureCapacity
+    {
+        get => _exchangeFeatureCapacity;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _exchangeFeatureCapacity = value;
+        }
+    }
+
+    /// <summary>
     /// Serves HTTP/1.1 over the supplied connection listener, with default configuration.
     /// </summary>
     /// <param name="listener">The listener producing the transport connections.</param>
@@ -150,7 +185,7 @@ public sealed class HttpConnectionListenerOptions
         Http1ConnectionListenerOptions http1Options = new();
         configure(http1Options);
 
-        return UseStreamListener(HttpProtocol.Http11, listener, (interceptors, responseInterceptors) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http11, listener, (interceptors, responseInterceptors, featureCapacity) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     /// <summary>
@@ -189,7 +224,7 @@ public sealed class HttpConnectionListenerOptions
         Http1ConnectionListenerOptions http1Options = new();
         configure(http1Options);
 
-        return UseStreamListener(HttpProtocol.Http11, listenerFactory, (interceptors, responseInterceptors) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http11, listenerFactory, (interceptors, responseInterceptors, featureCapacity) => new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     /// <summary>
@@ -227,7 +262,7 @@ public sealed class HttpConnectionListenerOptions
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     /// <summary>
@@ -266,7 +301,7 @@ public sealed class HttpConnectionListenerOptions
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     /// <summary>
@@ -334,7 +369,7 @@ public sealed class HttpConnectionListenerOptions
         Action<Http1ConnectionListenerOptions> configureHttp1,
         Action<Http2ConnectionListenerOptions> configureHttp2)
     {
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder =
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder =
             CreateAlpnConnectionFactoryBuilder(configureHttp1, configureHttp2);
 
         return UseStreamListener(HttpProtocol.Http11 | HttpProtocol.Http20, listener, connectionFactoryBuilder);
@@ -382,7 +417,7 @@ public sealed class HttpConnectionListenerOptions
         Action<Http1ConnectionListenerOptions> configureHttp1,
         Action<Http2ConnectionListenerOptions> configureHttp2)
     {
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder =
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder =
             CreateAlpnConnectionFactoryBuilder(configureHttp1, configureHttp2);
 
         return UseStreamListener(HttpProtocol.Http11 | HttpProtocol.Http20, listenerFactory, connectionFactoryBuilder);
@@ -460,15 +495,16 @@ public sealed class HttpConnectionListenerOptions
         configure(http3Options);
 
         // The QPACK options and limits are captured now (registration time); the listener-wide
-        // request/response interceptors are bound when the HttpConnectionListener snapshots them.
+        // request/response interceptors and feature capacity are bound when the
+        // HttpConnectionListener snapshots them.
         Registrations.Add(HttpListenerRegistration.ForMultiplexed(
             listenerFactory,
-            (interceptors, responseInterceptors) => new Http3ConnectionFactory(http3Options.Limits, interceptors, responseInterceptors, http3Options.QPack)));
+            (interceptors, responseInterceptors, featureCapacity) => new Http3ConnectionFactory(http3Options.Limits, interceptors, responseInterceptors, featureCapacity, http3Options.QPack)));
 
         return this;
     }
 
-    private static Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> CreateAlpnConnectionFactoryBuilder(
+    private static Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> CreateAlpnConnectionFactoryBuilder(
         Action<Http1ConnectionListenerOptions> configureHttp1,
         Action<Http2ConnectionListenerOptions> configureHttp2)
     {
@@ -476,23 +512,23 @@ public sealed class HttpConnectionListenerOptions
         ArgumentNullException.ThrowIfNull(configureHttp2);
 
         // Both protocols' options are captured now (registration time), exactly as UseHttp1/UseHttp2
-        // capture theirs; the listener-wide interceptors are bound when the HttpConnectionListener
-        // snapshots them, and both protocols share that one snapshot.
+        // capture theirs; the listener-wide interceptors and feature capacity are bound when the
+        // HttpConnectionListener snapshots them, and both protocols share that one snapshot.
         Http1ConnectionListenerOptions http1Options = new();
         configureHttp1(http1Options);
 
         Http2ConnectionListenerOptions http2Options = new();
         configureHttp2(http2Options);
 
-        return (interceptors, responseInterceptors) => new HttpAlpnConnectionFactory(
-            new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors),
-            new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
+        return (interceptors, responseInterceptors, featureCapacity) => new HttpAlpnConnectionFactory(
+            new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity),
+            new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity));
     }
 
     private HttpConnectionListenerOptions UseStreamListener(
         HttpProtocol protocol,
         IConnectionListener listener,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listener);
 
@@ -506,7 +542,7 @@ public sealed class HttpConnectionListenerOptions
     private HttpConnectionListenerOptions UseStreamListener(
         HttpProtocol protocol,
         Func<IConnectionListener> listenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
 

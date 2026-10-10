@@ -30,6 +30,10 @@ internal abstract class TransportHttpContext : HttpContext
     /// <param name="requestHead">The parsed request head.</param>
     /// <param name="connectionInfo">The connection's endpoints.</param>
     /// <param name="requestAborted">The transport's token that aborts the exchange.</param>
+    /// <param name="featureCapacity">
+    /// The number of features the exchange is expected to carry, which sizes the feature collection
+    /// this constructor creates when <paramref name="features"/> is <see langword="null"/>.
+    /// </param>
     /// <param name="features">The features request-parse interceptors attached, or <see langword="null"/>.</param>
     /// <param name="streamAborted">
     /// A second transport token that aborts the exchange — the HTTP/3 request stream's
@@ -41,6 +45,7 @@ internal abstract class TransportHttpContext : HttpContext
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
+        int featureCapacity,
         IHttpFeatureCollection? features = null,
         CancellationToken streamAborted = default)
     {
@@ -62,13 +67,13 @@ internal abstract class TransportHttpContext : HttpContext
         // attached features during the read (see IHttpExchangeInterceptor); it is used directly —
         // no defaults-wrapper layer, which would add a second dictionary probe to every Get on
         // the hot path. A null/foreign collection degrades gracefully: null gets a fresh empty
-        // collection (the zero-interceptor fast path), and a non-HttpFeatureCollection
-        // implementation is wrapped as a read-through defaults source. On disposal the effective
-        // collection is walked and every feature implementing IDisposable / IAsyncDisposable is
-        // disposed.
+        // collection sized for the features the exchange is expected to carry (the zero-interceptor
+        // fast path), and a non-HttpFeatureCollection implementation is wrapped as a read-through
+        // defaults source. On disposal the effective collection is walked and every feature
+        // implementing IDisposable / IAsyncDisposable is disposed.
         Features = features switch
         {
-            null => new HttpFeatureCollection(),
+            null => new HttpFeatureCollection(featureCapacity),
             HttpFeatureCollection concrete => concrete,
             _ => new HttpFeatureCollection(features),
         };

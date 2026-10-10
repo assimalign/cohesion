@@ -88,6 +88,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    // The number of features each exchange is expected to carry; its feature collection is sized
+    // for them when the request stream's context is created.
+    private readonly int _featureCapacity;
     // RFC 9218 §7.2 — the effective priority of request streams the peer has
     // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
     // engine's observable priority state; response ordering across streams is
@@ -107,6 +110,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         Http3ConnectionListenerOptions.Http3Limits limits,
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
+        int featureCapacity,
         Http3QPackOptions qpackOptions)
     {
         _connection = connection;
@@ -115,6 +119,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
         // A copy, not the listener's live instance: the SETTINGS written when the receive loop starts, the
         // decoder state, and the static-only decode must all use the values this connection advertises,
         // even if the host changes the listener's options after the connection opens.
@@ -1521,7 +1526,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 requestHead,
                 connectionInfo,
                 _limits.MaxRequestBodySize,
-                isConnect).ConfigureAwait(false);
+                isConnect,
+                _featureCapacity).ConfigureAwait(false);
         }
         catch (HttpRequestRejectedException)
         {
@@ -1553,6 +1559,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             streamConnection,
             requestStreamId,
             body,
+            _featureCapacity,
             interception.Features)
         {
             AddedResponseInterceptors = interception.ResponseInterceptors,
