@@ -14,9 +14,10 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 /// <summary>
 /// Owner decision 35 (#1380): a request feature is an <see cref="IHttpFeature"/> singleton. The host
-/// rejects, each with an error naming the registration, a scoped or transient feature and a feature
-/// registered under a narrower contract when the application is built, and a disposable feature when the
-/// pipeline snapshots the features it stamps onto every exchange.
+/// rejects, each with an error naming the registration, a scoped or transient feature, a feature
+/// registered under a narrower contract, and a disposable feature instance or implementation type when the
+/// application is built, and a disposable feature a factory produces when the pipeline snapshots the
+/// features it stamps onto every exchange.
 /// </summary>
 public class WebApplicationFeatureRegistrationTests
 {
@@ -115,12 +116,64 @@ public class WebApplicationFeatureRegistrationTests
         application.Context.Features.ShouldContain(feature => feature is IRouterFeature);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature should fail the pipeline build and name the feature")]
-    public async Task BuildPipeline_WithDisposableFeature_ShouldThrowNamingTheFeature()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature instance should fail the build and name the registration")]
+    public void Build_WithDisposableFeatureInstance_ShouldThrowNamingTheRegistration()
     {
         // Arrange
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        int index = builder.Services.Container.Count;
         ((IWebApplicationBuilder)builder).AddFeature(new DisposableFeature());
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        exception.Message.ShouldContain($"'{nameof(DisposableFeature)}'", Case.Sensitive);
+        exception.Message.ShouldContain($"builder.Services[{index}]", Case.Sensitive);
+        exception.Message.ShouldContain(typeof(DisposableFeature).FullName!, Case.Sensitive);
+        exception.Message.ShouldContain("is disposable", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: An async-disposable feature instance should fail the build")]
+    public void Build_WithAsyncDisposableFeatureInstance_ShouldThrowNamingTheRegistration()
+    {
+        // Arrange
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        int index = builder.Services.Container.Count;
+        builder.Services.AddSingleton<IHttpFeature>(new AsyncDisposableFeature());
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        exception.Message.ShouldContain($"builder.Services[{index}]", Case.Sensitive);
+        exception.Message.ShouldContain(typeof(AsyncDisposableFeature).FullName!, Case.Sensitive);
+        exception.Message.ShouldContain("is disposable", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature implementation type should fail the build")]
+    public void Build_WithDisposableFeatureImplementationType_ShouldThrowNamingTheRegistration()
+    {
+        // Arrange
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        int index = builder.Services.Container.Count;
+        builder.Services.AddSingleton<IHttpFeature, DisposableFeature>();
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        exception.Message.ShouldContain($"builder.Services[{index}]", Case.Sensitive);
+        exception.Message.ShouldContain(typeof(DisposableFeature).FullName!, Case.Sensitive);
+        exception.Message.ShouldContain("is disposable", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature from a factory should fail the pipeline build and name the feature")]
+    public async Task BuildPipeline_WithDisposableFactoryFeature_ShouldThrowNamingTheFeature()
+    {
+        // Arrange
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        ((IWebApplicationBuilder)builder).AddFeature(_ => new DisposableFeature());
         await using WebApplication application = builder.Build();
 
         // Act
@@ -150,15 +203,15 @@ public class WebApplicationFeatureRegistrationTests
         exception.Message.ShouldContain("is disposable", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature should fail the start before any request")]
-    public async Task StartAsync_WithDisposableFeature_ShouldFailBeforeServing()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature from a factory should fail the start before any request")]
+    public async Task StartAsync_WithDisposableFactoryFeature_ShouldFailBeforeServing()
     {
         // Arrange
         DisposableFeature feature = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.Server.UseServer(options => options.UseHttp1(
             tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, 0)));
-        ((IWebApplicationBuilder)builder).AddFeature(feature);
+        ((IWebApplicationBuilder)builder).AddFeature(_ => feature);
         await using WebApplication application = builder.Build();
 
         // Act

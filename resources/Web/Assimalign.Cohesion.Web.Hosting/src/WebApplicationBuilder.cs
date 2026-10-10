@@ -236,13 +236,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <c>IWebApplicationBuilder.AddFeature</c> and the feature packages' <c>builder.Services.Add&lt;Feature&gt;</c>
     /// verbs register it: the host stamps the same instances onto every exchange, and middleware reads
     /// them while the pipeline is composed. A scoped or transient <see cref="IHttpFeature"/> registration,
-    /// or a registration under a contract derived from <see cref="IHttpFeature"/>, fails the build.
+    /// a registration under a contract derived from <see cref="IHttpFeature"/>, or an
+    /// <see cref="IHttpFeature"/> instance or implementation type that is <see cref="IDisposable"/> or
+    /// <see cref="IAsyncDisposable"/> fails the build. A disposable feature a factory registration produces
+    /// is rejected when the pipeline is built, because the product exists only once it is resolved.
     /// </remarks>
     /// <returns>The built application.</returns>
     /// <exception cref="InvalidOperationException">
     /// The application has already been built; the options ask for concurrent service start or stop;
-    /// an <see cref="IHttpFeature"/> registration is not a singleton; or a registration's service type
-    /// derives from <see cref="IHttpFeature"/> without being <see cref="IHttpFeature"/>. Each feature
+    /// an <see cref="IHttpFeature"/> registration is not a singleton; a registration's service type
+    /// derives from <see cref="IHttpFeature"/> without being <see cref="IHttpFeature"/>; or an
+    /// <see cref="IHttpFeature"/> registration's instance or implementation type is disposable. Each feature
     /// error names the registration's position in <see cref="Services"/>.
     /// </exception>
     public WebApplication Build()
@@ -442,8 +446,13 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     // One scoped item makes the whole aggregate unresolvable from the root, and a transient item hands
     // each reader its own instance, so routes mapped into one router are served by another. A
     // registration under a narrower contract (IRouterFeature, say) never joins the aggregate, so it is
-    // never stamped. The provider's own validation sees neither: this module registers factories and
-    // instances, whose lifetimes and products it does not inspect. Checked before the build adds its
+    // never stamped. An exchange disposes the disposable features it carries when it ends, so a
+    // disposable feature, stamped as one shared instance, would be disposed after its first request.
+    // The provider's own validation sees none of these: this module registers factories and
+    // instances, whose lifetimes and products it does not inspect. The disposal check here covers the
+    // registrations that carry their product's type in the descriptor (an instance, as AddFeature(instance)
+    // and every static-factory verb register, or an implementation type); a factory's product exists only
+    // once it is resolved, so WebApplication's pipeline build checks it. Checked before the build adds its
     // own registrations, so a rejected build leaves the builder as the caller composed it.
     private void ValidateFeatureRegistrations()
     {
@@ -461,6 +470,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                         "them while the pipeline is composed. Register it with AddSingleton<IHttpFeature>, " +
                         "IWebApplicationBuilder.AddFeature, or the feature package's builder.Services.Add<Feature> verb.");
                 }
+
+                if (IsDisposableImplementation(descriptor))
+                {
+                    string name = descriptor.ImplementationInstance is IHttpFeature feature ? $" '{feature.Name}'" : string.Empty;
+                    throw new InvalidOperationException(
+                        $"The request feature registration{name} {DescribeRegistration(descriptor, index)} is " +
+                        "disposable. The host stamps the same feature instance onto every exchange, and an exchange " +
+                        "disposes the disposable features it carries when it ends, so this instance would be disposed " +
+                        "after its first request. Keep disposable per-request state in a feature that middleware " +
+                        "installs on each exchange.");
+                }
             }
             else if (typeof(IHttpFeature).IsAssignableFrom(descriptor.ServiceType))
             {
@@ -474,6 +494,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
             index++;
         }
+    }
+
+    private static bool IsDisposableImplementation(ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is { } instance)
+        {
+            return instance is IDisposable or IAsyncDisposable;
+        }
+
+        return descriptor.ImplementationType is { } type
+            && (typeof(IDisposable).IsAssignableFrom(type) || typeof(IAsyncDisposable).IsAssignableFrom(type));
     }
 
     private static string DescribeRegistration(ServiceDescriptor descriptor, int index)

@@ -282,9 +282,10 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   instance registration implies for a consumer, so a module whose aggregate has a lifetime
   contract checks the descriptors itself in `Build`, before `MakeReadOnly`, and names the
   offending registration. Precedent (owner decision 35, 2026-10-09): `WebApplicationBuilder.Build`
-  rejects a scoped or transient `IHttpFeature` registration and a registration under a contract
-  derived from `IHttpFeature`; the pipeline build, which resolves the aggregate, rejects a
-  disposable feature.
+  rejects a scoped or transient `IHttpFeature` registration, a registration under a contract
+  derived from `IHttpFeature`, and a disposable `IHttpFeature` instance or implementation type;
+  the pipeline build, which resolves the aggregate, rejects a disposable feature a factory
+  registration produced.
 - **The service type is the lifecycle phase; registration order is the order within a phase.**
   A single-phase area registers everything as `IHostService` and places its own services by
   *when* they register: telemetry in the builder constructor (first), hard-wired endpoints in

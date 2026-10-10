@@ -106,8 +106,9 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
 
         // Owner decision 35 (#1380): an exchange disposes every disposable feature it carries when it
         // ends, so a disposable application feature, stamped as one shared instance, would be disposed
-        // after its first request and handed to every later one. Builder-time checks cannot see this:
-        // a factory's product is known only once it is resolved, which is here.
+        // after its first request and handed to every later one. WebApplicationBuilder.Build already
+        // rejected the registrations that carry their product's type (an instance or an implementation
+        // type); a factory's product is known only once it is resolved, which is here.
         foreach (IHttpFeature feature in features)
         {
             if (feature is IDisposable or IAsyncDisposable)

@@ -81,9 +81,12 @@ by kind:
 - **Every request feature is a singleton (decision 35).** The host stamps one snapshot of the
   `IHttpFeature` aggregate onto every exchange, and middleware reads it while the pipeline is
   composed. `WebApplicationBuilder.Build` rejects an `IHttpFeature` registration that is scoped
-  or transient, and a registration under a contract derived from `IHttpFeature` (it would never
-  be stamped); the pipeline build rejects a disposable feature (the exchange would dispose the
-  shared instance after its first request). Each error names the registration. Request-scoped
+  or transient, a registration under a contract derived from `IHttpFeature` (it would never
+  be stamped), and an `IHttpFeature` instance or implementation type that is disposable (the
+  exchange would dispose the shared instance after its first request). A factory registration's
+  product exists only once it is resolved, so the pipeline build rejects a disposable one; that
+  covers the builder-template verbs and `AddFeature(factory)`, and fails host start before any
+  request. Each error names the registration. Request-scoped
   services for handlers are a separate future decision — a lazily created scope owned by the
   server, for a separate service type — never a looser lifetime on `IHttpFeature`.
 - **`IWebApplicationBuilder.AddFeature` (both overloads) stays the raw path** for a feature no

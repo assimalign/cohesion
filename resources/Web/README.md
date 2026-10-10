@@ -88,8 +88,9 @@ Owner decisions 34 and 35 (2026-10-09, #1380) set how a feature reaches an appli
 - **Pipeline verbs stay `extension(...)` members** of the feature package: `Use<Feature>` on
   `IWebApplicationPipelineBuilder`, `Map*` on the pipeline and router surfaces.
 - **Every `IHttpFeature` registration is a singleton.** `Web.Hosting` rejects a scoped or transient
-  one, and one registered under a narrower contract, at `Build`, and a disposable feature at the
-  pipeline build; each error names the registration.
+  one, one registered under a narrower contract, and a disposable instance or implementation type at
+  `Build`, and a disposable feature a factory registration produces at the pipeline build, where the
+  product first exists; each error names the registration.
 - **`IWebApplicationBuilder.AddFeature` stays the raw path**, for features no package ships a verb
   for.
 

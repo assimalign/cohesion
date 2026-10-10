@@ -769,13 +769,16 @@ enforces it where it can see each violation; every error names the registration:
 | --- | --- | --- | --- |
 | Lifetime | `WebApplicationBuilder.Build`, before `MakeReadOnly` | an `IHttpFeature` registration that is scoped or transient | One scoped item makes the whole aggregate unresolvable from the root ("scoped from root" at host start); a transient one hands each reader its own instance, so routes mapped into one router are served by another |
 | Contract | `WebApplicationBuilder.Build`, before `MakeReadOnly` | a registration whose service type derives from `IHttpFeature` but is not `IHttpFeature` | It never joins the aggregate, so it is never stamped |
-| Disposal | the pipeline build, where the aggregate is resolved | a resolved feature that is `IDisposable` or `IAsyncDisposable` | The exchange disposes the disposable features it carries at teardown, so the shared instance would be disposed after its first request |
+| Disposal, descriptor | `WebApplicationBuilder.Build`, before `MakeReadOnly` | an `IHttpFeature` instance or implementation type that is `IDisposable` or `IAsyncDisposable` (`AddFeature(instance)`, every static-factory verb, `AddSingleton<IHttpFeature, T>()`) | The exchange disposes the disposable features it carries at teardown, so the shared instance would be disposed after its first request |
+| Disposal, factory product | the pipeline build, where the aggregate is resolved | a feature a factory registration produced that is `IDisposable` or `IAsyncDisposable` (the builder-template verbs, `AddFeature(factory)`) | The same; the product exists only once the factory runs |
 
 The provider's own `ValidateOnBuild` sees none of these: this module registers factories and
-instances, whose implied lifetimes and products it does not inspect. The first two checks run
+instances, whose implied lifetimes and products it does not inspect. The `Build` checks run
 before `Build` adds its own registrations, so a rejected build leaves the builder as its caller
-composed it. The disposal check needs the product, which a factory registration yields only when
-it is resolved. Request-scoped services for handlers are a separate, future decision: a lazily
+composed it. A factory registration's product exists only when it is resolved, so its disposal
+check runs at the pipeline build, which still fails host start before any request. Decision 35
+reads "at `Build`" for all three rejections; the factory-product case is the one place the check
+cannot run there. Request-scoped services for handlers are a separate, future decision: a lazily
 created scope owned by the server, for a separate service type, never a looser `IHttpFeature`
 lifetime. A measured analysis found no performance or functional gain in scoped or transient
 features (plan §7.4, decision 35).
@@ -785,10 +788,10 @@ How a registration reaches an exchange, and where each check stops it:
 ```mermaid
 flowchart TD
     Verb["builder.Services.Add&lt;Feature&gt;(...)<br/>or IWebApplicationBuilder.AddFeature"] --> Descriptor["IHttpFeature descriptor<br/>in builder.Services"]
-    Descriptor --> Build{"WebApplicationBuilder.Build:<br/>singleton, typed IHttpFeature?"}
+    Descriptor --> Build{"WebApplicationBuilder.Build:<br/>singleton, typed IHttpFeature,<br/>instance or type not disposable?"}
     Build -->|no| BuildError["InvalidOperationException<br/>naming builder.Services[i]"]
     Build -->|yes| Provider["MakeReadOnly, then the provider"]
-    Provider --> Snapshot{"Pipeline build:<br/>any feature disposable?"}
+    Provider --> Snapshot{"Pipeline build:<br/>any factory product disposable?"}
     Snapshot -->|yes| StartError["InvalidOperationException<br/>naming the feature; start fails"]
     Snapshot -->|no| Stamp["Stamped onto every exchange"]
 ```
