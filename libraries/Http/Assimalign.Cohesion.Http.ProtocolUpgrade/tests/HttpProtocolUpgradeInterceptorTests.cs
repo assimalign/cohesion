@@ -316,6 +316,30 @@ public class HttpProtocolUpgradeInterceptorTests
         await Should.ThrowAsync<InvalidOperationException>(async () => await upgrade.AcceptAsync());
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: A Set-Cookie value the 101 cannot carry is refused before the connection is claimed")]
+    public async Task AcceptAsync_OnInvalidSetCookieValue_ShouldRefuseBeforeClaimingTheConnection()
+    {
+        // Arrange — the second of two cookies carries a line break that would start a field of its own.
+        MemoryStream wire = new();
+        FakeExchangeControl takeover = new(wire);
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, takeover, out HttpHeaderCollection responseHeaders);
+        responseHeaders[HttpHeaderKey.SetCookie] = new HttpHeaderValue(new[] { "a=1", "b=2\r\nLocation: /evil" });
+        IHttpProtocolUpgrade upgrade = context.Upgrade!;
+
+        // Act
+        HttpException refusal = await Should.ThrowAsync<HttpException>(async () => await upgrade.AcceptAsync());
+
+        // Assert — nothing written and the connection still the transport's.
+        refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        refusal.Message.ShouldNotContain("evil");
+        wire.Length.ShouldBe(0);
+        takeover.TakenOver.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: A response field with HTAB inside its value rides the 101")]
     public async Task AcceptAsync_OnValueWithInnerTab_ShouldEmitIt()
     {

@@ -228,6 +228,27 @@ public class HttpResponseFieldSyntaxTests
         await ShouldAnswerHttp2ReplacementAsync(peer, context);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/2 Set-Cookie value it cannot carry should be refused before a frame is written")]
+    public async Task Http2SendAsync_OnInvalidSetCookieValue_ShouldRefuseBeforeWriting()
+    {
+        // Arrange — Set-Cookie goes out one field line per value, through its own branch of the encoder,
+        // so each value is checked on its own.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/echo"));
+        IHttpContext context = await peer.ReceiveContextAsync();
+        context.Response.Headers[HttpHeaderKey.SetCookie] = new HttpHeaderValue(new[] { "a=1", "b=2\r\nLocation: /evil" });
+
+        // Act
+        HttpException refusal = await Should.ThrowAsync<HttpException>(() => peer.ConnectionContext.SendAsync(context).AsTask());
+        await peer.SyncAsync();
+
+        // Assert
+        refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        context.HasResponseStarted.ShouldBeFalse();
+        peer.Output.ForStream(1).ShouldBeEmpty();
+        await ShouldAnswerHttp2ReplacementAsync(peer, context);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/2 connection-specific field it cannot carry should be refused although it is never sent")]
     public async Task Http2SendAsync_OnInvalidConnectionSpecificField_ShouldRefuse()
     {
@@ -423,6 +444,24 @@ public class HttpResponseFieldSyntaxTests
 
         // Assert
         refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        await ShouldAnswerHttp3ReplacementAsync(stream, connection, context);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/3 Set-Cookie value it cannot carry should be refused before a frame is written")]
+    public async Task Http3SendAsync_OnInvalidSetCookieValue_ShouldRefuseBeforeWriting()
+    {
+        // Arrange — Set-Cookie goes out one field line per value, through its own branch of the encoder,
+        // so each value is checked on its own.
+        TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/echo", "https", "a"));
+        (IHttpConnectionContext connection, IHttpContext context) = await ReceiveHttp3Async(stream);
+        context.Response.Headers[HttpHeaderKey.SetCookie] = new HttpHeaderValue(new[] { "a=1", "b=2\r\nLocation: /evil" });
+
+        // Act
+        HttpException refusal = await Should.ThrowAsync<HttpException>(() => connection.SendAsync(context).AsTask());
+
+        // Assert — the replacement's HEADERS frame is the first frame on the stream.
+        refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        context.HasResponseStarted.ShouldBeFalse();
         await ShouldAnswerHttp3ReplacementAsync(stream, connection, context);
     }
 
