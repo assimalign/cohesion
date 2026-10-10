@@ -188,6 +188,9 @@ internal sealed partial class Http2ConnectionContext
     /// the stream is then removed when the peer has ended its side too, or reset with <c>NO_ERROR</c>
     /// to stop a peer still sending and reclaim the stream's concurrency slot (RFC 9113 §8.1), as
     /// after any response that completes before its request.</description></item>
+    /// <item><description><b>The wait for that end is cancelled</b> — the stream is reset with
+    /// <c>CANCEL</c> before the cancellation propagates (#1075), unless the end got out first, in which
+    /// case it is removed or reset with <c>NO_ERROR</c> as above.</description></item>
     /// </list>
     /// The after-response interceptor hooks do not run: the tunnel took the exchange over.
     /// </remarks>
@@ -215,7 +218,20 @@ internal sealed partial class Http2ConnectionContext
             return;
         }
 
-        await tunnel.CloseAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await tunnel.CloseAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // #1075 — the tunnel's 200 head is on the wire, so its stream can carry nothing else, and
+            // the end of the tunnel is still being written in the background with nothing to remove the
+            // stream afterwards: it would keep its slot and hold the graceful-close drain. Reset it now,
+            // as a cancelled send does a response it abandoned; an end that gets out first is finished
+            // like any completed response instead.
+            await ResetAbandonedResponseAsync(stream, cancellationToken).ConfigureAwait(false);
+            throw;
+        }
 
         if (stream.IsReset)
         {

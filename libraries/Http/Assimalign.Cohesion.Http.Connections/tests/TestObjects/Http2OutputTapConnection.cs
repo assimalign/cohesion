@@ -49,6 +49,20 @@ internal sealed class Http2OutputTapConnection : Connection
     /// </summary>
     public Action<FrameHeader>? OnFrameStarted { get; set; }
 
+    /// <summary>
+    /// Awaited after <see cref="OnFrameStarted"/> for each frame, before the write that carried it
+    /// returns: a transport that took the frame's octets and then makes the writer wait for room. The
+    /// wait does not observe the write's token, so the writer holds whatever it holds (the connection's
+    /// write gate) until the returned task completes.
+    /// </summary>
+    public Func<FrameHeader, Task>? HoldAfterFrame { get; set; }
+
+    /// <summary>
+    /// Invoked after each flush has reached the transport, on the server's writing thread, before the
+    /// flush observes its token. A token it cancels cuts the flush's (modeled) wait short.
+    /// </summary>
+    public Action? OnFlush { get; set; }
+
     public override ConnectionId Id => _inner.Id;
 
     public override EndPoint? LocalEndPoint => _inner.LocalEndPoint;
@@ -102,6 +116,11 @@ internal sealed class Http2OutputTapConnection : Connection
                 foreach (FrameHeader header in started)
                 {
                     _owner.OnFrameStarted?.Invoke(header);
+
+                    if (_owner.HoldAfterFrame is { } hold)
+                    {
+                        await hold(header).ConfigureAwait(false);
+                    }
                 }
             }
 
@@ -118,7 +137,15 @@ internal sealed class Http2OutputTapConnection : Connection
 
         public override void CancelPendingFlush() => _inner.CancelPendingFlush();
 
-        public override ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default) => _inner.FlushAsync(cancellationToken);
+        public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
+        {
+            FlushResult result = await _inner.FlushAsync(cancellationToken).ConfigureAwait(false);
+            _owner.OnFlush?.Invoke();
+
+            // A token cancelled while the flush ran cuts its (modeled) wait short, as for a write.
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
 
         public override void Complete(Exception? exception = null) => _inner.Complete(exception);
 

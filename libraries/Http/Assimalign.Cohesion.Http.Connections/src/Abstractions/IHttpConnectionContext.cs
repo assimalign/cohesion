@@ -42,6 +42,17 @@ public interface IHttpConnectionContext
     /// <param name="context">The HTTP context to serialize back to the client.</param>
     /// <param name="cancellationToken">The cancellation token for the write operation.</param>
     /// <returns>A task that completes when the response has been written.</returns>
+    /// <remarks>
+    /// Cancelling <paramref name="cancellationToken"/> once the final response is claimed abandons it,
+    /// and the exchange can carry no other response. On HTTP/2 the transport then resets the stream
+    /// with <c>RST_STREAM(CANCEL)</c> before the <see cref="System.OperationCanceledException"/>
+    /// propagates, so the stream does not stay open holding its slot and the connection's graceful
+    /// close does not wait for it; that applies to a buffered response, a streamed one, and an extended
+    /// CONNECT tunnel's end alike. A response whose <c>END_STREAM</c> already reached the transport is
+    /// complete, so its stream is ended without a reset and only the exception reports the
+    /// cancellation. The call still ends the exchange (see <see cref="ReceiveAsync"/>), whether it
+    /// returns or throws.
+    /// </remarks>
     ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
 
     /// <summary>

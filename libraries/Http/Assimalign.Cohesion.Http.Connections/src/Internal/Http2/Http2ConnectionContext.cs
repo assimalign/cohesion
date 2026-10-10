@@ -628,31 +628,49 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
             // If a response feature streamed to the raw sink, the head and DATA frames are already on
             // the wire (the BeforeResponseHead hooks fired at the sink's head commit); finalize the
-            // stream (empty DATA + END_STREAM and the same cleanup as the buffered path) rather than
-            // re-sending a buffered response. The AfterResponse hooks fire only when the application's
-            // response actually completed — not when the stream was reset under it.
-            if (http2Context.ResponseBodySink is { HasStarted: true } sink)
+            // stream rather than re-sending a buffered response. Otherwise the final response head is
+            // about to be committed on the buffered path — the last mutation point: fire the
+            // BeforeResponseHead lifecycle hooks, then re-read the directive so a hook that aborted the
+            // exchange resets the stream instead of writing the head. A hook may itself have started
+            // the response through the raw sink (its HEADERS block is then already on the wire), which
+            // is finalized the same way rather than given a second head.
+            HttpResponseBodyStream? startedSink = http2Context.ResponseBodySink is { HasStarted: true } sink ? sink : null;
+
+            if (startedSink is null)
             {
-                await CompleteStartedResponseAsync(http2Context, sink, cancellationToken).ConfigureAwait(false);
-                return;
+                await http2Context.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
+
+                if (http2Context.CancelRequested)
+                {
+                    await EmitRstStreamAsync(http2Context.StreamId, Http2ErrorCode.Cancel, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                startedSink = http2Context.ResponseBodySink is { HasStarted: true } hookStartedSink ? hookStartedSink : null;
             }
 
-            // The final response head is about to be committed on the buffered path — the last
-            // mutation point. Fire the BeforeResponseHead lifecycle hooks, then re-read the directive
-            // so a hook that aborted the exchange resets the stream instead of writing the head.
-            await http2Context.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
-
-            if (http2Context.CancelRequested)
+            if (startedSink is not null)
             {
-                await EmitRstStreamAsync(http2Context.StreamId, Http2ErrorCode.Cancel, cancellationToken).ConfigureAwait(false);
-                return;
-            }
+                // CompleteStreamingAsync ends the streamed response with END_STREAM and runs the same
+                // cleanup as the buffered path. A completion the token cancels resets the stream first
+                // (#1075), unless its END_STREAM already reached the transport.
+                try
+                {
+                    await startedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    await ResetAbandonedResponseAsync(stream, cancellationToken).ConfigureAwait(false);
+                    throw;
+                }
 
-            // A hook may itself have started the response through the raw sink (its HEADERS block is
-            // then already on the wire) — finalize that response rather than writing a second one.
-            if (http2Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
-            {
-                await CompleteStartedResponseAsync(http2Context, hookStartedSink, cancellationToken).ConfigureAwait(false);
+                // The AfterResponse hooks fire only when the application's response actually completed
+                // — not when the stream was reset under it.
+                if (stream.IsResponseCompleted)
+                {
+                    await http2Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 return;
             }
 
@@ -674,11 +692,36 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             http2Context.MarkFinalResponseStarted();
 
             // The claimed response is the only one the stream can carry, so a send cancelled from here on
-            // resets the stream (#1075) rather than leaving it open, holding its slot, with no response.
+            // resets the stream (#1075) rather than leaving it open, holding its slot, with no response —
+            // unless its END_STREAM already reached the transport.
             bool written;
             try
             {
-                written = await WriteClaimedResponseAsync(http2Context, cancellationToken).ConfigureAwait(false);
+                byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
+
+                // Advertise the HTTP/3 endpoint on this buffered response unless the application set its
+                // own Alt-Svc (RFC 7838 — the server never overwrites an application value).
+                HttpAltServiceInjector.Inject(http2Context.Response.Headers, _altSvcHeaderValue);
+
+                // RFC 9110 §9.3.2 — a HEAD response carries the header section a GET would, but never
+                // content: HEADERS only, END_STREAM on the HEADERS frame. A content-length the application
+                // set is preserved; one is synthesized only from a body the handler actually produced (the
+                // GET representation's length). An empty HEAD body gets none, because RFC 9110 §8.6 forbids
+                // a content-length that differs from what GET would send, and the transport cannot know it.
+                bool isHead = http2Context.Request.Method == HttpMethod.Head;
+                byte[] headerBlock = isHead && bodyBytes.Length == 0
+                    ? HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers)
+                    : HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
+                ReadOnlyMemory<byte> content = isHead ? ReadOnlyMemory<byte>.Empty : bodyBytes;
+
+                // RFC 9113 §8.1 — staged trailers follow the content as a HEADERS frame that ends the
+                // stream. A response to HEAD carries none: it has no content for them to follow, and
+                // RFC 9110 §9.3.2 lets a server omit the fields it determines while generating content.
+                byte[]? trailerBlock = !isHead && http2Context.Response.StagedTrailers is { } trailers
+                    ? HPackEncoder.EncodeTrailers(trailers)
+                    : null;
+
+                written = await WriteBufferedResponseAsync(http2Context, headerBlock, content, trailerBlock, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -695,13 +738,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 return;
             }
 
-            // RFC 9113 §5.1 — every server response ends with END_STREAM (on a
-            // body-less HEADERS frame, the last DATA frame, or the HEADERS frame
-            // of the trailer section). After
-            // a successful send the stream's local half is closed; if the peer
-            // already closed its half (the normal request/response case) the
-            // stream transitions to Closed.
-            stream.CompleteResponse();
+            // RFC 9113 §5.1 — every server response ends with END_STREAM (on a body-less HEADERS
+            // frame, the last DATA frame, or the HEADERS frame of the trailer section), which the writer
+            // recorded as it handed that frame over. The stream's local half is now closed; if the peer
+            // already closed its half (the normal request/response case) the stream is Closed.
             stream.SendEndStream();
 
             // Remove the stream, or reset it with NO_ERROR when the peer is still sending; its slot is
@@ -718,91 +758,46 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Finalizes a response the application started through the raw body sink: ends it on the wire
-    /// (<see cref="CompleteStreamingAsync"/>), then fires the AfterResponse hooks when it completed —
-    /// not when the stream was reset under it.
+    /// Ends the stream of a final response a cancelled <c>SendAsync</c> abandoned (#1075). The response
+    /// was claimed, so the stream can carry no other; left alone it would keep its concurrency slot, hold
+    /// the graceful-close drain for its whole window, and leave the peer waiting on a half-open stream.
     /// </summary>
     /// <remarks>
-    /// When <paramref name="cancellationToken"/> cancels the completion, the response can never end, so
-    /// the stream is reset (<see cref="ResetAbandonedResponseAsync"/>) before the cancellation propagates.
+    /// <list type="bullet">
+    /// <item><description><b>The response's <c>END_STREAM</c> never reached the transport</b> — the stream
+    /// is reset with <c>CANCEL</c> (RFC 9113 §7: the stream is no longer needed). The reset removes the
+    /// stream and returns its receive-window debt; send credit reserved for a frame that never reached
+    /// the wire was already returned by the writer.</description></item>
+    /// <item><description><b>It did</b> — a cancellation can land in the wait after the frame carrying
+    /// <c>END_STREAM</c> was handed over, since only a write's wait is cut short (#1326), and the writer
+    /// records the end as it hands that frame over. The stream then ends like any completed response
+    /// (<see cref="FinishCompletedResponseAsync"/>): a <c>RST_STREAM(CANCEL)</c> after a complete
+    /// response would be a frame on a closed stream, which RFC 9113 §5.1 forbids sending. The same
+    /// holds when the end gets out while the reset waits for the write gate (an extended CONNECT
+    /// tunnel ends its side in the background).</description></item>
+    /// </list>
+    /// Nothing is sent for a stream already reset, or one the transport answered itself.
     /// </remarks>
-    private async ValueTask CompleteStartedResponseAsync(Http2Context http2Context, HttpResponseBodyStream sink, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await ResetAbandonedResponseAsync(http2Context.Stream, cancellationToken).ConfigureAwait(false);
-            throw;
-        }
-
-        if (http2Context.Stream.IsResponseCompleted)
-        {
-            await http2Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Resets a stream whose final response a cancelled <c>SendAsync</c> left unfinished (#1075), with
-    /// <c>CANCEL</c> (RFC 9113 §7: the stream is no longer needed). The response was claimed, so the
-    /// stream can carry no other; without the reset it would keep its concurrency slot, hold the
-    /// graceful-close drain for its whole window, and leave the peer waiting on a half-open stream.
-    /// The reset removes the stream and returns its receive-window debt; send credit reserved for a
-    /// frame that never reached the wire was already returned by the writer. Nothing is sent for a
-    /// stream already reset, or one the transport answered itself.
-    /// </summary>
     /// <param name="stream">The stream whose response was abandoned.</param>
     /// <param name="cancellationToken">
-    /// The cancelled send's token. <see cref="EmitRstStreamAsync"/> writes the reset regardless, within a
-    /// bounded window.
+    /// The cancelled send's token. The reset, or the cleanup that replaces it, is written regardless,
+    /// within a bounded window.
     /// </param>
-    private Task ResetAbandonedResponseAsync(Http2Stream stream, CancellationToken cancellationToken)
+    private async Task ResetAbandonedResponseAsync(Http2Stream stream, CancellationToken cancellationToken)
     {
         if (stream.IsReset || stream.IsAnsweredByTransport)
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        return EmitRstStreamAsync(stream.StreamId, Http2ErrorCode.Cancel, cancellationToken);
-    }
+        if (stream.IsResponseCompleted)
+        {
+            stream.SendEndStream();
+            await FinishCompletedResponseAsync(stream, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
-    /// <summary>
-    /// Reads the application's buffered response and writes it on the stream whose final response the
-    /// caller claimed: the head, the content under flow control, and the trailer section.
-    /// </summary>
-    /// <returns>
-    /// <see langword="true"/> when the whole response is on the wire; <see langword="false"/> when the
-    /// stream was reset first.
-    /// </returns>
-    private async Task<bool> WriteClaimedResponseAsync(Http2Context http2Context, CancellationToken cancellationToken)
-    {
-        byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
-
-        // Advertise the HTTP/3 endpoint on this buffered response unless the application set its own
-        // Alt-Svc (RFC 7838 — the server never overwrites an application value).
-        HttpAltServiceInjector.Inject(http2Context.Response.Headers, _altSvcHeaderValue);
-
-        // RFC 9110 §9.3.2 — a HEAD response carries the header section a GET would, but never
-        // content: HEADERS only, END_STREAM on the HEADERS frame. A content-length the application
-        // set is preserved; one is synthesized only from a body the handler actually produced (the
-        // GET representation's length). An empty HEAD body gets none, because RFC 9110 §8.6 forbids a
-        // content-length that differs from what GET would send, and the transport cannot know it.
-        bool isHead = http2Context.Request.Method == HttpMethod.Head;
-        byte[] headerBlock = isHead && bodyBytes.Length == 0
-            ? HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers)
-            : HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
-        ReadOnlyMemory<byte> content = isHead ? ReadOnlyMemory<byte>.Empty : bodyBytes;
-
-        // RFC 9113 §8.1 — staged trailers follow the content as a HEADERS frame that ends the stream.
-        // A response to HEAD carries none: it has no content for them to follow, and RFC 9110 §9.3.2
-        // lets a server omit the fields it determines while generating content.
-        byte[]? trailerBlock = !isHead && http2Context.Response.StagedTrailers is { } trailers
-            ? HPackEncoder.EncodeTrailers(trailers)
-            : null;
-
-        return await WriteBufferedResponseAsync(http2Context, headerBlock, content, trailerBlock, cancellationToken).ConfigureAwait(false);
+        await EmitRstStreamAsync(stream.StreamId, Http2ErrorCode.Cancel, cancellationToken, abandonedResponse: stream).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2317,7 +2312,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// reads <c>END_STREAM</c>, while the after-response hooks may still run.
     /// </summary>
     /// <param name="stream">The stream whose response is complete.</param>
-    /// <param name="cancellationToken">A token to cancel the reset or the connection-level <c>WINDOW_UPDATE</c>.</param>
+    /// <param name="cancellationToken">
+    /// A token to cancel the reset or the connection-level <c>WINDOW_UPDATE</c>. When it is already
+    /// cancelled — a send cancelled after its <c>END_STREAM</c> went out — both are still written,
+    /// within <see cref="_abandonedResetWriteWindow"/>.
+    /// </param>
     private async ValueTask FinishCompletedResponseAsync(Http2Stream stream, CancellationToken cancellationToken)
     {
         stream.FinishExchange();
@@ -2325,8 +2324,16 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         if (stream.IsClosed)
         {
             // Both halves are done: drop the stream so the per-connection footprint stays bounded, and
-            // reclaim the connection-window debt of a body the handler never drained.
-            await RemoveStreamAsync(stream.StreamId, cancellationToken).ConfigureAwait(false);
+            // reclaim the connection-window debt of a body the handler never drained. The removal
+            // credits that debt to the connection window at once, so the WINDOW_UPDATE telling the peer
+            // must not be dropped for a token the caller already cancelled, or the peer's connection
+            // send window would stay short by the debt for good. It gets the bounded window
+            // EmitRstStreamAsync gives a reset.
+            using CancellationTokenSource? abandonedWrite = cancellationToken.IsCancellationRequested
+                ? new CancellationTokenSource(_abandonedResetWriteWindow)
+                : null;
+
+            await RemoveStreamAsync(stream.StreamId, abandonedWrite?.Token ?? cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -2363,6 +2370,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// <see cref="AcquireSendWindowAsync"/> — the same mechanism as the streaming path — for an
     /// inbound <c>WINDOW_UPDATE</c>, then re-acquires the gate at its priority for the remainder.
     /// </para>
+    /// <para>
+    /// The end of the response is recorded (<see cref="Http2Stream.CompleteResponse"/>) as the frame
+    /// carrying <c>END_STREAM</c> is handed to the transport, before its write and the final flush
+    /// can observe a cancellation: a cancellation cuts only a write's wait short, never its copy
+    /// (#1326), so once that frame's write starts the peer gets <c>END_STREAM</c> whatever the token
+    /// does, and a cancelled send must not reset the stream after it (#1075).
+    /// </para>
     /// </remarks>
     /// <param name="context">The exchange whose response is written.</param>
     /// <param name="headerBlock">The HPACK-encoded response field section.</param>
@@ -2393,7 +2407,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             }
 
             bool endsWithTrailers = trailerBlock is not null;
-            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: content.IsEmpty && !endsWithTrailers, cancellationToken).ConfigureAwait(false);
+            bool headersEndStream = content.IsEmpty && !endsWithTrailers;
+
+            if (headersEndStream)
+            {
+                stream.CompleteResponse();
+            }
+
+            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: headersEndStream, cancellationToken).ConfigureAwait(false);
 
             int offset = 0;
             while (offset < content.Length)
@@ -2444,6 +2465,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 if (offset + granted == content.Length && !endsWithTrailers)
                 {
                     frame.DataFlags |= Http2DataFrameFlags.EndStream;
+                    stream.CompleteResponse();
                 }
 
                 await Http2FrameWriter.WriteAsync(Stream, frame, content.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
@@ -2459,6 +2481,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     return false;
                 }
 
+                stream.CompleteResponse();
                 await WriteHeaderBlockAsync(context.StreamId, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
             }
 
@@ -2702,6 +2725,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     return;
                 }
 
+                // Recorded as the frame carrying END_STREAM is handed over, before its write or the
+                // flush can observe a cancellation, as on the buffered path (WriteBufferedResponseAsync):
+                // a send cancelled from here on must not reset a stream whose END_STREAM is out (#1075).
+                stream.CompleteResponse();
+
                 if (trailerBlock is null)
                 {
                     Http2Frame frame = new();
@@ -2721,7 +2749,6 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 _writeScheduler.Release();
             }
 
-            stream.CompleteResponse();
             stream.SendEndStream();
         }
 
@@ -2870,12 +2897,25 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// stream's receive debt is written on the same terms. A token cancelled while the write runs
     /// still cuts the write short.
     /// </remarks>
-    private async Task EmitRstStreamAsync(int streamId, Http2ErrorCode errorCode, CancellationToken cancellationToken)
+    /// <param name="streamId">The stream to reset.</param>
+    /// <param name="errorCode">The reset's error code.</param>
+    /// <param name="cancellationToken">A token to cancel the reset's write.</param>
+    /// <param name="abandonedResponse">
+    /// The stream, when the reset ends a response a cancelled send abandoned
+    /// (<see cref="ResetAbandonedResponseAsync"/>); otherwise <see langword="null"/>. Its end can reach
+    /// the transport while the reset waits for the write gate — an extended CONNECT tunnel ends its side
+    /// in the background — and the writers record that end under the gate. The check is repeated under
+    /// the gate, and a stream whose response completed first is ended like any completed response
+    /// instead (<see cref="FinishCompletedResponseAsync"/>): RFC 9113 §5.1 forbids a reset on a stream
+    /// both sides ended.
+    /// </param>
+    private async Task EmitRstStreamAsync(int streamId, Http2ErrorCode errorCode, CancellationToken cancellationToken, Http2Stream? abandonedResponse = null)
     {
         using CancellationTokenSource? abandonedWrite = cancellationToken.IsCancellationRequested
             ? new CancellationTokenSource(_abandonedResetWriteWindow)
             : null;
         CancellationToken writeToken = abandonedWrite?.Token ?? cancellationToken;
+        bool responseCompletedFirst = false;
 
         try
         {
@@ -2884,8 +2924,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             await AcquireControlWriteAsync(writeToken).ConfigureAwait(false);
             try
             {
-                await Http2FrameWriter.WriteAsync(Stream, rstStream, ReadOnlyMemory<byte>.Empty, writeToken).ConfigureAwait(false);
-                await Stream.FlushAsync(writeToken).ConfigureAwait(false);
+                responseCompletedFirst = abandonedResponse is { IsResponseCompleted: true };
+
+                if (!responseCompletedFirst)
+                {
+                    await Http2FrameWriter.WriteAsync(Stream, rstStream, ReadOnlyMemory<byte>.Empty, writeToken).ConfigureAwait(false);
+                    await Stream.FlushAsync(writeToken).ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -2897,6 +2942,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // Best-effort: stream errors are recoverable, and if the wire
             // is already in trouble the next connection-level read will
             // surface that via GOAWAY.
+        }
+
+        if (responseCompletedFirst)
+        {
+            abandonedResponse!.SendEndStream();
+            await FinishCompletedResponseAsync(abandonedResponse, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         Http2Stream? stream = await RemoveStreamAsync(streamId, writeToken, resetByServer: true).ConfigureAwait(false);

@@ -2016,16 +2016,32 @@ because the peer never received those octets and will never credit them back.
 - **Cancellation** of the `SendAsync` token cancels the wait with
   `OperationCanceledException`, and once the application's final response is
   claimed it also resets the stream with `RST_STREAM(CANCEL)` before the
-  exception propagates (#1075) — on the buffered path, and when the streaming sink's
-  completion is cancelled. The stream can carry no other response, so before #1075
-  it stayed open with no response: it held its concurrency slot for the life of
-  the connection, the graceful-close drain waited its whole five-second window for
-  it, and the peer was left with a half-open stream. The reset removes the stream,
-  which releases the drain and returns its receive-window debt, and the exchange
-  gives its slot back when `SendAsync` ends (see "A reset stream keeps its slot
-  until its exchange ends"). Send credit reserved for a frame that never reached
-  the wire was already returned by the writer. Nothing is sent for a stream already
-  reset, or one the transport answered itself with its `413`.
+  exception propagates (#1075) — on the buffered path, when the streaming sink's
+  completion is cancelled, and when the wait for an extended CONNECT tunnel's end
+  is cancelled (`FinishTunnelAsync`; that end is written in the background, and
+  nothing else would remove the stream). The stream can carry no other response, so
+  before #1075 it stayed open with no response: it held its concurrency slot for
+  the life of the connection, the graceful-close drain waited its whole five-second
+  window for it, and the peer was left with a half-open stream. The reset removes
+  the stream, which releases the drain and returns its receive-window debt, and the
+  exchange gives its slot back when `SendAsync` ends (see "A reset stream keeps its
+  slot until its exchange ends"). Send credit reserved for a frame that never
+  reached the wire was already returned by the writer. Nothing is sent for a stream
+  already reset, or one the transport answered itself with its `413`.
+- **No reset after `END_STREAM`.** A cancellation can land after the frame that
+  carries `END_STREAM` was handed to the transport: in that frame's own write, since
+  only a write's wait is cut short (see "A frame is written in one piece"), or in the
+  flush after it. The response is then complete, and a `RST_STREAM(CANCEL)` after it
+  would be a frame on a closed stream, which RFC 9113 §5.1 forbids sending (a peer
+  MAY treat it as a connection error `STREAM_CLOSED`, killing its sibling streams).
+  So the writers record the end (`Http2Stream.CompleteResponse`) as they hand that
+  frame over, under the write gate, and a cancelled send whose response completed
+  ends the stream like any completed response: it is removed, or reset with
+  `NO_ERROR` when the peer is still sending (RFC 9113 §8.1), and only the
+  `OperationCanceledException` reports the cancellation. A tunnel's end can get out
+  while the reset waits for the write gate, so `EmitRstStreamAsync` repeats the
+  check under the gate for an abandoned response. Until this review fix the reset
+  followed the complete response, and this section claimed a peer ignores that.
 - **A reset with a cancelled token is still written.** The caller of the reset is
   often the one that gave up: the cancelled send above, or a host that resets an
   exchange with its own, already cancelled, stop token (Web.Hosting does, once its
@@ -2034,10 +2050,11 @@ because the peer never received those octets and will never credit them back.
   the stream had ended. `EmitRstStreamAsync` now writes the frame, and the
   connection `WINDOW_UPDATE` that returns the stream's receive debt, on a token
   bounded by a fixed two-second window when the caller's token was already
-  cancelled, so a transport that takes nothing cannot hold the caller. A
-  cancellation can land after the frame that carries `END_STREAM` was handed to the
-  transport, since only a write's wait is cut short; the reset then follows a
-  complete response, which a peer that ended its side ignores (RFC 9113 §5.1).
+  cancelled, so a transport that takes nothing cannot hold the caller. The removal
+  after a complete response (`FinishCompletedResponseAsync`) writes its
+  `WINDOW_UPDATE` on the same terms: the removal credits the debt to the
+  connection window at once, so a dropped frame would leave the peer's connection
+  send window short by it for the rest of the connection.
 - **The pump exiting** still fails a waiting writer with `IOException`, because no
   credit can ever arrive.
 
