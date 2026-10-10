@@ -77,9 +77,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // Guarded by _syncRoot alongside the stream table.
     private readonly Dictionary<int, HttpPriority> _bufferedPriorities = new();
     private const int MaxBufferedPriorities = 128;
-    // RFC 9113 §5.1 — the streams the server reset while the peer was still sending. The peer can
-    // have sent frames before the RST_STREAM reached it, a trailer section among them, and a HEADERS
-    // frame is a field block the HPACK decoder must still process (§4.3) before the frame is ignored.
+    // RFC 9113 §5.1 — the streams the server reset or refused, whether or not the peer was still
+    // sending (#1074). The peer can have sent frames before the RST_STREAM reached it, a trailer
+    // section or a WINDOW_UPDATE among them; they are ignored, and a HEADERS frame is a field block the
+    // HPACK decoder must still process (§4.3) before the frame is ignored.
     // Bounded: the oldest id is forgotten first, and a HEADERS frame for a forgotten id is then the
     // connection error any closed stream draws (§5.1 lets an endpoint bound how long it ignores such
     // frames). Guarded by _syncRoot.
@@ -1096,33 +1097,16 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         int increment = receivedFrame.Frame.WindowUpdateSizeIncrement;
 
-        // RFC 9113 §5.1 — a WINDOW_UPDATE on a stream the server reset while the peer was still
-        // sending is ignored, whatever its increment: the peer sent it before the reset reached it.
-        if (receivedFrame.Frame.StreamId != 0 && IsResetByServer(receivedFrame.Frame.StreamId))
+        if (receivedFrame.Frame.StreamId == 0)
         {
-            return;
-        }
-
-        // RFC 9113 §6.9 — an increment of 0 is a protocol error:
-        // connection-level when delivered on stream 0, stream-level
-        // when delivered on a specific stream.
-        if (increment == 0)
-        {
-            if (receivedFrame.Frame.StreamId == 0)
+            // RFC 9113 §6.9 — an increment of 0 on stream 0 is a connection error.
+            if (increment == 0)
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
                     "HTTP/2 WINDOW_UPDATE on stream 0 with increment 0.");
             }
 
-            throw new Http2StreamException(
-                receivedFrame.Frame.StreamId,
-                Http2ErrorCode.ProtocolError,
-                $"HTTP/2 WINDOW_UPDATE on stream {receivedFrame.Frame.StreamId} with increment 0.");
-        }
-
-        if (receivedFrame.Frame.StreamId == 0)
-        {
             // Connection-level credit. Overflow → FLOW_CONTROL_ERROR
             // connection-level (RFC 9113 §6.9.1). Replenish under the lock and
             // wake any streaming-response writer parked on the exhausted window.
@@ -1158,7 +1142,21 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                         $"HTTP/2 WINDOW_UPDATE on idle stream {receivedFrame.Frame.StreamId}.");
                 }
 
+                // RFC 9113 §5.1 — a closed stream ignores the frame whatever its increment, and the
+                // lookup comes before the zero-increment check (#1074). A zero increment is a stream
+                // error only on a stream that is still open; on one the server reset, answering it
+                // would put a second RST_STREAM on the stream, and on one both sides ended, a reset
+                // the RFC forbids sending on a closed stream.
                 return;
+            }
+
+            // RFC 9113 §6.9 — an increment of 0 on an open stream is a stream error.
+            if (increment == 0)
+            {
+                throw new Http2StreamException(
+                    receivedFrame.Frame.StreamId,
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 WINDOW_UPDATE on stream {receivedFrame.Frame.StreamId} with increment 0.");
             }
 
             if (!stream.SendWindow.TryReplenish(increment))
@@ -1561,7 +1559,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         if (stream is null)
         {
-            // A stream the server refuses, or one it reset while the peer was still sending (see
+            // A stream the server refuses, or one it recently reset or refused (see
             // OpenInboundStream): its field block is decoded first, then refused or ignored.
             ReceiveDiscardedHeaderBlock(frame.StreamId, fragment.Span, frame.HeadersEndHeaders, refusal);
             return null;
@@ -1592,8 +1590,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// has been decoded; otherwise <see langword="null"/>.
     /// </param>
     /// <returns>
-    /// The stream, or <see langword="null"/> when the frame belongs to a stream the server refuses or
-    /// reset while the peer was still sending — the caller decodes its field block and discards it.
+    /// The stream, or <see langword="null"/> when the frame belongs to a stream the server refuses, or
+    /// one it recently reset or refused — the caller decodes its field block and discards it.
     /// </returns>
     private Http2Stream? OpenInboundStream(Http2Frame frame, out Http2StreamException? refusal)
     {
@@ -1651,12 +1649,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 if (refusal is not null)
                 {
                     // RFC 9113 §4.3 — the refused stream's field block is still decoded before the
-                    // refusal goes out (ReceiveDiscardedHeaderBlock). A peer still sending on the stream
-                    // is then ignored like any stream the server reset.
-                    if (!frame.HeadersEndStream)
-                    {
-                        RememberResetStreamLocked(frame.StreamId);
-                    }
+                    // refusal goes out (ReceiveDiscardedHeaderBlock). The peer's later frames on the
+                    // stream are then ignored like those on any stream the server reset (RFC 9113 §5.1).
+                    RememberResetStreamLocked(frame.StreamId);
 
                     return null;
                 }
@@ -1705,7 +1700,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
     /// <summary>
     /// Takes one HEADERS or CONTINUATION payload of a field block sent on a stream the server refuses,
-    /// or on one it reset while the peer was still sending. Once the block is complete it is decoded —
+    /// or on one it recently reset or refused. Once the block is complete it is decoded —
     /// keeping the HPACK decoder in step (RFC 9113 §4.3) — and its fields are discarded. A refused
     /// stream is then answered with <c>RST_STREAM(REFUSED_STREAM)</c>; a reset one gets no reply,
     /// since RFC 9113 §5.1 has the server ignore frames that arrive on a stream after it sent
@@ -1791,9 +1786,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Records that the server reset <paramref name="streamId"/> while the peer was still sending, so a
-    /// HEADERS frame the peer sent before the reset reached it is decoded and ignored (see
-    /// <see cref="OpenInboundStream"/>). Must be called while holding <see cref="_syncRoot"/>.
+    /// Records that the server reset or refused <paramref name="streamId"/>, so a frame the peer sent
+    /// before the reset reached it is ignored (RFC 9113 §5.1): a HEADERS frame is decoded and dropped
+    /// (see <see cref="OpenInboundStream"/>), and DATA is credited back with no reply. Every reset the
+    /// server sends is recorded, whether or not the peer was still sending (#1074). Must be called while
+    /// holding <see cref="_syncRoot"/>.
     /// </summary>
     private void RememberResetStreamLocked(int streamId)
     {
@@ -1803,19 +1800,6 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
 
         _recentlyResetStreams.Enqueue(streamId);
-    }
-
-    /// <summary>
-    /// Whether the server reset <paramref name="streamId"/> (or refused it) while the peer was still
-    /// sending, and still remembers doing so (see <see cref="RememberResetStreamLocked"/>). Frames the
-    /// peer sends on such a stream are ignored (RFC 9113 §5.1).
-    /// </summary>
-    private bool IsResetByServer(int streamId)
-    {
-        lock (_syncRoot)
-        {
-            return _recentlyResetStreams.Contains(streamId);
-        }
     }
 
     private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
@@ -1903,8 +1887,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 await EmitWindowUpdateAsync(0, flowControlLength, cancellationToken).ConfigureAwait(false);
             }
 
-            // RFC 9113 §5.1 — the server reset this stream while the peer was still sending, and
-            // the peer sent this frame before the reset reached it: ignore it, with no reply.
+            // RFC 9113 §5.1 — the server reset or refused this stream, and the peer sent this frame
+            // before the reset reached it: ignore it, with no reply.
             if (resetByServer)
             {
                 return null;
@@ -2226,9 +2210,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// <param name="streamId">The stream to remove.</param>
     /// <param name="cancellationToken">A token to cancel the connection-level <c>WINDOW_UPDATE</c>.</param>
     /// <param name="resetByServer">
-    /// Whether the server is removing the stream because it reset it. A stream reset while the peer
-    /// was still sending is remembered, so a HEADERS frame the peer had already sent is decoded and
-    /// ignored rather than refused (<see cref="RememberResetStreamLocked"/>).
+    /// Whether the server is removing the stream because it reset it. The stream is then remembered,
+    /// whether or not the peer was still sending, so the frames the peer had already sent are ignored
+    /// rather than answered (<see cref="RememberResetStreamLocked"/>).
     /// </param>
     private async ValueTask<Http2Stream?> RemoveStreamAsync(int streamId, CancellationToken cancellationToken, bool resetByServer = false)
     {
@@ -2258,9 +2242,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // it leaves the table, until the exchange ends (EndExchange).
             RetainSlotOfRunningExchangeLocked(stream);
 
-            // Recorded with the removal, under the same lock, so a HEADERS frame the pump reads next
-            // finds the stream either still tracked or remembered as reset — never neither.
-            if (resetByServer && !stream.InputCompleted)
+            // Recorded with the removal, under the same lock, so a frame the pump reads next finds the
+            // stream either still tracked or remembered as reset — never neither. RFC 9113 §5.1 has the
+            // server ignore frames on a stream once it sent RST_STREAM, so a stream whose request had
+            // already ended is remembered too (#1074).
+            if (resetByServer)
             {
                 RememberResetStreamLocked(streamId);
             }

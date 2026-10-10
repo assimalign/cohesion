@@ -1658,10 +1658,11 @@ on the connection could decode against a stale table.
 
 The refused id also counts as seen (RFC 9113 §5.1.1). The client may already have sent
 DATA or a trailer section on the stream, and those frames now land on a closed stream
-rather than an idle one, which was a connection `PROTOCOL_ERROR`. A refused stream
-whose head did not end the stream is remembered with the streams the server reset, so
-those frames are handled like any frame on such a stream (see "Trailers that arrive
-after the server reset the stream"). GOAWAY still announces the highest *accepted*
+rather than an idle one, which was a connection `PROTOCOL_ERROR`. A refused stream is
+remembered with the streams the server reset, so those frames are handled like any
+frame on such a stream (see "Trailers that arrive after the server reset the
+stream"). Until #1074 only a refused stream whose head did not end the stream was
+remembered. GOAWAY still announces the highest *accepted*
 stream (RFC 9113 §6.8), so the peer may retry every refused stream.
 
 ### The flood detectors are sliding windows
@@ -1840,12 +1841,16 @@ octets to the peer:
 - **Recently-closed discard.** DATA that arrives for a stream we have already
   retired is discarded, but its connection-window cost is credited back
   (RFC 9113 §6.9), so a benign close race does not shrink the window. What
-  follows depends on how the stream ended. A stream the server reset (or
-  refused) while the peer was still sending ignores the frame with no reply,
-  since the peer sent it before the reset reached it (RFC 9113 §5.1, #1318);
-  a WINDOW_UPDATE on such a stream is ignored too, even a zero increment that
-  would be a stream error on a live stream. Any other retired stream answers
-  `RST_STREAM(STREAM_CLOSED)`.
+  follows depends on how the stream ended. A stream the server reset or
+  refused ignores the frame with no reply, since the peer sent it before the
+  reset reached it (RFC 9113 §5.1, #1318) — whether or not the peer was still
+  sending when the stream was reset (#1074). Any other retired stream answers
+  `RST_STREAM(STREAM_CLOSED)`. A `WINDOW_UPDATE` on any retired stream, reset
+  or ended by both sides, is ignored whatever its increment: the stream lookup
+  comes before the zero-increment check, because a zero increment is a stream
+  error only on a stream that is still open (#1074). Before #1074 a zero
+  increment on a stream the server reset after the request had ended, a `GET`
+  the application cancelled say, drew a second `RST_STREAM(PROTOCOL_ERROR)`.
 - **Removal reclaim.** When a stream is removed while buffered body sits
   unconsumed (an ignored body, a reset, an abandoned upload), its outstanding
   receive debt — exactly `InitialReceiveWindow - ReceiveWindow.Available` — is
@@ -2240,10 +2245,11 @@ A handler that answers without reading the whole body makes the server reset the
 stream with `NO_ERROR` once the response is out (RFC 9113 §8.1), and the client may
 already have sent its trailer section. RFC 9113 §5.1 has the server ignore frames that
 arrive after it sent `RST_STREAM`, but a HEADERS frame still carries a field block the
-decoder must process. So the connection remembers the streams it reset while the peer
-was still sending, the most recent 128, recorded with the stream's removal under the
-stream-table lock. A HEADERS frame for one of them, and its CONTINUATION frames, is
-decoded and then dropped without a reply.
+decoder must process. So the connection remembers the streams it reset or refused, the
+most recent 128, recorded with the stream's removal under the stream-table lock. Since
+#1074 that is every such stream, not only one whose peer was still sending: the RFC's
+rule has no such condition. A HEADERS frame for one of them, and its CONTINUATION
+frames, is decoded and then dropped without a reply.
 
 The response can also go out while a trailer section is still arriving in CONTINUATION
 frames. The pump therefore holds the stream whose block is open, rather than looking it
@@ -2254,9 +2260,9 @@ Other HEADERS frames for a retired stream keep their connection error, the order
 `PROTOCOL_ERROR` of RFC 9113 §5.1.1: a stream both sides ended, one the peer reset, or
 one dropped from the bounded record. That now includes the highest stream id seen so
 far. Before #1314, a late trailer section on that stream re-opened it and was
-dispatched as a new request. DATA and WINDOW_UPDATE frames on a stream the server
-reset are ignored the same way, and DATA is still credited back to the connection
-window (#1318, see "Recently-closed discard").
+dispatched as a new request. DATA frames on a stream the server reset are ignored the
+same way, and still credited back to the connection window (#1318), and a WINDOW_UPDATE
+on any retired stream is ignored (#1074, see "Recently-closed discard").
 
 ### Response trailers
 
