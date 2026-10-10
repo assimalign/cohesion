@@ -203,25 +203,35 @@ public abstract class SqlFunction
     /// <exception cref="DatabaseException">The result does not match (<c>COHSQLE007</c>, naming the function).</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal SqlValue CheckResult(in SqlValue result, scoped in SqlArguments arguments)
-    {
-        var type = result.Type;
-        if (type == _resultType)
-        {
-            if (_resultType != DatabaseType.Null || !IsNeverNull)
-            {
-                return result;
-            }
-        }
-        else if ((uint)_elementIndex < (uint)arguments.Count && arguments[_elementIndex].Type == type)
-        {
-            return result; // an ANYELEMENT result of its first ANYELEMENT argument's type: UPPER over text
-        }
+        => HasDeclaredResultType(result.Type, in arguments) ? result : CheckResultSlow(result, in arguments);
 
-        return CheckResultSlow(result, in arguments);
-    }
+    /// <summary>
+    /// The fast test of <see cref="CheckResult"/>, on the result's type alone, so a caller that
+    /// holds the result checks it where it lies, without copying it: the declared type (NULL too,
+    /// unless the function never returns NULL), or for an <see cref="SqlType.AnyElement"/> result,
+    /// the type of the call's first <see cref="SqlType.AnyElement"/> argument (<c>UPPER</c> over
+    /// text). Anything else goes to <see cref="CheckResultSlow"/>, which converts or refuses it.
+    /// </summary>
+    /// <param name="type">The result's storage type.</param>
+    /// <param name="arguments">The call's arguments.</param>
+    /// <returns><see langword="true"/> when the result is returned as it is.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasDeclaredResultType(DatabaseType type, scoped in SqlArguments arguments)
+        => type == _resultType
+            ? _resultType != DatabaseType.Null || !IsNeverNull
+            : (uint)_elementIndex < (uint)arguments.Count && arguments.TypeAt(_elementIndex) == type;
 
+    /// <summary>
+    /// The rest of <see cref="CheckResult"/>, for a result the fast test did not pass: NULL from a
+    /// function that never returns it, a widening, a JSON value, an <see cref="SqlType.AnyElement"/>
+    /// result of another argument, or a mismatch.
+    /// </summary>
+    /// <param name="result">What the core returned.</param>
+    /// <param name="arguments">The call's arguments.</param>
+    /// <returns>The result, converted to the declared type when it widened to it.</returns>
+    /// <exception cref="DatabaseException">The result does not match (<c>COHSQLE007</c>, naming the function).</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlValue CheckResultSlow(in SqlValue result, scoped in SqlArguments arguments)
+    internal SqlValue CheckResultSlow(in SqlValue result, scoped in SqlArguments arguments)
     {
         if (result.IsNull)
         {

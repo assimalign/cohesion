@@ -301,6 +301,9 @@ flowchart LR
   type first. A value the engine reads from a row keeps the box it came from in the
   reference slot, so handing an argument back (`UPPER` of a number, `MIN`) boxes nothing,
   and a BOOLEAN result becomes one of two shared boxes, as the evaluator's predicates do.
+  `SqlValue.Compare` compares two values of one type on their payloads, in the order the
+  engine's comparer gives their row values (`MIN` over text compares the two strings under
+  the collation and nothing else), and values of two types through that comparer.
   A binary value is read-only (`AsBinary` and `GetBinary` return `ReadOnlyMemory<byte>`):
   its bytes are a stored row's or a caller's parameter, and a typed function over `byte[]`
   receives a copy. `SqlArguments` is a ref struct over the call's values and its
@@ -362,21 +365,35 @@ flowchart LR
 - **Evaluation.** `SqlBoundCall` holds the overload, its bound arguments, each argument's
   conversion target (null when every parameter is a pseudo-type; for a fixed signature the
   array is computed once with the function and shared by every bound call), the call's
-  collation and the database. Per row the evaluator evaluates every argument (one stays in
-  the recursive frame; more go to a 4-slot inline buffer of objects), returns NULL without a
-  call when the function is strict and a value is NULL, then a non-inlined helper converts
-  the values (one into a single `SqlValue`, more into an `[InlineArray(4)]` buffer, a
-  pooled array past four), widening each to its parameter's type, and makes one call of
-  the core through the internal `InvokeResolved`, which codes failures as the public
-  `Invoke` does but skips the count the planner matched. The result boxes once into the
-  row, as a built-in's always did. The executor's evaluator carries the statement's
-  cancellation token for the context only when the engine registers an application
-  function (`SqlFunctionCatalog.HasApplicationFunctions`), the only kind that reads it, so a
+  collation and the database (and the first argument's target, read without the array). Per
+  row the evaluator evaluates every argument (one stays in the recursive frame; more go to a
+  4-slot inline buffer of objects) and returns NULL without a call when the function is
+  strict and a value is NULL. A call of one argument, the shape of every standard-library
+  scalar and the most common application one, then goes to the function's internal
+  `InvokeResolved(object, …)`, one frame that converts the value, makes the coded call and
+  checks the result, and holds that one `SqlValue`, the call's `SqlArguments` and the result
+  and no buffer for its prologue to clear; more arguments go to a non-inlined helper that
+  converts them into an `[InlineArray(4)]` buffer (a pooled array past four) and calls
+  `InvokeResolved(in SqlArguments)`. Each value is widened to its parameter's type unless it
+  has that type already, as a column of the type always does; NULL, text, BIGINT, INTEGER and
+  NUMERIC row values convert inline and the other types out of line (`SqlValue.FromObject`),
+  keeping the row's box. The context is built in place inside the arguments. Both entry points
+  code failures as the public `Invoke` does but skip the count the planner matched, check the
+  result where the core wrote it and return it as the row's object: a result with a reference
+  (text, or an argument handed back) inline, a computed BIGINT boxed inline and any other
+  computed value boxed out of line, once, as a built-in's always was. A built-in and an
+  application's function take this one path; there is no other, so whatever the path costs,
+  an application's leaf costs the same and gains from every change to it. The executor's
+  evaluator carries the statement's cancellation token for the context only when the engine
+  registers an application function (`SqlFunctionCatalog.HasApplicationFunctions`), the only
+  kind that reads it, so a
   statement of an engine with the standard library alone shares the evaluator and
   allocates none, as before E2.
 - **The result is checked** against the declaration, which plans, result metadata and outer
   calls rely on (`SqlFunction.CheckResult`, after `InvokeCore` and `FinishCore`): one
-  comparison when it has the declared type; a value of a type that widens to it implicitly
+  comparison when it has the declared type, made on the result's type where the core wrote it
+  (`HasDeclaredResultType`), so the value is not copied to be checked; anything else goes to
+  an out-of-line check. A value of a type that widens to the declared one implicitly
   (INTEGER for BIGINT) is converted; a JSON result may be text and a JSONB one bytes; an
   `ANYELEMENT` result must have its call's `ANYELEMENT` arguments' type (an aggregate's is not
   checked: it has no arguments at `Finish`; `ABS` keeps its own rule); and a function that
@@ -412,10 +429,16 @@ flowchart LR
   the overload, its bound arguments (none for `name(*)`) and conversion targets; the
   grouping executor creates one accumulator per group per aggregate call through
   `CreateAccumulator`, adds each row (a strict aggregate skips a row with a NULL
-  argument, a one-argument one before converting anything) through the internal
-  `AddResolved`/`AddCoded`, the public `Add` without the checks the planner already
-  made, and calls `Finish` once per group, the implicit empty group included. A projected `COUNT` is non-nullable because its function says so
-  (`IsNeverNull`), not because of its name.
+  argument, a one-argument one before converting anything; `COUNT(*)` has no argument to
+  test) through the internal `AddResolved`/`AddCoded`, the public `Add` without the checks
+  the planner already made, and calls `Finish` once per group, the implicit empty group
+  included. The per-row add holds no `SqlValue` in its own frame: a one-argument call hands
+  its value, evaluated once, to the accumulator's internal `AddResolved(object, …)`, one frame
+  that converts it and makes the coded call (an integer that does not fit its parameter is
+  `COHSQLE002`, as the evaluator codes one); `COUNT(*)` adds through one that builds no
+  argument; more arguments go through a buffered helper. Every aggregate takes these paths.
+  A projected `COUNT` is non-nullable because its function says so (`IsNeverNull`), not
+  because of its name.
 - **Where a call may appear.** A CHECK resolves each call in the engine's catalog: an
   aggregate or a name outside it is `Function '<name>' is not supported in CHECK.`, and DDL
   admits only an `Immutable` function (decision 64), naming its volatility otherwise; ad-hoc
@@ -640,6 +663,75 @@ time, but under NativeAOT a build allocates about 160 KB more than at `9bc25a8a`
 `SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
 instrumented harness drops to +35 KB, which points at ILC code generation (inlining and stack
 allocation decisions) rather than at an allocation the change makes; it is not yet explained.
+
+**The shared call path.** A NativeAOT profile of Q1 after the review put about 3% of the
+statement, some 19 ns per call, on the path every call takes between the row and the function's
+own work, and none of it in any function. The path was made cheaper for every function at once,
+as the Evaluation, result-check and Aggregates bullets above describe: one frame per
+one-argument call that converts, calls and checks, with no buffer of four values for its
+prologue to clear; the common row types converted and a value's reference returned inline;
+the result checked where the core wrote it, not copied; the grouping executor's per-row add
+inlined into its loop with each aggregate shape adding through the accumulator's own frame and
+`COUNT(*)` scanning no arguments for NULL; and `SqlValue.Compare` comparing two values of one
+type on their payloads, where `MIN` and `MAX` had boxed both back to objects. Nothing is reserved
+to the standard library: an application's leaf takes the same path, with every check.
+
+Measured by sampling, since the wall clock of this shared machine cannot resolve a few percent:
+the symbol-bearing NativeAOT publishes of `ff07eb5a` (with the same harness, compiled with
+`SqlBenchmarkBaseline`), of `43e3ae90` (E2 after the review, before this change) and of this
+change, each run for 150 iterations of one case at high priority on cores 8 to 11, the runs of
+the three interleaved, while a user-mode sampler suspended the measuring thread about every
+millisecond and symbolized its stack from the native PDB, inline frames included. A sample is the
+call path's when the first engine frame from the leaf is one of the path's own (the evaluator's
+call frames, the grouping executor's add, the conversions, arguments and context, the coded call,
+the result check and `SqlValue.Compare`); function bodies, value comparisons, allocation and GC
+are not. Medians, with the call path's share of all samples and its time per row (the share times
+the run's nanoseconds per row):
+
+| Case | `ff07eb5a` | `43e3ae90` | This change | What E2 adds over `ff07eb5a` |
+| --- | --- | --- | --- | --- |
+| Q1 (n = 4 / 9 / 7) | 0.51%, 9.7 ns | 3.04%, 67.1 ns | 1.56%, 31.6 ns | 2.53 → 1.05 points (−58%); 57.4 → 21.9 ns per row, about 19 → 7 ns per call |
+| Q3 (n = 4 / 9 / 7) | 0 | 3.67%, 90.6 ns | 1.48%, 35.3 ns | 3.67 → 1.48 points (−60%); 90.6 → 35.3 ns per row, about 18 → 7 ns per aggregate call |
+
+At `ff07eb5a` an aggregate was one method of the executor's (`AggregateState.Add`), all of which
+counts as the function's work, so Q3 has no call path there. Of the non-GC samples, E2's addition goes from 5.2 to 2.6 points in Q1 (−51%) and from 7.1 to
+2.8 in Q3 (−60%). The runs of one binary spread by up to a factor of two in share (core frequency
+and the load beside them move the memory-bound scan and the compute-bound path differently), so
+only the medians of many runs mean anything. At `43e3ae90` Q1's path was the one-argument
+`InvokeScalar` frame (1.0% of samples), `InvokeResolved` with its result copies (0.8%), and
+`FromObject` and `ToObject` out of line (0.4% each); Q3's was `AddRow`'s frame (2.1%), `ToObject`
+inside `SqlValue.Compare` (0.7%), `COUNT(*)`'s NULL scan of no arguments (0.5%), `FromObject`
+(0.5%) and the coded add (0.4%). With this change Q1's path is the one-argument frame (about 1.2%:
+its prologue and conversion, and the check and return) and `EvaluateCall` (0.3%, which at
+`ff07eb5a` was the whole path); Q3's is the accumulator's one-argument add (0.8%), `COUNT(*)`'s
+(0.3%) and `SqlValue.Compare` (0.2%). `MIN` and `MAX` compare text with less work than at
+`ff07eb5a`: the comparison's share of Q3 is 2.9% against 3.5%, since two strings no longer pass
+the comparer's type tests.
+
+Timed as before (alternating process rounds, rotating order, high priority, cores 8 to 11, the
+median of the per-process medians), eight three-way rounds of every case, nanoseconds per row:
+
+| Case | `ff07eb5a` | `43e3ae90` | This change | Over its process's Q6C: `ff07eb5a` / `43e3ae90` / this change |
+| --- | --- | --- | --- | --- |
+| Q1 | 1,885 | 1,961 (+4.0%) | 2,005 (+6.4%) | 1.258 / 1.393 (+10.8%) / 1.281 (+1.8%) |
+| Q2 | 1,614 | 1,743 (+8.0%) | 1,726 (+6.9%) | 1.112 / 1.141 (+2.6%) / 1.104 (−0.7%) |
+| Q3 | 2,183 | 2,466 (+13.0%) | 2,437 (+11.6%) | 1.364 / 1.715 (+25.7%) / 1.480 (+8.5%) |
+| Q6C | 1,458 | 1,418 (−2.8%) | 1,512 (+3.7%) | the control |
+
+The function-free control moved by 6.5 points between two builds whose Q6C path is the same, so the
+raw medians resolve nothing at this size; each process's case over its own Q6C (the same scan and
+decode of the same rows, without a function) removes the process's own speed, and by it this
+change takes Q1 and Q2 back to `ff07eb5a` and Q3 most of the way, and against `43e3ae90` is −8.1%
+on Q1, −3.2% on Q2, −13.7% on Q3 and −12.1% on Q4. Sixteen two-way rounds of Q1 to Q3, Q6C and
+Q7 against `43e3ae90` (the same within half a point without the one round another build ran
+beside): Q1 −5.4% (faster in 12 of 16 rounds, paired −6.4%), Q2 −0.4%, Q3 −5.4% (12 of 16,
+paired −4.2%), Q7 +2.5% (slower in 9 of 16, inside its ±10% spread; its CHECK's calls take the
+cheaper path) and the control Q6C −0.9%. No bytes are added per row or
+statement (Q1 1,015.6, Q2 927.6, Q3 1,040.4, Q4 1,015.6, Q6 911.6, Q7 14,759.2 as at `43e3ae90`),
+and Q4 sits within 4.4% of Q1 in-process. Q8 and Q8C allocate about 34 KB less per build than at
+`43e3ae90` (4,252,464 bytes against 4,287,784, and 6,032,344 against 6,065,848), in every
+process; it is not explained, and like the 160 KB the review's re-measurement describes it points
+at ILC code generation rather than at an allocation the change removes.
 
 ## Compiled-schema provisioning
 

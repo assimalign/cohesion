@@ -321,6 +321,39 @@ public sealed partial class SqlFunctionExtensibilityTests
             .ShouldBe("The value is INTEGER, not BIGINT; read it with the accessor of its type.");
     }
 
+    /// <summary>
+    /// A one-argument call, scalar or aggregate, converts its argument in the frame that makes the
+    /// coded call: a column of a narrower type widens to the parameter's, a column of the parameter's
+    /// type passes as it is, an integer literal the planner typed by its magnitude narrows to it, and
+    /// NULL skips a strict function, for an application's function as for a built-in.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a one-argument call converts its argument to the parameter's type")]
+    public async Task ExecuteAsync_OneArgumentConversion_ShouldGiveTheFunctionItsParameterType()
+    {
+        // Arrange
+        await using var engine = await BuildAsync(functions => functions
+            .Add(SqlScalarFunction.Create("plus_one", static (int value) => value + 1))
+            .Add(SqlScalarFunction.Create("as_wide", static (long value) => value))
+            .Add(SqlAggregateFunction.Create<long, int, long>("sum_int", static () => 0L,
+                static (long state, int value) => state + value, static (long state) => state))
+            .Add(SqlAggregateFunction.Create<long, long, long>("sum_wide", static () => 0L,
+                static (long state, long value) => state + value, static (long state) => state)));
+        await using var session = await SessionAsync(engine);
+        await ExecuteAsync(session, "CREATE TABLE t (small INT, big BIGINT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1, 10), (3, 30), (NULL, NULL)");
+
+        // Act
+        var scalars = await RowsAsync(session,
+            "SELECT as_wide(small), as_wide(big), plus_one(small), plus_one(5), UPPER(small), ABS(small) FROM t WHERE big IS NOT NULL ORDER BY big");
+        var nulls = await RowsAsync(session, "SELECT as_wide(small), plus_one(small), UPPER(small), ABS(small) FROM t WHERE big IS NULL");
+        var aggregates = await RowsAsync(session, "SELECT sum_wide(small), sum_wide(big), sum_int(small), sum_int(5), MAX(small) FROM t");
+
+        // Assert
+        scalars.ShouldBe([[1L, 10L, 2, 6, 1, 1L], [3L, 30L, 4, 6, 3, 3L]]);
+        nulls.ShouldBe([[null, null, null, null]]);
+        aggregates.ShouldBe([[4L, 40L, 4L, 15L, 3]]);
+    }
+
     // A test of a function that reads its context builds the context itself.
     private static SqlValue InvokeWithContext(SqlScalarFunction function, Collation collation)
     {

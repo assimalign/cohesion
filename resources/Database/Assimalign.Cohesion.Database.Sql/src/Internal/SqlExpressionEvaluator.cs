@@ -829,35 +829,46 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>
     /// Computes a scalar function call. The binder resolved the call to its function once, before
     /// any row was read (a call no overload accepts bound as a <see cref="SqlBoundFailure"/>), so each
-    /// row evaluates the arguments, then makes one call through the function's
-    /// <see cref="SqlScalarFunction.Invoke"/>, which returns NULL without calling a strict function
-    /// over a NULL argument and codes what the function throws as <c>COHSQLE007</c>.
+    /// row evaluates the arguments, returns NULL without calling a strict function over a NULL
+    /// argument, and makes one call through the function's internal <c>InvokeResolved</c>, which
+    /// converts the arguments, codes what the function throws as <c>COHSQLE007</c> and checks its
+    /// result, as the public <see cref="SqlScalarFunction.Invoke"/> does.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every argument is evaluated before the call, as PostgreSQL's executor does. Only the values
     /// stay in this frame while the arguments recurse, never the call's buffer: the frame of a
-    /// one-argument call, the shape every standard-library scalar has, holds no buffer at all, so a
-    /// deep nest of calls costs this walk no more stack per level than before. It is kept out
-    /// of line, so its locals never join the frame of <see cref="EvaluateCore"/>, which every
-    /// node of every tree recurses through.
+    /// one-argument call, the shape of every standard-library scalar and the most common
+    /// application one, holds no buffer at all, so a deep nest of calls costs this walk no more
+    /// stack per level than before. It is kept out of line, so its locals never join the frame of
+    /// <see cref="EvaluateCore"/>, which every node of every tree recurses through.
+    /// </para>
+    /// <para>
+    /// Every function takes the same path, whoever wrote it: the strict test, the conversion of
+    /// each argument to its parameter's type, the coded call and the result's check.
+    /// </para>
     /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? EvaluateCall(SqlBoundCall call, object?[] row)
     {
         var arguments = call.Arguments;
-        switch (arguments.Length)
+        if (arguments.Length != 1)
         {
-            case 0:
-                return InvokeScalar(call, []);
-            case 1:
-                object? value = EvaluateCore(arguments[0], row);
-                return InvokeScalar(call, new ReadOnlySpan<object?>(in value));
-            default:
-                return EvaluateCallArguments(call, row);
+            return EvaluateCallArguments(call, row);
         }
+
+        object? value = EvaluateCore(arguments[0], row);
+        var function = call.Function;
+        if (value is null && function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput)
+        {
+            return null; // PostgreSQL's EEOP_FUNCEXPR_STRICT: a strict function is not called
+        }
+
+        // One frame converts, calls and checks (SqlScalarFunction.InvokeResolved), and holds no buffer.
+        return function.InvokeResolved(value, call.FirstTarget, call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
     }
 
-    /// <summary>Evaluates the arguments of a call with more than one, then calls it.</summary>
+    /// <summary>Evaluates the arguments of a call with none or more than one, then calls it.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? EvaluateCallArguments(SqlBoundCall call, object?[] row)
     {
@@ -871,7 +882,7 @@ internal sealed partial class SqlExpressionEvaluator
                 values[index] = EvaluateCore(arguments[index], row);
             }
 
-            return InvokeScalar(call, values);
+            return InvokeScalarMany(call, values);
         }
 
         object?[] rented = ArrayPool<object?>.Shared.Rent(arguments.Length);
@@ -882,7 +893,7 @@ internal sealed partial class SqlExpressionEvaluator
                 rented[index] = EvaluateCore(arguments[index], row);
             }
 
-            return InvokeScalar(call, rented.AsSpan(0, arguments.Length));
+            return InvokeScalarMany(call, rented.AsSpan(0, arguments.Length));
         }
         finally
         {
@@ -892,13 +903,14 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Calls a function over its evaluated arguments: NULL without a call when the function is
-    /// strict and an argument is NULL (PostgreSQL's <c>EEOP_FUNCEXPR_STRICT</c>), otherwise the
-    /// arguments converted to the value ABI, in an inline buffer of four (a pooled one past four),
-    /// each to its parameter's type, and one call of the function's core.
+    /// Calls a function over its evaluated arguments, none or more than one: NULL without a call
+    /// when the function is strict and an argument is NULL (PostgreSQL's
+    /// <c>EEOP_FUNCEXPR_STRICT</c>), otherwise the arguments converted to the value ABI, in an
+    /// inline buffer of four (a pooled one past four), each to its parameter's type, and one call
+    /// of the function's core.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private object? InvokeScalar(SqlBoundCall call, ReadOnlySpan<object?> values)
+    private object? InvokeScalarMany(SqlBoundCall call, ReadOnlySpan<object?> values)
     {
         var function = call.Function;
         if (function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput)
@@ -912,37 +924,27 @@ internal sealed partial class SqlExpressionEvaluator
             }
         }
 
-        var context = new SqlFunctionContext(call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
-        if (values.Length == 1)
-        {
-            // The shape of every standard-library scalar: one value, no buffer to clear.
-            var value = SqlValue.FromObject(values[0]);
-            if (call.Targets is { } targets && targets[0] != DatabaseType.Null)
-            {
-                value = SqlFunctionResolver.Coerce(value, targets[0], function, 0);
-            }
-
-            return function.InvokeResolved(new SqlArguments(new ReadOnlySpan<SqlValue>(in value), context)).ToObject();
-        }
+        var collation = call.Collation.Resolve(_subqueryValues);
         if (values.Length > SqlValueBuffer.Length)
         {
-            return InvokeScalarPooled(call, values, context);
+            return InvokeScalarPooled(call, values, collation, _cancellationToken);
         }
 
         SqlValueBuffer buffer = default;
         Span<SqlValue> arguments = buffer[..values.Length];
         ConvertArguments(call, values, arguments);
-        return function.InvokeResolved(new SqlArguments(arguments, context)).ToObject();
+        return function.InvokeResolved(new SqlArguments(arguments, call.Database, collation, _cancellationToken));
     }
 
-    private static object? InvokeScalarPooled(SqlBoundCall call, ReadOnlySpan<object?> values, scoped in SqlFunctionContext context)
+    private static object? InvokeScalarPooled(SqlBoundCall call, ReadOnlySpan<object?> values, Collation collation,
+        CancellationToken cancellationToken)
     {
         SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(values.Length);
         try
         {
             Span<SqlValue> arguments = rented.AsSpan(0, values.Length);
             ConvertArguments(call, values, arguments);
-            return call.Function.InvokeResolved(new SqlArguments(arguments, context)).ToObject();
+            return call.Function.InvokeResolved(new SqlArguments(arguments, call.Database, collation, cancellationToken));
         }
         finally
         {
@@ -956,10 +958,12 @@ internal sealed partial class SqlExpressionEvaluator
         var targets = call.Targets;
         for (int index = 0; index < values.Length; index++)
         {
-            var value = SqlValue.FromObject(values[index]);
-            arguments[index] = targets is null || targets[index] == DatabaseType.Null
-                ? value
-                : SqlFunctionResolver.Coerce(value, targets[index], call.Function, index);
+            ref var argument = ref arguments[index];
+            argument = SqlValue.FromObject(values[index]);
+            if (targets is not null && targets[index] != DatabaseType.Null && targets[index] != argument.Type)
+            {
+                argument = SqlFunctionResolver.Coerce(argument, targets[index], call.Function, index);
+            }
         }
     }
 

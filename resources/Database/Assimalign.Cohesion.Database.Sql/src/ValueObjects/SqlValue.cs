@@ -319,13 +319,47 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     /// <exception cref="DatabaseException">The values' types do not compare, such as TEXT and BIGINT.</exception>
     public static int Compare(in SqlValue left, in SqlValue right, Collation? collation = null)
     {
-        if (left.IsNull || right.IsNull)
+        var type = left._type;
+        if (type == DatabaseType.Null || right._type == DatabaseType.Null)
         {
-            throw new ArgumentException("NULL has no place in the order; test IsNull first.", left.IsNull ? nameof(left) : nameof(right));
+            ThrowNullCompared(left.IsNull);
         }
 
-        return SqlValueComparer.Compare(left.ToObject()!, right.ToObject()!, collation);
+        if (type != right._type)
+        {
+            // Across types (INTEGER and NUMERIC, REAL and DOUBLE): the engine's comparer, which
+            // compares numbers by value and fails a pair that does not compare.
+            return SqlValueComparer.Compare(left.ToObject()!, right.ToObject()!, collation);
+        }
+
+        // Two values of one type compare on the payload, in the order the engine's comparer gives
+        // them: no box is read back and no type is tested again.
+        return type switch
+        {
+            DatabaseType.String => (collation ?? Collation.Binary).Compare(Unsafe.As<string>(left._reference!), Unsafe.As<string>(right._reference!)),
+            DatabaseType.Int64 => left.Read<long>().CompareTo(right.Read<long>()),
+            DatabaseType.Int32 => left.Read<int>().CompareTo(right.Read<int>()),
+            DatabaseType.Decimal => left.Read<decimal>().CompareTo(right.Read<decimal>()),
+            DatabaseType.Float64 => left.Read<double>().CompareTo(right.Read<double>()), // NaN first, as the comparer orders it
+            DatabaseType.Int16 => left.Read<short>().CompareTo(right.Read<short>()),
+            DatabaseType.Int8 => left.Read<sbyte>().CompareTo(right.Read<sbyte>()),
+            DatabaseType.Float32 => left.Read<float>().CompareTo(right.Read<float>()),
+            DatabaseType.Boolean => left.Read<bool>().CompareTo(right.Read<bool>()),
+            DatabaseType.Binary => Unsafe.As<byte[]>(left._reference!).AsSpan().SequenceCompareTo(Unsafe.As<byte[]>(right._reference!)),
+            DatabaseType.Date => left.Read<DateOnly>().CompareTo(right.Read<DateOnly>()),
+            DatabaseType.Time => left.Read<TimeOnly>().CompareTo(right.Read<TimeOnly>()),
+            DatabaseType.DateTime => left.Read<DateTime>().Ticks.CompareTo(right.Read<DateTime>().Ticks),
+            DatabaseType.DateTimeOffset => left.Read<DateTimeOffset>().UtcTicks.CompareTo(right.Read<DateTimeOffset>().UtcTicks),
+            DatabaseType.TimeSpan => left.Read<TimeSpan>().CompareTo(right.Read<TimeSpan>()),
+            DatabaseType.Guid => left.Read<Guid>().CompareTo(right.Read<Guid>()),
+            _ => SqlValueComparer.Compare(left.ToObject()!, right.ToObject()!, collation),
+        };
     }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowNullCompared(bool leftIsNull)
+        => throw new ArgumentException("NULL has no place in the order; test IsNull first.", leftIsNull ? "left" : "right");
 
     /// <summary>
     /// Converts a value of the engine's row representation: <see langword="null"/> or a boxed value
@@ -337,13 +371,45 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     /// <param name="value">The row value.</param>
     /// <returns>The SQL value.</returns>
     /// <exception cref="DatabaseException">The value's CLR type has no SQL type.</exception>
-    internal static SqlValue FromObject(object? value) => value switch
+    /// <remarks>
+    /// Every call of every function, a built-in's or an application's, converts its arguments
+    /// here, so the common row types (NULL, text, BIGINT, INTEGER and NUMERIC) convert inline at
+    /// the call site; the other types convert in <see cref="FromOtherObject"/>, out of line.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static SqlValue FromObject(object? value)
     {
-        null => default,
-        string text => new(DatabaseType.String, text, default),
-        long number => new(DatabaseType.Int64, value, Pack(number)),
-        int number => new(DatabaseType.Int32, value, Pack(number)),
-        decimal number => new(DatabaseType.Decimal, value, Pack(number)),
+        if (value is null)
+        {
+            return default;
+        }
+        if (value is string text)
+        {
+            return new(DatabaseType.String, text, default);
+        }
+        if (value is long int64)
+        {
+            return new(DatabaseType.Int64, value, Pack(int64));
+        }
+        if (value is int int32)
+        {
+            return new(DatabaseType.Int32, value, Pack(int32));
+        }
+        if (value is decimal number)
+        {
+            return new(DatabaseType.Decimal, value, Pack(number));
+        }
+
+        return FromOtherObject(value);
+    }
+
+    /// <summary>Converts a row value of a type <see cref="FromObject"/> does not convert inline.</summary>
+    /// <param name="value">The row value; not null, text, BIGINT, INTEGER or NUMERIC.</param>
+    /// <returns>The SQL value.</returns>
+    /// <exception cref="DatabaseException">The value's CLR type has no SQL type.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static SqlValue FromOtherObject(object value) => value switch
+    {
         double number => new(DatabaseType.Float64, value, Pack(number)),
         bool flag => new(DatabaseType.Boolean, value, Pack(flag)),
         short number => new(DatabaseType.Int16, value, Pack(number)),
@@ -369,6 +435,13 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     /// binary reference, or a boxed value; a value read from a row returns the box it was read from.
     /// </summary>
     /// <returns>The row value.</returns>
+    /// <remarks>
+    /// Inline at the call site for a value that has its row representation already (NULL, a
+    /// reference, a value read from a row), which is every argument handed back and every text
+    /// result, and for a computed BIGINT, the type counts and lengths have, which boxes once; a
+    /// value of another type a function computed boxes in <see cref="Box"/>, out of line.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal object? ToObject()
     {
         if (_reference is not null || _type == DatabaseType.Null)
@@ -376,6 +449,14 @@ public readonly struct SqlValue : IEquatable<SqlValue>
             return _reference;
         }
 
+        return _type == DatabaseType.Int64 ? Read<long>() : Box();
+    }
+
+    /// <summary>Boxes a value that has no reference: one a function computed, not one read from a row.</summary>
+    /// <returns>The boxed value.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object Box()
+    {
         return _type switch
         {
             // Shared boxes, as the evaluator's predicates return: a function returning BOOLEAN

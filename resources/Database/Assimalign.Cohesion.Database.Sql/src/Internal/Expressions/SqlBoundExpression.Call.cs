@@ -30,6 +30,7 @@ internal sealed class SqlBoundCall : SqlBoundExpression
         Function = function;
         Arguments = arguments;
         Targets = targets;
+        FirstTarget = targets is { Length: > 0 } ? targets[0] : DatabaseType.Null;
         Collation = collation;
         Database = database;
     }
@@ -46,6 +47,12 @@ internal sealed class SqlBoundCall : SqlBoundExpression
     /// or null when every parameter is a pseudo-type, as for every standard-library scalar.
     /// </summary>
     internal DatabaseType[]? Targets { get; }
+
+    /// <summary>
+    /// Gets the storage type the first argument converts to (<see cref="DatabaseType.Null"/> when it
+    /// converts to none), read by every row of a one-argument call without testing the array.
+    /// </summary>
+    internal DatabaseType FirstTarget { get; }
 
     /// <summary>Gets the collation the call's input compares under.</summary>
     internal SqlBoundCollation Collation { get; }

@@ -45,7 +45,14 @@ internal sealed record SqlGroupPlan(
 /// <param name="Collation">The collation the arguments compare under, which the function's context carries (<c>MIN</c>, <c>MAX</c>).</param>
 /// <param name="Database">The database whose statement runs the aggregate.</param>
 internal sealed record SqlGroupAggregate(SqlFunctionCallExpression Call, SqlAggregateFunction Function,
-    SqlBoundExpression[] Arguments, DatabaseType[]? Targets, SqlBoundCollation Collation, DatabaseName Database);
+    SqlBoundExpression[] Arguments, DatabaseType[]? Targets, SqlBoundCollation Collation, DatabaseName Database)
+{
+    /// <summary>
+    /// Gets the storage type the first argument converts to (<see cref="DatabaseType.Null"/> when it
+    /// converts to none), read by every row of a one-argument call without testing the array.
+    /// </summary>
+    internal DatabaseType FirstTarget { get; } = Targets is { Length: > 0 } ? Targets[0] : DatabaseType.Null;
+}
 
 /// <summary>A grouping key bound over the input row, with the collation its values are grouped under.</summary>
 /// <param name="Value">The bound key expression.</param>

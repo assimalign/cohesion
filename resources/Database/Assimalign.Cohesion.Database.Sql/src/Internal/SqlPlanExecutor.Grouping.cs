@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -134,47 +135,58 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Adds one input row to one group's accumulator of one aggregate call: its arguments evaluated
-    /// over the row, converted to the value ABI on the stack (four inline, a pooled buffer past
-    /// four) and to their parameters' types. A strict aggregate's accumulator skips the row when an
-    /// argument is NULL; <c>COUNT(*)</c> has no argument, so it counts every row.
+    /// Adds one input row to one group's accumulator of one aggregate call, the same way for every
+    /// aggregate, a built-in's or an application's: its arguments evaluated over the row, once,
+    /// converted to the value ABI on the stack and to their parameters' types. A strict aggregate's
+    /// accumulator skips the row when an argument is NULL; <c>COUNT(*)</c> has no argument, so it
+    /// counts every row.
     /// </summary>
+    /// <remarks>
+    /// The frame holds no value of the ABI: each shape adds through a frame of its own (one
+    /// argument, the shape of every standard-library aggregate but <c>COUNT(*)</c>, through the
+    /// accumulator's internal <c>AddResolved</c>, which converts it and makes the coded call; none;
+    /// more), so the prologue of the call every row makes per aggregate clears no buffer of four
+    /// values, and it is inlined into the row loop, which then holds only references for it.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AddRow(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
         SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
     {
         var arguments = aggregate.Arguments;
-        if (arguments.Length == 1)
-        {
-            // The shape of every standard-library aggregate but COUNT(*): one value, no buffer, and
-            // a strict aggregate's NULL row skipped before anything is converted.
-            object? argument = evaluator.Evaluate(arguments[0], row);
-            if (argument is null && aggregate.Function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput)
-            {
-                return;
-            }
-
-            var single = ConvertArgument(aggregate, 0, argument);
-            state.AddCoded(new SqlArguments(new ReadOnlySpan<SqlValue>(in single),
-                new SqlFunctionContext(aggregate.Database, collation, cancellationToken)));
-            return;
-        }
-
-        var context = new SqlFunctionContext(aggregate.Database, collation, cancellationToken);
         switch (arguments.Length)
         {
+            case 1:
+                // A strict aggregate's NULL row is skipped before anything is converted.
+                object? argument = evaluator.Evaluate(arguments[0], row);
+                if (argument is not null || aggregate.Function.NullBehavior != SqlNullBehavior.ReturnsNullOnNullInput)
+                {
+                    // Converted, added and coded in one frame of the accumulator's; not evaluated again.
+                    state.AddResolved(argument, aggregate.FirstTarget, aggregate.Database, collation, cancellationToken);
+                }
+
+                return;
             case 0:
-                state.AddResolved(new SqlArguments([], context));
+                // COUNT(*): no argument, so no NULL for the strict rule to skip.
+                state.AddResolved(aggregate.Database, collation, cancellationToken);
                 return;
             case <= SqlValueBuffer.Length:
-                SqlValueBuffer buffer = default;
-                Span<SqlValue> values = buffer[..arguments.Length];
-                EvaluateArguments(aggregate, evaluator, row, values);
-                state.AddResolved(new SqlArguments(values, context));
+                AddRowBuffered(state, aggregate, collation, evaluator, row, cancellationToken);
                 return;
             default:
                 AddRowPooled(state, aggregate, collation, evaluator, row, cancellationToken);
                 return;
         }
+    }
+
+    /// <summary>Adds a row of a call of two to four arguments, converted into an inline buffer.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddRowBuffered(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+    {
+        SqlValueBuffer buffer = default;
+        Span<SqlValue> values = buffer[..aggregate.Arguments.Length];
+        EvaluateArguments(aggregate, evaluator, row, values);
+        state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
     }
 
     private static void AddRowPooled(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
@@ -185,7 +197,7 @@ internal sealed partial class SqlPlanExecutor
         {
             Span<SqlValue> values = rented.AsSpan(0, aggregate.Arguments.Length);
             EvaluateArguments(aggregate, evaluator, row, values);
-            state.AddResolved(new SqlArguments(values, new SqlFunctionContext(aggregate.Database, collation, cancellationToken)));
+            state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
         }
         finally
         {
@@ -196,30 +208,29 @@ internal sealed partial class SqlPlanExecutor
     private static void EvaluateArguments(SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator, object?[] row, Span<SqlValue> values)
     {
         var arguments = aggregate.Arguments;
+        var targets = aggregate.Targets;
         for (int i = 0; i < values.Length; i++)
         {
-            values[i] = ConvertArgument(aggregate, i, evaluator.Evaluate(arguments[i], row));
+            ref var value = ref values[i];
+            value = SqlValue.FromObject(evaluator.Evaluate(arguments[i], row));
+            if (targets is not null && targets[i] != DatabaseType.Null && targets[i] != value.Type)
+            {
+                value = Coerce(aggregate, i, value, targets[i]);
+            }
         }
     }
 
-    /// <summary>Converts one evaluated argument to the value ABI, widened to its parameter's type.</summary>
-    private static SqlValue ConvertArgument(SqlGroupAggregate aggregate, int index, object? argument)
+    /// <summary>Converts one argument to its parameter's type, coding an integer that does not fit as the evaluator codes one.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static SqlValue Coerce(SqlGroupAggregate aggregate, int index, in SqlValue value, DatabaseType target)
     {
-        var value = SqlValue.FromObject(argument);
-        var targets = aggregate.Targets;
-        return targets is null || targets[index] == DatabaseType.Null ? value : Coerce(aggregate, index, value, targets[index]);
-
-        static SqlValue Coerce(SqlGroupAggregate aggregate, int index, SqlValue value, DatabaseType target)
+        try
         {
-            try
-            {
-                return SqlFunctionResolver.Coerce(value, target, aggregate.Function, index);
-            }
-            catch (ArithmeticException exception)
-            {
-                // An integer that does not fit its parameter, coded as the evaluator codes one.
-                throw SqlEvaluationException.FromArithmetic(exception);
-            }
+            return SqlFunctionResolver.Coerce(value, target, aggregate.Function, index);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception);
         }
     }
 

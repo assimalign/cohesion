@@ -714,7 +714,12 @@ Deleted with E2: `SqlFunctionSignatures`, `SqlFunctionSignature`, the internal `
   argument is NULL (`EEOP_FUNCEXPR_STRICT`, `src/backend/executor/execExprInterp.c:944`), then one
   abstract `InvokeCore` call. A typed leaf adds one delegate call; its `ValueConverter<T>` branches
   on `typeof(T) == typeof(long)`, which NativeAOT folds per instantiation, with no reflection and no
-  boxing. The result boxes once into the `object?[]` row slot, as built-ins do today.
+  boxing. The result boxes once into the `object?[]` row slot, as built-ins do today. A call of
+  one argument, every built-in's shape, converts its one value without the buffer, in the frame
+  that makes the coded call and checks the result (`Database.Sql/docs/DESIGN.md`, "Functions
+  (E2)"); every function, the standard library's and an application's, takes that one path,
+  and no faster path is reserved for the built-ins, so the abstraction an application
+  implements is the one the engine's own functions run on.
 - **Exceptions.** Anything a function throws other than `OperationCanceledException`,
   `InsufficientExecutionStackException`, `OutOfMemoryException` or a `DatabaseException` becomes
   `COHSQLE007` naming the function, with the original as the inner exception. It fails the

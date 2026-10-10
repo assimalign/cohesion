@@ -1,4 +1,7 @@
 using System;
+using System.Threading;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -42,6 +45,20 @@ public readonly ref struct SqlArguments
     {
         _values = values;
         _context = context;
+    }
+
+    /// <summary>
+    /// Initializes the engine's arguments of one call, the context built in place from its parts,
+    /// so the caller's frame holds no context of its own to clear and copy.
+    /// </summary>
+    /// <param name="values">The argument values, in parameter order.</param>
+    /// <param name="database">The database whose statement makes the call.</param>
+    /// <param name="collation">The collation the call's input compares under.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    internal SqlArguments(ReadOnlySpan<SqlValue> values, DatabaseName database, Collation collation, CancellationToken cancellationToken)
+    {
+        _values = values;
+        _context = new SqlFunctionContext(database, collation, cancellationToken);
     }
 
     /// <summary>Gets the number of arguments.</summary>
@@ -156,6 +173,11 @@ public readonly ref struct SqlArguments
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">The argument is NULL or of another type.</exception>
     public Guid GetGuid(int index) => _values[index].AsGuid();
+
+    /// <summary>Reads an argument's storage type in place, without copying the value.</summary>
+    /// <param name="index">The argument's position, from zero.</param>
+    /// <returns>The type; <see cref="DatabaseType.Null"/> for <c>NULL</c>.</returns>
+    internal DatabaseType TypeAt(int index) => _values[index].Type;
 
     /// <summary>Gets whether any argument is SQL <c>NULL</c>: the strict short-circuit's test.</summary>
     internal bool HasNull
