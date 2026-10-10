@@ -1493,6 +1493,17 @@ cap was drained in full, past the cap it had just been rejected for. The
 `RejectedStatusCode` latch makes the drain return `false` at once, as `IsMalformed`
 does.
 
+Nor is a body whose read stopped inside its framing. A read that fails while a chunk
+terminator, a chunk-size line or the trailer section is in progress, an application's
+cancelled read among them, has consumed part of a line, and the decoder keeps no
+partial line. A drain that resumed there would read the rest of the line as a line of
+its own: the rest of `40` is `0`, a last chunk, and the chunk's data, from its leading
+CRLF, then reads as the end of a trailer section and a new request. The stream latches
+the interruption, the drain returns `false`, and a later read fails with an
+`IOException` instead of resuming mid-line. The response status is left alone, since
+the client did nothing wrong. A read cancelled inside a chunk's data consumed nothing
+of it, so the drain still resumes that one.
+
 The drain reads framing lines under the same caps as the application (#1375). A
 drain that meets an over-long chunk extension or trailer line, or a trailer section
 over its bounds, stops at the breach, returns `false`, and the connection closes;

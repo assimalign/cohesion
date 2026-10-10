@@ -69,8 +69,9 @@ internal sealed class Http1Context : TransportHttpContext
     /// <summary>
     /// Consumes and discards any request body the application did not read, so the connection
     /// realigns on the next request's framing before a keep-alive reuse. Enforces the same body-size
-    /// cap and minimum data rate as a normal read; a violation, a malformed body, or a wire failure
-    /// returns <see langword="false"/> so the caller closes the connection instead of reusing it.
+    /// cap and minimum data rate as a normal read; a violation, a malformed body, an earlier read that
+    /// stopped inside the chunked framing, or a wire failure returns <see langword="false"/> so the
+    /// caller closes the connection instead of reusing it.
     /// </summary>
     /// <param name="cancellationToken">The ambient connection token.</param>
     /// <returns><see langword="true"/> when the body drained and the connection realigned; otherwise <see langword="false"/>.</returns>

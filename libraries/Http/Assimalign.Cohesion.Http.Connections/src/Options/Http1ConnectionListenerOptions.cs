@@ -30,7 +30,7 @@ public sealed class Http1ConnectionListenerOptions
     /// memory-exhaustion vector, and the inherited timeouts close the Slowloris vector.
     /// Enforcement lives in the HTTP/1.1 read path (<c>Http1MessageReader</c> /
     /// <c>Http1RequestBodyStream</c>) and connection loop; violations are answered with
-    /// <c>400</c> / <c>414</c> / <c>431</c> / <c>413</c> before the connection is closed.
+    /// <c>400</c> / <c>408</c> / <c>414</c> / <c>431</c> / <c>413</c> before the connection is closed.
     /// </remarks>
     public sealed class Http1Limits : HttpConnectionListenerLimits
     {

@@ -92,6 +92,10 @@ internal sealed class Http1RequestBodyStream : Stream
     private long _chunkRemaining = -1;
     private bool _needChunkTerminator;
 
+    // Set when a read failed while a framing line or the trailer section was in progress. The octets
+    // that read consumed are gone, so where the framing resumes on the wire is not known.
+    private bool _framingInterrupted;
+
     /// <summary>
     /// Initializes the streaming request body.
     /// </summary>
@@ -230,9 +234,10 @@ internal sealed class Http1RequestBodyStream : Stream
     /// <summary>
     /// Consumes and discards any request body not yet read, so the connection realigns on the next
     /// request's framing for keep-alive. Enforces the same body-size cap and data rate as a normal
-    /// read; a violation (413 / 408), a malformed body, or a wire failure returns
-    /// <see langword="false"/> so the caller closes the connection instead of reusing it. Safe to
-    /// call after disposal — it operates on the connection stream, which the body stream never owns.
+    /// read; a violation (413 / 408), a malformed body, an earlier read that stopped inside the
+    /// chunked framing, or a wire failure returns <see langword="false"/> so the caller closes the
+    /// connection instead of reusing it. Safe to call after disposal — it operates on the connection
+    /// stream, which the body stream never owns.
     /// </summary>
     /// <param name="cancellationToken">The ambient connection token.</param>
     /// <returns><see langword="true"/> when the body was fully drained and the connection realigned; otherwise <see langword="false"/>.</returns>
@@ -251,8 +256,11 @@ internal sealed class Http1RequestBodyStream : Stream
         // A malformed body has no known end on the wire; the connection cannot be reused (#1333). Nor
         // can one rejected over a limit: where a chunked body broke its cap, the octets that follow the
         // offending chunk-size line are that chunk's data, which can read like a last chunk and then a
-        // new request (#1339).
-        if (IsMalformed || RejectedStatusCode is not null)
+        // new request (#1339). Nor can one whose read stopped inside its framing, cancelled by the
+        // application for instance: the octets of the line read so far are gone, so a drain would
+        // resume mid-line, and the rest of a chunk-size line "40" read as a line of its own is "0", a
+        // last chunk.
+        if (IsMalformed || RejectedStatusCode is not null || _framingInterrupted)
         {
             return false;
         }
@@ -380,14 +388,37 @@ internal sealed class Http1RequestBodyStream : Stream
             throw new InvalidDataException("RFC 9112 §7.1: the chunked request body is malformed and is not read further.");
         }
 
+        // A read that stopped inside a framing line cannot be resumed: the line's octets read so far are
+        // gone, and resuming would read the rest of the line as a line of its own. The status is left
+        // alone, since the client did nothing wrong; the connection just cannot be reused.
+        if (_framingInterrupted)
+        {
+            throw new IOException(
+                "RFC 9112 §7.1: an earlier read of the chunked request body stopped inside its framing, so the body is not read further.");
+        }
+
+        bool succeeded = false;
         try
         {
-            return await ReadChunkedCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
+            int read = await ReadChunkedCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
+            succeeded = true;
+            return read;
         }
         catch (InvalidDataException)
         {
             IsMalformed = true;
             throw;
+        }
+        finally
+        {
+            // _chunkRemaining is negative only while a chunk terminator, a chunk-size line or the
+            // trailer section is being read (or is about to be): a read that failed there, cancelled
+            // or not, leaves the framing at an unknown offset. A read that failed inside a chunk's
+            // data consumed none of it, so that one can be resumed.
+            if (!succeeded && _chunkRemaining < 0)
+            {
+                _framingInterrupted = true;
+            }
         }
     }
 
