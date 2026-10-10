@@ -307,6 +307,12 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 | 14 (wave 2) | #1183 → #1376 | A/B | sessions 2, 5 | CR, LF and NUL are not rejected in response fields (CWE-113) on any writer, the Http.ProtocolUpgrade 101 writer included. HTTP/2 and HTTP/3 never validate inbound fields |
 | 15 (wave 2) | #1340 | D/E | session 4 | A malformed body is logged as a 500 application fault on HTTP/1.1, and the client got 400. The HTTP/2 and HTTP/3 half is #1378, in Stage 12 |
 
+**Owner-directed Web restructure, between the waves (decisions 32–36).**
+- #1382, the COHRES002 change, landed first (`f71ab0af`, `57e1f049`).
+- #1379, the root features, and #1380, `builder.Services` registration plus the singleton checks, run after wave 1 is integrated and before wave 2.
+- #1381, presizing, runs alongside them.
+- Wave 2's #1340 touches HTTP logging and the exception boundary, so it runs after #1380.
+
 ### Stage 12 — Protocol conformance
 
 **Status:** lined up. Gate: Stage 11 reviewed.
@@ -839,7 +845,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20, and adopted decision 21 in the review of decision 20's follow-ups the same day. Decision 31 proposes an answer to decision 5, pending the owner's date. The owner made decision 32 on 2026-10-09.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20, and adopted decision 21 in the review of decision 20's follow-ups the same day. Decision 31 proposes an answer to decision 5, pending the owner's date. The owner made decisions 32–36 on 2026-10-09 while Stage 11 ran, directing a Web restructure (#1379–#1382) that lands between its two waves.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -932,6 +938,29 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - **What it unblocks.** The Web root's features can leave the root: the endpoint and path base to `Web.Routing`, and the request id, response completion and drain to a new `Web.Server`, both referenced by `Web.Hosting`.
     - **What it does not change.** Registering a feature never needs a hosting-module reference to it: feature verbs still ship with the feature package.
     - Recorded in `build/Targets/Build.Rules.targets`, `.claude/rules/resource-areas.md`, `.claude/rules/web-area.md` and `resources/Web/README.md`.
+33. **The Web root holds no feature contracts (owner, 2026-10-09; #1379).** Decision 20's rule extends to `Assimalign.Cohesion.Web`.
+    - `IWebEndpointFeature`, `IWebPathBaseFeature` and the `Map(path)` branching move to Web.Routing.
+    - `IWebRequestIdFeature`, `IWebResponseCompletionFeature` and `IWebServerDrainFeature` move to a new `Assimalign.Cohesion.Web.Server`.
+    - Web.Hosting references both packages under decision 32. Its telemetry reads the endpoint's route template.
+    - The owner chose this over one shared features package. Placing the contracts in Web.Hosting is ruled out by COHRES001.
+34. **Feature registration moves to `builder.Services` (owner, 2026-10-09; #1380).**
+    - The eight `Add<Feature>` verbs leave `extension(IWebApplicationBuilder)` and become `builder.Services.AddX(...)`, as in other .NET hosting models. They are delivered by component integration (`.claude/rules/component-integration.md`): each feature package declares the integration, and the generator emits the verb into the application.
+    - Web.Hosting needs no feature references for them.
+    - `IWebApplicationBuilder.AddFeature` (both overloads) stays as the raw registration path.
+    - Pipeline `Use*` and `Map*` verbs stay in their packages.
+    - `AddOpenApi` moves too.
+    - **Rejected alternatives:**
+      - moving the verbs into Web.Hosting, which would land every feature's closure in the 17 area frameworks;
+      - a factory-only `AddFeature<TFeature>` seam, prototyped on `proto/web-feature-factory-seam` and rejected because it removed raw `AddFeature`.
+35. **`IHttpFeature` registrations are singletons (owner, 2026-10-09; #1380).** A measured analysis found no performance or functional benefit in scoped or transient features. At 8 features, a scope per exchange costs +495 ns and +1,536 B, and transient through the container costs +235 ns and +280 B.
+    - Scoped breaks every composition-time reader, because one scoped item makes the whole `IEnumerable<IHttpFeature>` scoped.
+    - Transient sends `Map*` routes to a throwaway router.
+    - At `Build`, Web.Hosting rejects:
+      - a non-singleton `IHttpFeature` registration;
+      - a registration under a narrower type than `IHttpFeature`, which would never be stamped;
+      - a disposable `IHttpFeature`.
+    - Request-scoped services for handlers stay a separate future decision: a lazily created scope owned by the server, for a separate service type.
+36. **Presize each exchange's feature collection (owner, 2026-10-09; #1381).** Dictionary resizes are almost all of today's stamping cost: 560 B at 4 features and 1,744 B at 16. The capacity constructor already exists. The other per-request lever, an allocation-free `Get<T>()` (#1337), stays in Stage 14.
 
 ### 7.5 Lineup
 
