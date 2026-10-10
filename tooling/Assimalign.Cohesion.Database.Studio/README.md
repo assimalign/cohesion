@@ -26,7 +26,8 @@ exe, and exits non-zero when a step fails. It covers, per model, the declared `s
 (listed after the engine's build, its drop refused, opened), create/insert/query embedded and
 over loopback TCP, transactions, the catalog, and every Samples script; for SQL also the declared
 database's provisioned schema and its CHECK, and the registered functions embedded and over the
-wire. A run over a fresh temporary root gives 98 passed, 0 failed, 1 skipped (Documents has no
+wire; and, on a scratch root of its own, that a declaration failing its build stops only its own
+model. A run over a fresh temporary root gives 99 passed, 0 failed, 1 skipped (Documents has no
 wire); a second run over the same `dataRoot` takes the engines' open path and gives the same. UI
 crashes are logged to `studio-crash.log` next to the exe; the UI marks them handled and keeps
 running.
@@ -41,6 +42,10 @@ database while it is built and refuses to drop it. It holds each engine typed
 `BlobDatabaseEngine`), and each model's workspace overrides `Engine` and `Session` with its typed
 engine and session, so nothing in the Studio casts from the root `DatabaseEngine` or
 `DatabaseSession`.
+
+The declared database is opened or provisioned inside the build, so stored files can fail it. A
+model whose declaration fails its build is built again without the declaration: the log and the
+model's status on the Workspace page say so, and the other four models start as usual.
 
 The SQL engine also gets the Studio's own extension (`StudioSqlExtensions`), written the way an
 application packages one, as extension members on `SqlDatabaseEngineBuilder`:
@@ -91,6 +96,11 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 - Wire (external) cannot list/create/drop databases, run KEYSPACES, or manage blob containers.
 - The declared `studio` database cannot be dropped: its engine's builder declares it. Remove the
   declaration in `StudioEngines.Create` first.
+- A declared `studio` database that cannot be opened or provisioned (an older catalog format after
+  a format bump, or a `studio` SQL database written before P7 whose `notes` table the declaration
+  did not create) leaves its model running without it. Delete `<data root>\<model>\studio` (and
+  `studio.catalog` beside it, for SQL and Key-Value), or pick another data root on the Workspace
+  page and Apply, to get the declared database back.
 - No statement parameters; no cancellation of a statement the engine does not observe.
 - Graph index creation is only `GraphSchema.CreateIndexAsync`, not exposed here (GQL has no index DDL).
 - Settings are not persisted between runs.

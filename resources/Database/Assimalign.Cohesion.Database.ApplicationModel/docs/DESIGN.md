@@ -137,8 +137,9 @@ package unchanged, which phase 7 of the concrete-types plan verified: its built 
 exactly the list above plus `System.Security.Cryptography.ProtectedData`, with no other
 Database assembly (no root, model or engine), and `IDatabaseResourceDescriptor` is one of the five
 interfaces the area keeps. It stays an interface because it extends the library-owned
-`IResourceCommandDescriptor`, the pattern of every area's `I<Area>ResourceDescriptor`; the
-concrete-first rule covers engine models, not orchestration.
+`IResourceCommandDescriptor`, the pattern of every area's `I<Area>ResourceDescriptor`;
+`database-area.md` keeps it as one of its five interfaces because it is orchestration, not an
+engine model, and no other public interface may be added to this package.
 
 ## Non-goals
 

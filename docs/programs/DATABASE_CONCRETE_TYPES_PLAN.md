@@ -4206,13 +4206,22 @@ landed them; this phase is the ApplicationModel verification and Studio's typed 
   declares `studio` with a typed schema whose CHECK calls `studio_initials`. The SQL catalog explorer
   lists the registered functions from `COHESION_SCHEMA.FUNCTIONS`, and a new "Registered functions"
   sample calls them.
-- *Smoke.* 83 → 98 passed, 0 failed, 1 skipped. The 15 new steps: per model, the declared database
+- *A failed declaration stays in its model.* A declared database is opened or provisioned inside
+  the engine's build, so stored files can now fail `StudioEngines.Create`: an older catalog format
+  after a format bump, or a `studio` SQL database written before P7 whose `notes` table the
+  declaration did not create (`COHSQLP005`). Studio used to fail one database only when it was
+  selected, and `StudioState` keeps one failing model from taking down the others. So a model
+  whose declaration fails its build is built again without it, and the log and the model's status
+  say so; the other four start as before.
+- *Smoke.* 83 → 99 passed, 0 failed, 1 skipped. The 16 new steps: per model, the declared database
   is listed after the build, its drop is refused and it opens (10); SQL's provisioned schema, and
   its CHECK refusing a title with no word (2); the registered functions embedded and over loopback
-  TCP (2); the new sample (1). Two runs over one persistent data root give the same; the second
-  takes the engines' open path, where the stored CHECK binds the registered function again.
+  TCP (2); the new sample (1); and, on a scratch root holding a pre-P7 `studio` SQL database, SQL
+  alone running without its declaration while the other four declare theirs (1). Two runs over
+  one persistent data root give the same; the second takes the engines' open path, where the
+  stored CHECK binds the registered function again.
 - *Gate, as run.* ApplicationModel 15 and Hosting 78, in Debug and Release. Studio builds with no
-  warning to output folders under `%TEMP%` in Debug and Release, and both `--smoke` runs give 98,
+  warning to output folders under `%TEMP%` in Debug and Release, and both `--smoke` runs give 99,
   0 and 1. The dependency graph check passes. Not run: the `Sdk.Gateway` CommandGateway test
   project the P7 row names, which needs refreshed canonical packs. The ApplicationModel's public
   surface did not change (its one source edit is XML documentation). The template and
@@ -4383,8 +4392,9 @@ That is roughly 570 files in this repository and 119 in the two companions.
 - [Likely] Net: about 53 to 58 fewer public types.
 
 **Effort.** [Guessing] 14 PRs in this repository: P0, P1, P2 (five commits), P3, P4.0, five model
-PRs, P5, P6, P7 and P8. P7 adds one cohesion-examples PR in the same window. Roughly 15,000 to
-25,000 changed lines, most of them mechanical renames in tests. The real design work is in P3
+PRs, P5, P6, P7 and P8. B1 of the engine extensibility design carried the one cohesion-examples
+PR (decision 72). Roughly 15,000 to 25,000 changed lines, most of them mechanical renames in
+tests. The real design work is in P3
 (NVI bases and the consolidated state machine), §6.6 and §6.7. The moves out of `Internal/` (C12)
 are counted in P2, P4 and P5: [Likely] about 35 files, including the four storage
 sub-components, each changing namespace, plus the `using …Internal` lines in their tests.
@@ -4406,7 +4416,7 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
 | R11 | [Guessing] Public sealed `SqlConnection` and `SqlClient` clash with Microsoft.Data.SqlClient's types when both namespaces are imported. | Users alias one of them. Renaming is out of scope unless a consumer reports the clash. |
 | R12 | [Certain] Deleting `ExternalEngineBuilder` removes the builder-validation coverage it carried. | Direct tests against the sealed builder (row 83). |
 | R13 | [Certain] Studio is MAUI and Windows-only, outside most CI legs, so it can rot between phases. | It is built in P4, P5 and P7. |
-| R14 | [Certain] cohesion-examples drifts. | The identity cast keeps it compiling until P7. P7 updates it in the same window. |
+| R14 | [Certain] cohesion-examples drifts. | The identity cast kept it compiling until B1, which updated it in the same window (decision 72). |
 | R15 | [Certain] A source break for preview.1 consumers. | One release-notes line (D11). |
 | R16 | [Certain] The coordinator carries three internal test hooks in production code (§6.9). | They are internal, `null` unless a test sets them, and called once per checkpoint, sequence reservation or rollback, never per row. Only Transactions.Tests reaches them, and each test asserts its hook fired. |
 

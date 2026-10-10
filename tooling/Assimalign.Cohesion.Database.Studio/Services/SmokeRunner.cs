@@ -8,6 +8,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Studio;
@@ -48,12 +50,20 @@ internal sealed class SmokeRunner
             engines = await runner.StepAsync("engines", "create", () => Task.FromResult(StudioEngines.Create(dataRoot))).ConfigureAwait(false);
             if (engines is not null)
             {
+                foreach ((StudioModel model, string failure) in engines.DeclarationFailures)
+                {
+                    // The model's declared-database steps fail below; this line says why.
+                    write($"      engines: {model.DisplayName} runs without its declared database: {failure}");
+                }
+
                 await runner.SqlAsync(engines).ConfigureAwait(false);
                 await runner.DocumentsAsync(engines).ConfigureAwait(false);
                 await runner.GraphAsync(engines).ConfigureAwait(false);
                 await runner.KeyValueAsync(engines).ConfigureAwait(false);
                 await runner.BlobAsync(engines).ConfigureAwait(false);
             }
+
+            await runner.DeclarationFallbackAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -494,6 +504,74 @@ internal sealed class SmokeRunner
             outcomes => ExpectRows(outcomes[0], rows, row => row[1] == lastInitial)
                 ?? ExpectRows(outcomes[1], 1, row => row[0] == product)
                 ?? ExpectRows(outcomes[2], 2, row => row[0] == StudioSqlExtensions.ProductFunction));
+
+    /// <summary>
+    /// A declared database that fails its engine's build takes down only its own model. On a scratch
+    /// root whose SQL <c>studio</c> database already holds a <c>notes</c> table the declaration did not
+    /// create (a root written before P7), the SQL engine runs without the declaration and the other
+    /// four models still declare theirs. Always runs on its own temporary root, which it deletes.
+    /// </summary>
+    private Task DeclarationFallbackAsync()
+        => StepAsync("engines", "declaration-fallback", async () =>
+        {
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "cohesion-studio-smoke", Guid.NewGuid().ToString("N")[..8] + "-fallback");
+            try
+            {
+                SqlDatabaseEngineBuilder builder = SqlDatabaseEngine.CreateBuilder("studio-sql-undeclared");
+                builder.Options.RootPath = System.IO.Path.Combine(root, StudioModel.Sql.FolderName);
+                SqlDatabaseEngine undeclared = builder.Build();
+                await using (undeclared.ConfigureAwait(false))
+                {
+                    SqlDatabase database = await undeclared.CreateDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
+                    SqlDatabaseSession session = await database.CreateSessionAsync().ConfigureAwait(false);
+                    await using (session.ConfigureAwait(false))
+                    {
+                        var outcome = new StatementOutcome { Statement = $"CREATE TABLE {StudioSqlExtensions.NotesTable} (Id BIGINT PRIMARY KEY, Title TEXT NOT NULL);" };
+                        QueryResult result = await session.ExecuteAsync(outcome.Statement, null).ConfigureAwait(false);
+                        await QueryResultReader.FillAsync(outcome, result, CancellationToken.None).ConfigureAwait(false);
+                        Require(!outcome.Failed, $"the conflicting table was not created: {Describe(outcome)}");
+                    }
+                }
+
+                StudioEngines engines = StudioEngines.Create(root);
+                await using (engines.ConfigureAwait(false))
+                {
+                    string failure = engines.DeclarationFailures.Count == 1 && engines.DeclarationFailures.TryGetValue(StudioModel.Sql, out string? sqlFailure)
+                        ? sqlFailure
+                        : throw new InvalidOperationException(
+                            $"expected only SQL's declaration to fail, got [{string.Join("; ", engines.DeclarationFailures.Select(entry => $"{entry.Key}: {entry.Value}"))}]");
+
+                    (StudioModel Model, DatabaseEngine Engine)[] declaring =
+                        [(StudioModel.Documents, engines.Documents), (StudioModel.Graph, engines.Graph), (StudioModel.KeyValue, engines.KeyValue), (StudioModel.Blob, engines.Blob)];
+                    foreach ((StudioModel model, DatabaseEngine engine) in declaring)
+                    {
+                        bool listed = false;
+                        await foreach (DatabaseInstance instance in engine.GetDatabasesAsync().ConfigureAwait(false))
+                        {
+                            listed |= string.Equals(instance.Name.ToString(), StudioEngines.DeclaredDatabase, StringComparison.OrdinalIgnoreCase);
+                        }
+
+                        Require(listed, $"{model.DisplayName} did not declare '{StudioEngines.DeclaredDatabase}' next to the failed SQL declaration");
+                    }
+
+                    return failure.Length > 120 ? failure[..120] + "..." : failure;
+                }
+            }
+            finally
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup of the scratch root.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        });
 
     // ---------------------------------------------------------------- shared steps
 
