@@ -198,7 +198,9 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
 
         foreach (HttpMethod method in methods)
         {
-            OperationType? operation = method.Value.ToUpperInvariant() switch
+            // Byte for byte (RFC 9110 §9.1): a route mapped for 'get' serves only 'get', which is an
+            // extension method, not the GET the 'get' operation field describes.
+            OperationType? operation = method.Value switch
             {
                 "GET" => OperationType.Get,
                 "PUT" => OperationType.Put,

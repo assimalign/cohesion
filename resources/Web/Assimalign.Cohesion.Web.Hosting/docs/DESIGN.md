@@ -572,10 +572,11 @@ A failure sets the span status to `Error`; a `4xx` leaves it unset, as the serve
 `QUERY`, which are exactly the methods `HttpMethod` canonicalizes. The convention requires a way to
 replace it, because a valid extension method would otherwise always report `_OTHER`.
 `OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS` (comma-separated, case-sensitive, a full replacement) is
-read once per process, as the source and meter are process-wide. The HTTP stack upper-cases method
-tokens when it parses a request, so entries should be upper case. For the same reason the original
-casing of a known method is not available, and `http.request.method_original` is set only for
-`_OTHER`.
+read once per process, as the source and meter are process-wide. Methods are case-sensitive
+(RFC 9110 §9.1, #1301): the HTTP stack keeps the token as the client sent it, so a lower-case `get`
+is an unknown method, reported as `_OTHER` with `http.request.method_original` = `get`. A method is
+known only when it matches a list entry exactly, so its original never differs from
+`http.request.method`, and `http.request.method_original` is set only for `_OTHER`.
 
 **Outcomes and `error.type`.** The server reports how it finalized the exchange; the exception
 itself stays with the error boundary, which does not keep it, and with the hosting logs (#147).
@@ -823,7 +824,8 @@ transport with a real client and an `ActivityListener` and `MeterListener` subsc
 (`TestObjects/TelemetryRecorder`): one server span per request, parented to the caller's
 `traceparent` and current while the pipeline runs; the attributes and the span name, a routed
 request's `http.route` (through real `Web.Routing`, a test-only reference); every outcome in the
-`error.type` table; `_OTHER`; one span per HTTP/2 stream; an ambient activity at server start that
+`error.type` table; `_OTHER`, including a lower-case `get` written raw and reported with its original
+case; one span per HTTP/2 stream; an ambient activity at server start that
 must not parent requests; the duration and the active-request count; the request id with and
 without a span; and no activity at all without a listener. Listeners are process-wide, so the class
 runs in the non-parallel `TelemetryCollection`.

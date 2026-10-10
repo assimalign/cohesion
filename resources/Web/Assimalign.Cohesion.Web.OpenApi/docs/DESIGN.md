@@ -95,7 +95,9 @@ from the template's constraints and a bare `200`. This mirrors ASP.NET Core, who
 plain `RequestDelegate` endpoints.
 
 A route that accepts any method names no operation and is skipped. `CONNECT` and extension methods have
-no operation field and are skipped. `QUERY` becomes the 3.2 `query` operation, which generation drops
+no operation field and are skipped. Methods map to operation fields byte for byte (RFC 9110 §9.1, #1301):
+a route mapped for `get` serves only `get`, an extension method, so it is not described as the `get`
+operation, which means `GET`. `QUERY` becomes the 3.2 `query` operation, which generation drops
 for earlier lines. The first route registered for a path and method keeps it: routes whose templates
 differ only in constraints (`{id:int}` beside `{id}`) or host share one OpenAPI path.
 

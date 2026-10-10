@@ -110,6 +110,10 @@ a single `HttpMethod` (the common case) or an `IEnumerable<HttpMethod>`. Duplica
 de-duplicated at construction. An **empty** method set means "accept any method" — useful for
 catch-all/fallback routes.
 
+Methods match byte for byte, because `HttpMethod` is case-sensitive (RFC 9110 §9.1, #1301). A `GET`
+route does not serve a request whose method is `get`: that request is answered `405` with
+`Allow: GET, HEAD`, as any other method the route does not list.
+
 ### 405 vs 404 and the `Allow` header
 
 `Router.Match` returns a `RouteMatch` with one of three `RouteMatchStatus` values:
@@ -493,7 +497,9 @@ The middleware calls `router.Match(context)` once and publishes the result:
 - `MethodNotAllowed` → a 405 endpoint is published. It is an `IWebEndpointFeature` only, not a route
   match, so metadata consumers see no endpoint. The terminal sets `405` and the `Allow` header.
 - A **CORS preflight** to a path that no route accepts `OPTIONS` on → routing matches again with the
-  method named in `Access-Control-Request-Method` (`IRouter.Match(context, method)`). A candidate
+  method named in `Access-Control-Request-Method` (`IRouter.Match(context, method)`), parsed as sent:
+  methods are case-sensitive (RFC 9110 §9.1, #1301), so a preflight for `patch` resolves no `PATCH`
+  route, just as the actual `patch` request matches none. A candidate
   is published as an `IRouteMatchFeature` with `IsPreflight` set, so CORS can read its metadata.
   The candidate never runs for the preflight: if no middleware answers it, the terminal answers
   the plain `OPTIONS` request with `405` and `Allow`. A path with an explicit `OPTIONS` route handles

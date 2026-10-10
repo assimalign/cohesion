@@ -665,13 +665,13 @@ internal static class HttpProtocolPayloadFactory
 
     private static void WriteHttp2MethodHeader(Stream stream, string method)
     {
-        if (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(method, "GET", StringComparison.Ordinal))
         {
             WriteHttp2IndexedHeader(stream, 2);
             return;
         }
 
-        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(method, "POST", StringComparison.Ordinal))
         {
             WriteHttp2IndexedHeader(stream, 3);
             return;

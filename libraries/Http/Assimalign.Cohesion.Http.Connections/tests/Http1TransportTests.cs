@@ -281,6 +281,50 @@ public class Http1TransportTests
         body.ShouldBe(bodyText);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: A standard method in another case should be an unknown method (RFC 9110 §9.1)")]
+    [InlineData("get", "GET")]
+    [InlineData("post", "POST")]
+    [InlineData("Head", "HEAD")]
+    [InlineData("options", "OPTIONS")]
+    public async Task Http1_OnMethodInAnotherCase_ShouldParseAnUnknownMethod(string method, string standard)
+    {
+        // Arrange
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request($"{method} /widgets HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        // Assert
+        httpContext.Request.Method.Value.ShouldBe(method);
+        httpContext.Request.Method.ShouldNotBe(HttpMethod.GetCanonicalizedValue(standard));
+        httpContext.Request.Path.Value.ShouldBe("/widgets");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: A lower-case 'head' should get its response body, because it is not HEAD")]
+    public async Task Http1_OnLowerCaseHead_ShouldSendTheResponseBody()
+    {
+        // Arrange — an intermediary that forwards 'head' as an unknown method expects a body; suppressing it
+        // would leave the next response on a shared connection misframed.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request("head /widgets HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Act
+        httpContext.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("widgets"));
+        await httpConnectionContext.SendAsync(httpContext);
+        string responseText = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
+
+        // Assert
+        responseText.ShouldStartWith("HTTP/1.1 200");
+        responseText.ShouldContain("Content-Length: 7");
+        responseText.ShouldEndWith("\r\n\r\nwidgets");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse a QUERY request line and deliver its content body (RFC 10008)")]
     public async Task Http1_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
     {

@@ -316,6 +316,32 @@ public class CorsEndToEndTests
         Header(unanswered, "Access-Control-Allow-Origin").ShouldBeNull();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - E2E: A preflight for 'patch' should not resolve the PATCH route, because methods are case-sensitive")]
+    public async Task UseCors_PreflightForMethodInAnotherCase_ShouldNotUseTheRoutePolicy()
+    {
+        // Arrange — Fetch sends 'patch' as written, and the actual 'patch' request matches no PATCH route.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        factory.Application.UseCors();
+        routes.Map(CohesionHttpMethod.Patch, "/items", Ok()).RequireCors(policy => policy.WithOrigins(App).AllowAnyMethod());
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage exact = await client.SendAsync(Preflight("/items", App, "PATCH"), cancellation.Token);
+        using HttpResponseMessage otherCase = await client.SendAsync(Preflight("/items", App, "patch"), cancellation.Token);
+
+        // Assert
+        exact.StatusCode.ShouldBe(NetHttpStatusCode.NoContent);
+        Header(exact, "Access-Control-Allow-Origin").ShouldBe(App);
+        otherCase.StatusCode.ShouldBe(NetHttpStatusCode.MethodNotAllowed);
+        Header(otherCase, "Access-Control-Allow-Origin").ShouldBeNull();
+        Header(otherCase, "Access-Control-Allow-Methods").ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Cors] - E2E: An explicit OPTIONS route should answer its path's preflights itself")]
     public async Task UseCors_PreflightToExplicitOptionsRoute_ShouldLetTheRouteAnswer()
     {

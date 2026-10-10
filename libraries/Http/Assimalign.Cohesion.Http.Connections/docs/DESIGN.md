@@ -163,6 +163,16 @@ then does the transport construct its version's context (`Http1Context`,
 and `response.HttpContext` are read-only and assigned at construction. They
 are never observed unset, and nothing can re-parent them (#699).
 
+The method is parsed the same way on every version: the request-line token, or
+the `:method` field, goes through `HttpMethod.GetCanonicalizedValue`, which keeps
+it as sent and matches the standard methods byte for byte (RFC 9110 §9.1, #1301).
+`get`, `head` and `connect` are unknown extension methods, so HTTP/1.1 sends a
+body for `head`, and HTTP/2 and HTTP/3 treat a `connect` that carries `:scheme`
+and `:path` as the ordinary request their pseudo-header checks, which already
+compared `CONNECT` ordinally, took it for. Before #1301 the token was
+upper-cased here, and the transport applied semantics an intermediary in front
+of it did not.
+
 The request and response are the same sealed types on every version. The
 former per-version subclasses (`Http1Request` … `Http3Response`) added no
 members, so they were removed. Version-specific state lives on the contexts:

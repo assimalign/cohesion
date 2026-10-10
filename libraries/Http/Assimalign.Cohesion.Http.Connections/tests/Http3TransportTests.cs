@@ -60,6 +60,32 @@ public class Http3TransportTests
         Encoding.UTF8.GetString(frames[1].Payload).ShouldBe("quic");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3: A standard :method in another case should be an unknown method (RFC 9110 §9.1)")]
+    [InlineData("get", "GET")]
+    [InlineData("head", "HEAD")]
+    [InlineData("connect", "CONNECT")]
+    public async Task Http3_OnMethodInAnotherCase_ShouldParseAnUnknownMethod(string method, string standard)
+    {
+        // Arrange — 'connect' carries :scheme and :path, as any method but CONNECT must, so it is not a tunnel.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(method, "/items", "https", "a");
+        TestConnection stream = new(payload);
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Act
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Assert
+        httpContext.Request.Method.Value.ShouldBe(method);
+        httpContext.Request.Method.ShouldNotBe(HttpMethod.GetCanonicalizedValue(standard));
+        httpContext.Request.Path.Value.ShouldBe("/items");
+        httpContext.Request.Trailers.IsSupported.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a QUERY :method and deliver its content body (RFC 10008)")]
     public async Task Http3_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
     {

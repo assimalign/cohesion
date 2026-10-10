@@ -736,6 +736,38 @@ public class CorsMiddlewareTests
         context.ResponseHeader(HttpHeaderKey.AccessControlAllowOrigin).ShouldBe(Other);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Cors] - Preflight source: A route serves the requested method only byte for byte (RFC 9110 §9.1)")]
+    [InlineData("PATCH", true)]
+    [InlineData("patch", false)]
+    [InlineData("Patch", false)]
+    public async Task InvokeAsync_PreflightToRouteServingMethodInAnotherCase_ShouldLeaveItToTheRoute(string requestedMethod, bool answered)
+    {
+        // Arrange — the route's policy grants any method, so only the route's method set decides. The actual
+        // 'patch' request would not match this PATCH route, so its policy must not approve the preflight.
+        await using CorsTestContext context = CorsTestContext.Preflight(Other, requestedMethod);
+        CorsPolicy routePolicy = new CorsPolicyBuilder().WithOrigins(Other).AllowAnyMethod().Build();
+        FakeRouteMatchFeature route = new(new CorsMetadata(routePolicy))
+        {
+            Route = new Route([HttpMethod.Options, HttpMethod.Patch], "/items"),
+        };
+
+        // Act
+        bool continued = await CorsPipeline.InvokeAsync(context, configure: null, route);
+
+        // Assert
+        continued.ShouldBe(!answered);
+
+        if (answered)
+        {
+            context.ResponseHeader(HttpHeaderKey.AccessControlAllowOrigin).ShouldBe(Other);
+            context.ResponseHeader(HttpHeaderKey.AccessControlAllowMethods).ShouldBe(requestedMethod);
+        }
+        else
+        {
+            AssertNoCorsHeaders(context);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Cors] - Preflight source: A route that accepts any method should answer with its policy")]
     public async Task InvokeAsync_PreflightToAnyMethodRoute_ShouldAnswerWithRoutePolicy()
     {

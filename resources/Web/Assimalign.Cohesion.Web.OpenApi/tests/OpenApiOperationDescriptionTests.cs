@@ -276,6 +276,26 @@ public class OpenApiOperationDescriptionTests
         line31.Paths!.Items.Keys.ShouldBe(["/ping"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Operations: a route mapped for a standard method in another case is an extension method and is left out")]
+    public async Task Describe_MethodInAnotherCase_ShouldBeLeftOut()
+    {
+        // Arrange — methods are case-sensitive (RFC 9110 §9.1): the route serves 'get', never GET.
+        using CancellationTokenSource cancellation = new(OpenApiTestApplication.Timeout);
+        await using WebApplicationTestFactory factory = OpenApiTestApplication.CreateFactory();
+        factory.Application.UseRouting();
+        factory.Application.Map(new Assimalign.Cohesion.Http.HttpMethod("get"), "/orders/lowercase", () => "lowercase");
+        factory.Application.MapGet("/ping", () => "pong");
+
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/ping", cancellation.Token);
+
+        // Act
+        OpenApiDocument document = factory.Application.GetOpenApiDescriptionProvider().GetDocument(OpenApiSpecVersion.V3_2);
+
+        // Assert
+        document.Paths!.Items.Keys.ShouldBe(["/ping"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Operations: document tags list declared tags first, then tags endpoints use")]
     public async Task Describe_Tags_ShouldListDeclaredThenUsed()
     {

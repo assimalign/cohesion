@@ -1426,6 +1426,51 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
   ubiquitous `X-Forwarded-*` headers plus RFC 7239; other vendor variants are a
   consumer overlay if ever needed.
 
+## Methods are case-sensitive (RFC 9110 §9.1)
+
+`HttpMethod` keeps its token exactly as given and compares it byte for byte:
+`Equals`, `GetHashCode` and the operators are ordinal, and
+`GetCanonicalizedValue` returns a standard method's shared instance only for its
+exact upper-case token. `get` is an unknown extension method: it is not `GET`,
+it is not safe, idempotent or cacheable, and nothing that tests for `GET` matches
+it (#1301, decision 26).
+
+**Why.** RFC 9110 §9.1 defines methods as case-sensitive, and conformant
+intermediaries treat `get` as a method they do not know. Before #1301 the
+constructor upper-cased every token and equality ignored case, so this server
+applied the standard semantics a proxy, WAF or cache in front of it did not:
+
+- a method-based access rule at the intermediary was bypassed by `post` or
+  `delete`;
+- `head` had its response body suppressed while the intermediary, seeing an
+  unknown method, waited for one, which misframes the next response on a shared
+  upstream connection;
+- `connect` with `:scheme` and `:path` passed the HTTP/2 and HTTP/3 pseudo-header
+  checks as an ordinary request (they already compared `CONNECT` ordinally), then
+  became `CONNECT` and skipped the request-body hooks.
+
+Every transport parses the method through `GetCanonicalizedValue`, so the rule
+holds on HTTP/1.1, HTTP/2 and HTTP/3 alike, and so does every consumer that
+compares against the standard instances (routing, CORS, antiforgery, output
+caching, telemetry). Telemetry now reports `get` as `_OTHER` with
+`http.request.method_original` = `get`, as the semantic convention intends.
+
+**Breaking change** (accepted during the previews on decision 15's terms). A method
+built from a token that is not upper case, including through the implicit
+conversion from `string`, no longer equals the standard method it spells, and
+`Value` keeps the case it was given. Code that wrote `request.Method == "get"`
+or mapped a route with `new HttpMethod("get")` now names a different method.
+
+**Alternatives considered.**
+
+- **Reject a non-standard-case method with `400`/`501`.** RFC 9110 lets a server
+  answer an unknown method with `501`, and an application that wants that can do it
+  in its pipeline; the transport's job is to report what was sent, not to guess
+  which extension methods the application serves.
+- **Keep folding and compare ordinally only at the edges.** Every consumer would
+  need to know which comparison is safe; one forgotten case-insensitive check
+  reopens the gap. Fixing the value type closes it everywhere at once.
+
 ## The QUERY method (RFC 10008)
 
 RFC 10008 registers `QUERY`: a **safe, idempotent** method that carries the query
@@ -1443,7 +1488,8 @@ change. This section records the three semantic decisions QUERY forced.
 *method* is the correct home for facts the RFC defines *about the method*, and
 every consumer that reasons about them (antiforgery, a future output cache,
 retry policy, a CORS preflight decision) already holds an `HttpMethod`. They are
-plain switches over the canonical (upper-cased) token — fully AOT/trim-safe, no
+plain ordinal switches over the token, so only the exact upper-case standard
+tokens match (see "Methods are case-sensitive") — fully AOT/trim-safe, no
 layering impact — and they answer:
 
 | Method | `IsSafe` | `IsIdempotent` | `IsCacheable` | `CacheKeyIncludesContent` |
@@ -1465,8 +1511,9 @@ total (a default-constructed `HttpMethod`, whose `Value` is `null`, also reports
 
 `HttpMethod.Query` and the `"QUERY"` arm in `GetCanonicalizedValue` were the only
 other additions. Adding the constant is **non-breaking**: `HttpMethod` equality
-is `OrdinalIgnoreCase` over the token, so any pre-existing `new HttpMethod("QUERY")`
-already compared equal to the new canonical value.
+is over the token, so any pre-existing `new HttpMethod("QUERY")` already compared
+equal to the new canonical value. (Equality was `OrdinalIgnoreCase` then and is
+ordinal since #1301, so `new HttpMethod("query")` no longer does.)
 
 ### `Accept-Query` is an SFV consumer, projected onto `HttpMediaType`
 

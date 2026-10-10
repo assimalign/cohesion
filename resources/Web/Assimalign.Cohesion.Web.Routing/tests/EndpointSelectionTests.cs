@@ -170,6 +170,7 @@ public class EndpointSelectionTests
     [Theory(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: A preflight with no candidate for the requested method is a plain 405")]
     [InlineData("PUT")]       // no route accepts PUT on the path
     [InlineData("DEL ETE")]   // not a method token
+    [InlineData("get")]       // methods are case-sensitive (RFC 9110 §9.1): 'get' is not GET
     public async Task UseRouting_OnPreflightWithoutCandidate_ShouldAnswer405WithoutMatch(string requestedMethod)
     {
         // Arrange
@@ -203,6 +204,28 @@ public class EndpointSelectionTests
         // Assert
         context.GetRouteMatch().ShouldBeNull();
         context.Response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: A standard method in another case is a different method, answered 405 (RFC 9110 §9.1)")]
+    [InlineData("get")]
+    [InlineData("Get")]
+    [InlineData("head")]
+    public async Task UseRouting_OnMethodInAnotherCase_ShouldAnswer405WithoutRunningTheRoute(string method)
+    {
+        // Arrange — the method as a transport parses it off the wire.
+        RecordingRouterRouteHandler handler = new();
+        TestHttpContext context = TestHttpContext.Create(HttpMethod.GetCanonicalizedValue(method), "/items");
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(HttpMethod.Get, "/items", handler));
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        handler.WasInvoked.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+        context.Response.Headers[HttpHeaderKey.Allow].ToString().ShouldBe("GET, HEAD");
     }
 
     // ------------------------------------------------------------------ required middleware

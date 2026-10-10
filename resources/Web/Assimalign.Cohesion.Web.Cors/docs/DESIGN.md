@@ -83,8 +83,11 @@ excludes both.
 
 ### Methods
 
-- **Byte-case-sensitive**, as Fetch compares them. The requested method is read from the raw
-  `Access-Control-Request-Method` header, because the `HttpMethod` value type uppercases every method.
+- **Byte-case-sensitive**, as Fetch compares them and as RFC 9110 §9.1 defines them. The requested method
+  is read from the raw `Access-Control-Request-Method` header and compared ordinally everywhere: against the
+  policy, and against the methods of a route that matched the `OPTIONS` request (#1301). `HttpMethod` is
+  case-sensitive too, so routing resolves the same candidate: a preflight for `patch` names a method no
+  `PATCH` route serves, because the actual `patch` request will not match that route either.
 - **Fetch's "normalize a method" is applied to configured methods.** `DELETE`, `GET`, `HEAD`, `OPTIONS`,
   `POST` and `PUT` are uppercased, because a browser always sends them uppercase; any other method keeps its
   case. So `WithMethods("put")` approves `PUT`, but `WithMethods("PATCH")` does not approve
@@ -185,7 +188,7 @@ request's endpoint whenever routing can name it:
 | Routing published | Policy source | Why |
 | --- | --- | --- |
 | A candidate (`IRouteMatchFeature.IsPreflight`) | The candidate's metadata, else the default | It is the actual request's endpoint |
-| A route that matched the `OPTIONS` request and also serves the requested method (lists it, or accepts any method) | That route's metadata, else the default | It is the actual request's endpoint too, for example a gateway catch-all |
+| A route that matched the `OPTIONS` request and also serves the requested method (lists it byte for byte, or accepts any method) | That route's metadata, else the default | It is the actual request's endpoint too, for example a gateway catch-all |
 | An `OPTIONS`-only route | None: the middleware calls `next` and the route answers | See below |
 | Nothing: routing's 405 or 404, no routing at all, or `UseCors` ahead of `UseRouting` | The default policy | See "A preflight with no candidate endpoint" |
 
@@ -381,14 +384,15 @@ double (`tests/TestObjects/`); a stage ahead of the middleware publishes a fake 
 CORS headers, the second write after a downstream reset and its suppression once the response started;
 preflight grants and denials, byte-exact methods with the safelisted ones always allowed, case-insensitive and
 malformed request headers, the any-method and any-header echoes, max age; and the preflight's policy source
-for a candidate, a disabled candidate, an `OPTIONS`-only route, a route that also serves the requested method,
-an any-method route, and no endpoint at all.
+for a candidate, a disabled candidate, an `OPTIONS`-only route, a route that also serves the requested method
+(byte for byte: a `PATCH` route does not serve `patch`), an any-method route, and no endpoint at all.
 
 `tests/CorsEndToEndTests.cs` and `tests/CorsRouteConventionTests.cs` run the real router over the in-memory
 `WebApplicationTestFactory`: wildcard, credentialed and denied requests on the wire; a preflight answered
 through its candidate, which never runs; named, group-level and route-level policies and their overrides;
 `DisableCors`; preflight grants and denials for methods and headers; exposed headers and max age; the
-preflight with no candidate, with and without a default policy; the explicit `OPTIONS` route; a same-origin
+preflight with no candidate, with and without a default policy; a preflight for `patch`, which resolves no
+`PATCH` candidate; the explicit `OPTIONS` route; a same-origin
 request to an endpoint with a policy; `UseCors` registered ahead of `UseRouting` and missing altogether, both
 failing closed at dispatch; the real exception boundary behind `UseCors` keeping the CORS headers on its
 `500`; and a preflight over HTTP/2.

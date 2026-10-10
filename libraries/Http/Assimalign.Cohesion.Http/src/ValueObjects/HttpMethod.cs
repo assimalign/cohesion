@@ -8,6 +8,21 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Represents an HTTP method token.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Methods are case-sensitive (RFC 9110 &#167; 9.1). The token is kept exactly as it was given, and two
+/// methods are equal only when their tokens match byte for byte. <c>get</c> is therefore an unknown
+/// extension method, not <see cref="Get"/>: a server that read it as <c>GET</c> would apply semantics a
+/// conformant intermediary in front of it does not, which lets a client step around a method-based
+/// access rule, or desynchronize response framing with <c>head</c>.
+/// </para>
+/// <para>
+/// <b>Breaking change.</b> In 10.0.0-preview.1 the constructor upper-cased the token and equality
+/// ignored case. A method built from a string that is not upper case, including through the implicit
+/// conversion from <see cref="string"/>, no longer equals the standard method it spells, and
+/// <see cref="Value"/> keeps the case it was given.
+/// </para>
+/// </remarks>
 [DebuggerDisplay("{Value}")]
 public readonly struct HttpMethod : IEquatable<HttpMethod>
 {
@@ -17,19 +32,22 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// <summary>
     /// Initializes a new HTTP method.
     /// </summary>
-    /// <param name="value">The method token.</param>
+    /// <param name="value">The method token, kept as given: methods are case-sensitive.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="value"/> is empty, longer than 32 characters, or not an RFC 9110 token.
+    /// </exception>
     public HttpMethod(string? value)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(value);
         ArgumentException.ThrowIf(value.Length > MaximumLength, $"The method is too long. It must be {MaximumLength} characters or fewer.");
         ArgumentException.ThrowIf(value.AsSpan().ContainsAnyExcept(_allowedCharacters), $"The provided method is invalid: '{value}'.");
 
-
-        Value = value.ToUpperInvariant();
+        Value = value;
     }
 
     /// <summary>
-    /// Gets the raw HTTP method token.
+    /// Gets the HTTP method token, in the case it was given.
     /// </summary>
     public string Value { get; }
 
@@ -136,18 +154,30 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
         _ => false,
     };
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Compares two methods byte for byte (RFC 9110 &#167; 9.1): <c>get</c> does not equal <c>GET</c>.
+    /// </summary>
+    /// <param name="other">The method to compare with.</param>
+    /// <returns><see langword="true"/> when both tokens are the same ordinal string.</returns>
     public bool Equals(HttpMethod other)
     {
-        return string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(Value, other.Value, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Returns a canonicalized method when one of the standard methods matches.
+    /// Returns the shared instance of a standard method when <paramref name="method"/> spells one exactly,
+    /// otherwise a new method that keeps <paramref name="method"/> as it was sent.
     /// </summary>
-    /// <param name="method">The method to canonicalize.</param>
-    /// <returns>A canonicalized method value.</returns>
-    public static HttpMethod GetCanonicalizedValue(string method) => method.ToUpperInvariant() switch
+    /// <remarks>
+    /// The match is case-sensitive (RFC 9110 &#167; 9.1). <c>GET</c> returns <see cref="Get"/>, while
+    /// <c>get</c> returns an unknown extension method whose <see cref="Value"/> is <c>get</c>. Every
+    /// transport parses a request's method through this member.
+    /// </remarks>
+    /// <param name="method">The method token.</param>
+    /// <returns>The standard method, or a new method for any other token.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="method"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="method"/> is not a valid method token.</exception>
+    public static HttpMethod GetCanonicalizedValue(string method) => method switch
     {
         "GET" => Get,
         "POST" => Post,
@@ -169,10 +199,31 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     public override bool Equals([NotNullWhen(true)] object? obj) => obj is HttpMethod method && Equals(method);
 
     /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Value);
 
+    /// <summary>
+    /// Converts a token to a method, keeping its case: <c>(HttpMethod)"get"</c> does not equal <see cref="Get"/>.
+    /// </summary>
+    /// <param name="method">The method token.</param>
     public static implicit operator HttpMethod(string method) => new(method);
+
+    /// <summary>
+    /// Returns the method's token.
+    /// </summary>
+    /// <param name="method">The method.</param>
     public static implicit operator string(HttpMethod method) => method.Value;
+
+    /// <summary>
+    /// Compares two methods byte for byte.
+    /// </summary>
+    /// <param name="left">The first method.</param>
+    /// <param name="right">The second method.</param>
     public static bool operator ==(HttpMethod left, HttpMethod right) => left.Equals(right);
+
+    /// <summary>
+    /// Compares two methods byte for byte.
+    /// </summary>
+    /// <param name="left">The first method.</param>
+    /// <param name="right">The second method.</param>
     public static bool operator !=(HttpMethod left, HttpMethod right) => !left.Equals(right);
 }

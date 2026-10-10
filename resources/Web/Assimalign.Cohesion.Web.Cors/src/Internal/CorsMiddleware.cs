@@ -149,8 +149,8 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
     }
 
     // Whether the route routing matched for the OPTIONS request also serves the actual request's method, with
-    // routing's own method semantics: case-insensitive, an empty method set accepting any method, and GET
-    // serving HEAD.
+    // routing's own method semantics: byte for byte (RFC 9110 §9.1, so a route mapped for PATCH does not serve
+    // the 'patch' a browser sends as written), an empty method set accepting any method, and GET serving HEAD.
     private static bool Serves(IRouterRoute route, string requestedMethod)
     {
         if (route.Methods.Count == 0)
@@ -160,8 +160,8 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
 
         foreach (HttpMethod method in route.Methods)
         {
-            if (string.Equals(method.Value, requestedMethod, StringComparison.OrdinalIgnoreCase)
-                || (method == HttpMethod.Get && string.Equals(requestedMethod, HttpMethod.Head.Value, StringComparison.OrdinalIgnoreCase)))
+            if (string.Equals(method.Value, requestedMethod, StringComparison.Ordinal)
+                || (method == HttpMethod.Get && string.Equals(requestedMethod, HttpMethod.Head.Value, StringComparison.Ordinal)))
             {
                 return true;
             }
