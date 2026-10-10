@@ -75,7 +75,7 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **11 — Close the remote-triggerable holes** *(Phase 2 follow-ups, opened 2026-10-09)* | Every advisory candidate in the follow-up backlog, plus defects any client can turn into a 5xx or a log flood. | Stage 10 approved |
 | **12 — Protocol conformance** | Response framing, HTTP/3 stream lifecycle, request-target and cookie rules, telemetry conformance. | Stage 11 reviewed |
 | **13 — Web correctness** | Host start, the response-starting hook, repeated query and form values, validation error keys, trace ids. | Stage 12 reviewed |
-| **14 — Performance, operations and DX** | Allocation and thread-hop costs, transport rejection telemetry, certificate authentication, template and docs gaps. | Stage 13 reviewed |
+| **14 — Performance, operations and DX** | Allocation and thread-hop costs, transport rejection telemetry, Web event sources, certificate authentication, template and docs gaps. | Stage 13 reviewed |
 
 **The single most important edge in the whole program:** **#762 (rewrite `WebApplicationServer`) is the gate for nearly all Web middleware.** It is a Stage-1, P001 item. Land it early. Until it merges, the only Web-side work that is safe is the Stage-0 deletions and pure-primitive Http-library items.
 
@@ -91,6 +91,7 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **D — Web runtime** | the composition root & server | `resources/Web/Assimalign.Cohesion.Web`, `...Web.Hosting` | **#762 first.** DI/Logging/Config integration happens **only** here (builder-time). No ASP.NET-style per-concern micro-packages. |
 | **E — Web middleware** | request-pipeline features | `resources/Web/Assimalign.Cohesion.Web.*` feature projects | Each is a thin feature project consuming a Stage-1 primitive + the pipeline. Extensibility via `IHttpFeatureCollection` typed features, not request-time service location. All gate on #762. |
 | **F — Routing & API surface** | endpoints, binding, formatting | `...Web.Routing`, `...Web.Api`, `...Web.ProblemDetails`, `analyzers/...SourceGeneration.Web` | Endpoint **metadata bag (#150)** is the seam auth/CORS/OpenAPI/docs consume — get it right early; AOT mandates source-gen for binding, never reflection. **Direction (2026-07-10): middleware-first** — fluent `.Use(...)` / `IWebApplicationMiddleware` composition over a return-value result model; IResult withdrawn pre-merge, controllers/functions set aside (`Web.Api.Controllers` + `Web.Functions` removed). |
+| **G — Web diagnostics** *(added 2026-10-10)* | event sources | every `resources/Web/**` assembly that raises events (`WEB_EVENT_SOURCES_SCOPE.md` §5) | `event-source.md` is the standard: one `internal sealed` source per assembly, primitive payloads computed inside `IsEnabled`, exact counters, no request content or credentials, the four required tests. A library never takes `ILogger` to describe itself. |
 
 Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. The path-scoped rules in `.claude/rules/` are canonical and auto-load in Claude sessions.
 
@@ -340,6 +341,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 | 7 | #1395: the Stage 11 review follow-up to #1380 (an optional generator callback, the `*Components` types removed) | 1 |
 | 8 | #1083 → #1306 → #1330: the HTTP/3 control stream, GOAWAY rejection, QUIC half-close | 2 |
 | 9 | #1378 → #1385: client fault, then `100-continue` on HTTP/2 and HTTP/3 | 2 |
+| 10 | #1409: health responses stop publishing exception messages (found while scoping the Web event sources; Web.Health only, so it collides with no other session) | 2 |
 
 | Issue | Lane | Blocked by | Note |
 |---|---|---|---|
@@ -355,6 +357,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 | #1383 | A/B | — | A request can change or disable its minimum request-body data rate on every protocol (P002; HTTP/2 and HTTP/3 began enforcing the rate in #1085) |
 | #1384 | A | — | A minimum response data rate so a client that withholds flow-control credit or stops reading cannot hold a response writer (P002, advisory triage) |
 | #1385, #1387 | A | — | `100-continue` on HTTP/2 and HTTP/3; HPACK and QPACK decode values as Latin-1 like HTTP/1.1 |
+| #1409 | E | — | Web.Health's default JSON writer publishes each check's exception message, twice, to any prober (CWE-209). Shipped in 10.0.0-preview.1 (P002, advisory triage) |
 
 ### Stage 13 — Web correctness
 
@@ -365,6 +368,8 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1208 → #1209: validation errors kept and keyed by JSON name and index.
 - #1297 → #1325: HTTP logging trace ids, and body capture behind a request view.
 - #1388: a streamed response is reported as unstarted when the transport refuses its head.
+- #1410: every response-completion callback runs when an earlier one throws. Today the control plane's deferred stop can be acknowledged and never happen.
+- #1411: an exchange that ErrorHandling aborts reports as cancelled, not completed.
 
 ### Stage 14 — Performance, operations and DX
 
@@ -375,7 +380,13 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1092: the `cohesion-spa` fallback route.
 - #1303 → #1305: the missing OVERVIEW files; certificate authentication in a new `Web.Authentication.Certificate` (decision 31).
 - #1389: resolve a single per-exchange response interceptor without intermediate lists.
+- #1412: reuse the control plane's bootstrap-token verifier instead of building one per request.
+- #1413: document how an operator recognizes HttpsPolicy's proxy redirect loop.
 - #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
+- **Lane G — Web event sources** (epic #1396, tasks #1397–#1408; scope in [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md)). 21 internal sources under `event-source.md`; #147's `ILogger` diagnostics move into `WebServerEventSource`.
+  - #1397 (T0) is three owner decisions, taken at the Stage 12 review: (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT.
+  - Wave 1: #1398 (Web.Hosting) serial after #1389, with #1400–#1407 in parallel. Wave 2: #1399 (forwarding and AOT) with #1398, then #1408 (conformance and docs).
+  - Stage 13 rewrites code these sources instrument (#1079 → #1078, #1156, #1388, #1297 → #1325), which is why the lane waits for Stage 14.
 
 **Other programs**, not scheduled here:
 - **FileSystem:** #1181, #1182, #1212–#1216.
@@ -1065,7 +1076,8 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
 37. **#1384 goes ahead first in Stage 12 (owner, Stage 11 review, 2026-10-10).** Slow-read protection, a minimum response data rate, opens Stage 12. It is triaged for an advisory on decision 24's terms.
 38. **#1383 joins #1384 (owner delegated to the integrator's recommendation, 2026-10-10).** The per-request opt-out for the minimum request-body data rate and the new response rate share one per-request rate seam, so they land in one session, #1383 first. Until then, an HTTP/2 or HTTP/3 upload that pauses gets `408`, as HTTP/1.1 always has.
 39. **The component-integration generator may change (owner, 2026-10-10; #1395).** The builder-template shape takes an optional configure callback. The six Web verbs that #1380 put on static factories move to builder templates wherever a builder can carry them, and their hidden `*Components` types are deleted. This is the owner-approved exception to `component-integration.md`'s "the generator stays semantics-free" rule; the rule records it.
-40. **An advisory for #1066 (owner delegated, 2026-10-10).** In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. Stage 5 fixed it before the advisory practice began. It gets a private draft on decision 24's terms, published with the other Phase 2 advisories.
+40. **An advisory for #1066 (owner delegated, 2026-10-10).** In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. Stage 5 fixed it before the advisory practice began. It gets a private draft on decision 24's terms, published with the other Phase 2 advisories. Drafted as GHSA-jr9p-p9jq-pcv8.
+41. **#1409 joins Stage 12's second wave (owner delegated, 2026-10-10).** Scoping the Web event sources found that Web.Health's default JSON writer has published each check's exception message to any prober since 10.0.0-preview.1. That is a larger exposure than any event payload the scope designs. It touches Web.Health only, so it runs as session 10 instead of waiting for Stage 13, and it is triaged for an advisory with #1384. The event-source lane itself (#1396) is placed in Stage 14 as lane G; its owner decisions are #1397, taken at the Stage 12 review.
 
 ### 7.5 Lineup
 
