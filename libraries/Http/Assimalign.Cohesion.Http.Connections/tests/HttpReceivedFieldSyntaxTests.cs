@@ -101,13 +101,18 @@ public class HttpReceivedFieldSyntaxTests
         await peer.SendDataAsync(1, Encoding.ASCII.GetBytes("hello"), endStream: false);
         IHttpContext upload = await peer.ReceiveContextAsync();
 
-        // Act
-        await peer.SendAsync(HPackTestEncoder.TrailersFrame(1, HPackTestEncoder.Literal(name, value)));
+        // Act — a valid field precedes the offending one, so a section published field by field would
+        // leave it behind.
+        await peer.SendAsync(HPackTestEncoder.TrailersFrame(
+            1,
+            HPackTestEncoder.Literal("x-checksum", "abc123"),
+            HPackTestEncoder.Literal(name, value)));
         await peer.Output.ReadUntilAsync(
             frames => frames.Any(frame => frame.IsRstStream && frame.StreamId == 1),
             "the reset of stream 1");
 
-        // Assert — the request never reads as complete, and the connection keeps serving.
+        // Assert — the request never reads as complete, none of the section is published, and the
+        // connection keeps serving.
         peer.Output.ForStream(1).Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.ProtocolError);
         await ShouldFailToReadBodyAsync(upload.Request.Body);
         upload.Request.Trailers.Count.ShouldBe(0);
@@ -176,11 +181,12 @@ public class HttpReceivedFieldSyntaxTests
     [MemberData(nameof(InvalidFields))]
     public async Task Http3Receive_OnInvalidTrailerField_ShouldResetStreamWithMessageError(string name, string value)
     {
-        // Arrange
+        // Arrange — a valid field precedes the offending one, so a section published field by field would
+        // leave it behind.
         byte[] payload = Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
             HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello")),
-            HttpProtocolPayloadFactory.CreateHttp3HeadersFrame((name, value)));
+            HttpProtocolPayloadFactory.CreateHttp3HeadersFrame(("x-checksum", "abc123"), (name, value)));
         TestConnection stream = new(payload);
         IHttpContext context = await ReceiveHttp3Async(stream);
 
@@ -188,7 +194,7 @@ public class HttpReceivedFieldSyntaxTests
         using StreamReader reader = new(context.Request.Body);
         await Should.ThrowAsync<IOException>(() => reader.ReadToEndAsync());
 
-        // Assert
+        // Assert — none of the section is published, as on HTTP/2.
         stream.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
         context.Request.Trailers.Count.ShouldBe(0);
     }

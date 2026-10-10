@@ -218,16 +218,27 @@ internal static class Http3HeaderCodec
     /// Validates a decoded request trailer section (RFC 9114 §4.1) and adds its fields to
     /// <paramref name="trailers"/>. The rules are the ones HTTP/2 applies
     /// (<see cref="HttpTrailerFieldRules.AddReceivedFields"/>): no pseudo-header field (RFC 9114 §4.3),
-    /// the header section's field-name rules (RFC 9114 §4.2), and none of the fields RFC 9110 §6.5.1
+    /// the header section's field syntax (RFC 9114 §4.2, #1376), and none of the fields RFC 9110 §6.5.1
     /// excludes from trailers, among them the <c>Content-Length</c> and <c>Host</c> a trailer could
     /// otherwise use to contradict the head it follows.
     /// </summary>
+    /// <remarks>
+    /// The section is judged whole before any of it is published, as HTTP/2 does: a malformed section
+    /// leaves <paramref name="trailers"/> as it was, rather than holding the valid fields that came
+    /// before the offending one.
+    /// </remarks>
     /// <param name="fields">The decoded name/value field lines, in wire order.</param>
     /// <param name="trailers">The request's trailer collection.</param>
     /// <exception cref="InvalidDataException">Thrown when the trailer section violates an HTTP/3 message rule.</exception>
     public static void AddTrailers(List<(string Name, string Value)> fields, HttpTrailerCollection trailers)
     {
-        HttpTrailerFieldRules.AddReceivedFields(fields, trailers, "HTTP/3");
+        HttpHeaderCollection received = new();
+        HttpTrailerFieldRules.AddReceivedFields(fields, received, "HTTP/3");
+
+        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in received)
+        {
+            trailers[field.Key] = field.Value;
+        }
     }
 
     /// <summary>

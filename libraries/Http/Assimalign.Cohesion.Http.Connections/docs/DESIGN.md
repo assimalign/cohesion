@@ -2774,6 +2774,13 @@ step. HTTP/3 resets the request stream with `H3_MESSAGE_ERROR` (RFC 9114 §4.1.2
 streams and the connection carry on. A message never quotes a name that is not a token or any
 value: it names the offending character in hex, as the HTTP/1.1 reader does.
 
+**A trailer section is judged whole before any of it is published.** HTTP/2 always collected a
+section into a collection of its own and published it once valid; HTTP/3 added each field to
+`Request.Trailers` as it checked it, so a section `x-a: 1`, `x-b: a\0b` reset the stream but left
+`x-a` behind. `Http3HeaderCodec.AddTrailers` now validates into a temporary collection and copies it
+over only when the whole section passed, so on both versions a malformed section publishes none of
+its fields.
+
 ## Trailers on HTTP/2 and HTTP/3
 
 Trailers (RFC 9110 §6.5) are HTTP semantics, decided apart from gRPC (decision 18,
