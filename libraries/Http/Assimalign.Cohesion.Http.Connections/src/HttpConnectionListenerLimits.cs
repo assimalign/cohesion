@@ -49,7 +49,8 @@ public abstract class HttpConnectionListenerLimits
     /// per request before the body is read (the <c>Assimalign.Cohesion.Http.RequestLimits</c>
     /// package surfaces it as a typed <c>IHttpMaxRequestBodySizeFeature</c>). Enforced by the
     /// HTTP/1.1 and HTTP/3 request-body reads, where the per-request value freezes at the first body
-    /// read (HTTP/3 answers <c>413</c> while the response head is uncommitted), and by HTTP/2, which
+    /// read (both answer <c>413</c> while the response head is uncommitted, and HTTP/1.1 then closes
+    /// the connection), and by HTTP/2, which
     /// freezes the value when the request is dispatched, rejects a larger declared
     /// <c>content-length</c> before reading the body, and answers a body that grows past it on
     /// receipt with <c>413</c> (a stream reset when the response has already started).
@@ -113,7 +114,8 @@ public abstract class HttpConnectionListenerLimits
     /// Gets or sets the minimum rate, in octets per second (with a grace period), at which the
     /// request body must be received once the grace period elapses, or <see langword="null"/> to
     /// disable the check. A peer that trickles its body below this rate is reclaimed: the read
-    /// fails with <c>408 Request Timeout</c> (RFC 9110 §15.5.9) semantics. Defaults to 240 octets
+    /// fails, the exchange is answered <c>408 Request Timeout</c> (RFC 9110 §15.5.9) when its response
+    /// has not started, and the connection closes. Defaults to 240 octets
     /// per second over a 5-second grace period (Kestrel's <c>MinRequestBodyDataRate</c> parity).
     /// Enforced by the HTTP/1.1 streaming request-body read today; HTTP/2 paces the body through
     /// flow-control backpressure and HTTP/3 through QUIC flow control, so this rate is a

@@ -57,11 +57,14 @@ internal sealed class Http1Context : TransportHttpContext
         ResponseFinalized ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
 
     /// <summary>
-    /// Whether reading the request body found its chunked framing or trailer section malformed after
-    /// the head was dispatched. The transport then rejects the request itself: <c>400</c> in place of
-    /// a response that has not started, and the connection closes (RFC 9112 §5.1, #1333).
+    /// The status the transport answers this exchange with because reading its request body after
+    /// dispatch failed on the client's side, or <see langword="null"/> when it did not: <c>400</c> for a
+    /// malformed chunked framing or trailer section (RFC 9112 §5.1, #1333), and the latched limit
+    /// status for a body over the size cap (<c>413</c>) or below the minimum data rate (<c>408</c>,
+    /// #1339). The rejection replaces a response that has not started, and the connection closes.
     /// </summary>
-    public bool IsRequestBodyMalformed => _requestBody.IsMalformed;
+    public HttpStatusCode? RequestBodyRejectedStatusCode =>
+        _requestBody.IsMalformed ? HttpStatusCode.BadRequest : _requestBody.RejectedStatusCode;
 
     /// <summary>
     /// Consumes and discards any request body the application did not read, so the connection

@@ -149,6 +149,15 @@ internal sealed class Http1RequestBodyStream : Stream
     /// </summary>
     internal bool IsMalformed { get; private set; }
 
+    /// <summary>
+    /// The status the body was rejected with because it broke a configured limit — <c>413</c> over the
+    /// body-size cap, <c>408</c> below the minimum data rate — or <see langword="null"/> while it has
+    /// not. Latched where the <see cref="Http1LimitExceededException"/> is thrown. Once set, the body is
+    /// never read again: a later read fails with the same status, the drain gives up so the connection
+    /// closes, and the exchange's response becomes this status when it has not started (#1339).
+    /// </summary>
+    internal HttpStatusCode? RejectedStatusCode { get; private set; }
+
     /// <inheritdoc />
     public override bool CanRead => !_disposed;
 
@@ -219,8 +228,11 @@ internal sealed class Http1RequestBodyStream : Stream
             return false;
         }
 
-        // A malformed body has no known end on the wire; the connection cannot be reused (#1333).
-        if (IsMalformed)
+        // A malformed body has no known end on the wire; the connection cannot be reused (#1333). Nor
+        // can one rejected over a limit: where a chunked body broke its cap, the octets that follow the
+        // offending chunk-size line are that chunk's data, which can read like a last chunk and then a
+        // new request (#1339).
+        if (IsMalformed || RejectedStatusCode is not null)
         {
             return false;
         }
@@ -274,7 +286,7 @@ internal sealed class Http1RequestBodyStream : Stream
         // ReadChunkedAsync.
         if (_mode == Http1RequestBodyMode.ContentLength && _cap is { } cap && _contentLength > cap)
         {
-            throw new Http1LimitExceededException(
+            throw Reject(
                 HttpStatusCode.RequestEntityTooLarge,
                 $"Content-Length value '{_contentLength}' exceeds the configured maximum request body size ({cap} octets).");
         }
@@ -296,6 +308,15 @@ internal sealed class Http1RequestBodyStream : Stream
 
     private ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
+        // A body rejected over a limit stays rejected, as a malformed one stays malformed: nothing more
+        // is read from it, because the octets past the breach have no known framing (#1339).
+        if (RejectedStatusCode is { } rejectedStatus)
+        {
+            return ValueTask.FromException<int>(new Http1LimitExceededException(
+                rejectedStatus,
+                $"The request body was rejected with {rejectedStatus} and is not read further."));
+        }
+
         if (_completed || buffer.IsEmpty)
         {
             return new ValueTask<int>(0);
@@ -381,7 +402,7 @@ internal sealed class Http1RequestBodyStream : Stream
                 {
                     // RFC 9110 §15.5.14 — reject a chunked body that would exceed the cap before the
                     // offending chunk is delivered.
-                    throw new Http1LimitExceededException(
+                    throw Reject(
                         HttpStatusCode.RequestEntityTooLarge,
                         $"Chunked body exceeds the configured maximum request body size ({cap} octets) at chunk size {chunkSize} after {_totalRead} octets read.");
                 }
@@ -594,13 +615,23 @@ internal sealed class Http1RequestBodyStream : Stream
         return (linked.Token, linked);
     }
 
-    private static Http1LimitExceededException RateTooSlow()
+    private Http1LimitExceededException RateTooSlow()
     {
         // RFC 9110 §15.5.9 — a body received below the configured minimum data rate is reclaimed
         // with 408 Request Timeout semantics.
-        return new Http1LimitExceededException(
+        return Reject(
             HttpStatusCode.RequestTimeout,
             "The request body was received below the configured minimum data rate.");
+    }
+
+    /// <summary>
+    /// Latches <paramref name="statusCode"/> as the body's rejection and returns the exception the
+    /// caller throws. The first rejection wins; the body is not read again after it.
+    /// </summary>
+    private Http1LimitExceededException Reject(HttpStatusCode statusCode, string message)
+    {
+        RejectedStatusCode ??= statusCode;
+        return new Http1LimitExceededException(statusCode, message);
     }
 
     /// <inheritdoc />

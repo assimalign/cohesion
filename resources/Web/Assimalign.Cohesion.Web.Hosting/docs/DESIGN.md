@@ -313,9 +313,13 @@ whole connection, so an HTTP/1.1 client saw a dropped connection instead of a st
 It now receives a `500` on a connection that stays usable for keep-alive, the same as
 Kestrel. The transport still decides reuse: if the faulted handler left a request body
 that cannot be drained within the limits, the connection closes after the `500`. A
-post-dispatch body-limit violation (`413` or `408` raised from the body read) surfaces
-as an exception whose status only the transport knows, so it is answered with `500`
-until the transport exposes that status.
+post-dispatch body-limit violation (`413` or `408` raised from the body read) faults the
+pipeline like any exception, and the server stages its `500`. The HTTP/1.1 transport
+latched the limit when it threw, so its `SendAsync` answers `413` or `408` with
+`Connection: close` in place of the unstarted `500`, sets the exchange's status to match,
+and closes the connection (#1339); a malformed body gets `400` the same way (#1333). No
+`500` reaches the client. HTTP/2 and HTTP/3 answer an over-cap body with `413` on their
+own stream.
 
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation

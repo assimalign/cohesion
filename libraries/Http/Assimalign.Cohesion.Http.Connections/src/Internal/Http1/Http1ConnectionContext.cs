@@ -163,20 +163,27 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             return;
         }
 
-        // RFC 9112 §5.1 / §7.1 — reading the body found the request malformed after its head was
-        // dispatched: a broken chunk framing, or a trailer field line whose name is not a token. The
-        // transport rejects the request itself, as HTTP/2 and HTTP/3 reset a malformed request's
-        // stream: a 400 in place of whatever the application staged, then the connection closes,
-        // since where the request ends on the wire is no longer known (#1333). A response already
-        // on the wire is finished as it is, and the connection still closes after it.
-        if (http1Context.IsRequestBodyMalformed)
+        // Reading the body after the head was dispatched failed on the client's side, so the transport
+        // rejects the request itself, as HTTP/2 and HTTP/3 do:
+        //   - RFC 9112 §5.1 / §7.1: a malformed body (a broken chunk framing, or a trailer field line
+        //     whose name is not a token) is answered 400 (#1333);
+        //   - RFC 9110 §15.5.14 / §15.5.9: a body over the size cap is answered 413, and one received
+        //     below the minimum data rate 408 (#1339). Without this the application only saw the
+        //     read fail, and a host's fault boundary answered 500.
+        // The status replaces whatever the application staged, unless it staged that status itself,
+        // whose representation is kept; the exchange's status is updated too, so a host reports what
+        // went on the wire. The connection then closes, since where the request ends on the wire is no
+        // longer known. A response already on the wire is finished as it is, and the connection still
+        // closes after it.
+        if (http1Context.RequestBodyRejectedStatusCode is { } rejectedStatus)
         {
             http1Context.KeepAlive = false;
 
-            if (!http1Context.HasFinalResponseStarted)
+            if (!http1Context.HasFinalResponseStarted && http1Context.Response.StatusCode != rejectedStatus)
             {
+                http1Context.Response.StatusCode = rejectedStatus;
                 http1Context.MarkFinalResponseStarted();
-                await TryWriteErrorResponseAsync(HttpStatusCode.BadRequest, cancellationToken).ConfigureAwait(false);
+                await TryWriteErrorResponseAsync(rejectedStatus, cancellationToken).ConfigureAwait(false);
                 return;
             }
         }

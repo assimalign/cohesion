@@ -1231,8 +1231,8 @@ of the box:
 | `MaxRequestLineSize` | 8 KB | `Http1MessageReader` request-line read | `414` URI Too Long (RFC 9110 §15.5.15) |
 | `MaxRequestHeaderCount` | 100 | header loop | `431` Request Header Fields Too Large (§15.5.22) |
 | `MaxRequestHeadersTotalSize` | 32 KB | per-line cap = remaining budget | `431` |
-| `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1RequestBodyStream` (frozen at first read) | `413` Content Too Large (§15.5.14), on the body read |
-| `MinRequestBodyDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1RequestBodyStream` | `408` Request Timeout (§15.5.9), on the body read |
+| `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1RequestBodyStream` (frozen at first read) | `413` Content Too Large (§15.5.14), after dispatch (#1339) |
+| `MinRequestBodyDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1RequestBodyStream` | `408` Request Timeout (§15.5.9), after dispatch (#1339) |
 | `MinResponseDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1ResponseBodyStream` (streaming sink) | exchange aborted (`IOException`) |
 | `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
 | `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
@@ -1249,10 +1249,12 @@ in "HTTP/1.1 request-body streaming and data rates" below.
 timeout are detected *before* the request is dispatched, so the transport emits a
 clean bodyless status response and closes. The body-size (`413`) and
 request-body data-rate (`408`) violations are detected *after* dispatch, on the
-streamed body read (the request is dispatched at head — see below), so they
-surface to the application as a read exception rather than a transport-written
-status; the hosting layer's exception boundary maps them to a response if it has
-not already started one.
+streamed body read (the request is dispatched at head — see below). The read fails
+with an `Http1LimitExceededException` and the body stream latches its status, so
+`SendAsync` answers that status itself, with `Connection: close`, when the response
+has not started, and the connection closes either way (#1339; see "A body over a
+limit is rejected by the transport" below). A host's exception boundary no longer
+turns the failed read into a `500`.
 
 ### 414 / 431 / 413 semantics, not a silent drop
 
@@ -1416,6 +1418,23 @@ chunked). Load-bearing invariants:
   the `400` for whitespace before a colon. A body the application never read to
   its end is found malformed by the drain instead, after its response, which then
   closes the connection.
+- **A body over a limit is rejected by the transport (#1339).** Each
+  `Http1LimitExceededException` the stream throws latches its status in
+  `RejectedStatusCode`: `413` for a declared `Content-Length` or an accumulated
+  chunked body over the frozen cap, `408` for a read that fell below the minimum
+  data rate. `Http1Context.RequestBodyRejectedStatusCode` reports it beside the
+  `400` of a malformed body, and `SendAsync` takes one branch for both: the status
+  replaces a response that has not started, `Connection: close` included, and sets
+  the exchange's `StatusCode` so a host reports what went on the wire; an
+  application that staged that same status itself keeps its representation. A
+  response already on the wire is finished as it is, and the connection still
+  closes after it. A host whose fault boundary *resets* an exchange that faulted
+  after its response started (Web.Hosting does) still truncates it: that is the
+  HTTP/1.1 form of the stream reset HTTP/2 and HTTP/3 send, and completing the
+  chunked framing would pass a cut-off response off as whole. Before this, the read
+  only threw, so a host answered `500` (HTTP/2 and HTTP/3 already answered `413`).
+  A rejected body stays rejected: a later read fails with the same status without
+  touching the wire.
 - **Disposal never touches the connection.** The stream does not own the
   connection stream, so `Dispose` only bars further public reads; it does not
   close or drain the connection.
@@ -1437,6 +1456,14 @@ The drain used to resume decoding where the read had failed, so the octets after
 bad chunk-size line — `0`, an empty line, then `GET /next ...` — read like a last
 chunk and a fresh request, and the connection served a request the original framing
 never delimited. The `IsMalformed` latch makes the drain return `false` at once.
+
+A body rejected over a limit is never drained either (#1339). A chunked body breaks
+its cap at a chunk-size line, before that chunk's data, so a drain that resumed there
+read the data as framing: `40`, then `0`, an empty line and `GET /smuggled ...`
+served a request smuggled inside the rejected chunk. A `Content-Length` body over the
+cap was drained in full, past the cap it had just been rejected for. The
+`RejectedStatusCode` latch makes the drain return `false` at once, as `IsMalformed`
+does.
 
 ### Graceful close (`BeginGracefulClose`)
 
@@ -1481,7 +1508,8 @@ proportional slack while one that stalls exhausts it. Two design choices matter:
   `Http1ConnectionContext`); AOT-safe, no reflection.
 
 On the request side, a read that would exceed the allowance is failed with an
-`Http1LimitExceededException(408)`; on the response side (the streaming sink,
+`Http1LimitExceededException(408)`, whose status the body stream latches so the
+transport answers `408` itself (#1339); on the response side (the streaming sink,
 `Http1ResponseBodyStream`), a write / flush that blocks too long on a slow reader
 is failed with an `IOException` (the response has already started, so its status
 cannot change — the exchange is aborted as a wire failure). Both are `IOException`
