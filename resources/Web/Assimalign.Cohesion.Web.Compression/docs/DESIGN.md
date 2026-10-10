@@ -69,9 +69,12 @@ A handler that writes through `context.Response.Streaming` commits its own head 
 and bypasses `IHttpResponse.Body` entirely. The compression wrapper on `IHttpResponse.Body` is
 simply never written to, and `SendAsync` short-circuits to the sink — so the streamed response is
 **left untouched**, never corrupted. Compressing the streaming-sink path would require a transport
-response interceptor wired at server-composition time, which crosses the Web-area hosting-isolation
-boundary; it is a deliberate non-goal (see below). "Composes with the streaming write path" here
-means *does not break it*.
+response interceptor wired at server-composition time, inside `Web.Hosting`. This package may not
+reach into `Web.Hosting` (COHRES001). The other direction, `Web.Hosting` referencing this package,
+was forbidden by COHRES002 when this was designed; since the rule's 2026-10-09 relaxation it is
+permitted, but it would make the runtime compose a pipeline feature and ship this package in every
+framework that carries `Web.Hosting`. It stays a deliberate non-goal (see below). "Composes with the
+streaming write path" here means *does not break it*.
 
 ### Composition with the exception boundary (#864/#881)
 
@@ -210,7 +213,8 @@ Nothing in the package or its tests needs dynamic code. `IsAotCompatible=true` h
   Out of scope for a first body-compression pass.
 - **No compression of the streaming-sink path.** A handler that streams via
   `IHttpResponseStreamingFeature` is handed off untouched; compressing it needs a transport
-  interceptor across the hosting-isolation boundary.
+  interceptor that `Web.Hosting` wires at server-composition time (see "Composition with streamed
+  responses").
 - **No raw-deflate (RFC 1951) request bodies.** `deflate` is the RFC 9110 zlib format; a bare-deflate
   sender gets a `400`.
 - **No HEAD length mirroring.** A bodyless HEAD is left alone; precisely mirroring the coded

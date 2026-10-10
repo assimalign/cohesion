@@ -18,14 +18,18 @@ composition root that integrates DI, configuration, logging, and transports.
 >
 > **COHRES002** — The exact hosting module may reference any library in its own area **except**:
 > `<Area>.Testing`, which references the hosting module, so the reverse reference is a cycle;
-> `<Area>.ApplicationModel` and `<Area>.ApplicationModel.Orchestration`, which the
-> realization-plan design keeps the runtime off (generated code in the consumer executable joins
-> the declarative plane to the runtime; COHAM001 and the Orchestration rules below bound the other
-> direction); the framework producers `<Area>.Refs` and `<Area>.Runtime`, packaging shells that
-> themselves reference the hosting module; and test, example, sample, and fixture projects, which
-> are harnesses. Owner decision 2026-10-09 ("allow the Hosting project to be able reference all
-> `Web.*` projects, or more generically all the `<Area>.*` projects"; the four exclusions follow
-> from earlier decisions); until then the module could reference only the area root,
+> `<Area>.ApplicationModel`, which the realization-plan design keeps the runtime off (generated
+> code in the consumer executable joins the declarative plane to the runtime; COHAM001 bounds the
+> other direction); `<Area>.ApplicationModel.Orchestration`, the gateway-side provider package
+> that R8 (owner decisions of 2026-09-25) makes opt-in, NuGet-only, and never an `App.<Area>`
+> member, so a runtime reference would force it into every framework that carries the module
+> (the Orchestration rules below bound the other direction); the framework producers
+> `<Area>.Refs` and `<Area>.Runtime`, packaging shells that themselves reference the hosting
+> module; and test, example, sample, and fixture projects, which are harnesses. The two
+> ApplicationModel exclusions hold by any route: the module's resolved closure may carry neither.
+> Owner decision 2026-10-09 ("allow the Hosting project tobe [sic] able reference all `Web.*`
+> projects, or more generically all the `<Area>.*` projects"; the exclusions follow from earlier
+> decisions); until then the module could reference only the area root,
 > `Assimalign.Cohesion.<Area>`, and its own hosting family (`<Area>.Hosting.<Suffix>`). The
 > permission is not a reason to reference features: each reference lands its closure in every
 > framework that carries the module (the `<Area>.Hosting` bullet under "What every area is
@@ -94,15 +98,20 @@ in the same file applies everywhere, see `general-rules.md`). Violations fail th
   transitive) and the resolved assembly closure after `ResolveAssemblyReferences` (which also
   catches `<Reference>`+`HintPath` and package-delivered DLLs). Exact-module and hosting-family
   candidates are checked separately, with exact assembly-name exemptions applied to each.
-- `COHRES002` constrains the hosting module's **direct** references only (the evaluation-time
-  snapshot, taken before NuGet adds transitive project references) and rejects only its excluded
-  categories. A reference is same-area when its name carries the `Assimalign.Cohesion.<Area>.`
-  prefix or its project lives under `resources/<Area>/`. `Testing`, `ApplicationModel`,
-  `ApplicationModel.Orchestration`, `Refs`, and `Runtime` are matched by exact name; a harness is a
-  referenced project with a `tests/`, `examples/`, `samples/`, or `fixtures/` segment in its path
-  below the repository root. Transitive routes are left to the rules that govern the intermediate
-  library: a route to `Testing` or a producer is a cycle, and COHRES004 keeps roots and features off
-  `<Area>.ApplicationModel`, whose closure carries `Hosting.Resources`.
+- `COHRES002` rejects only its excluded categories, in two layers. The first checks the hosting
+  module's **direct** references (the evaluation-time snapshot, taken before NuGet adds transitive
+  project references) against every category. A reference is same-area when its name carries the
+  `Assimalign.Cohesion.<Area>.` prefix or its project lives under `resources/<Area>/`. `Testing`,
+  `ApplicationModel`, `ApplicationModel.Orchestration`, `Refs`, and `Runtime` are matched by exact
+  name; a harness is a referenced project with a `tests/`, `examples/`, `samples/`, or `fixtures/`
+  segment in its path below the repository root. The second checks the module's resolved assembly
+  closure after `ResolveAssemblyReferences` for `<Area>.ApplicationModel` and
+  `<Area>.ApplicationModel.Orchestration` only, because no rule on an intermediate library stops
+  either: an Orchestration package resolves no `Hosting*` assembly, so COHRES004 lets a root or
+  feature the module references take it, and COHRES004 exempts the hosting family, so a
+  `<Area>.Hosting.<Suffix>` integration could take either package. The other categories are
+  checked on direct references only: a route to `Testing` or a producer is a cycle, and a route to
+  a harness through another library is not checked.
 - `COHAM001`, `COHRES003`, and `COHRES004` are checked in two layers: the direct/transitive
   project-reference graph, then the resolved assembly closure after `ResolveAssemblyReferences`.
   The latter also catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error

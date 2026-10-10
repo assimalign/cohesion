@@ -918,17 +918,19 @@ Decisions 22–31 line up Stages 11–14 (2026-10-09). The integrator made them 
 
 Decision 32 is the owner's, made on 2026-10-09 after the lineup.
 
-32. **COHRES002 relaxed (owner decision, 2026-10-09).** The owner: "I decided I'm going to change the build rule. I am going to allow the Hosting project to be able reference all `Web.*` projects, or more generically all the `<Area>.*` projects. This makes more sense."
+32. **COHRES002 relaxed (owner decision, 2026-10-09).** The owner: "So I decided I'm going to change the build rule. I am going to allow the Hosting project tobe [sic] able reference all `Web.*` projects, or more generically all the `<Area>.*` projects. This makes more sense".
     - **The rule now:** an area's exact hosting module may reference any library in its own area. Until now it could reference only the area root and its own hosting family.
-    - **Four exclusions, which follow from earlier decisions.** The build still rejects a hosting-module reference to each:
+    - **Exclusions, which follow from earlier decisions.** The build still rejects a hosting-module reference to each:
       - `<Area>.Testing`. It references the hosting module, so the reverse reference would be a cycle.
-      - `<Area>.ApplicationModel` and `<Area>.ApplicationModel.Orchestration`. The realization-plan design keeps the runtime off both; COHAM001 and the Orchestration rules bound the other direction.
+      - `<Area>.ApplicationModel`. The realization-plan design keeps the runtime off it: generated code in the consumer executable joins the declarative plane to the runtime. COHAM001 bounds the other direction.
+      - `<Area>.ApplicationModel.Orchestration`. R8 (the owner decisions of 2026-09-25) makes it a gateway-side, opt-in, NuGet-only package that is never an `App.<Area>` member, so a runtime reference would force it into every framework that carries the module. The Orchestration rules bound the other direction.
       - The framework producers `<Area>.Refs` and `<Area>.Runtime`. They are packaging shells that reference the hosting module.
       - Test, example, sample and fixture projects. They are harnesses.
+    - **The two ApplicationModel exclusions hold by any route.** The build also rejects either package in the hosting module's resolved closure, so a library the module may now reference cannot bring one in. The other exclusions are checked on direct references.
     - COHRES001, COHRES003, COHRES004 and COHAM001 are unchanged. `CohesionHostingIsolationExemptions` still waives COHRES002, which now matters only for the excluded categories.
     - **The framework-closure consequence.** Each reference a hosting module takes ships its closure in every framework that carries the module. `Web.Hosting` is a private member of all 17 other area frameworks, so each reference it takes is a membership change in all of them. A hosting module references only what the runtime needs.
     - **What it unblocks.** The Web root's features can leave the root: the endpoint and path base to `Web.Routing`, and the request id, response completion and drain to a new `Web.Server`, both referenced by `Web.Hosting`.
-    - **What it does not change.** Feature registration verbs still move to `builder.Services` through component integration, a separate approved change. Registering a feature never needs a hosting-module reference to it.
+    - **What it does not change.** Registering a feature never needs a hosting-module reference to it: feature verbs still ship with the feature package.
     - Recorded in `build/Targets/Build.Rules.targets`, `.claude/rules/resource-areas.md`, `.claude/rules/web-area.md` and `resources/Web/README.md`.
 
 ### 7.5 Lineup

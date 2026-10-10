@@ -19,8 +19,9 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// Covers the pipeline terminal that replaced the silent <c>Task.CompletedTask</c> in
 /// <c>WebApplication.Build</c> (issue #881): an unhandled request now yields a bodyless
 /// <c>404 Not Found</c> instead of an empty <c>200</c>, while a response a middleware already shaped
-/// (status, body, redirect) is left untouched. The 404 is deliberately payload-free — the
-/// hosting-isolation rule keeps <c>Web.ProblemDetails</c> out of this runtime module, so the opt-in
+/// (status, body, redirect) is left untouched. The 404 is deliberately payload-free — this runtime
+/// module does not reference <c>Web.ProblemDetails</c> (COHRES002 forbade it until 2026-10-09, and
+/// the reference would now ship in every framework that carries the module), so the opt-in
 /// status-code-pages middleware (in <c>Web.ErrorHandling</c>) is what upgrades it to problem+json.
 /// </summary>
 public class WebApplicationTerminalFallbackTests

@@ -60,7 +60,8 @@ instance of the repo-wide *resource hosting-isolation rule* in
 reference it (`COHRES001`, checked against both the project-reference graph and the resolved
 assembly closure), and the hosting module may directly reference any same-area library except
 the area's `Testing`, `ApplicationModel`, `ApplicationModel.Orchestration`, framework producers,
-and harness projects (`COHRES002`). A project with a sanctioned, user-approved exception opts out
+and harness projects, and may not resolve the two ApplicationModel packages by any route
+(`COHRES002`). A project with a sanctioned, user-approved exception opts out
 per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
 `Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
 exempt — the rule constrains shipped libraries, not harnesses — and every Web library builds in

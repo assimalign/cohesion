@@ -85,7 +85,7 @@ flowchart LR
 | Boundary | Required result |
 | --- | --- |
 | COHRES001 | Root/model packages reference neither exact Database.Hosting nor its integrations. Integrations never reference their exact runtime. No exemption is requested. |
-| COHRES002 | Database.Hosting references its root and, if needed, its hosting family; it never references SQL, Documents, Graph, Blob, or KeyValue directly. Consumer-supplied/model-supplied delegates invoke those factories. |
+| COHRES002 | Database.Hosting references its root and, if needed, its hosting family; it never references SQL, Documents, Graph, Blob, or KeyValue directly. Consumer-supplied/model-supplied delegates invoke those factories. Keeping the engines out of Database.Hosting is this design's choice; since the owner decision of 2026-10-09 COHRES002 no longer requires it (the rule now rejects only the area's Testing, ApplicationModel, ApplicationModel.Orchestration, framework-producer and harness projects). |
 | COHRES003 | No resource package acquires an ApplicationModel.Gateway dependency. |
 | COHRES004 | No root/model acquires any Hosting reference, including through DI/config integration. AddService remains concrete-hosting-only. |
 | Runtime versus integration family | The exact runtime constructs the application. Feature-aware adapters, if a future need warrants them, belong in the hosting family; this design does not require a new project. |

@@ -10,7 +10,9 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 > it, and it may reference any Web-area library except `Web.Testing`, `Web.ApplicationModel`,
 > the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test, example, sample, and fixture
 > projects.** (COHRES002, relaxed by owner decision 2026-10-09; before that, `Web.Hosting` could
-> reference only the root `Assimalign.Cohesion.Web` and its own hosting family.)
+> reference only the root `Assimalign.Cohesion.Web` and its own hosting family.) `Web.ApplicationModel`
+> stays out of `Web.Hosting`'s resolved closure by any route, including through a Web library it
+> references.
 
 - A Web feature library (`Assimalign.Cohesion.Web.<Feature>`) may reference: the root
   `Assimalign.Cohesion.Web`, **other Web feature libraries**, and anything outside the Web area
@@ -40,7 +42,7 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 
 **Enforcement:** this is the Web instance of the repo-wide **resource hosting-isolation rule** —
 see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002`/`COHRES004` build errors, the
-two-layer check semantics, COHRES002's excluded categories (direct references only), and the per-project `CohesionHostingIsolationExemptions` opt-out
+two-layer check semantics, COHRES002's excluded categories (direct references, plus the resolved closure for the ApplicationModel packages), and the per-project `CohesionHostingIsolationExemptions` opt-out
 (deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
 csproj). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
 executes in CI. The two framework producers, `Assimalign.Cohesion.Web.Refs` and

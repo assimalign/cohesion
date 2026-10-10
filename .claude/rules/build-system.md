@@ -228,10 +228,11 @@ orchestration gateway:
   family is classified case-insensitively.
   COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
   integrations from roots/features. Each assembly is filtered against the project's named
-  exemptions independently. COHRES002 still checks only the exact runtime module's direct
-  references; since owner decision 2026-10-09 it rejects only the same-area `Testing`,
-  `ApplicationModel`, `ApplicationModel.Orchestration`, framework-producer, and harness projects
-  (`resource-areas.md`).
+  exemptions independently. COHRES002 checks only the exact runtime module; since owner decision
+  2026-10-09 it rejects only the same-area `Testing`, `ApplicationModel`,
+  `ApplicationModel.Orchestration`, framework-producer, and harness projects among its direct
+  references, and `<Area>.ApplicationModel` or `<Area>.ApplicationModel.Orchestration` anywhere in
+  its resolved closure (`resource-areas.md`).
 - **COHAM002** requires `<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>` for
   every non-harness `resources/**` assembly whose name ends in `.ApplicationModel` or
   `.ApplicationModel.Orchestration`. One `using` then composes every area's verbs and every opt-in

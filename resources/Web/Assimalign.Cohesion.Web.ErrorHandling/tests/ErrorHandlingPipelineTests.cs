@@ -171,7 +171,7 @@ public class ErrorHandlingPipelineTests
     {
         // Arrange — no routing/handler middleware, so the request reaches the Web.Hosting terminal,
         // which sets a bodyless 404; the status-code-pages verb upgrades it to problem+json. This is
-        // the cross-package layering the hosting-isolation rule mandates.
+        // the cross-package layering the Web area uses.
         using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
