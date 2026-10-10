@@ -235,13 +235,16 @@ internal static class Http1MessageWriter
         ArrayBufferWriter<byte> head = new(InitialHeadCapacity);
         WriteStatusLine(head, statusCode);
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
+        bool permitsTransferEncoding = HttpResponseContentRules.PermitsTransferEncoding(statusCode);
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
             HttpResponseFieldRules.EnsureValidName(header.Key);
 
-            // RFC 9110 §8.6 — a 204 carries no Content-Length, not even one the application set (#1073).
-            if (!permitsContentLength && header.Key == HttpHeaderKey.ContentLength)
+            // RFC 9110 §8.6 and RFC 9112 §6.1 — a 204 carries neither Content-Length nor Transfer-Encoding,
+            // not even one the application set (#1073). Only the wire loses the field.
+            if ((!permitsContentLength && header.Key == HttpHeaderKey.ContentLength)
+                || (!permitsTransferEncoding && header.Key == HttpHeaderKey.TransferEncoding))
             {
                 continue;
             }

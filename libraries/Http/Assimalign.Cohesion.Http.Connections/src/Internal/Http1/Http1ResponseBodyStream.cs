@@ -78,7 +78,8 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 
         // Chunked transfer coding is selected when the caller did not commit to a Content-Length,
         // which is the streaming case (length not known up front). A 204 or 304 has no body to code, and
-        // a 204 MUST NOT carry Transfer-Encoding (RFC 9112 §6.1). HEAD keeps the coding a GET would get.
+        // a 204 MUST NOT carry Transfer-Encoding (RFC 9112 §6.1); the head encoder also drops one the
+        // application set on a 204. HEAD keeps the coding a GET would get.
         bool addedTransferEncoding = false;
 
         if (!headers.ContainsKey(HttpHeaderKey.ContentLength)

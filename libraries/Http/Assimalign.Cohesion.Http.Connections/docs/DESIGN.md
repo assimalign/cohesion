@@ -3030,10 +3030,29 @@ buffered path and through the raw body sink:
   for the connection-specific fields.
 - **No transfer coding on a `204` or `304`.** The HTTP/1.1 sink selects chunked
   coding only for a response that can carry content, or for HEAD, whose head is the
-  one a GET would get. A `204` or `304` head goes out with neither
-  `Transfer-Encoding` nor a terminating chunk.
+  one a GET would get. A `204` or `304` head never gets a terminating chunk, and the
+  transport adds no `Transfer-Encoding` to either. `Http1MessageWriter.EncodeHead`
+  also skips a `Transfer-Encoding` the application set on a `204`, on the buffered
+  and the streamed path alike, which RFC 9112 §6.1 forbids
+  (`HttpResponseContentRules.PermitsTransferEncoding`). A `304` keeps one the
+  application set: §6.1 lets it name the coding a `200` would have had. HTTP/2 and
+  HTTP/3 never send the field, which is connection-specific there.
 - **Interim heads are out of scope.** RFC 9110 §8.6 also forbids `Content-Length` on
   a `1xx`; the interim writers send the fields the caller passes.
+
+### Behavior changes
+
+Accepted on decision 15's terms:
+
+- *Observable by applications and clients.* On every version, a `Content-Length`
+  the application set on a `204` is no longer sent, and on HTTP/1.1 neither is a
+  `Transfer-Encoding` it set there. `Response.Headers` still holds both.
+- *Observable by applications and clients.* A body staged or streamed for a `204`
+  or `304` is discarded silently instead of being sent, as a HEAD body always was.
+  No exception tells the application.
+- *Observable by clients.* An HTTP/1.1 response to HEAD with an empty buffered body
+  no longer carries `Content-Length: 0`, and no version synthesizes a length for a
+  `304` (or a `204`).
 
 ## Connection-specific fields in HTTP/2 and HTTP/3 response heads
 

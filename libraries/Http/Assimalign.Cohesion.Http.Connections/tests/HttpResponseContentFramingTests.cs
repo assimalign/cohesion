@@ -120,6 +120,64 @@ public class HttpResponseContentFramingTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response Framing: An HTTP/1.1 204 should not send a Transfer-Encoding the application set, and a 304 should")]
+    [InlineData(204, false)]
+    [InlineData(304, true)]
+    public async Task Http1SendAsync_OnContentlessStatusWithApplicationTransferEncoding_ShouldSendItOnlyOnNotModified(int status, bool sent)
+    {
+        // Act
+        string response = await RespondHttp1Async("GET", context =>
+        {
+            context.Response.StatusCode = status;
+            context.Response.Headers[HttpHeaderKey.TransferEncoding] = "chunked";
+            context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("stale"));
+        });
+
+        // Assert — RFC 9112 §6.1: a server MUST NOT send Transfer-Encoding in a 204, and MAY in a 304 to name the
+        // coding a 200 would have had. Either ends with its head (RFC 9112 §6.3).
+        response.ShouldStartWith($"HTTP/1.1 {status}");
+        response.ShouldEndWith("\r\n\r\n");
+        response.ShouldNotContain("stale");
+
+        if (sent)
+        {
+            response.ShouldContain("Transfer-Encoding: chunked\r\n");
+        }
+        else
+        {
+            response.ShouldNotContain("Transfer-Encoding", Case.Insensitive);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Framing: A streamed HTTP/1.1 204 should not send a Transfer-Encoding the application set")]
+    public async Task Http1StreamingWrite_OnNoContentWithApplicationTransferEncoding_ShouldNotSendIt()
+    {
+        // Arrange
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request("GET /events HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext context = await ReadSingleHttp1ContextAsync(connectionContext);
+        context.Response.StatusCode = HttpStatusCode.NoContent;
+        context.Response.Headers[HttpHeaderKey.TransferEncoding] = "chunked";
+
+        // Act
+        await context.Response.Streaming.WriteAsync(Encoding.ASCII.GetBytes("ignored"));
+        await context.Response.Streaming.FlushAsync();
+        await connectionContext.SendAsync(context);
+        string response = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
+
+        // Assert — RFC 9112 §6.1: no Transfer-Encoding on a 204, an application-set one included.
+        response.ShouldStartWith("HTTP/1.1 204");
+        response.ShouldNotContain("Transfer-Encoding", Case.Insensitive);
+        response.IndexOf("\r\n\r\n", StringComparison.Ordinal).ShouldBe(response.Length - 4);
+        context.Response.Headers[HttpHeaderKey.TransferEncoding].Value.ShouldBe("chunked");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Framing: An HTTP/1.1 204 with a staged body should leave the next keep-alive response framed")]
     public async Task Http1SendAsync_OnNoContentWithBodyOnKeepAlive_ShouldFrameTheNextResponse()
     {
