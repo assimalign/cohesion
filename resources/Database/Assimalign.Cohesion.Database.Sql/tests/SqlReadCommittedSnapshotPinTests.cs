@@ -16,6 +16,20 @@ using Xunit.Abstractions;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
+/// Runs the read-committed stress probe alone. It keeps four readers, two writers and a purge
+/// thread busy, so beside it a timing-sensitive test elsewhere in the suite (a server handshake or
+/// idle timeout) can starve on a small CI runner.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SqlReadCommittedStressCollection
+{
+    /// <summary>
+    /// The collection name.
+    /// </summary>
+    public const string Name = "SQL read-committed stress";
+}
+
+/// <summary>
 /// The snapshot pin of a statement in a read-committed transaction (#1363). The statement reads
 /// through the snapshot captured when it started, and that snapshot can keep a floor below every
 /// active sequence: a writer that began before the transaction was still in flight then. A
@@ -26,6 +40,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// it with the statement, as the Documents, Graph and Blob operations do; the statement itself
 /// still runs under the transaction's own context.
 /// </summary>
+[Collection(SqlReadCommittedStressCollection.Name)]
 public sealed class SqlReadCommittedSnapshotPinTests
 {
     private const string Join = "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id ORDER BY a.id";
