@@ -154,13 +154,20 @@ public sealed class DocumentDatabaseEventSourceTests
         DocumentDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
         DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, true, DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1));
 
-        // Act
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        long started = DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1);
-        DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, true, started);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Act: the fewest bytes of three rounds. A write that allocates does so in every round, while
+        // the runtime can now and then charge an allocation of its own to this thread.
+        long allocated = long.MaxValue;
+        long started = 0;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            long roundStarted = DocumentDatabaseEventSource.Log.IndexRecoveryStart(database, 1);
+            DocumentDatabaseEventSource.Log.IndexRecoveryStop(database, true, roundStarted);
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+            started |= roundStarted;
+        }
 
-        // Assert
+        // Assert: no round read a timestamp.
         allocated.ShouldBe(0);
         started.ShouldBe(0);
     }

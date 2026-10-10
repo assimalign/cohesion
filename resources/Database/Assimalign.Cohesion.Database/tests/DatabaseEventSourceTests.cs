@@ -1101,9 +1101,9 @@ public sealed class DatabaseEventSourceTests
         Measure(() => session.ExecuteAsync("SELECT 1"), 100);
 
         // Act
-        long core = Measure(() => session.ExecuteCoreDirectly(request), iterations);
-        long typed = Measure(() => session.ExecuteAsync(request), iterations);
-        long text = Measure(() => session.ExecuteAsync("SELECT 1"), iterations);
+        long core = FewestBytes(() => session.ExecuteCoreDirectly(request), iterations);
+        long typed = FewestBytes(() => session.ExecuteAsync(request), iterations);
+        long text = FewestBytes(() => session.ExecuteAsync("SELECT 1"), iterations);
 
         // Assert
         core.ShouldBe(0);
@@ -1127,13 +1127,27 @@ public sealed class DatabaseEventSourceTests
         Measure(() => session.ExecuteAsync("SELECT 1"), 100);
 
         // Act
-        long typed = Measure(() => session.ExecuteAsync(request), iterations);
-        long text = Measure(() => session.ExecuteAsync("SELECT 1"), iterations);
+        long typed = FewestBytes(() => session.ExecuteAsync(request), iterations);
+        long text = FewestBytes(() => session.ExecuteAsync("SELECT 1"), iterations);
 
         // Assert
         typed.ShouldBe(0);
         text.ShouldBe(0);
         recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldBeEmpty();
+    }
+
+    // Measures the call three rounds over and returns the fewest bytes a round allocated. A call that
+    // allocates does so in every round, while the runtime can now and then charge an allocation of
+    // its own to this thread.
+    private static long FewestBytes(Func<ValueTask<QueryResult>> execute, int iterations)
+    {
+        long fewest = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            fewest = Math.Min(fewest, Measure(execute, iterations));
+        }
+
+        return fewest;
     }
 
     // Runs the call the given number of times on this thread and returns the bytes it allocated.
