@@ -15,17 +15,18 @@ namespace Assimalign.Cohesion.Http;
 /// <c>If-Range</c> lets a client that already holds part of a representation ask for the remaining
 /// bytes only if the representation is unchanged, and otherwise receive the whole thing. The
 /// validator it carries is always evaluated with <em>strong</em> semantics via
-/// <see cref="Matches(HttpEntityTag?, DateTimeOffset?)"/>: an entity-tag is compared with
-/// <see cref="HttpEntityTag.StrongEquals(HttpEntityTag)"/> (so a weak tag never matches), and a date
-/// applies the range only when the representation has not been modified after the client's date.
+/// <see cref="Matches(HttpEntityTag?, DateTimeOffset?, DateTimeOffset)"/>: an entity-tag is compared
+/// with <see cref="HttpEntityTag.StrongEquals(HttpEntityTag)"/> (so a weak tag never matches), and a
+/// date applies the range only when it equals a <c>Last-Modified</c> that is itself a strong validator.
 /// </para>
 /// <para>
 /// This is RFC 9110 &#167; 13.2.2 step 5 (the range-application decision). It composes with steps
 /// 1&#8211;4 (<c>If-Match</c> / <c>If-None-Match</c> / <c>If-*-Since</c>), which are resolved by
 /// <see cref="HttpConditionalRequest.Evaluate(in HttpConditionalRequestContext)"/>: a caller runs
 /// that first, and only when it returns <see cref="HttpPreconditionOutcome.Proceed"/> for a request
-/// carrying a <c>Range</c> does <see cref="Matches(HttpEntityTag?, DateTimeOffset?)"/> decide whether
-/// to honor the range (<c>206</c>) or ignore it and serve the full representation (<c>200</c>).
+/// carrying a <c>Range</c> does <see cref="Matches(HttpEntityTag?, DateTimeOffset?, DateTimeOffset)"/>
+/// decide whether to honor the range (<c>206</c>) or ignore it and serve the full representation
+/// (<c>200</c>).
 /// </para>
 /// </remarks>
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
@@ -57,24 +58,52 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
     public static HttpIfRange FromEntityTag(HttpEntityTag entityTag) => new(entityTag, null);
 
     /// <summary>Creates an <c>If-Range</c> that carries an HTTP-date validator.</summary>
-    /// <param name="date">The date to compare against the current representation's <c>Last-Modified</c>.</param>
+    /// <param name="date">The date to compare against the current representation's <c>Last-Modified</c>, at whole-second (HTTP-date) granularity.</param>
     /// <returns>The <c>If-Range</c> value.</returns>
     public static HttpIfRange FromDate(DateTimeOffset date) => new(null, date);
 
     /// <summary>
-    /// Evaluates this <c>If-Range</c> validator against the target representation's current validators
-    /// (RFC 9110 &#167; 13.1.5) — the RFC 9110 &#167; 13.2.2 step-5 decision of whether a present
-    /// <c>Range</c> should be honored. The entity-tag form uses strong comparison (a weak or absent
-    /// current tag never matches); the date form applies the range only when the representation has
-    /// not been modified after the client's date, compared at one-second (HTTP-date) granularity.
+    /// Evaluates this <c>If-Range</c> validator against the selected representation's current
+    /// validators (RFC 9110 &#167; 13.1.5): the RFC 9110 &#167; 13.2.2 step-5 decision of whether a
+    /// present <c>Range</c> is honored.
     /// </summary>
-    /// <param name="currentETag">The target representation's current entity-tag, or <see langword="null"/> when it has none.</param>
-    /// <param name="currentLastModified">The target representation's current last-modification date, or <see langword="null"/> when unknown.</param>
+    /// <remarks>
+    /// <para>
+    /// The entity-tag form uses the strong comparison function (RFC 9110 &#167; 8.8.3.2), so a weak or
+    /// absent current entity-tag never applies the range.
+    /// </para>
+    /// <para>
+    /// The date form applies the range only when both of these hold, compared at the one-second
+    /// granularity of an HTTP-date:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///   <paramref name="currentLastModified"/> is a strong validator (RFC 9110 &#167; 8.8.2.2): it is at
+    ///   least one second earlier than <paramref name="responseDate"/>. A representation modified in
+    ///   the second the response is sent can change again within that second without changing its
+    ///   <c>Last-Modified</c>, and one dated after the response cannot be vouched for at all.
+    ///   </description></item>
+    ///   <item><description>
+    ///   The client's date equals <paramref name="currentLastModified"/> exactly. An earlier or a later
+    ///   date names some other representation, whose bytes would not splice with the current ones.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// Every other case serves the full representation, which RFC 9110 &#167; 13.1.5 requires when the
+    /// condition is false.
+    /// </para>
+    /// </remarks>
+    /// <param name="currentETag">The selected representation's current entity-tag, or <see langword="null"/> when it has none.</param>
+    /// <param name="currentLastModified">The selected representation's current last-modification date, or <see langword="null"/> when unknown.</param>
+    /// <param name="responseDate">
+    /// The response's origination date (RFC 9110 &#167; 6.6.1), normally the current time. Only the date
+    /// form reads it, to decide whether <paramref name="currentLastModified"/> is strong.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> when the range should be applied (serve <c>206</c>); <see langword="false"/>
-    /// when the validator no longer matches and the full representation should be served (<c>200</c>).
+    /// when the validator does not match and the full representation should be served (<c>200</c>).
     /// </returns>
-    public bool Matches(HttpEntityTag? currentETag, DateTimeOffset? currentLastModified)
+    public bool Matches(HttpEntityTag? currentETag, DateTimeOffset? currentLastModified, DateTimeOffset responseDate)
     {
         if (EntityTag is HttpEntityTag ifRangeTag)
         {
@@ -83,18 +112,22 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
         }
         if (Date is DateTimeOffset ifRangeDate)
         {
-            // Apply the range only if the representation has not been modified after the client's date.
-            return currentLastModified is DateTimeOffset lastModified
-                && TruncateToSeconds(lastModified) <= ifRangeDate;
+            if (currentLastModified is not DateTimeOffset lastModified)
+            {
+                return false;
+            }
+
+            // Whole Unix seconds: an HTTP-date carries no sub-second part, and the arithmetic cannot
+            // overflow the way DateTimeOffset.AddSeconds can at its range limits.
+            long validator = lastModified.ToUnixTimeSeconds();
+
+            // RFC 9110 §8.8.2.2: Last-Modified is strong only when it is at least one second before
+            // the response's Date. §13.1.5: a weak date never applies the range, and a strong one
+            // applies it only on an exact match.
+            return validator < responseDate.ToUnixTimeSeconds()
+                && ifRangeDate.ToUnixTimeSeconds() == validator;
         }
         return false;
-    }
-
-    // HTTP-date carries one-second resolution; drop any sub-second component before comparing.
-    private static DateTimeOffset TruncateToSeconds(DateTimeOffset value)
-    {
-        DateTime utc = value.UtcDateTime;
-        return new DateTimeOffset(utc.Ticks - (utc.Ticks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
     }
 
     /// <summary>

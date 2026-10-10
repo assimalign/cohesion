@@ -330,9 +330,9 @@ public class HttpResponseFileExtensionsTests
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a current If-Range date should honor the range")]
     public async Task SendFileAsync_IfRangeCurrentDate_ShouldHonorRange()
     {
-        // Arrange
-        using InMemoryFileSystem site = StaticSite.Create(("data.txt", "0123456789"));
-        IFileSystemFile file = GetFile(site, "data.txt");
+        // Arrange — modified well before the response, so Last-Modified is a strong validator
+        // (RFC 9110 §8.8.2.2).
+        var file = new FixedTimestampFile("data.txt", "0123456789", new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc));
         TestHttpContext first = await RunAsync(HttpMethod.Get, response => response.SendFileAsync(file));
         string lastModified = Header(first, HttpHeaderKey.LastModified);
 
@@ -349,6 +349,33 @@ public class HttpResponseFileExtensionsTests
         // Assert
         second.Response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
         second.ReadResponseBody().ShouldBe("01");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: an If-Range date other than Last-Modified should send the full 200")]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public async Task SendFileAsync_IfRangeDateOtherThanLastModified_ShouldServeFull200(int offsetSeconds)
+    {
+        // Arrange — RFC 9110 §13.1.5 applies the range only on an exact match. A later date used to
+        // pass (#1185), sending a 206 of a file that is not the one the client holds part of.
+        var updatedOn = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        var file = new FixedTimestampFile("data.txt", "0123456789", updatedOn);
+        string ifRange = HttpDate.Format(new DateTimeOffset(updatedOn).AddSeconds(offsetSeconds));
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            HttpMethod.Get,
+            response => response.SendFileAsync(file),
+            ctx =>
+            {
+                ctx.Request.Headers[HttpHeaderKey.Range] = "bytes=0-1";
+                ctx.Request.Headers[HttpHeaderKey.IfRange] = ifRange;
+            });
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        context.ReadResponseBody().ShouldBe("0123456789");
+        context.Response.Headers.ContainsKey(HttpHeaderKey.ContentRange).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a stale If-Range should ignore the range and send the full 200")]
@@ -807,6 +834,41 @@ public class HttpResponseFileExtensionsTests
         weakContext.ReadResponseBody().ShouldBe("0123456789");
         unvalidatedContext.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
         unvalidatedContext.ReadResponseBody().ShouldBe("0123456789");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - WriteStreamAsync: If-Range should honor the range only for a date equal to a strong Last-Modified")]
+    public async Task WriteStreamAsync_IfRangeDate_ShouldHonorRangeOnlyForStrongLastModified()
+    {
+        // Arrange — a date names a representation only when it equals Last-Modified, and only when
+        // Last-Modified is at least a second older than the response (RFC 9110 §8.8.2.2, §13.1.5).
+        // One dated after the response (a clock running ahead) is weak, as is one in the current
+        // second; the past and the future are used here so the outcome cannot hinge on the clock.
+        DateTimeOffset settled = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset ahead = DateTimeOffset.UtcNow.AddHours(1);
+        using MemoryStream current = Content("0123456789");
+        using MemoryStream later = Content("0123456789");
+        using MemoryStream weak = Content("0123456789");
+        static Action<TestHttpContext> Prepare(DateTimeOffset ifRange) => ctx =>
+        {
+            ctx.Request.Headers[HttpHeaderKey.Range] = "bytes=0-2";
+            ctx.Request.Headers[HttpHeaderKey.IfRange] = HttpDate.Format(ifRange);
+        };
+
+        // Act
+        TestHttpContext currentContext = await RunAsync(
+            HttpMethod.Get, response => response.WriteStreamAsync(current, "text/plain", lastModified: settled), Prepare(settled));
+        TestHttpContext laterContext = await RunAsync(
+            HttpMethod.Get, response => response.WriteStreamAsync(later, "text/plain", lastModified: settled), Prepare(settled.AddDays(1)));
+        TestHttpContext weakContext = await RunAsync(
+            HttpMethod.Get, response => response.WriteStreamAsync(weak, "text/plain", lastModified: ahead), Prepare(ahead));
+
+        // Assert
+        currentContext.Response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
+        currentContext.ReadResponseBody().ShouldBe("012");
+        laterContext.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        laterContext.ReadResponseBody().ShouldBe("0123456789");
+        weakContext.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        weakContext.ReadResponseBody().ShouldBe("0123456789");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - WriteStreamAsync: a stream of unknown length should be sent whole, without length or range support")]

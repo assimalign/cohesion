@@ -318,11 +318,13 @@ internal static class RepresentationWriter
 
         // RFC 9110 §13.2.2 step 5: a present If-Range gates whether the Range is honored at
         // all. An unparseable If-Range cannot be validated, so the range is ignored; so is one
-        // whose validator the representation does not have.
+        // whose validator the representation does not have, a date that is not exactly the
+        // Last-Modified, and any date while Last-Modified is still within the current second
+        // (a weak validator, §8.8.2.2: the file can change again without changing it).
         if (request.Headers.TryGetValue(HttpHeaderKey.IfRange, out HttpHeaderValue ifRangeValue))
         {
             if (!HttpIfRange.TryParse((string?)ifRangeValue, out HttpIfRange ifRange)
-                || !ifRange.Matches(etag, lastModified))
+                || !ifRange.Matches(etag, lastModified, DateTimeOffset.UtcNow))
             {
                 return false;
             }

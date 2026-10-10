@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 
 using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
@@ -94,4 +95,41 @@ internal sealed class CancellableTestHttpContext : IHttpContext
     public void Cancel() { }
     public Task CancelAsync() => Task.CompletedTask;
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+/// <summary>
+/// A file whose <see cref="UpdatedOn"/> the test fixes. An in-memory file is stamped with the time it
+/// is written, so its <c>Last-Modified</c> falls in the second the test runs and is a weak validator
+/// (RFC 9110 &#167; 8.8.2.2); a date-form <c>If-Range</c> test needs one settled in the past.
+/// </summary>
+internal sealed class FixedTimestampFile : IFileSystemFile
+{
+    private readonly byte[] _content;
+
+    public FixedTimestampFile(string name, string content, DateTime updatedOn)
+    {
+        Name = name;
+        _content = Encoding.UTF8.GetBytes(content);
+        Size = _content.Length;
+        UpdatedOn = updatedOn;
+    }
+
+    public Size Size { get; }
+    public FileName Name { get; }
+    public FileSystemPath Path => FileSystemPath.Parse("/" + Name);
+    public DateTime CreatedOn => UpdatedOn;
+    public DateTime UpdatedOn { get; }
+    public DateTime AccessedOn => UpdatedOn;
+    public FileAttributes Attributes => FileAttributes.Normal;
+    public IFileSystem FileSystem => throw new NotSupportedException();
+    public IFileSystemDirectory Directory => throw new NotSupportedException();
+
+    public Stream Open() => new MemoryStream(_content, writable: false);
+    public Stream Open(FileMode fileMode) => Open();
+    public Stream Open(FileMode fileMode, FileAccess fileAccess) => Open();
+    public Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare) => Open();
+
+    public IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare) => throw new NotSupportedException();
+    public IFileSystemEventToken Watch() => throw new NotSupportedException();
+    public void SetAttributes(FileAttributes attributes) => throw new NotSupportedException();
 }

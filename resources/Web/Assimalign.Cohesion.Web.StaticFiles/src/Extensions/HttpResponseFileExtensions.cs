@@ -162,6 +162,9 @@ public static class HttpResponseFileExtensions
         /// <c>If-Match</c> and <c>If-None-Match</c> can match, and a request carrying <c>If-Range</c>
         /// gets the full representation. A weak <paramref name="entityTag"/> can satisfy
         /// <c>If-None-Match</c>, but never <c>If-Match</c> or <c>If-Range</c>, which compare strongly.
+        /// A date in <c>If-Range</c> applies the range only when it equals
+        /// <paramref name="lastModified"/> and <paramref name="lastModified"/> is at least one second
+        /// in the past (RFC 9110 &#167; 13.1.5, &#167; 8.8.2.2).
         /// </para>
         /// <para>
         /// The stream is not disposed; whoever opened it disposes it once the returned task completes.

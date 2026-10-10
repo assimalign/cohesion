@@ -1424,24 +1424,39 @@ needs:
 outcome = HttpConditionalRequest.Evaluate(context)      // steps 1–4 → 304 / 412 / proceed
 if outcome != Proceed              → send 304 / 412
 else if a Range header is present:
-    applyRange = ifRange is null  ||  ifRange.Matches(currentETag, currentLastModified)   // step 5
+    applyRange = ifRange is null  ||  ifRange.Matches(currentETag, currentLastModified, responseDate)   // step 5
     if applyRange   → HttpRangeSelector.Select(...)     → 206 / 416 / (Full → 200)
     else            → 200 full          // validator stale: give the client the whole thing
 else                               → 200 full
 ```
 
-Two correctness details:
+Three correctness details:
 
 - **`If-Range` is always strong.** The entity-tag form uses
   `HttpEntityTag.StrongEquals` (a weak or absent current tag never applies the
-  range); the date form applies the range only when the representation has not
-  been modified after the client's date (`Last-Modified ≤ If-Range date`, the
-  Kestrel rule). A mismatch *ignores* the range (full `200`) — `If-Range` is
-  "give me the whole thing if my copy is stale", never a `412`.
-- **One-second granularity.** `HttpIfRange.Matches` truncates the representation's
-  `Last-Modified` to whole seconds before the date comparison, because an
-  HTTP-date carries only whole seconds; a sub-second write therefore does not read
-  as "modified".
+  range). A mismatch *ignores* the range (full `200`) — `If-Range` is "give me
+  the whole thing if my copy is stale", never a `412`.
+- **A date applies the range only on an exact match with a strong
+  `Last-Modified` (#1185).** RFC 9110 §13.1.5 makes the date form true only when
+  the date "exactly matches" `Last-Modified`, and only when that date is a strong
+  validator (§8.8.2.2). The origin-server test for strength is that the
+  representation cannot change twice in the second the date names, which
+  `Matches` reads as "`Last-Modified` is at least one second before the
+  response's `Date`". So a representation modified in the current second, or
+  dated after the response (a clock running ahead), never applies a date. The
+  caller passes `responseDate`, normally the current time, because the core reads
+  no ambient clock (the `HttpFreshness` rule). Through 10.0.0-preview.1 the date
+  form applied the range whenever `Last-Modified ≤ If-Range date`, the rule
+  Kestrel uses. A client holding a *later* date (a file replaced by an older copy,
+  or a client clock ahead of the server's) then got a `206` of a representation
+  its partial copy does not splice with. The two-argument `Matches` was replaced
+  rather than kept beside the new one, since it cannot decide strength without a
+  date. That is a source break for a caller outside this repository, accepted
+  during the previews on the terms of the HTTP/Web program's decision 15.
+- **One-second granularity.** The date comparison and the strength test both run
+  on whole Unix seconds, because an HTTP-date carries only whole seconds. A
+  sub-second write therefore does not read as "modified", and a date built in code
+  with a sub-second part names the second it falls in.
 
 ### AOT posture (range/If-Range)
 

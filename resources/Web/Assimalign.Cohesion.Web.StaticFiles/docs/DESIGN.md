@@ -72,6 +72,13 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   before validator derivation, so `If-None-Match`/`If-Range` compare against the validators
   of the representation that would actually be served — and a `Range` applies to the encoded
   bytes (RFC 9110 §14.2: ranges address the selected representation).
+- **A date `If-Range` applies only to a settled file (#1185).** `HttpIfRange.Matches` honors the
+  range for a date only when the date equals `Last-Modified` and `Last-Modified` is at least one
+  second before the response, which `RepresentationWriter` takes as the current time
+  (`DateTimeOffset.UtcNow`; nothing upstream sets a response `Date`). A file written in the current
+  second can change again without changing its `Last-Modified`, so it gets the full `200`, and so
+  does any date earlier or later than `Last-Modified`. The strong `ETag` form is unaffected; it is
+  what a resuming client should send anyway.
 - **Single-range only; multi-range falls back to full `200`.** `multipart/byteranges`
   assembly is complexity with almost no modern client demand; the RFC permits serving the
   full representation instead. `HttpRangeSelector`'s DoS guard (16-range cap → full) rides
