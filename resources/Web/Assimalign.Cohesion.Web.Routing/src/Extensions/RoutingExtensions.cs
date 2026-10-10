@@ -9,11 +9,13 @@ using Assimalign.Cohesion.Web.Routing.Internal;
 namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
-/// Adds routing to web applications and wires the routing middleware into their pipelines.
+/// Wires the routing middleware into web application pipelines.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>AddRouting</c> (builder time) registers the per-application <see cref="IRouterFeature"/>, and
+/// <c>builder.Services.AddRouting()</c> (builder time) registers the per-application
+/// <see cref="IRouterFeature"/> as an <see cref="IHttpFeature"/> singleton; the verb is a component
+/// integration the application's compilation receives (<see cref="RoutingComponents"/>, owner decision 34).
 /// <c>UseRouting</c> (pipeline time) resolves that <em>same</em> feature and returns its
 /// <see cref="IRouterFeature.Builder"/>. Both therefore operate on one per-application builder — there
 /// is no process-wide shared builder, so route tables never leak between applications hosted in the
@@ -39,22 +41,6 @@ public static class RoutingExtensions
     private static readonly SearchValues<char> _methodTokenCharacters =
         SearchValues.Create("!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
     private const int maximumMethodLength = 32;
-
-    extension(IWebApplicationBuilder builder)
-    {
-        /// <summary>
-        /// Registers routing for the web application by installing the per-application
-        /// <see cref="IRouterFeature"/> on the HTTP context feature collection.
-        /// </summary>
-        /// <returns>The web application builder, for chaining.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        public IWebApplicationBuilder AddRouting()
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-
-            return builder.AddFeature(new RouterFeature());
-        }
-    }
 
     extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
     {
@@ -98,7 +84,7 @@ public static class RoutingExtensions
         /// </returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="InvalidOperationException">
-        /// Routing has not been registered on the application (call <c>AddRouting</c> before <c>UseRouting</c>).
+        /// Routing has not been registered on the application (call <c>builder.Services.AddRouting</c> before <c>UseRouting</c>).
         /// </exception>
         public IRouterBuilder UseRouting()
         {
@@ -106,7 +92,7 @@ public static class RoutingExtensions
 
             IRouterFeature feature = builder.Context.Features.OfType<IRouterFeature>().FirstOrDefault()
                 ?? throw new InvalidOperationException(
-                    "Routing has not been registered. Call AddRouting() on the web application builder before UseRouting().");
+                    "Routing has not been registered. Call builder.Services.AddRouting() before UseRouting().");
 
             builder.Use((WebApplicationMiddleware next) =>
             {

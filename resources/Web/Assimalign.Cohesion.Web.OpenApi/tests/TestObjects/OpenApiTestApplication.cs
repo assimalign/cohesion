@@ -56,7 +56,7 @@ internal static class OpenApiTestApplication
     public static WebApplicationTestFactory CreateFactory(Action<OpenApiOptions>? configure = null, Action<AuthorizationOptions>? authorization = null)
     {
         WebApplicationTestFactory factory = CreateFactoryWithoutAuthorization(configure);
-        factory.Builder.AddAuthorization(authorization);
+        factory.Builder.Services.AddAuthorization(authorization);
         return factory;
     }
 
@@ -67,10 +67,10 @@ internal static class OpenApiTestApplication
     public static WebApplicationTestFactory CreateFactoryWithoutAuthorization(Action<OpenApiOptions>? configure = null)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(OpenApiTestJsonContext.Default);
-        factory.Builder.AddAuthentication(BearerScheme.Name);
-        factory.Builder.AddOpenApi(configure);
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddJsonSerialization(OpenApiTestJsonContext.Default);
+        factory.Builder.Services.AddAuthentication(authentication => authentication.Options.DefaultScheme = BearerScheme.Name);
+        factory.Builder.Services.AddOpenApi(configure);
         return factory;
     }
 

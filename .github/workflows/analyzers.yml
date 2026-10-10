@@ -6,6 +6,16 @@ on:
       - "build/**"
       - "libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/**"
       - "libraries/Http/Assimalign.Cohesion.Http.ClientFactory/**"
+      # Owner decision 34 (#1380): the Web feature packages declare the builder.Services.Add<Feature>
+      # component integrations IntegrationCheck projects, so a change to one rebuilds the canary.
+      - "resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Authentication/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Authorization/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.ErrorHandling/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.OpenApi/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Routing/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Serialization/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Validation/src/**"
       - ".github/workflows/analyzers.yml" # When Pipeline File Changes
 permissions:
   contents: read

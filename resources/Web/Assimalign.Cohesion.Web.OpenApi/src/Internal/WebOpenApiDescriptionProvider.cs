@@ -45,7 +45,7 @@ internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvide
 
         IRouterFeature routing = _application.Features.OfType<IRouterFeature>().LastOrDefault()
             ?? throw new InvalidOperationException(
-                "Routing has not been registered. Call AddRouting() on the web application builder: the OpenAPI document describes the routes it maps.");
+                "Routing has not been registered. Call builder.Services.AddRouting(): the OpenAPI document describes the routes it maps.");
 
         if (!_application.TryGetAuthorizationOptions(out AuthorizationOptions? authorization))
         {

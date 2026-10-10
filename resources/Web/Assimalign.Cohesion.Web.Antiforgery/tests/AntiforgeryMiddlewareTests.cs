@@ -379,7 +379,9 @@ public class AntiforgeryMiddlewareTests
         Action<HttpAntiforgeryOptions>? configure = null)
     {
         TestWebApplicationBuilder application = new();
-        application.AddAntiforgery(configure);
+        // The feature builder.Services.AddAntiforgery(configure) registers, through the raw path this
+        // container-free double composes with.
+        application.AddFeature(AntiforgeryComponents.CreateFeature(configure));
         antiforgery = application.Antiforgery;
 
         TestPipelineBuilder pipeline = new(new TestWebApplicationContext(application.Features), endpoint);

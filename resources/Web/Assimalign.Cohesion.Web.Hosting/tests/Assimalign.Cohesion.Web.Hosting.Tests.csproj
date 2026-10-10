@@ -35,6 +35,8 @@
 		     the pipeline terminal and the IWebEndpointFeature.RouteTemplate its telemetry reads (#1064,
 		     #1379); the routing verbs the tests call are not runtime machinery. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+    <!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+    <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="Shouldly" />

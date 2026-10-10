@@ -213,9 +213,11 @@ public sealed class CookiePolicyCookieAuthenticationTests : IDisposable
     {
         WebApplicationTestFactory factory = new();
 
-        factory.Builder
-            .AddAuthentication(options => options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme, _dataProtection)
-            .AddCookie(cookie);
+        factory.Builder.Services.AddAuthentication(authentication =>
+        {
+            authentication.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            authentication.UseDataProtection(_dataProtection).AddCookie(cookie);
+        });
 
         factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
         factory.Application.UseCookiePolicy(policy);

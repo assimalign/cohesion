@@ -25,8 +25,8 @@ public class EndpointDescriptionConventionTests
     private static WebApplicationTestFactory CreateFactory()
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(ApiTestJsonContext.Default);
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddJsonSerialization(ApiTestJsonContext.Default);
         return factory;
     }
 

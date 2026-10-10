@@ -35,11 +35,11 @@ public class EndpointReturnValueTests
     private static WebApplicationTestFactory CreateFactory(bool registerJson = true)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         if (registerJson)
         {
-            factory.Builder.AddJsonSerialization(ApiTestJsonContext.Default);
+            factory.Builder.Services.AddJsonSerialization(ApiTestJsonContext.Default);
         }
 
         return factory;

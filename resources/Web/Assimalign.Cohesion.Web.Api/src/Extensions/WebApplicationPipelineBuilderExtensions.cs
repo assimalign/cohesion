@@ -53,7 +53,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// </param>
         /// <returns>The route group builder.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="prefix"/> is <see langword="null"/>.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>).</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>).</exception>
         /// <exception cref="Routing.Exceptions.RoutePatternException"><paramref name="prefix"/> is not a valid route template.</exception>
         public IRouterGroupBuilder MapGroup(string prefix)
         {
@@ -72,7 +72,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder Map(HttpMethod method, string pattern, WebApplicationMiddleware middleware)
         {
             ArgumentException.ThrowIfNullOrEmpty(pattern);
@@ -90,7 +90,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// <param name="middleware">The middleware to execute for requests the fallback answers.</param>
         /// <returns>The fallback route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapFallback(WebApplicationMiddleware middleware)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -108,7 +108,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// <returns>The fallback route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapFallback(string pattern, WebApplicationMiddleware middleware)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -126,7 +126,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapGet(
             string pattern,
             WebApplicationMiddleware middleware)

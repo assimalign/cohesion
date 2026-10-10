@@ -10,11 +10,13 @@ using Assimalign.Cohesion.Web.Routing;
 namespace Assimalign.Cohesion.Web.OpenApi;
 
 /// <summary>
-/// Builder-time registration and pipeline-time mapping for the application's OpenAPI document.
+/// Pipeline-time mapping and reading of the application's OpenAPI document.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>AddOpenApi</c> captures the document options as a typed application feature; <c>MapOpenApi</c> maps
+/// <c>builder.Services.AddOpenApi(...)</c>, a component integration the application's compilation receives
+/// (<see cref="OpenApiComponents"/>, owner decision 34), registers the document options as an application
+/// feature, an <see cref="IHttpFeature"/> singleton; <c>MapOpenApi</c> maps
 /// a <c>GET</c> route that serves the document. The document describes the application's routes from the
 /// metadata they carry: the source-generated parameter and response descriptions of typed endpoints, the
 /// description verbs (<c>WithTags</c>, <c>WithSummary</c>, <c>WithDescription</c>,
@@ -25,7 +27,8 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// is discovered by reflection, so the document is generated the same way under NativeAOT.
 /// </para>
 /// <para>
-/// Composition is dependency-free: no service container, no configuration binding, no hosting reference.
+/// Composition is dependency-free: this package takes no service-container, configuration-binding or hosting
+/// reference.
 /// </para>
 /// </remarks>
 public static class OpenApiWebApplicationExtensions
@@ -34,31 +37,6 @@ public static class OpenApiWebApplicationExtensions
     /// The route pattern <c>MapOpenApi()</c> serves the document at when none is given.
     /// </summary>
     public const string DefaultDocumentPattern = "/openapi/v1.json";
-
-    extension(IWebApplicationBuilder builder)
-    {
-        /// <summary>
-        /// Registers the application's OpenAPI document options. Pair it with <c>MapOpenApi</c> in the
-        /// pipeline.
-        /// </summary>
-        /// <param name="configure">An optional callback that configures the document.</param>
-        /// <returns>The same builder, for chaining.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <remarks>
-        /// The options become read-only when <paramref name="configure"/> returns. Call this once; a second
-        /// call replaces the first registration.
-        /// </remarks>
-        public IWebApplicationBuilder AddOpenApi(Action<OpenApiOptions>? configure = null)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-
-            OpenApiOptions options = new();
-            configure?.Invoke(options);
-            options.MakeReadOnly();
-
-            return builder.AddFeature(new OpenApiDocumentFeature(options));
-        }
-    }
 
     extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
     {
@@ -74,7 +52,7 @@ public static class OpenApiWebApplicationExtensions
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
         /// <exception cref="InvalidOperationException">
-        /// OpenAPI or routing has not been registered (call <c>AddOpenApi</c> and <c>AddRouting</c>), or the
+        /// OpenAPI or routing has not been registered (call <c>builder.Services.AddOpenApi</c> and <c>AddRouting</c>), or the
         /// route table has already been built.
         /// </exception>
         /// <remarks>
@@ -113,7 +91,7 @@ public static class OpenApiWebApplicationExtensions
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="specVersion"/> is not a defined <see cref="OpenApiSpecVersion"/>.</exception>
         /// <exception cref="InvalidOperationException">
-        /// OpenAPI or routing has not been registered (call <c>AddOpenApi</c> and <c>AddRouting</c>), or the
+        /// OpenAPI or routing has not been registered (call <c>builder.Services.AddOpenApi</c> and <c>AddRouting</c>), or the
         /// route table has already been built.
         /// </exception>
         public IRouterRouteBuilder MapOpenApi(string pattern, OpenApiSpecVersion specVersion)
@@ -144,7 +122,7 @@ public static class OpenApiWebApplicationExtensions
         /// </summary>
         /// <returns>A provider whose <see cref="IOpenApiDescriptionProvider.GetDocument"/> builds a new document per call.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="application"/> is <see langword="null"/>.</exception>
-        /// <exception cref="InvalidOperationException">OpenAPI has not been registered (call <c>AddOpenApi</c>).</exception>
+        /// <exception cref="InvalidOperationException">OpenAPI has not been registered (call <c>builder.Services.AddOpenApi</c>).</exception>
         /// <remarks>
         /// Building a document reads the application's router, which builds it and closes the route table,
         /// so call <c>GetDocument</c> after the application has mapped its endpoints, typically after it
@@ -161,7 +139,7 @@ public static class OpenApiWebApplicationExtensions
     private static OpenApiDocumentFeature GetFeature(IWebApplicationContext context)
         => context.Features.OfType<OpenApiDocumentFeature>().LastOrDefault()
             ?? throw new InvalidOperationException(
-                "OpenAPI has not been registered. Call AddOpenApi() on the web application builder before mapping or reading the document.");
+                "OpenAPI has not been registered. Call builder.Services.AddOpenApi() before mapping or reading the document.");
 
     private static OpenApiFormat GetFormat(string pattern)
         => pattern.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || pattern.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)

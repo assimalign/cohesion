@@ -7,15 +7,16 @@ using Assimalign.Cohesion.Web.Authorization.Internal;
 namespace Assimalign.Cohesion.Web.Authorization;
 
 /// <summary>
-/// Builder-time registration, pipeline installation, and read access to the registered options for
-/// authorization.
+/// Pipeline installation of, and read access to the registered options for, authorization.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Registration is dependency-free: <c>AddAuthorization</c> captures the policies as values and hands
-/// them to the pipeline as a typed application feature. No service container, configuration binding, or
-/// hosting reference is involved, so any composition surface that implements
-/// <see cref="IWebApplicationBuilder"/> can wire authorization.
+/// Registration is <c>builder.Services.AddAuthorization(...)</c>, a component integration the
+/// application's compilation receives (<see cref="AuthorizationComponents"/>, owner decision 34). It
+/// captures the policies as values and registers them as an application feature, an
+/// <see cref="Http.IHttpFeature"/> singleton the host hands to the pipeline. This package takes no
+/// dependency-injection or hosting reference; a composition surface without a service container
+/// registers the same feature through <c>IWebApplicationBuilder.AddFeature</c>.
 /// </para>
 /// <para>
 /// The supported order is <c>UseRouting</c> → <c>UseAuthentication</c> → <c>UseAuthorization</c> →
@@ -30,31 +31,6 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// </remarks>
 public static class AuthorizationWebApplicationExtensions
 {
-    extension(IWebApplicationBuilder builder)
-    {
-        /// <summary>
-        /// Registers authorization: the default policy, the optional fallback policy, and the named
-        /// policies endpoints reference. Pair it with <c>UseAuthorization</c> in the pipeline.
-        /// </summary>
-        /// <remarks>
-        /// The options become read-only when <paramref name="configure"/> returns. Call this once; a
-        /// second call replaces the first registration.
-        /// </remarks>
-        /// <param name="configure">An optional callback that configures the policies.</param>
-        /// <returns>The same builder, for chaining.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        public IWebApplicationBuilder AddAuthorization(Action<AuthorizationOptions>? configure = null)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-
-            AuthorizationOptions options = new();
-            configure?.Invoke(options);
-            options.MakeReadOnly();
-
-            return builder.AddFeature(new AuthorizationFeature(options));
-        }
-    }
-
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
@@ -79,8 +55,8 @@ public static class AuthorizationWebApplicationExtensions
         /// <returns>The same pipeline builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="InvalidOperationException">
-        /// Thrown when the pipeline is composed (at application start) if <c>AddAuthorization</c> was not
-        /// called on the web application builder.
+        /// Thrown when the pipeline is composed (at application start) if <c>builder.Services.AddAuthorization</c> was
+        /// not called.
         /// </exception>
         public IWebApplicationPipelineBuilder UseAuthorization()
         {
@@ -94,8 +70,8 @@ public static class AuthorizationWebApplicationExtensions
                 if (!application.TryGetAuthorizationOptions(out AuthorizationOptions? options))
                 {
                     throw new InvalidOperationException(
-                        "Authorization has not been registered. Call AddAuthorization() on the web application " +
-                        "builder before UseAuthorization().");
+                        "Authorization has not been registered. Call builder.Services.AddAuthorization() before " +
+                        "UseAuthorization().");
                 }
 
                 AuthorizationMiddleware middleware = new(options);

@@ -48,21 +48,29 @@ string[] hostArgs = smoke
     : args;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(hostArgs);
-builder.AddRouting();
-builder.AddJsonSerialization(GuardJsonContext.Default);
-builder.AddErrorHandling();
-builder.AddAuthentication(options => options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme)
-    .AddCookie()
-    .AddJwtBearer(options =>
+// The feature registration verbs are component integrations on the service registrations (#1380):
+// each registers one IHttpFeature singleton the host stamps onto every exchange.
+builder.Services
+    .AddRouting()
+    .AddJsonSerialization(GuardJsonContext.Default)
+    // No OnError handler: every fault renders the RFC 9457 ProblemDetails default.
+    .AddErrorHandling(errors => { })
+    .AddAuthentication(authentication =>
     {
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(signingKey));
-        options.ValidIssuers.Add(GuardSmoke.Issuer);
-        options.ValidAudiences.Add(GuardSmoke.Audience);
-    });
-builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
-builder.AddAntiforgery();
-builder.AddOpenApi(options => options.Title = "Cohesion Web AOT guard");
-builder.AddValidation(validation => validation.AddProfile(new GuardItemProfile()));
+        authentication.Options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+        authentication
+            .AddCookie()
+            .AddJwtBearer(options =>
+            {
+                options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(signingKey));
+                options.ValidIssuers.Add(GuardSmoke.Issuer);
+                options.ValidAudiences.Add(GuardSmoke.Audience);
+            });
+    })
+    .AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")))
+    .AddAntiforgery()
+    .AddOpenApi(options => options.Title = "Cohesion Web AOT guard")
+    .AddValidation(validation => validation.AddProfile(new GuardItemProfile()));
 
 await using WebApplication application = builder.Build();
 

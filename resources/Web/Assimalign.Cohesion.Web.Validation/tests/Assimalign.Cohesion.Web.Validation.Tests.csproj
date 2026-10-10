@@ -21,6 +21,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
 		<!-- Activate the endpoint-binding generator on this project's typed Map* call sites. -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

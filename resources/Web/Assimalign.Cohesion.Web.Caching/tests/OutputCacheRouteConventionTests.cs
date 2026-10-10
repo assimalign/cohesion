@@ -33,7 +33,7 @@ public class OutputCacheRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         int[] hits = new int[3];
 
@@ -75,7 +75,7 @@ public class OutputCacheRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         int[] hits = new int[2];
 

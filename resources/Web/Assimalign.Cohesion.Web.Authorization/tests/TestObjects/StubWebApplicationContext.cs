@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.Authorization.Tests.TestObjects;
 
 /// <summary>
 /// A minimal <see cref="IWebApplicationContext"/> over a fixed feature list (typically the features a
-/// <see cref="StubWebApplicationBuilder"/> recorded): the only context capability
+/// service provider resolved): the only context capability
 /// <c>TryGetAuthorizationOptions</c> reads.
 /// </summary>
 internal sealed class StubWebApplicationContext : IWebApplicationContext

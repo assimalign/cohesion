@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <remarks>
 /// <para>
 /// A router builder is <em>per application</em>: each web application owns its own builder (installed
-/// through <see cref="RoutingExtensions"/>' <c>AddRouting</c>/<c>UseRouting</c>) so route tables never
+/// through <c>builder.Services.AddRouting()</c> and <see cref="RoutingExtensions"/>' <c>UseRouting</c>) so route tables never
 /// leak between applications hosted in the same process. There is intentionally no shared/static
 /// builder — that was the cross-application state-leakage defect fixed in issue #789.
 /// </para>

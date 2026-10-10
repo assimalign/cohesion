@@ -35,7 +35,7 @@ public class EndpointFileBindingTests
     private static WebApplicationTestFactory CreateFactory(HttpFormOptions? formOptions = null)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         if (formOptions is not null)
         {

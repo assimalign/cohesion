@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 
@@ -6,6 +8,8 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Authorization.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
 
@@ -13,7 +17,7 @@ namespace Assimalign.Cohesion.Web.Authorization.Tests;
 
 /// <summary>
 /// The builder-time options and their registration: the default and fallback policies, named policies,
-/// the read-only snapshot <c>AddAuthorization</c> hands to the pipeline, and reading that snapshot back
+/// the read-only snapshot <c>builder.Services.AddAuthorization</c> hands to the pipeline, and reading that snapshot back
 /// from the application context.
 /// </summary>
 public class AuthorizationOptionsTests
@@ -87,25 +91,28 @@ public class AuthorizationOptionsTests
         act.ShouldThrow<ArgumentNullException>();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Registration: AddAuthorization should register one application feature")]
-    public void AddAuthorization_WithPolicies_ShouldRegisterOneFeature()
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Registration: AddAuthorization should register one IHttpFeature singleton")]
+    public void AddAuthorization_WithPolicies_ShouldRegisterOneFeatureSingleton()
     {
         // Arrange
-        StubWebApplicationBuilder builder = new();
+        ServiceProviderBuilder builder = new();
 
         // Act
-        IWebApplicationBuilder result = builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
+        IServiceProviderBuilder result = builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
 
-        // Assert
+        // Assert — one singleton the host stamps onto every exchange (owner decision 35).
         result.ShouldBeSameAs(builder);
-        builder.Features.Count.ShouldBe(1);
+        ServiceDescriptor descriptor = builder.Container.ShouldHaveSingleItem();
+        descriptor.ServiceType.ShouldBe(typeof(IHttpFeature));
+        descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+        Resolve(builder).ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Registration: Options should become read-only once AddAuthorization returns")]
     public void AddAuthorization_OptionsMutatedAfterward_ShouldThrowInvalidOperationException()
     {
         // Arrange
-        StubWebApplicationBuilder builder = new();
+        ServiceProviderBuilder builder = new();
         AuthorizationOptions? captured = null;
         AuthorizationPolicy policy = new AuthorizationPolicyBuilder().RequireRole("admin").Build();
 
@@ -120,19 +127,6 @@ public class AuthorizationOptionsTests
         addPolicy.ShouldThrow<InvalidOperationException>();
         setDefault.ShouldThrow<InvalidOperationException>();
         setFallback.ShouldThrow<InvalidOperationException>();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Registration: AddAuthorization on a null builder should throw")]
-    public void AddAuthorization_NullBuilder_ShouldThrowArgumentNullException()
-    {
-        // Arrange
-        IWebApplicationBuilder builder = null!;
-
-        // Act
-        Action act = () => builder.AddAuthorization();
-
-        // Assert
-        act.ShouldThrow<ArgumentNullException>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Registration: UseAuthorization on a null pipeline builder should throw")]
@@ -200,7 +194,7 @@ public class AuthorizationOptionsTests
     public void TryGetAuthorizationOptions_AfterAddAuthorization_ShouldReturnTheReadOnlyRegistration()
     {
         // Arrange
-        StubWebApplicationBuilder builder = new();
+        ServiceProviderBuilder builder = new();
         AuthorizationOptions? configured = null;
         builder.AddAuthorization(options =>
         {
@@ -209,7 +203,7 @@ public class AuthorizationOptionsTests
             configured = options;
         });
 
-        IWebApplicationContext context = new StubWebApplicationContext(builder.Features);
+        IWebApplicationContext context = new StubWebApplicationContext(Resolve(builder));
 
         // Act
         bool found = context.TryGetAuthorizationOptions(out AuthorizationOptions? registered);
@@ -243,11 +237,11 @@ public class AuthorizationOptionsTests
     public void TryGetAuthorizationOptions_RegisteredTwice_ShouldReturnTheLastRegistration()
     {
         // Arrange
-        StubWebApplicationBuilder builder = new();
+        ServiceProviderBuilder builder = new();
         builder.AddAuthorization(options => options.AddPolicy("first", policy => policy.RequireRole("first")));
         builder.AddAuthorization(options => options.AddPolicy("second", policy => policy.RequireRole("second")));
 
-        IWebApplicationContext context = new StubWebApplicationContext(builder.Features);
+        IWebApplicationContext context = new StubWebApplicationContext(Resolve(builder));
 
         // Act
         context.TryGetAuthorizationOptions(out AuthorizationOptions? options);
@@ -263,7 +257,7 @@ public class AuthorizationOptionsTests
     {
         // Arrange — the real Web.Hosting context, whose features come from its service provider.
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
+        factory.Builder.Services.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
 
         IWebApplicationContext context = ((IWebApplication)factory.Application).Context;
 
@@ -287,5 +281,12 @@ public class AuthorizationOptionsTests
 
         // Assert
         act.ShouldThrow<ArgumentNullException>();
+    }
+
+    // Resolves the application features the way the host does when it composes the pipeline.
+    private static IHttpFeature[] Resolve(IServiceProviderBuilder services)
+    {
+        IServiceProvider provider = services.Build();
+        return provider.GetRequiredService<IEnumerable<IHttpFeature>>().ToArray();
     }
 }

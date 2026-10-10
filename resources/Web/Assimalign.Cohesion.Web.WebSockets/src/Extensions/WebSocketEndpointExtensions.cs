@@ -58,7 +58,7 @@ public static class WebSocketEndpointExtensions
         /// <returns>The mapped route's builder, for attaching endpoint metadata and policies.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="handler"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapWebSocket(string pattern, Func<IHttpContext, WebSocket, Task> handler)
             => builder.MapWebSocket(pattern, handler, acceptOptions: null);
 
@@ -76,7 +76,7 @@ public static class WebSocketEndpointExtensions
         /// <returns>The mapped route's builder, for attaching endpoint metadata and policies.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="handler"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapWebSocket(
             string pattern,
             Func<IHttpContext, WebSocket, Task> handler,
@@ -88,7 +88,7 @@ public static class WebSocketEndpointExtensions
 
             IRouterFeature routing = builder.Context.Features.OfType<IRouterFeature>().FirstOrDefault()
                 ?? throw new InvalidOperationException(
-                    "No router builder was registered. Call AddRouting() on the application builder before mapping endpoints.");
+                    "No router builder was registered. Call builder.Services.AddRouting() before mapping endpoints.");
 
             return routing.Builder.Map(WebSocketEndpoint.Methods, pattern, CreateHandler(handler, acceptOptions));
         }

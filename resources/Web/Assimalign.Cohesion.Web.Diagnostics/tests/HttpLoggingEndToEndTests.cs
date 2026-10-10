@@ -261,7 +261,7 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
 
@@ -307,7 +307,7 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
 
@@ -345,7 +345,7 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
 
@@ -386,7 +386,7 @@ public class HttpLoggingEndToEndTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
 

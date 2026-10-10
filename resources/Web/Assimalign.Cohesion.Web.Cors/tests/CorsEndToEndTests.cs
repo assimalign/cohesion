@@ -39,7 +39,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin()));
@@ -63,7 +63,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
@@ -86,7 +86,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -112,7 +112,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -144,7 +144,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options
@@ -170,7 +170,7 @@ public class CorsEndToEndTests
         // Arrange — the group policy is attached after a route is mapped; composition happens at build.
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options
@@ -203,7 +203,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -231,7 +231,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy
@@ -268,7 +268,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy
@@ -322,7 +322,7 @@ public class CorsEndToEndTests
         // Arrange — Fetch sends 'patch' as written, and the actual 'patch' request matches no PATCH route.
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors();
@@ -348,7 +348,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         int optionsInvocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -374,7 +374,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -400,7 +400,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         InvalidOperationException? dispatchFailure = null;
         int invocations = 0;
 
@@ -432,7 +432,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         InvalidOperationException? dispatchFailure = null;
 
         ObserveDispatchFailures(factory, exception => dispatchFailure = exception);
@@ -461,7 +461,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
@@ -486,7 +486,7 @@ public class CorsEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = WebApplicationTestProtocol.Http2 });
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).WithMethods("PUT").WithHeaders("Content-Type")));
@@ -513,7 +513,7 @@ public class CorsEndToEndTests
     private static WebApplicationTestFactory CreateItemsApplication(Action<CorsOptions> configure)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         factory.Application.UseCors(configure);

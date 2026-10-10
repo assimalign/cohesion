@@ -21,7 +21,7 @@ internal static class EndpointMapping
         IRouterFeature? feature = context.Features.OfType<IRouterFeature>().FirstOrDefault();
 
         return feature?.Builder
-            ?? throw new InvalidOperationException("No router builder was registered. Call AddRouting() on the application builder before mapping endpoints.");
+            ?? throw new InvalidOperationException("No router builder was registered. Call builder.Services.AddRouting() before mapping endpoints.");
     }
 
     /// <summary>

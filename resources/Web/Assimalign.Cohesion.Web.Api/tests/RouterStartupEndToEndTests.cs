@@ -42,7 +42,7 @@ public class RouterStartupEndToEndTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting()
             .Map(NamedRoute("orders", "/orders/{id}"))
             .Map(NamedRoute("orders", "/archive/{id}"));
@@ -62,7 +62,7 @@ public class RouterStartupEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting()
             .Map(NamedRoute("orders", "/orders/{id}"))
             .Map(NamedRoute("orders", "/archive/{id}"));
@@ -82,7 +82,7 @@ public class RouterStartupEndToEndTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
 
         // Act
@@ -102,7 +102,7 @@ public class RouterStartupEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
         factory.Application.MapGet("/orders", _ok);
 
@@ -129,7 +129,7 @@ public class RouterStartupEndToEndTests
         {
             Protocol = WebApplicationTestProtocol.Http2,
         });
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         WaitingRouterRouteHandler handler = new();
         factory.Application.UseRouting().Map(new Route(HttpMethod.Get, "/slow", handler));

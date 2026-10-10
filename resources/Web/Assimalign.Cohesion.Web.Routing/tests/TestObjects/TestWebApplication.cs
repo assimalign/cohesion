@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
 
 /// <summary>
-/// A minimal in-process web-application double that supports the real <c>AddRouting</c> /
+/// A minimal in-process web-application double that supports the real routing feature and the
 /// <c>UseRouting</c> / <c>Map</c> extension methods end-to-end. It mirrors the production wiring that
 /// matters for routing: features registered at build time are seeded onto each request's
 /// <see cref="IHttpContext.Features"/> collection (as <c>WebApplication.Init</c> does), and the
@@ -50,6 +50,18 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
     public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => this;
 
     public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
+
+    /// <summary>
+    /// Registers routing the way <c>builder.Services.AddRouting()</c> does: the feature
+    /// <see cref="RoutingComponents.CreateFeature"/> creates, through the raw <see cref="AddFeature(IHttpFeature)"/>
+    /// path. The verb itself is projected only into compilations that reference dependency injection,
+    /// which this double composes without.
+    /// </summary>
+    public TestWebApplication AddRouting()
+    {
+        AddFeature(RoutingComponents.CreateFeature());
+        return this;
+    }
 
     IWebApplication IWebApplicationBuilder.Build() => this;
 

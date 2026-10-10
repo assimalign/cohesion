@@ -11,8 +11,7 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// Builder-time options for the application's OpenAPI document: the document-level information, the
 /// OpenAPI line it targets, the security schemes and tags it declares, extra endpoint sources, and
 /// transformers that edit the finished document. Configure them in the
-/// <see cref="OpenApiWebApplicationExtensions.AddOpenApi(IWebApplicationBuilder, Action{OpenApiOptions})"/>
-/// callback.
+/// <c>builder.Services.AddOpenApi(...)</c> callback.
 /// </summary>
 /// <remarks>
 /// <para>

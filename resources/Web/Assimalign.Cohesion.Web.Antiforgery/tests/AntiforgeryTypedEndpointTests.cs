@@ -149,7 +149,7 @@ public class AntiforgeryTypedEndpointTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         InvalidOperationException? dispatchFailure = null;
         factory.Application.Use(async (context, next) =>
@@ -266,8 +266,8 @@ public class AntiforgeryTypedEndpointTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAntiforgery();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAntiforgery();
         factory.Application.Use(async (context, next) =>
         {
             context.Features.Set<IHttpFormFeature>(new HttpFormFeature(context.Request, new HttpFormOptions { MultipartBodyLengthLimit = 16 }));
@@ -305,8 +305,8 @@ public class AntiforgeryTypedEndpointTests
     private static WebApplicationTestFactory CreateFactory(bool useAntiforgery)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAntiforgery();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAntiforgery();
         factory.Application.UseRouting();
 
         if (useAntiforgery)

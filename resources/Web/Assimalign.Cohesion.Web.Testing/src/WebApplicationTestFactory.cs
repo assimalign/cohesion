@@ -165,7 +165,7 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
 
     /// <summary>
     /// Gets the application builder, for service/configuration registration before the
-    /// application is built (for example <c>Builder.AddRouting()</c> or additional
+    /// application is built (for example <c>Builder.Services.AddRouting()</c> or additional
     /// <c>Builder.Server.UseServer(...)</c> listener configuration).
     /// </summary>
     public WebApplicationBuilder Builder { get; }

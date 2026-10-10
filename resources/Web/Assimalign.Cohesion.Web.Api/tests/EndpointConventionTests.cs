@@ -59,7 +59,7 @@ public class EndpointConventionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
         UseTagEcho(factory);
 
@@ -84,7 +84,7 @@ public class EndpointConventionTests
         // Arrange — the group's metadata is attached after its endpoint is mapped.
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
         UseTagEcho(factory);
 
@@ -110,7 +110,7 @@ public class EndpointConventionTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
 
         factory.Application.MapGet("/users/{id:int}", context => WriteTextAsync(context, "user")).WithName("user");

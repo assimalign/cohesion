@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// <remarks>
 /// Register <see cref="UseErrorHandling(IWebApplicationPipelineBuilder, Action{ExceptionBoundaryOptions})"/>
 /// <b>first</b> so it wraps every middleware that follows. Pair it with
-/// <c>builder.AddErrorHandling().OnError(...)</c> at builder time to register fault handlers; the
+/// <c>builder.Services.AddErrorHandling(errors =&gt; errors.OnError(...))</c> at builder time to register fault handlers; the
 /// boundary consults them and falls back to the terminal problem+json default when none owns the
 /// fault. <see cref="UseStatusCodePages(IWebApplicationPipelineBuilder, Action{StatusCodePagesOptions})"/>
 /// is independent and opt-in: it upgrades bodyless <c>4xx</c>/<c>5xx</c> terminal responses (such as

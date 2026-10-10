@@ -240,7 +240,7 @@ public class OutputCacheEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         int cachedHits = 0;
         int plainHits = 0;
@@ -295,7 +295,7 @@ public class OutputCacheEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         int privateHits = 0;
         int publicHits = 0;

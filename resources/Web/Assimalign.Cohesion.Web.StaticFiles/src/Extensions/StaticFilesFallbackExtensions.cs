@@ -33,7 +33,7 @@ public static class StaticFilesFallbackExtensions
         /// <returns>The fallback route's builder.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="filePath"/> is empty or not a path inside the web root, or the options are invalid.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapFallbackToFile(string filePath, Action<StaticFilesOptions>? configure = null)
         {
             return builder.MapFallbackToFile("{**path:nonfile}", filePath, configure);
@@ -49,7 +49,7 @@ public static class StaticFilesFallbackExtensions
         /// <returns>The fallback route's builder.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="pattern"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="filePath"/> is empty or not a path inside the web root, or the options are invalid.</exception>
-        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
         public IRouterRouteBuilder MapFallbackToFile(string pattern, string filePath, Action<StaticFilesOptions>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -69,7 +69,7 @@ public static class StaticFilesFallbackExtensions
 
             IRouterBuilder routes = builder.Context.Features.OfType<IRouterFeature>().FirstOrDefault()?.Builder
                 ?? throw new InvalidOperationException(
-                    "No router builder was registered. Call AddRouting() on the application builder before mapping a fallback.");
+                    "No router builder was registered. Call builder.Services.AddRouting() before mapping a fallback.");
 
             StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(builder.Context, options);
 

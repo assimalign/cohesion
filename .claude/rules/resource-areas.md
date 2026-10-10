@@ -169,8 +169,10 @@ semicolon-delimited, in its own csproj:
   the plain host directly or its area's runtime module `Assimalign.Cohesion.<Area>.Hosting`;
   `COHAM001` enforces the complete resolved-assembly boundary as each project opts in.
 - Do not use the property to route around design pressure: if a feature library "needs" hosting,
-  the missing piece is almost always a seam on the area root (that is how the Web area moved its
-  authentication builder verbs out of `Web.Hosting`).
+  the missing piece is almost always a seam on the area root or a component integration (that is
+  how the Web area moved its authentication builder verbs out of `Web.Hosting`; since owner
+  decision 34 of 2026-10-09 they ship as the `builder.Services.AddAuthentication(...)` component
+  integration).
 
 ## The resource instance is the SDK consumer's project
 
@@ -273,6 +275,16 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   it. Registration-time duplicate checks read `Services.Container`, never a second collection.
   Precedents: `IWebApplicationBuilder.AddFeature/AddServer` → `IHttpFeature`/`IWebApplicationServer`;
   `ISchedulerApplicationBuilder.AddJob/AddScheduleProvider` → `IScheduleJob`/`IScheduleProvider`.
+  `AddFeature` is Web's raw feature path; the Web feature packages' own registration verbs are
+  component integrations that register the same `IHttpFeature` singleton directly on `Services`
+  (owner decision 34, 2026-10-09).
+- **Validate what the container cannot.** `ValidateOnBuild` cannot see the lifetime a factory or
+  instance registration implies for a consumer, so a module whose aggregate has a lifetime
+  contract checks the descriptors itself in `Build`, before `MakeReadOnly`, and names the
+  offending registration. Precedent (owner decision 35, 2026-10-09): `WebApplicationBuilder.Build`
+  rejects a scoped or transient `IHttpFeature` registration and a registration under a contract
+  derived from `IHttpFeature`; the pipeline build, which resolves the aggregate, rejects a
+  disposable feature.
 - **The service type is the lifecycle phase; registration order is the order within a phase.**
   A single-phase area registers everything as `IHostService` and places its own services by
   *when* they register: telemetry in the builder constructor (first), hard-wired endpoints in
@@ -330,14 +342,21 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   the ambient `Assimalign.Cohesion.Hosting.Resources.ResourceContext` and the registered default
   control plane, otherwise it behaves as a plain application — see
   `docs/DEVELOPER_EXPERIENCE_DESIGN.md` §2/§4.2). Feature/model registration verbs ship with
-  their feature package as `extension(I<Area>ApplicationBuilder)` members and compose against
-  the root builder — never against the hosting module — so a feature or model registers itself
-  on any composition surface without knowing the hosting layer. Registration stays
-  dependency-free (values and options objects; no container, no configuration binding).
-  Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)`
-  (`Web.Hosting`) + `AddAuthentication` (`Web.Authentication`); `IDatabaseApplicationBuilder`
-  (Database root) + `DatabaseApplication.CreateBuilder(args)` (`Database.Hosting`) +
-  `AddSql` (`Database.Sql`, with nested engine server factories). The root application exposes `Context`, `StartAsync`,
+  their feature package — never in the hosting module — so a feature or model registers itself
+  without knowing the hosting layer. They take one of two forms:
+  `extension(I<Area>ApplicationBuilder)` members that compose against the root builder, or
+  component integrations (`component-integration.md`) that the generator projects onto the
+  hosting builder's `Services` (`IServiceProviderBuilder`), as other .NET hosting models register
+  features. Either way the package stays dependency-free: it composes values and options objects
+  and references no container and no configuration binding. Precedents:
+  `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)` (`Web.Hosting`) +
+  `builder.Services.AddAuthentication(auth => auth.AddCookie(...))` (`Web.Authentication`, a
+  component integration; owner decisions 34 and 35 of 2026-10-09 moved the eight Web feature
+  registration verbs there and made every `IHttpFeature` registration a singleton that
+  `Web.Hosting` enforces at `Build`; `IWebApplicationBuilder.AddFeature` stays the raw path);
+  `IDatabaseApplicationBuilder` (Database root) + `DatabaseApplication.CreateBuilder(args)`
+  (`Database.Hosting`) + `AddSql` (`Database.Sql`, an `extension(IDatabaseApplicationBuilder)`
+  member with nested engine server factories). The root application exposes `Context`, `StartAsync`,
   and `StopAsync`; its builder exposes area verbs and `Build()`. Background-work
   registration (`AddService`) is a concrete-builder verb in `<Area>.Hosting`, absent
   from the root contract; no area-owned service abstraction is introduced. This pattern
@@ -357,7 +376,8 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   framework that carries it privately (`Web.Hosting` is a private member of all 17 other area
   frameworks, so one new `Web.Hosting` reference is a framework-membership change in each of them).
   Feature registration never needs the module to reference the feature: the feature's verbs ship
-  with the feature. It composes through its container ("Hosting composition — DI is the dependency
+  with the feature, as root-builder extensions or as component integrations on `Services` (Web,
+  owner decision 34). It composes through its container ("Hosting composition — DI is the dependency
   control", above).
 - `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
   manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the
@@ -446,7 +466,7 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   consumer's real `Program.cs` under a test-scoped ambient resource context. When present, this
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
 - `Assimalign.Cohesion.<Area>.<Feature>` — feature libraries; builder verbs ship here, not in
-  hosting.
+  hosting (registration verbs may be component integrations on `Services`, as Web's are).
 - `Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` — the producers of
   the area's `App.<Area>` shared framework, named for the area while their assembly and package
   names keep the `App` segment (`Assimalign.Cohesion.App.<Area>.Refs` / `Assimalign.Cohesion.App.<Area>`,

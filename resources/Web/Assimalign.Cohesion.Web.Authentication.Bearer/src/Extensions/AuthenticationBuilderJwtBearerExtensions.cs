@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// <summary>
 /// Grafts the JWT bearer scheme verbs onto <see cref="AuthenticationBuilder"/>, so registering
 /// bearer authentication reads identically wherever the builder came from:
-/// <c>builder.AddAuthentication(...).AddJwtBearer(...)</c>.
+/// <c>builder.Services.AddAuthentication(authentication => authentication.AddJwtBearer(...))</c>.
 /// </summary>
 public static class AuthenticationBuilderJwtBearerExtensions
 {

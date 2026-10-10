@@ -40,12 +40,12 @@ public class ValidationEndToEndTests
     private static WebApplicationTestFactory CreateFactory(Action<EndpointValidationOptions>? configure = null, bool registerValidation = true)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(ValidationTestJsonContext.Default);
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddJsonSerialization(ValidationTestJsonContext.Default);
 
         if (registerValidation)
         {
-            factory.Builder.AddValidation(options =>
+            factory.Builder.Services.AddValidation(options =>
             {
                 options.AddProfile(new CustomerProfile());
                 configure?.Invoke(options);
@@ -396,9 +396,9 @@ public class ValidationEndToEndTests
         });
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(ValidationTestJsonContext.Default);
-        factory.Builder.AddValidation(options => options.AddValidator(throwing));
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddJsonSerialization(ValidationTestJsonContext.Default);
+        factory.Builder.Services.AddValidation(options => options.AddValidator(throwing));
         factory.Application.UseRouting();
         factory.Application.MapPost("/customers", (Customer customer) => "accepted");
 
@@ -422,9 +422,9 @@ public class ValidationEndToEndTests
         IValidator faulting = Validator.Create(builder => builder.AddProfile(new FaultingCustomerProfile()));
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(ValidationTestJsonContext.Default);
-        factory.Builder.AddValidation(options => options.AddValidator(faulting));
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddJsonSerialization(ValidationTestJsonContext.Default);
+        factory.Builder.Services.AddValidation(options => options.AddValidator(faulting));
 
         InvalidOperationException? fault = null;
         factory.Application.Use(async (context, next) =>

@@ -13,7 +13,7 @@ using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 namespace Assimalign.Cohesion.Web.Routing.Tests;
 
 /// <summary>
-/// Verifies that the real <c>AddRouting()</c> / <c>UseRouting()</c> chain dispatches through the
+/// Verifies that the real routing feature and <c>UseRouting()</c> chain dispatches through the
 /// per-application router and that the route-match state it installs (via the #150 Features-based
 /// <c>SetRouteMatch</c>) is resolvable downstream. Composed over <see cref="TestWebApplication"/>,
 /// which mirrors production feature seeding.

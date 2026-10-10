@@ -15,8 +15,8 @@ using Assimalign.Cohesion.Web.Routing.Metadata;
 namespace Assimalign.Cohesion.Web.Antiforgery.Tests;
 
 /// <summary>
-/// An <see cref="IWebApplicationBuilder"/> that records the features registered on it, so
-/// <c>AddAntiforgery</c> can be exercised without the hosting stack and its registration inspected.
+/// An <see cref="IWebApplicationBuilder"/> that records the features registered on it, so the antiforgery
+/// feature can be composed without the hosting stack and its registration inspected.
 /// </summary>
 internal sealed class TestWebApplicationBuilder : IWebApplicationBuilder
 {

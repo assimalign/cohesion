@@ -67,7 +67,7 @@ public sealed class StaticFilesFallbackTests : IDisposable
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseStaticFiles();
         factory.Application.UseRouting().Map(HttpMethod.Get, "/api/ping", Text("pong"));
         factory.Application.MapFallbackToFile("index.html");
@@ -97,7 +97,7 @@ public sealed class StaticFilesFallbackTests : IDisposable
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
         factory.Application.MapFallbackToFile("missing.html");
         using HttpClient client = factory.CreateClient();
@@ -116,7 +116,7 @@ public sealed class StaticFilesFallbackTests : IDisposable
     {
         // Arrange
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => factory.Application.MapFallbackToFile(filePath));

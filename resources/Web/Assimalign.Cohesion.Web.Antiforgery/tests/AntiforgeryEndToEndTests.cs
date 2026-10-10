@@ -197,7 +197,7 @@ public class AntiforgeryEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         InvalidOperationException? dispatchFailure = null;
         ObserveDispatchFailure(factory.Application, exception => dispatchFailure = exception);
@@ -225,8 +225,8 @@ public class AntiforgeryEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAntiforgery();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAntiforgery();
 
         InvalidOperationException? dispatchFailure = null;
         ObserveDispatchFailure(factory.Application, exception => dispatchFailure = exception);
@@ -255,7 +255,7 @@ public class AntiforgeryEndToEndTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
         factory.Application.UseAntiforgery();
 
@@ -311,8 +311,8 @@ public class AntiforgeryEndToEndTests
         IHttpAntiforgery replacement = HttpAntiforgery.Create();
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAntiforgery();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAntiforgery();
         factory.Application.Use((context, next) =>
         {
             context.Antiforgery = replacement;
@@ -345,8 +345,8 @@ public class AntiforgeryEndToEndTests
     private static WebApplicationTestFactory CreateFactory()
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAntiforgery();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAntiforgery();
         factory.Application.UseRouting();
         factory.Application.UseAntiforgery();
         MapTokenEndpoint(factory.Application);

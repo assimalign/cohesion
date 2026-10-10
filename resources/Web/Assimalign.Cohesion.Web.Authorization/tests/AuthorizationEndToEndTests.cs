@@ -729,7 +729,7 @@ public class AuthorizationEndToEndTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         factory.Application.UseRouting();
         factory.Application.UseAuthorization();
@@ -744,11 +744,15 @@ public class AuthorizationEndToEndTests
     private static WebApplicationTestFactory CreateFactory(Action<AuthorizationOptions>? configure = null)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAuthentication(TestEndpoints.Primary)
-            .AddScheme(TestEndpoints.Scheme(TestEndpoints.Primary))
-            .AddScheme(TestEndpoints.Scheme(TestEndpoints.Secondary));
-        factory.Builder.AddAuthorization(configure);
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAuthentication(authentication =>
+        {
+            authentication.Options.DefaultScheme = TestEndpoints.Primary;
+            authentication
+                .AddScheme(TestEndpoints.Scheme(TestEndpoints.Primary))
+                .AddScheme(TestEndpoints.Scheme(TestEndpoints.Secondary));
+        });
+        factory.Builder.Services.AddAuthorization(configure);
         return factory;
     }
 

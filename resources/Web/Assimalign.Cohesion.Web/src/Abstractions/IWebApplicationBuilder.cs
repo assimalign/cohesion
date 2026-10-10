@@ -10,11 +10,19 @@ using Http;
 /// requests and its request pipeline, then builds it.
 /// </summary>
 /// <remarks>
-/// The hosting runtime implements this contract (<c>WebApplication.CreateBuilder(args)</c>). Feature
-/// packages extend it with <c>Add&lt;Feature&gt;</c> verbs declared as <c>extension(IWebApplicationBuilder)</c>
-/// members, so a feature registers itself through these members without referencing the hosting
-/// runtime. Registration is dependency-free: values, options objects and factories over the
-/// application context, never a service container.
+/// <para>
+/// The hosting runtime implements this contract (<c>WebApplication.CreateBuilder(args)</c>). Its members
+/// take values and factories over the application context, never a service container, so any
+/// composition surface that implements it can be handed features and servers.
+/// </para>
+/// <para>
+/// Feature packages do not extend this contract. Their registration verbs are component integrations
+/// projected onto the application's service registrations, <c>builder.Services.Add&lt;Feature&gt;(...)</c>,
+/// which register the same <see cref="IHttpFeature"/> singleton <see cref="AddFeature(IHttpFeature)"/>
+/// does (owner decision 34, #1380). <see cref="AddFeature(IHttpFeature)"/> stays the raw registration
+/// path for a feature no package ships a verb for. A request feature is a singleton: the hosting runtime
+/// rejects a scoped, transient or disposable one.
+/// </para>
 /// </remarks>
 public interface IWebApplicationBuilder
 {

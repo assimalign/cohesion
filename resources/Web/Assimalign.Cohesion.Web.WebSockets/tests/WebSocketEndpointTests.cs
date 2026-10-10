@@ -46,7 +46,7 @@ public class WebSocketEndpointTests
         StrongBox<int> invocations = new();
         await using WebSocketTestServer server = await WebSocketTestServer.StartAsync(
             protocol,
-            builder => builder.AddRouting(),
+            builder => builder.Services.AddRouting(),
             application =>
             {
                 application.UseRouting();
@@ -74,7 +74,7 @@ public class WebSocketEndpointTests
         StrongBox<int> invocations = new();
         await using WebSocketTestServer server = await WebSocketTestServer.StartAsync(
             protocol,
-            builder => builder.AddRouting(),
+            builder => builder.Services.AddRouting(),
             application =>
             {
                 application.UseRouting();
@@ -109,9 +109,13 @@ public class WebSocketEndpointTests
             protocol,
             builder =>
             {
-                builder.AddRouting();
-                builder.AddAuthentication(HeaderAuthenticationHandler.Scheme).AddScheme(HeaderAuthenticationHandler.CreateScheme());
-                builder.AddAuthorization();
+                builder.Services.AddRouting();
+                builder.Services.AddAuthentication(authentication =>
+                {
+                    authentication.Options.DefaultScheme = HeaderAuthenticationHandler.Scheme;
+                    authentication.AddScheme(HeaderAuthenticationHandler.CreateScheme());
+                });
+                builder.Services.AddAuthorization();
             },
             application =>
             {
@@ -148,7 +152,7 @@ public class WebSocketEndpointTests
         StrongBox<int> invocations = new();
         await using WebSocketTestServer server = await WebSocketTestServer.StartAsync(
             WebSocketTestProtocol.Http1,
-            builder => builder.AddRouting(),
+            builder => builder.Services.AddRouting(),
             application =>
             {
                 application.UseRouting();
@@ -178,7 +182,7 @@ public class WebSocketEndpointTests
         StrongBox<int> invocations = new();
         await using WebSocketTestServer server = await WebSocketTestServer.StartAsync(
             WebSocketTestProtocol.Http2,
-            builder => builder.AddRouting(),
+            builder => builder.Services.AddRouting(),
             application =>
             {
                 application.UseRouting();

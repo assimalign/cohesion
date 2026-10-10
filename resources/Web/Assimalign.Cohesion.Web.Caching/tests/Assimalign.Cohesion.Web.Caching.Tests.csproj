@@ -17,6 +17,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching.InMemory" />
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

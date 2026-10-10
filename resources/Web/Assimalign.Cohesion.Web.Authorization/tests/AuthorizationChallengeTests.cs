@@ -228,16 +228,21 @@ public sealed class AuthorizationChallengeTests : IDisposable
     private WebApplicationTestFactory CreateFactory(string defaultScheme)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAuthentication(options => options.DefaultScheme = defaultScheme, _dataProtection)
-            .AddCookie()
-            .AddJwtBearer(options =>
-            {
-                options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_signingKey));
-                options.ValidIssuers.Add(TestJwt.Issuer);
-                options.ValidAudiences.Add(TestJwt.Audience);
-            });
-        factory.Builder.AddAuthorization();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAuthentication(authentication =>
+        {
+            authentication.Options.DefaultScheme = defaultScheme;
+            authentication
+                .UseDataProtection(_dataProtection)
+                .AddCookie()
+                .AddJwtBearer(options =>
+                {
+                    options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_signingKey));
+                    options.ValidIssuers.Add(TestJwt.Issuer);
+                    options.ValidAudiences.Add(TestJwt.Audience);
+                });
+        });
+        factory.Builder.Services.AddAuthorization();
         return factory;
     }
 

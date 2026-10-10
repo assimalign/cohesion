@@ -34,7 +34,7 @@ public class RateLimitingRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/expensive", Ok()).RequireRateLimiting("expensive");
@@ -65,7 +65,7 @@ public class RateLimitingRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         IRouterGroupBuilder api = routes.MapGroup("/api");
@@ -98,7 +98,7 @@ public class RateLimitingRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         IRouterGroupBuilder api = routes.MapGroup("/api").RequireRateLimiting(SinglePermitPerPath());
@@ -125,7 +125,7 @@ public class RateLimitingRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         InvalidOperationException? dispatchFailure = null;
 

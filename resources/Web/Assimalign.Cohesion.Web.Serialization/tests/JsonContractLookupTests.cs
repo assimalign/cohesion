@@ -18,18 +18,14 @@ namespace Assimalign.Cohesion.Web.Serialization.Tests;
 /// </summary>
 public class JsonContractLookupTests
 {
-    private static IHttpContentSerializationFeature GetFeature(TestWebApplicationBuilder builder)
-        => builder.Features.OfType<IHttpContentSerializationFeature>().Single();
-
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - TryGetJsonTypeInfo: Should return the writer's contract with the web defaults")]
     public void TryGetJsonTypeInfo_RegisteredType_ShouldReturnWriterContract()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddJsonSerialization(TestJsonContext.Default);
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act
-        bool found = GetFeature(builder).TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
+        bool found = feature.TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
 
         // Assert
         found.ShouldBeTrue();
@@ -43,11 +39,10 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_ConfiguredOptions_ShouldMatchTheWire()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddJsonSerialization(TestJsonContext.Default, options => options.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default, options => options.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower).Build();
 
         // Act
-        bool found = GetFeature(builder).TryGetJsonTypeInfo(typeof(TestReceipt), out JsonTypeInfo? typeInfo);
+        bool found = feature.TryGetJsonTypeInfo(typeof(TestReceipt), out JsonTypeInfo? typeInfo);
 
         // Assert
         found.ShouldBeTrue();
@@ -58,11 +53,10 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_UnregisteredType_ShouldReturnFalse()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddJsonSerialization(TestJsonContext.Default);
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act
-        bool found = GetFeature(builder).TryGetJsonTypeInfo(typeof(UnregisteredModel), out JsonTypeInfo? typeInfo);
+        bool found = feature.TryGetJsonTypeInfo(typeof(UnregisteredModel), out JsonTypeInfo? typeInfo);
 
         // Assert
         found.ShouldBeFalse();
@@ -73,13 +67,13 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_CustomJsonWriterFirst_ShouldReturnFalse()
     {
         // Arrange — the custom writer is registered first, so application/json resolves to it.
-        TestWebApplicationBuilder builder = new();
-        builder.AddContentSerialization()
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder()
             .AddWriter(new FakeContentWriter(HttpMediaType.ApplicationJson))
-            .AddJson(TestJsonContext.Default);
+            .AddJson(TestJsonContext.Default)
+            .Build();
 
         // Act
-        bool found = GetFeature(builder).TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
+        bool found = feature.TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
 
         // Assert
         found.ShouldBeFalse();
@@ -90,11 +84,12 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_NoJsonWriter_ShouldReturnFalse()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddContentSerialization().AddWriter(new FakeContentWriter(HttpMediaType.TextPlain));
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder()
+            .AddWriter(new FakeContentWriter(HttpMediaType.TextPlain))
+            .Build();
 
         // Act
-        bool found = GetFeature(builder).TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
+        bool found = feature.TryGetJsonTypeInfo(typeof(TestOrder), out JsonTypeInfo? typeInfo);
 
         // Assert
         found.ShouldBeFalse();
@@ -105,9 +100,7 @@ public class JsonContractLookupTests
     public void TryGetJsonTypeInfo_NullType_ShouldThrow()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
-        builder.AddJsonSerialization(TestJsonContext.Default);
-        IHttpContentSerializationFeature feature = GetFeature(builder);
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddJson(TestJsonContext.Default).Build();
 
         // Act / Assert
         Should.Throw<ArgumentNullException>(() => feature.TryGetJsonTypeInfo(null!, out _));

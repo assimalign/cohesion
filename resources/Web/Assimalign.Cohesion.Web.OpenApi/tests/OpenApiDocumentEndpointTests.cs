@@ -176,7 +176,7 @@ public class OpenApiDocumentEndpointTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         // Act / Assert
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => factory.Application.MapOpenApi());

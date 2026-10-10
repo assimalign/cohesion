@@ -36,7 +36,7 @@ public class RequestTimeoutRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/slow", NeverCompletes()).WithRequestTimeout(_shortTimeout);
@@ -60,7 +60,7 @@ public class RequestTimeoutRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         IRouterGroupBuilder api = routes.MapGroup("/api")

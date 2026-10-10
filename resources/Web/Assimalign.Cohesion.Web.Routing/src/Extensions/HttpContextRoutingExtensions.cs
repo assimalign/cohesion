@@ -145,8 +145,8 @@ public static class HttpContextRoutingExtensions
         /// <returns>The application's <see cref="ILinkGenerator"/>.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <exception cref="InvalidOperationException">
-        /// Routing has not been registered on the application (call <c>AddRouting</c> on the web
-        /// application builder).
+        /// Routing has not been registered on the application (call
+        /// <c>builder.Services.AddRouting</c>).
         /// </exception>
         public ILinkGenerator GetLinkGenerator()
         {
@@ -154,7 +154,7 @@ public static class HttpContextRoutingExtensions
 
             IRouterFeature feature = context.Features.Get<IRouterFeature>()
                 ?? throw new InvalidOperationException(
-                    "Routing has not been registered. Call AddRouting() on the web application builder before generating links.");
+                    "Routing has not been registered. Call builder.Services.AddRouting() before generating links.");
 
             return feature.Router.LinkGenerator;
         }

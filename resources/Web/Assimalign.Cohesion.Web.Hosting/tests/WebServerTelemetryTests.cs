@@ -129,7 +129,7 @@ public class WebServerTelemetryTests
         using TelemetryRecorder recorder = new();
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting()
             .MapGroup("/telemetry")
             .Map(CohesionHttpMethod.Get, "orders/{id:int}", new RouterRouteHandler(async context =>
@@ -338,7 +338,7 @@ public class WebServerTelemetryTests
         double activeInPipeline = double.NaN;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting().Map(CohesionHttpMethod.Get, "/telemetry/metrics/{id}", new RouterRouteHandler(context =>
         {
             activeInPipeline = SumActiveRequests(recorder);

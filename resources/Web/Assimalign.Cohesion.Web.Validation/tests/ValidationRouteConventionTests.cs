@@ -43,7 +43,7 @@ public class ValidationRouteConventionTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseRouting();
 
         IRouterGroupBuilder group = factory.Application.MapGroup("api").DisableValidation();
@@ -69,7 +69,7 @@ public class ValidationRouteConventionTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         IRouterRouteBuilder route = factory.Application.MapPost("/chained", WriteNothingAsync);
 
         // Act

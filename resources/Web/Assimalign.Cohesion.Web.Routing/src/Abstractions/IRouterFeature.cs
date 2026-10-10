@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Http;
 /// built from it (used at request time to match).
 /// </summary>
 /// <remarks>
-/// One instance is registered per web application (via <c>AddRouting</c>) and installed on each
+/// One instance is registered per web application (via <c>builder.Services.AddRouting()</c>) and installed on each
 /// request's <see cref="IHttpContext.Features"/> collection. Because the builder lives on this
 /// per-application feature rather than on a shared static, two applications hosted in the same
 /// process keep fully isolated route tables.

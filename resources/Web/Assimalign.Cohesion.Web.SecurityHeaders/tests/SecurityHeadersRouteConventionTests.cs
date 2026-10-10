@@ -35,7 +35,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/embed", Ok()).WithSecurityHeaders(policy => policy.Framing = FramingPolicy.SameOrigin);
@@ -62,7 +62,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders(policy =>
         {
             policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.DefaultSrc(sources => sources.Self()));
@@ -89,7 +89,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange — the replacement starts from the safe defaults, not from the pipeline's opt-ins.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders(policy =>
         {
             policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.DefaultSrc(sources => sources.Self()));
@@ -117,7 +117,7 @@ public class SecurityHeadersRouteConventionTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         SecurityHeadersPolicy replacement = new() { ReferrerPolicy = ReferrerPolicy.NoReferrer };
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/api", Ok()).WithSecurityHeaders(replacement);
@@ -137,7 +137,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders(policy => policy.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameOrigin);
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/raw", new RouterRouteHandler(context =>
@@ -165,7 +165,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange — the group disables the headers; one route opts back in with an empty adjustment.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         IRouterGroupBuilder api = routes.MapGroup("/api").DisableSecurityHeaders();
@@ -190,7 +190,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         factory.Application.UseErrorHandling();
         IRouterBuilder routes = factory.Application.UseRouting();
@@ -214,7 +214,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange — routing publishes the DELETE route as the preflight's candidate; it never runs for it.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Delete, "/items", Ok()).DisableSecurityHeaders();
@@ -238,7 +238,7 @@ public class SecurityHeadersRouteConventionTests
         // Arrange — the head commits inside the handler, after UseRouting has published the endpoint.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory(streaming: true);
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/events", new RouterRouteHandler(context => StreamTextAsync(context, "data")))
@@ -267,7 +267,7 @@ public class SecurityHeadersRouteConventionTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         int runs = 0;
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/embed", Ok()).WithSecurityHeaders(policy =>
@@ -293,7 +293,7 @@ public class SecurityHeadersRouteConventionTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
         IRouterBuilder routes = factory.Application.UseRouting();
         IRouterRouteBuilder route = routes.Map(CohesionHttpMethod.Get, "/api", Ok());
 

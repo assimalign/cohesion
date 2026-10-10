@@ -103,7 +103,7 @@ public class AntiforgeryRouteConventionTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
+        factory.Builder.Services.AddRouting();
 
         InvalidOperationException? dispatchFailure = null;
         factory.Application.Use(async (context, next) =>
@@ -193,8 +193,8 @@ public class AntiforgeryRouteConventionTests
     private static WebApplicationTestFactory CreateFactory(bool useAntiforgery, out IRouterBuilder routes)
     {
         WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddAntiforgery();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddAntiforgery();
         routes = factory.Application.UseRouting();
 
         if (useAntiforgery)

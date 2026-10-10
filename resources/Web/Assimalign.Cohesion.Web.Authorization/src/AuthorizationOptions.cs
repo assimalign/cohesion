@@ -9,8 +9,7 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// <summary>
 /// Builder-time options for authorization: the default policy, the optional fallback policy, and the
 /// named policies endpoints reference. Configure them in the
-/// <see cref="AuthorizationWebApplicationExtensions.AddAuthorization(IWebApplicationBuilder, Action{AuthorizationOptions})"/>
-/// callback.
+/// <c>builder.Services.AddAuthorization(...)</c> callback.
 /// </summary>
 /// <remarks>
 /// <para>

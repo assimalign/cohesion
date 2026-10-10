@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing;
 
 using Shouldly;
 
@@ -100,6 +101,7 @@ public class WebApplicationFeatureRegistrationTests
         ((IWebApplicationBuilder)builder).AddFeature(raw);
         builder.Services.AddSingleton<IHttpFeature>(direct);
         builder.Services.AddSingleton<IHttpFeature>(_ => factory);
+        builder.Services.AddRouting();
 
         // Act
         await using WebApplication application = builder.Build();
@@ -110,6 +112,7 @@ public class WebApplicationFeatureRegistrationTests
         application.Context.Features.ShouldContain(raw);
         application.Context.Features.ShouldContain(direct);
         application.Context.Features.ShouldContain(factory);
+        application.Context.Features.ShouldContain(feature => feature is IRouterFeature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Feature registration: A disposable feature should fail the pipeline build and name the feature")]

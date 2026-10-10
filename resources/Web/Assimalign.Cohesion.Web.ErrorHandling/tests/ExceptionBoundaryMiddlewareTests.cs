@@ -23,10 +23,9 @@ public class ExceptionBoundaryMiddlewareTests
 {
     private static IErrorHandlingFeature Hook(Action<ErrorHandlingBuilder>? configure = null)
     {
-        TestWebApplicationBuilder builder = new();
-        ErrorHandlingBuilder composition = builder.AddErrorHandling();
+        ErrorHandlingBuilder composition = new();
         configure?.Invoke(composition);
-        return builder.Features.OfType<IErrorHandlingFeature>().Single();
+        return composition.Build();
     }
 
     private static async Task<TestHttpContext> RunAsync(

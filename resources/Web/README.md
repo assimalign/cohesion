@@ -42,11 +42,8 @@ Why the rule exists:
   listed in
   [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props))
   delivers the family to applications, so an app using `Sdk.Web` sees every Web assembly without
-  any project wiring, and builder verbs ship with their feature
-  (`AddAuthentication` in Web.Authentication, `AddCookie` in Web.Authentication.Cookie,
-  `AddJwtBearer` in Web.Authentication.Bearer, `AddRouting`/`UseRouting` in Web.Routing, …) and
-  compose against the root project's `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder`
-  seams. Each reference `Web.Hosting` takes ships its closure in every framework that carries
+  any project wiring, and builder verbs ship with their feature (see *Feature registration*
+  below). Each reference `Web.Hosting` takes ships its closure in every framework that carries
   `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks. It takes two (owner
   decision 33, #1379): `Web.Routing`, for the pipeline terminal and the endpoint's route template
   its telemetry reports, and `Web.Server`, for the per-exchange features the server installs.
@@ -77,15 +74,66 @@ packaging shells rather than libraries: the Runtime producer references the whol
 `Web.Hosting` included, so the guard skips both by exact identity (`COHRES003` still applies), and
 `sdk-smoke.yml` packs them.
 
+## Feature registration
+
+Owner decisions 34 and 35 (2026-10-09, #1380) set how a feature reaches an application:
+
+- **Registration verbs are component integrations on `builder.Services`.** Each feature package
+  declares `[assembly: ComponentIntegration(...)]` targeting
+  `Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder.AddSingleton` with
+  `Contract = typeof(IHttpFeature)`, and the generator projects the verb into the application, so
+  neither the package nor `Web.Hosting` takes a reference for it. `Sdk.Web` applications get the
+  generator from the App framework; in-repo projects add
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />`.
+- **Pipeline verbs stay `extension(...)` members** of the feature package: `Use<Feature>` on
+  `IWebApplicationPipelineBuilder`, `Map*` on the pipeline and router surfaces.
+- **Every `IHttpFeature` registration is a singleton.** `Web.Hosting` rejects a scoped or transient
+  one, and one registered under a narrower contract, at `Build`, and a disposable feature at the
+  pipeline build; each error names the registration.
+- **`IWebApplicationBuilder.AddFeature` stays the raw path**, for features no package ships a verb
+  for.
+
+| Package | Verb | Shape |
+| --- | --- | --- |
+| `Web.Routing` | `AddRouting()` | static factory (`RoutingComponents`) |
+| `Web.Authentication` | `AddAuthentication(auth => auth.AddCookie().AddJwtBearer(...))` | builder template (`AuthenticationBuilder`) |
+| `Web.Authorization` | `AddAuthorization(options => ...)` | static factory (`AuthorizationComponents`) |
+| `Web.Antiforgery` | `AddAntiforgery(...)`, `AddAntiforgery(dataProtectionProvider, ...)` | static factory (`AntiforgeryComponents`) |
+| `Web.ErrorHandling` | `AddErrorHandling(errors => errors.OnError(...))` | builder template (`ErrorHandlingBuilder`) |
+| `Web.Serialization` | `AddContentSerialization(serialization => ...)`, `AddJsonSerialization(resolver, ...)` | builder template (`ContentSerializationBuilder`); static factory (`SerializationComponents`) |
+| `Web.Validation` | `AddValidation(validation => ...)` | static factory (`ValidationComponents`) |
+| `Web.OpenApi` | `AddOpenApi(options => ...)` | static factory (`OpenApiComponents`) |
+
+A verb whose callback configures a builder other packages graft onto is a builder template; a verb
+called bare, with an optional options callback, or with a value argument is a static factory, so
+callers keep `builder.Services.AddRouting()`. The rule set is `.claude/rules/web-area.md`, "Builder
+verbs ship with their feature".
+
+```csharp
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Services
+    .AddRouting()
+    .AddJsonSerialization(AppJsonContext.Default)
+    .AddAuthentication(auth => auth.AddCookie())
+    .AddAuthorization();
+
+await using WebApplication app = builder.Build();
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+await app.RunAsync();
+```
+
 ## Adding a new Web feature library
 
 A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is not done until all of these are updated
 (the working checklist also lives in `.claude/rules/web-area.md`):
 
-1. **csproj** — references per the dependency rule; builder verbs (`Add<Feature>`/`Use<Feature>`)
-   ship in the package itself, composing against the root `IWebApplicationBuilder` /
-   `IWebApplicationPipelineBuilder` seams with dependency-free registration (typed features and
-   values — no DI, no configuration binding).
+1. **csproj** — references per the dependency rule; builder verbs ship in the package itself:
+   a `builder.Services.Add<Feature>` registration verb as a component integration (see *Feature
+   registration*, plus a call in `build/IntegrationCheck` and a path in `analyzers.yml`), and
+   `Use<Feature>` pipeline verbs on `IWebApplicationPipelineBuilder`. Registration stays
+   dependency-free (typed features and values — no DI reference, no configuration binding).
 2. **Framework membership** — a `CohesionFrameworkAssembly` line in
    [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props),
    plus any new outside-area transitive dependencies App does not carry. Validate by packing
@@ -138,7 +186,7 @@ flowchart LR
 | `Assimalign.Cohesion.Web.OpenApi` | OpenAPI 3.0/3.1/3.2 documents from endpoint metadata, never runtime reflection (#152): the Web adapter for `OpenApi.Integration`'s `IOpenApiEndpointSource` over the route table (parameters and responses from the source-generated endpoint descriptions, schemas from the application's source-generated System.Text.Json contracts via `JsonSchemaExporter`, tags/summaries/exclusion from the Web.Api description verbs, security requirements from each endpoint's effective authorization policy, fallback and named policies included); `AddOpenApi` + `MapOpenApi` serve the document as JSON or YAML, built once and revalidated by ETag. **NuGet-only**: not an `App.Web` member, so applications that do not document their API carry none of the OpenApi family |
 | `Assimalign.Cohesion.Web.Validation` | Request validation over `ObjectValidation` (#1060): `AddValidation` registers a validator per model type (keyed by `typeof(T)`, no reflection) and a global switch; typed endpoints validate their bound body model before the handler runs (the generator emits the call only when the application references this package) and answer an invalid one with 400 problem+json and an `errors` map keyed by member path; `DisableValidation()`/`RequireValidation()` per endpoint or group; `context.ValidateAsync(value)` for hand-bound values. `Web.Api` takes no validation dependency |
 | `Assimalign.Cohesion.Web.ProblemDetails` | The RFC 9457 problem+json payload (model + AOT-safe writer + `WriteProblemDetailsAsync`) |
-| `Assimalign.Cohesion.Web.ErrorHandling` | The `OnError` fault seam (`AddErrorHandling().OnError(...)` handler chain + terminal problem+json default) and the pipeline exception boundary (`UseErrorHandling` catch → `IHttpExceptionFeature` → chain, no-clobber, developer-detail toggle) + status-code pages (`UseStatusCodePages` upgrades the bodyless 404) — faults only |
+| `Assimalign.Cohesion.Web.ErrorHandling` | The `OnError` fault seam (`builder.Services.AddErrorHandling(errors => errors.OnError(...))` handler chain + terminal problem+json default) and the pipeline exception boundary (`UseErrorHandling` catch → `IHttpExceptionFeature` → chain, no-clobber, developer-detail toggle) + status-code pages (`UseStatusCodePages` upgrades the bodyless 404) — faults only |
 | `Assimalign.Cohesion.Web.Query` | RFC 10008 QUERY server rules: request Content-Type validation / Accept-Query negotiation (400/415/406), method-preserving redirect helpers (307/308, 303), conditional QUERY (304/412) |
 | `Assimalign.Cohesion.Web.HostFiltering` | Allowed-hosts enforcement (`UseHostFiltering`, register at the front — after `UseForwardedHeaders` behind a proxy): 400s requests whose effective host (forwarded by a trusted proxy, else transport-resolved) misses the allowlist |
 | `Assimalign.Cohesion.Web.HttpsPolicy` | HTTPS policy: `UseHttpsRedirection` (307/308 an insecure request to the configured HTTPS port, path+query preserved) and `UseHsts` (RFC 6797 `Strict-Transport-Security` on secure responses only, loopback excluded by default). Security is the effective typed scheme — a trusted TLS-terminating proxy's forwarded scheme, else the transport-derived scheme (#763) — no scheme sniffing |
@@ -171,10 +219,12 @@ no `Assimalign.Cohesion.Hosting*` library. Background work uses the concrete
 (`libraries/DependencyInjection`, `libraries/Configuration`, `libraries/Logging`) are consumed
 by the hosting module and by the `Web.Testing` harness (which drives the runtime and starts the
 default server from its context) — never by feature libraries. Inside the hosting module the
-container is the only composition registry: the root `IWebApplicationBuilder` verbs a feature calls
-(`AddFeature`, `AddServer`) are explicit-interface shims over `Services.AddSingleton<IHttpFeature>`
-and `Services.AddSingleton<IWebApplicationServer>`, resolved once at pipeline build and host start
-(`resource-areas.md`, "Hosting composition — DI is the dependency control"). `Web.ApplicationModel` references
+container is the only composition registry: the feature packages' projected
+`builder.Services.Add<Feature>` verbs register `IHttpFeature` singletons on it directly, and the
+root `IWebApplicationBuilder` verbs (`AddFeature`, `AddServer`) are explicit-interface shims over
+`Services.AddSingleton<IHttpFeature>` and `Services.AddSingleton<IWebApplicationServer>`, resolved
+once at pipeline build and host start (`resource-areas.md`, "Hosting composition — DI is the
+dependency control"). `Web.ApplicationModel` references
 only the shared ApplicationModel and
 `Hosting.Resources` contracts; that resource-runtime package brings the plain Hosting lifecycle,
 the `Hosting.Health` contribution contracts, and the Windows-only ProtectedData BCL facade into
