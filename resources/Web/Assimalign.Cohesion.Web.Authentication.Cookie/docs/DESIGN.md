@@ -204,4 +204,5 @@ metadata resolution is an `is`-test scan.
 - **Key management.** The rotating key ring and its persistence live in
   `Security.DataProtection`, carried at builder time by
   `AuthenticationBuilder.DataProtectionProvider` (the default key ring, or
-  a provider the application passes to `AddAuthentication`).
+  a provider the application passes to `AuthenticationBuilder.UseDataProtection`
+  inside `builder.Services.AddAuthentication`).

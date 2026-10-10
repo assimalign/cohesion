@@ -9,8 +9,8 @@ protector signed with a per-process random key (issue #1057; D12 in
 `docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.2). This package is the Web-pipeline half. It owns three
 things and nothing else:
 
-- **Registration** — `AddAntiforgery` creates the application's antiforgery service once and chooses
-  the protector it seals tokens with.
+- **Registration** — `builder.Services.AddAntiforgery(...)` creates the application's antiforgery
+  service once and chooses the protector it seals tokens with.
 - **Enforcement** — `UseAntiforgery` validates protected endpoints between `UseRouting` and the
   endpoint.
 - **Declaration** — the sealed `AntiforgeryMetadata` carrier and the `RequireAntiforgery` /
@@ -187,17 +187,29 @@ its interceptor maps.
   `Map(method, ...)` call site has no static method to inspect, and a safe-method request passes the
   middleware anyway.
 
-Application impact: a `Sdk.Web` application with `[FromForm]` endpoints must register `AddAntiforgery`
+Application impact: a `Sdk.Web` application with `[FromForm]` endpoints must register
+`builder.Services.AddAntiforgery()`
 and `UseAntiforgery` (after `UseRouting`), or opt those endpoints out. Otherwise their requests fail at
 dispatch, by design.
 
 ## Registration and protector selection
 
-`AddAntiforgery` builds `HttpAntiforgeryOptions`, runs the caller's `configure`, selects the protector,
-creates the service with `HttpAntiforgery.Create(options)`, and registers it through
-`IWebApplicationBuilder.AddFeature` as an `IHttpAntiforgeryFeature`. The host seeds application features
-onto every exchange, so the render path mints with `context.RequireAntiforgery.GetAndStoreTokens(context)`
-on any route, protected or not, and with or without `UseAntiforgery`.
+`builder.Services.AddAntiforgery(...)` is a component integration (owner decision 34, #1380): the
+package declares `[assembly: ComponentIntegration]` over `AntiforgeryComponents.CreateFeature` in
+`src/Properties/ComponentIntegrations.cs`, and the generator projects both overloads onto
+`IServiceProviderBuilder` in the application's compilation, so the package takes no
+dependency-injection reference. `AntiforgeryComponents` is the static-factory shape because the verb is
+called bare or with an optional callback, and one overload takes the data-protection provider; it is
+`[EditorBrowsable(Never)]` and declares the package's root namespace, so the projected verb sits beside
+`UseAntiforgery`.
+
+The factory builds `HttpAntiforgeryOptions`, runs the caller's `configure`, selects the protector,
+creates the service with `HttpAntiforgery.Create(options)`, and the verb registers it as an
+`IHttpFeature` singleton (an `IHttpAntiforgeryFeature`), the only lifetime `Web.Hosting` accepts
+(decision 35). A composition surface without a container registers the factory's result through
+`IWebApplicationBuilder.AddFeature`. The host seeds application features onto every exchange, so the
+render path mints with `context.RequireAntiforgery.GetAndStoreTokens(context)` on any route, protected or
+not, and with or without `UseAntiforgery`.
 
 The protector is chosen in this order:
 
@@ -213,7 +225,8 @@ The protector is chosen in this order:
    segment.
 3. **Otherwise** the engine's HMAC-SHA256 protector over a per-process random key. This is for
    development only: a restart invalidates every token, and instances behind a load balancer reject each
-   other's tokens. It is documented that way on `AddAntiforgery()`, `HttpAntiforgeryOptions.Key`, and
+   other's tokens. It is documented that way on `AntiforgeryComponents.CreateFeature()` (the
+   `AddAntiforgery()` verb), `HttpAntiforgeryOptions.Key`, and
    `IHttpAntiforgeryProtector`.
 
 The adapter maps `DataProtectionException` — every verification and key-lifecycle failure — to
@@ -234,9 +247,10 @@ unknown-key throttle").
 The application "has a data-protection provider" when it hands one over. Web composition is
 dependency-free: there is no container to discover a provider in, and there is no application-level
 data-protection contract both `Web.Authentication` and this package could read without one of them, or
-the area root, owning a data-protection seam. `AddAuthentication(..., dataProtectionProvider)` set the
-precedent of an explicit parameter; sharing one key ring is passing the same provider to both
-registrations. A shared application-level provider feature is a recorded follow-up.
+the area root, owning a data-protection seam. Authentication's explicit provider set the precedent
+(today `AuthenticationBuilder.UseDataProtection` inside `builder.Services.AddAuthentication`); sharing
+one key ring is passing the same provider to both registrations. A shared application-level provider
+feature is a recorded follow-up.
 
 ### Why not default to a file-system key ring
 

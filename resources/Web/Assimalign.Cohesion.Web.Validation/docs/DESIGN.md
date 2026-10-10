@@ -57,11 +57,18 @@ thunk in the application calls both.
 
 ## Registration
 
-`AddValidation(Action<EndpointValidationOptions>)` builds the options, then freezes them into an
-application feature (`EndpointValidationFeature`, an `IHttpFeature` the host seeds onto every exchange):
-the default (`Enabled`, on unless set off) and a `FrozenDictionary<Type, IValidator>`. Registering again
-replaces the feature. No service container, configuration binding, middleware or request-time service
-location is involved, per the Web area's dependency-free composition rule.
+`builder.Services.AddValidation(Action<EndpointValidationOptions>)` builds the options, then freezes them
+into an application feature (`EndpointValidationFeature`, an `IHttpFeature` singleton the host seeds onto
+every exchange): the default (`Enabled`, on unless set off) and a `FrozenDictionary<Type, IValidator>`.
+Registering again replaces the feature. The verb is a component integration (owner decisions 34 and 35,
+2026-10-09, #1380): the package declares `[assembly: ComponentIntegration]` over
+`ValidationComponents.CreateFeature` (`src/Properties/ComponentIntegrations.cs`), and the generator
+projects `AddValidation` onto `IServiceProviderBuilder` in the application's compilation, so the package
+takes no dependency-injection reference. `ValidationComponents` is the static-factory shape,
+`[EditorBrowsable(Never)]` in the package's root namespace, so the verb keeps its
+`EndpointValidationOptions` callback; until #1380 it was an `extension(IWebApplicationBuilder)` member.
+No configuration binding, middleware or request-time service location is involved, per the Web area's
+dependency-free composition rule.
 
 | Verb | Keys the validator by | Notes |
 | --- | --- | --- |

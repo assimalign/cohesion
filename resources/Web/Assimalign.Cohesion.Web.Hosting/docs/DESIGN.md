@@ -22,9 +22,11 @@ under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicatio
 `IWebEndpointFeature.RouteTemplate` its telemetry reads, and `Web.Server` for the request id,
 response completion and drain features it installs on every exchange. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
-verbs ship with their features (`AddAuthentication` moved to
-`Web.Authentication`, `AddCookie`/`AddJwtBearer` to their handler packages) and
-compose against the root `IWebApplicationBuilder` seam. The one sanctioned
+verbs ship with their features: feature registration is a component integration each feature
+package declares and the application's compilation projects onto `builder.Services`
+(`builder.Services.AddAuthentication(auth => auth.AddCookie())`, owner decision 34), and pipeline
+verbs extend the root `IWebApplicationPipelineBuilder` seam, so this module needs no reference to a
+feature to host it. The one sanctioned
 exception is `Web.Testing`, the harness that drives this concrete runtime.
 
 This document focuses on the piece with the most load-bearing runtime behaviour:
@@ -82,7 +84,7 @@ dependency the host runs with is a registration in it, and the root
 | --- | --- |
 | `AddService(IHostService)` / `AddService(Func<WebApplicationContext, IHostService>)` | `IHostService` |
 | `IWebApplicationBuilder.AddServer(...)`, `Server.UseServer<TServer>(...)` | `IWebApplicationServer` |
-| `IWebApplicationBuilder.AddFeature(...)` | `IHttpFeature` |
+| `IWebApplicationBuilder.AddFeature(...)`, the feature packages' `builder.Services.Add<Feature>(...)` verbs | `IHttpFeature` (singleton only) |
 | `AddHealthCheck(name, check)` | `IHealthContributor` |
 
 A value becomes an instance registration, which stays owned by its caller; a
@@ -735,8 +737,9 @@ described in that library's DESIGN ("NativeAOT compatibility checks").
 
 ## Application feature seeding
 
-`IWebApplicationBuilder.AddFeature` registers `IHttpFeature` singletons (routing's
-per-application `IRouterFeature` is the canonical example), but a feature is only
+`IWebApplicationBuilder.AddFeature` and the feature packages' `builder.Services.Add<Feature>(...)`
+verbs register `IHttpFeature` singletons (routing's per-application `IRouterFeature`, from
+`builder.Services.AddRouting()`, is the canonical example), but a feature is only
 useful once it is present on each exchange's `IHttpContext.Features` collection.
 That bridging happens when the pipeline is built: `WebApplication`'s pipeline
 `Build()` resolves the registered features **once** and, when any exist, wraps the
@@ -754,6 +757,41 @@ Two deliberate properties:
 - **Application-registered features are per-application.** Each application seeds
   only its own DI-registered features, which is half of the process-wide isolation
   story (#789's per-application router state is the other half).
+
+### Feature registrations are singletons (owner decision 35, #1380)
+
+Seeding stamps one snapshot of the `IHttpFeature` aggregate onto every exchange, and composition-time
+readers (`UseRouting`, `UseAntiforgery`, the OpenAPI document) resolve the same aggregate from the root
+provider. A feature therefore has exactly one lawful shape, an `IHttpFeature` singleton, and the module
+enforces it where it can see each violation; every error names the registration:
+
+| Check | Where | Rejects | Why |
+| --- | --- | --- | --- |
+| Lifetime | `WebApplicationBuilder.Build`, before `MakeReadOnly` | an `IHttpFeature` registration that is scoped or transient | One scoped item makes the whole aggregate unresolvable from the root ("scoped from root" at host start); a transient one hands each reader its own instance, so routes mapped into one router are served by another |
+| Contract | `WebApplicationBuilder.Build`, before `MakeReadOnly` | a registration whose service type derives from `IHttpFeature` but is not `IHttpFeature` | It never joins the aggregate, so it is never stamped |
+| Disposal | the pipeline build, where the aggregate is resolved | a resolved feature that is `IDisposable` or `IAsyncDisposable` | The exchange disposes the disposable features it carries at teardown, so the shared instance would be disposed after its first request |
+
+The provider's own `ValidateOnBuild` sees none of these: this module registers factories and
+instances, whose implied lifetimes and products it does not inspect. The first two checks run
+before `Build` adds its own registrations, so a rejected build leaves the builder as its caller
+composed it. The disposal check needs the product, which a factory registration yields only when
+it is resolved. Request-scoped services for handlers are a separate, future decision: a lazily
+created scope owned by the server, for a separate service type, never a looser `IHttpFeature`
+lifetime. A measured analysis found no performance or functional gain in scoped or transient
+features (plan §7.4, decision 35).
+
+How a registration reaches an exchange, and where each check stops it:
+
+```mermaid
+flowchart TD
+    Verb["builder.Services.Add&lt;Feature&gt;(...)<br/>or IWebApplicationBuilder.AddFeature"] --> Descriptor["IHttpFeature descriptor<br/>in builder.Services"]
+    Descriptor --> Build{"WebApplicationBuilder.Build:<br/>singleton, typed IHttpFeature?"}
+    Build -->|no| BuildError["InvalidOperationException<br/>naming builder.Services[i]"]
+    Build -->|yes| Provider["MakeReadOnly, then the provider"]
+    Provider --> Snapshot{"Pipeline build:<br/>any feature disposable?"}
+    Snapshot -->|yes| StartError["InvalidOperationException<br/>naming the feature; start fails"]
+    Snapshot -->|no| Stamp["Stamped onto every exchange"]
+```
 
 **The pipeline is built before any service starts (#1051).** `WebApplication.OnStartingAsync`
 resolves the servers, and with them the pipeline and every middleware factory, so a composition

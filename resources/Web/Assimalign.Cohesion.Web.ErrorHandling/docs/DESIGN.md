@@ -8,7 +8,8 @@ pipeline: as exceptions. This package is the seam that turns them back into resp
 the application, not by whichever feature happened to throw.
 
 The package carries two layers. The **`OnError` hook** (#864) is the composition surface —
-`AddErrorHandling().OnError(...)` registers the handler chain and the terminal problem+json default.
+`builder.Services.AddErrorHandling(errors => errors.OnError(...))` registers the handler chain and the
+terminal problem+json default.
 The **pipeline exception boundary** (#881) is the consumer: `UseErrorHandling()` installs the
 middleware that catches faults escaping downstream, publishes them as an `IHttpExceptionFeature`,
 and dispatches through the hook; `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal
@@ -38,12 +39,24 @@ presentation out of feature libraries (no feature invents its own error payload)
   application into one mega-handler; event-style multicast has no answer to "who writes the
   response". Registration order = consultation order means *specific handlers register first* —
   the same mental model as exception `catch` clauses.
-- **`AddErrorHandling().OnError(...)`, not `builder.OnError(...)` directly.** A root-level
-  `OnError` verb would read as repeatable subscription (`+=`), but with name-keyed features each
-  root call would compose a fresh hook that silently replaces the previous one — dropping
-  earlier handlers with no diagnostic. Keeping `OnError` on the returned
-  `ErrorHandlingBuilder` (the `AddAuthentication` idiom) makes repetition safe where it is safe
-  and impossible where it is not.
+- **`AddErrorHandling(errors => errors.OnError(...))`, not `builder.OnError(...)` directly.** A
+  root-level `OnError` verb would read as repeatable subscription (`+=`), but with name-keyed
+  features each root call would compose a fresh hook that silently replaces the previous one —
+  dropping earlier handlers with no diagnostic. Keeping `OnError` on the `ErrorHandlingBuilder` the
+  callback receives (the `AddAuthentication` idiom) makes repetition safe where it is safe and
+  impossible where it is not.
+- **A component integration on `builder.Services` (owner decisions 34 and 35, 2026-10-09, #1380).**
+  The package declares `[assembly: ComponentIntegration]` over `ErrorHandlingBuilder.Build`
+  (`src/Properties/ComponentIntegrations.cs`); the generator projects the builder template onto
+  `IServiceProviderBuilder` in the application's compilation, so the package takes no
+  dependency-injection reference. The template constructs the builder (public, parameterless), runs
+  the callback, calls `Build()`, and registers the hook as an `IHttpFeature` singleton, the only
+  lifetime `Web.Hosting` accepts. `Build()` hands the feature a snapshot of the handlers, so the
+  chain is immutable and the request path takes no lock; until #1380 the verb was an
+  `extension(IWebApplicationBuilder)` member that returned the builder, and the feature read a
+  copy-on-write array the builder kept mutating. A composition surface without a container
+  registers `new ErrorHandlingBuilder().OnError(...).Build()` through
+  `IWebApplicationBuilder.AddFeature`.
 - **Global granularity, not per-feature.** One hook per application. Per-feature error hooks
   would re-scatter error presentation into the features — the exact thing the seam exists to
   centralize. A handler that wants feature-specific behavior branches on the exception type,

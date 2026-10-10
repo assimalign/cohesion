@@ -11,7 +11,8 @@ with a challenge or a forbid through `Web.Authentication`. It evaluates over the
   requirements a request must all satisfy (an authenticated user, roles, claims with allowed values,
   sync or async delegate assertions, or a custom `IAuthorizationRequirement`), plus the authentication
   schemes that establish the principal they evaluate.
-- **Options** (`AuthorizationOptions`, registered with `AddAuthorization`): the default policy
+- **Options** (`AuthorizationOptions`, registered with `builder.Services.AddAuthorization(...)`, a
+  component integration the application's compilation receives): the default policy
   (an authenticated user), an optional fallback policy for requests without authorization metadata,
   and named policies. They become read-only once registered.
 - **Endpoint metadata** (`AuthorizationMetadata`, attached with `RequireAuthorization(...)` and
@@ -50,12 +51,15 @@ using Assimalign.Cohesion.Web.Authentication.Cookie;
 using Assimalign.Cohesion.Web.Authorization;
 using Assimalign.Cohesion.Web.Routing;
 
-builder.AddRouting();
-builder.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie()
-    .AddJwtBearer(options => { /* signing keys, issuers, audiences */ });
+builder.Services.AddRouting();
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    auth.AddCookie()
+        .AddJwtBearer(options => { /* signing keys, issuers, audiences */ });
+});
 
-builder.AddAuthorization(options =>
+builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("admins", policy => policy.RequireRole("admin"));
     options.AddPolicy("sales", policy => policy.RequireClaim("department", "sales", "support"));

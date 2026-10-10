@@ -279,8 +279,15 @@ everything under it; a reusable endpoint library would push the OpenApi family o
 
 ## The document endpoint
 
-`AddOpenApi(options => ...)` captures the options as a typed application feature; they are read-only
-once the callback returns. `MapOpenApi(pattern = "/openapi/v1.json")` maps a `GET` route through
+`builder.Services.AddOpenApi(options => ...)` captures the options as a typed application feature, an
+`IHttpFeature` singleton; they are read-only once the callback returns. The verb is a component
+integration (owner decisions 34 and 35, 2026-10-09, #1380): the package declares
+`[assembly: ComponentIntegration]` over `OpenApiComponents.CreateFeature`
+(`src/Properties/ComponentIntegrations.cs`), and the generator projects `AddOpenApi` onto
+`IServiceProviderBuilder` in the application's compilation, so the package takes no dependency-injection
+reference; until #1380 it was an `extension(IWebApplicationBuilder)` member. `OpenApiComponents` is the
+static-factory shape, `[EditorBrowsable(Never)]` in the package's root namespace, because the callback is
+optional. `MapOpenApi(pattern = "/openapi/v1.json")` maps a `GET` route through
 Web.Api's raw `Map` and returns its `IRouterRouteBuilder`, so the document route can carry policies
 (`RequireAuthorization`, `RequireCors`). The route is itself marked `ExcludeFromDescription`.
 

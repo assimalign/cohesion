@@ -11,9 +11,10 @@ rather than from runtime reflection, so the same document is produced under Nati
   contracts, tags, summaries and exclusion from the Web.Api description verbs, and security requirements
   from each endpoint's effective Web.Authorization policy, the one `UseAuthorization` applies (the
   fallback policy and named policies included).
-- **`AddOpenApi(options => ...)`** registers the document: title, API version, description, the OpenAPI
-  line (3.1 by default; 3.0 and 3.2 as well), declared security schemes and tags, extra endpoint sources,
-  and document transformers.
+- **`builder.Services.AddOpenApi(options => ...)`** registers the document: title, API version,
+  description, the OpenAPI line (3.1 by default; 3.0 and 3.2 as well), declared security schemes and tags,
+  extra endpoint sources, and document transformers. The verb is a component integration the
+  application's compilation receives (#1380); this package takes no dependency-injection reference.
 - **`MapOpenApi(pattern)`** serves the document from a `GET` route as JSON, or YAML for a `.yaml`/`.yml`
   pattern. The document is built on the first request, cached, and revalidated with a strong `ETag`.
 - **`GetOpenApiDescriptionProvider()`** returns the same document as a model, for tools and tests.
@@ -45,9 +46,9 @@ using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Serialization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-builder.AddRouting();
-builder.AddJsonSerialization(AppJsonContext.Default);
-builder.AddOpenApi(options =>
+builder.Services.AddRouting();
+builder.Services.AddJsonSerialization(AppJsonContext.Default);
+builder.Services.AddOpenApi(options =>
 {
     options.Title = "Orders API";
     options.ApiVersion = "1.0.0";

@@ -176,7 +176,7 @@ latter. `MapWebSocket` (below) removes the difference.
 ## Mapping a socket endpoint
 
 `MapWebSocket(pattern, handler)` maps one route for both handshake methods, `GET` and `CONNECT`, on
-the application (through the router `AddRouting` registered) or on a route group, and returns the
+the application (through the router `builder.Services.AddRouting()` registered) or on a route group, and returns the
 route's builder. #1336 exists because the `MapGet` alternative fails only in production: a local
 test over `http://localhost` speaks HTTP/1.1 and passes, while every browser behind `UseHttps`
 negotiates HTTP/2 through ALPN, opens the socket with RFC 8441, and gets the router's `405`. ASP.NET

@@ -39,7 +39,7 @@ then emits neither framing field.
 
 ```csharp
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-builder.AddRouting();
+builder.Services.AddRouting();
 WebApplication app = builder.Build();
 
 // At the front of the pipeline (only UseHttpLogging goes ahead of it) and ahead of the exception

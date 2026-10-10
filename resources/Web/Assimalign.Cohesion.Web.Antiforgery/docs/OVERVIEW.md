@@ -8,9 +8,11 @@ reimplements token cryptography; it chooses the protector the engine seals token
 
 ## Scope
 
-- **`AddAntiforgery`** (builder time) creates the application's `IHttpAntiforgery` service and
-  registers it as an application feature, so every exchange carries it and a handler mints tokens with
-  `context.RequireAntiforgery.GetAndStoreTokens(context)`.
+- **`builder.Services.AddAntiforgery(...)`** (builder time) creates the application's `IHttpAntiforgery`
+  service and registers it as an application feature, an `IHttpFeature` singleton, so every exchange
+  carries it and a handler mints tokens with `context.RequireAntiforgery.GetAndStoreTokens(context)`.
+  The verb is a component integration the application's compilation receives (owner decision 34,
+  #1380); this package takes no dependency-injection reference.
 - **Protector selection.** `AddAntiforgery(dataProtectionProvider)` seals tokens with a protector the
   application's `Security.DataProtection` key ring derives for the antiforgery purpose, so tokens
   survive restarts and validate on every instance that shares the key repository. `AddAntiforgery()`
@@ -62,9 +64,9 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 IDataProtectionProvider dataProtection = DataProtectionProvider.Create(
     KeyRepository.CreateFileSystem("/var/lib/app/keys"));
 
-builder.AddRouting();
-builder.AddAntiforgery(dataProtection);  // the cookie token is Secure on every HTTPS request
-// builder.AddAntiforgery();             // development only: a per-process random key
+builder.Services.AddRouting();
+builder.Services.AddAntiforgery(dataProtection);  // the cookie token is Secure on every HTTPS request
+// builder.Services.AddAntiforgery();             // development only: a per-process random key
 
 WebApplication app = builder.Build();
 
@@ -89,9 +91,9 @@ account.Map(HttpMethod.Post, "webhook", ReceiveWebhookAsync).DisableAntiforgery(
 ```
 
 To share the key ring cookie authentication uses, pass the same provider to both
-(`builder.AddAuthentication(dataProtectionProvider: dataProtection)` and
-`builder.AddAntiforgery(dataProtection)`); each derives its own purpose, so neither accepts the other's
-payloads.
+(`builder.Services.AddAuthentication(auth => auth.UseDataProtection(dataProtection).AddCookie())` and
+`builder.Services.AddAntiforgery(dataProtection)`); each derives its own purpose, so neither accepts the
+other's payloads.
 
 Register `UseAntiforgery` after `UseRouting`, and after `UseRateLimiting` and `UseRequestTimeouts` when
 the application uses them, so floods are rejected before any body is read and a form read runs under the

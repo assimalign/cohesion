@@ -708,8 +708,17 @@ would reject exactly the group-plus-override shape the convention verbs make rou
 the immutable `IRouter` built from it once, at startup. The wiring guarantees a single builder per
 app:
 
-- `AddRouting()` (builder time) registers the per-application `RouterFeature` as an `IHttpFeature`.
-  Because it is one DI singleton per application, two applications get two distinct features.
+- `builder.Services.AddRouting()` (builder time) registers the per-application `RouterFeature` as an
+  `IHttpFeature`. Because it is one DI singleton per application, two applications get two distinct
+  features. The verb is a component integration (owner decisions 34 and 35, 2026-10-09, #1380): the
+  package declares `[assembly: ComponentIntegration]` over `RoutingComponents.CreateFeature`
+  (`src/Properties/ComponentIntegrations.cs`), and the generator projects `AddRouting` onto
+  `IServiceProviderBuilder` in the application's compilation, so the package takes no
+  dependency-injection reference. `RoutingComponents` is the static-factory shape,
+  `[EditorBrowsable(Never)]` in the package's root namespace, because the verb takes no configuration.
+  The singleton is load-bearing, and `Web.Hosting` enforces it at `Build`: a transient registration
+  would hand `UseRouting` and the exchange two different routers, so routes mapped into one would be
+  served by the other. Until #1380 the verb was an `extension(IWebApplicationBuilder)` member.
 - `UseRouting()` (pipeline time) resolves that **same** feature off the application context
   (`builder.Context.Features`) and returns its `Builder`. `MapGet`/`Map` (in `Web.Api`) resolve the
   same feature the same way. So `AddRouting`, `UseRouting`, and `MapGet` all map into and match

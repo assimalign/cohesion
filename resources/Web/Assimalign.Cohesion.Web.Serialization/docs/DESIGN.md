@@ -39,18 +39,28 @@ layer, composing over the same seam.
   RFC media range); the JSON pair claims `application/json` + `text/json`. Suffix awareness is the
   negotiation layer's call, via `HttpMediaType.Suffix` — delivered narrowly (see *Content
   negotiation* below).
-- **`AddJsonSerialization(resolver)` is the AOT registration story.** The built-in JSON pair
+- **`builder.Services.AddJsonSerialization(resolver)` is the AOT registration story.** The built-in JSON pair
   serializes exclusively through the `JsonTypeInfo`-based System.Text.Json entry points, with
   contracts supplied by the application's source-generated resolver (typically its
   `JsonSerializerContext`). There is no reflection fallback: options are frozen with
   `MakeReadOnly()` (the non-populating overload), and a type outside the resolver's contracts
   faults with `HttpContentSerializationException` instead of silently reflecting. Options
   default to `JsonSerializerDefaults.Web` (camelCase, case-insensitive reads).
-- **Builder-time feature, no DI** — the `AddAuthentication` idiom. The root verb creates the
-  registry and attaches it via `IWebApplicationBuilder.AddFeature`; the returned
-  `ContentSerializationBuilder` feeds the same instance, so chained format verbs (`AddJson`,
-  future grafts) take effect without re-registration. Repeating the *root* verb composes a
-  fresh registry that replaces the old one (features are name-keyed) — call it once.
+- **Builder-time feature, no DI reference** — the `AddAuthentication` idiom. Both registration
+  verbs are component integrations (owner decisions 34 and 35, 2026-10-09, #1380), declared in
+  `src/Properties/ComponentIntegrations.cs` and projected onto `IServiceProviderBuilder` in the
+  application's compilation, so the package never references the container.
+  `builder.Services.AddContentSerialization(serialization => serialization.AddJson(...))` is the
+  builder template over `ContentSerializationBuilder`: the generator constructs the builder (public,
+  parameterless), runs the callback, so format verbs (`AddJson`, future grafts) compose on it, calls
+  `Build()`, and registers the registry as an `IHttpFeature` singleton. `Build()` hands the registry
+  a snapshot of the readers and writers, so it is immutable and the request path takes no lock.
+  `builder.Services.AddJsonSerialization(resolver, configure)` is the static-factory shorthand
+  (`SerializationComponents`, `[EditorBrowsable(Never)]`), because the resolver is an argument the
+  template's single callback cannot carry. Until #1380 both were `extension(IWebApplicationBuilder)`
+  members that returned the builder, and the feature read copy-on-write arrays the builder kept
+  mutating. Repeating a verb composes a fresh registry that replaces the old one (features are
+  name-keyed) — call one, once.
 - **`ReadContentAsync`/`WriteContentAsync`, not `WriteAsync`.** The issue sketch says
   `response.WriteAsync(value)`; the shipped names add `Content` because a raw-text
   `WriteAsync(string)` response helper is a likely future addition, and an unconstrained

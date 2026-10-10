@@ -7,8 +7,8 @@ typed-delegate parameter binding.
 ## Typed Endpoints
 
 ```csharp
-app.AddRouting();          // builder time
-app.UseRouting();          // pipeline time
+builder.Services.AddRouting();   // builder time
+app.UseRouting();                // pipeline time
 
 // `id` is bound from the matched route value; the returned user is written as the response.
 app.MapGet("/users/{id}", (int id) => store.FindAsync(id));

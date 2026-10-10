@@ -27,12 +27,15 @@ login / logout / access-denied flow.
 Register it at the composition root, not here:
 
 ```csharp
-builder.AddAuthentication(o => o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme)
-       .AddCookie(o =>
-       {
-           o.LoginPath = "/account/login";
-           o.Cookie.Secure = true;
-       });
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    auth.AddCookie(o =>
+    {
+        o.LoginPath = "/account/login";
+        o.Cookie.Secure = true;
+    });
+});
 
 app.UseAuthentication();
 ```

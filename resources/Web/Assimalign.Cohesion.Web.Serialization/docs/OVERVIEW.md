@@ -10,9 +10,11 @@ ceremony — reflection-free under NativeAOT.
 - **The registry** — `IHttpContentSerializationFeature`, a typed feature on every exchange with
   distinct request-deserialization (`IHttpContentReader`) and response-serialization
   (`IHttpContentWriter`) halves, keyed by `HttpMediaType`.
-- **Builder-time registration** — `AddJsonSerialization(AppJsonContext.Default)` registers the
-  built-in JSON pair over a source-generated `IJsonTypeInfoResolver`;
-  `AddContentSerialization()` + `ContentSerializationBuilder` register custom formats.
+- **Builder-time registration** — `builder.Services.AddJsonSerialization(AppJsonContext.Default)`
+  registers the built-in JSON pair over a source-generated `IJsonTypeInfoResolver`;
+  `builder.Services.AddContentSerialization(serialization => ...)` and its `ContentSerializationBuilder`
+  register custom formats. Both verbs are component integrations the application's compilation
+  receives (#1380); this package takes no dependency-injection reference.
 - **Typed call sites** — `request.ReadContentAsync<T>()` and
   `response.WriteContentAsync(value)` extensions that dispatch through the registry.
 - **Content negotiation** — `context.WriteNegotiatedContentAsync(value)` selects the response
@@ -27,7 +29,7 @@ ceremony — reflection-free under NativeAOT.
 
 ```csharp
 // Composition (builder time) — the resolver is the application's source-generated context.
-builder.AddJsonSerialization(AppJsonContext.Default);
+builder.Services.AddJsonSerialization(AppJsonContext.Default);
 
 // A handler (request time) — no JsonTypeInfo ceremony at the call site.
 application.Use(async (context, next) =>

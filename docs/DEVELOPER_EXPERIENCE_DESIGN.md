@@ -173,7 +173,7 @@ ISqlClient orders = SqlClient.Create(new SqlClientOptions
 });
 builder.Services.AddSingleton(orders);
 if (Resource.References.IdentityHub.Https.TryGetUrl(out Uri? authority))               // Optional external: absent when unresolved
-    builder.AddAuthentication().AddJwtBearer(o => o.Authority = authority);
+    builder.Services.AddAuthentication(auth => auth.AddJwtBearer(o => o.Authority = authority));
 builder.AddHealthCheck("orders", /* … */);                                              // aggregated by the Web default control plane the opt-in registered
 int pageSize = Resource.Settings.OrdersPageSize.Get<int>();                             // COHESION_CONFIG__Orders__PageSize; default 50 from the manifest
 WebApplication app = builder.Build();                                                   // concrete builder → concrete host (IHost); the control-plane routes are mapped first

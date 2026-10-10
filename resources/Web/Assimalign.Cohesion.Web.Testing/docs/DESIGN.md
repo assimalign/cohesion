@@ -133,7 +133,7 @@ first.
 ## Parallel test isolation
 
 Each factory owns a private listener, dial factory, and application. Because the router
-builder is per-application state (#789 — `AddRouting` registers a per-application
+builder is per-application state (#789 — `builder.Services.AddRouting()` registers a per-application
 `IRouterFeature`, and `UseRouting` resolves that same feature), two factories in one process
 share no route tables, middleware, or connections. The test suite guards this end to end:
 two live factories with disjoint route maps serve their own routes and 404 each other's,

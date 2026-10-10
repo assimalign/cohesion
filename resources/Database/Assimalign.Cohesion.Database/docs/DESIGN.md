@@ -201,7 +201,9 @@ classDiagram
   exposes no service-registration verb (O34). Multiple `AddServer` registrations are
   allowed — servers are per-model. This mirrors the Web area exactly
   (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
-  in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
+  in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`, since #1380 a
+  component integration on `builder.Services` rather than a root-builder
+  extension) — and the
   pattern is the **cross-area expectation**: every area root provides
   `I<Area>ApplicationBuilder`, and feature/model registration verbs ship with
   their feature package (see `.claude/rules/resource-areas.md`). The rejected

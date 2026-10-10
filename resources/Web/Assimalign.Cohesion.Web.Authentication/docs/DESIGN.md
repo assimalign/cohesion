@@ -196,22 +196,51 @@ needs no check.
 **Builder-time registration lives with the model, not in `*.Hosting`.**
 (Revised 2026-07-10 with the Web-area dependency rule — the original #790
 design placed the verbs in `Web.Hosting`.) The hosting/runtime module
-neither references nor is referenced by the feature libraries, so
-`AddAuthentication` (on the root `IWebApplicationBuilder`), the
-`AuthenticationBuilder` scheme surface, and `UseAuthentication` live in
-*this* package, and each handler package grafts its own scheme verb onto
-`AuthenticationBuilder` via `extension(...)` (`AddCookie` in the Cookie
-package, `AddJwtBearer` in the Bearer package). Composition stays
-dependency-free — the service is attached as a typed feature
-(`builder.AddFeature`), schemes are registered as values, and no service
-container or configuration binding is involved, so moving the verbs out
-of Hosting does not violate the "DI/config composition only in
-`*.Hosting`" philosophy. The ticket-crypto seam travels with the builder:
-`AuthenticationBuilder.DataProtectionProvider` defaults to a
+neither references nor is referenced by the feature libraries, so the
+registration verb, the `AuthenticationBuilder` scheme surface, and
+`UseAuthentication` live in *this* package, and each handler package
+grafts its own scheme verb onto `AuthenticationBuilder` via
+`extension(...)` (`AddCookie` in the Cookie package, `AddJwtBearer` in
+the Bearer package).
+
+**Registration is `builder.Services.AddAuthentication(auth => ...)`**
+(owner decisions 34 and 35, 2026-10-09, #1380). The package declares a
+component integration over `AuthenticationBuilder.Build`
+(`src/Properties/ComponentIntegrations.cs`); the generator projects the
+builder template onto `IServiceProviderBuilder` in the application's
+compilation, so the package takes no dependency-injection reference. The
+template constructs an `AuthenticationBuilder` (public, parameterless),
+runs the callback, calls `Build()` and registers the resulting
+`IAuthenticationService` as an `IHttpFeature` singleton, the only
+lifetime `Web.Hosting` accepts:
+
+```csharp
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    auth.UseDataProtection(dataProtection)
+        .AddCookie()
+        .AddJwtBearer(options => { /* keys, issuers, audiences */ });
+});
+```
+
+Until #1380 the verb was an `extension(IWebApplicationBuilder)` member that
+returned the `AuthenticationBuilder` for chaining, with overloads taking a
+default scheme and a data-protection provider. Both now live on the builder
+the callback receives (`Options.DefaultScheme`, `UseDataProtection`), and
+the scheme graft is unchanged. Composition stays dependency-free —
+schemes are registered as values and no service container or
+configuration binding is involved; a composition surface without a
+container registers `new AuthenticationBuilder()...Build()` through
+`IWebApplicationBuilder.AddFeature`. The ticket-crypto seam travels with
+the builder: `AuthenticationBuilder.DataProtectionProvider` defaults to a
 file-system-backed rotating key ring under `AppContext.BaseDirectory`
-when no provider is supplied to `AddAuthentication` (the host-content-root
-default that Hosting used to supply is gone — pass a provider explicitly
-to control key placement). `AuthenticationService.Create` and the public
+unless `UseDataProtection` supplied one (the host-content-root default
+that Hosting used to supply is gone — pass a provider explicitly to
+control key placement). Reading the provider fixes it: a scheme verb
+derives its protector at registration, so `UseDataProtection` after a
+scheme has read the provider throws instead of leaving that scheme on
+the earlier key ring. `AuthenticationService.Create` and the public
 handler factories (`CookieAuthentication.CreateHandler`,
 `JwtBearerAuthentication.CreateHandler`) remain the seams the verbs use
 while the concrete handler and service implementations stay `internal`.
@@ -220,7 +249,7 @@ while the concrete handler and service implementations stay `internal`.
 
 | Package | Role | Dependencies |
 |---------|------|---------------|
-| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (`AddAuthentication`, `AuthenticationBuilder`, `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
+| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (the `builder.Services.AddAuthentication` component integration over `AuthenticationBuilder`, and `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
 | `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
 | `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) + the grafted `AddJwtBearer` verb | This package, `IdentityModel.Token.JsonWebToken` |
 
@@ -252,7 +281,7 @@ serialization or runtime-policy surface is consumed by this package.
 - **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer` ship with their
   handler packages as `extension(AuthenticationBuilder)` members; this
   package exposes only the scheme-agnostic surface (`AddAuthentication`,
-  `AddScheme`, `UseAuthentication`).
+  `AddScheme`, `UseDataProtection`, `UseAuthentication`).
 - **OAuth2 / OIDC interactive login.** Authorization-code and other
   redirect-based sign-in flows are follow-ups behind the IdentityModel
   and IdentityHub epics, not part of this scheme model.

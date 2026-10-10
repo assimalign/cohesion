@@ -7,7 +7,8 @@ binding failures already use.
 
 ## Scope
 
-- **`AddValidation`** (builder time) registers a validator per model type and the application's default.
+- **`builder.Services.AddValidation(...)`** (builder time), a component integration the application's
+  compilation receives (#1380), registers a validator per model type and the application's default.
   Validators are keyed by `typeof(T)`: `AddProfile(new CustomerProfile())` builds a validator over one
   profile, `AddValidator(validator)` registers a configured `IValidator` for every type it has a profile
   for, and `AddValidator<T>(validator)` names the type. No reflection is involved.
@@ -48,9 +49,9 @@ using Assimalign.Cohesion.Web.Serialization;
 using Assimalign.Cohesion.Web.Validation;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-builder.AddRouting();
-builder.AddJsonSerialization(AppJsonContext.Default);
-builder.AddValidation(validation =>
+builder.Services.AddRouting();
+builder.Services.AddJsonSerialization(AppJsonContext.Default);
+builder.Services.AddValidation(validation =>
 {
     validation.AddProfile(new CustomerProfile());
 });

@@ -8,7 +8,7 @@ contracts, security requirements from each endpoint's effective authorization po
 document with `MapOpenApi` as JSON or YAML, for OpenAPI 3.0, 3.1 or 3.2.
 
 ```csharp
-builder.AddOpenApi(options => options.Title = "Orders API");
+builder.Services.AddOpenApi(options => options.Title = "Orders API");
 // ...
 app.MapOpenApi();   // GET /openapi/v1.json
 ```

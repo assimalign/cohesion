@@ -32,13 +32,16 @@ re-validates the caller-supplied token on every request.
 Register it at the composition root, not here:
 
 ```csharp
-builder.AddAuthentication(o => o.DefaultScheme = JwtBearerDefaults.AuthenticationScheme)
-       .AddJwtBearer(o =>
-       {
-           o.ValidIssuers.Add("https://issuer.example");
-           o.ValidAudiences.Add("api://default");
-           o.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(publicKey));
-       });
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    auth.AddJwtBearer(o =>
+    {
+        o.ValidIssuers.Add("https://issuer.example");
+        o.ValidAudiences.Add("api://default");
+        o.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(publicKey));
+    });
+});
 
 app.UseAuthentication();
 ```

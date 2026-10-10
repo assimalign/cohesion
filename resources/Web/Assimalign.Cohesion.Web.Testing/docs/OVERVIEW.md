@@ -27,7 +27,7 @@ caller's business.
 await using WebApplicationTestFactory factory = new();
 
 // 1. Builder-time configuration (services, features, extra listener options).
-factory.Builder.AddRouting();
+factory.Builder.Services.AddRouting();
 
 // 2. Pipeline configuration on the built application.
 factory.Application.Use(async (context, next) =>

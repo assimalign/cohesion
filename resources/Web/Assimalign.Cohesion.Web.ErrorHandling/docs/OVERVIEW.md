@@ -9,8 +9,9 @@ decides what the client sees, with an overridable default that renders the RFC 9
 
 - **The hook contract** — `IErrorHandler` / the `HttpErrorHandler` delegate: inspect a fault, own
   the response for it (return `true`) or pass (`false`).
-- **Builder-time registration** — `builder.AddErrorHandling().OnError(...)`; handlers are
-  consulted in registration order.
+- **Builder-time registration** — `builder.Services.AddErrorHandling(errors => errors.OnError(...))`,
+  a component integration the application's compilation receives; handlers are consulted in
+  registration order.
 - **The exchange feature** — `IErrorHandlingFeature`, seeded onto every exchange; a pipeline
   exception boundary invokes `HandleAsync(context, exception)` to turn a caught fault into the
   application's response.
@@ -29,7 +30,7 @@ decides what the client sees, with an overridable default that renders the RFC 9
 ```csharp
 // Composition (builder time). With no OnError registrations, every fault renders as
 // problem+json 500 — the hook is useful with zero configuration.
-builder.AddErrorHandling().OnError(async (context, exception, cancellationToken) =>
+builder.Services.AddErrorHandling(errors => errors.OnError(async (context, exception, cancellationToken) =>
 {
     if (exception is not StorageUnavailableException)
     {
@@ -41,7 +42,7 @@ builder.AddErrorHandling().OnError(async (context, exception, cancellationToken)
         ProblemDetails.FromStatus(503, detail: "Storage is briefly unavailable; retry."),
         cancellationToken);
     return true;
-});
+}));
 ```
 
 Install the boundary (and, optionally, status-code pages) on the pipeline. Register

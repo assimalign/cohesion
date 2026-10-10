@@ -33,7 +33,7 @@ for it (#1059, see "Return Values").
   `RouterGroupBuilderEndpointExtensions.MapGet(group, ...)`).
 
 All `Map*` overloads compose on the router: they resolve the `IRouterFeature` and register a `Route`,
-so an application still calls `AddRouting()` (builder) and `UseRouting()` (pipeline) exactly as it
+so an application still calls `builder.Services.AddRouting()` (builder) and `UseRouting()` (pipeline) exactly as it
 does for the raw router surface.
 
 **Every `Map*` returns the mapped route's `IRouterRouteBuilder` (#1055).** Per-endpoint policies
