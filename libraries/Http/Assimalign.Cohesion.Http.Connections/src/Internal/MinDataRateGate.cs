@@ -85,11 +85,27 @@ internal sealed class MinDataRateGate
             return false;
         }
 
-        double seconds = remainingTicks / (double)_frequency;
-        timeout = seconds >= _maxOperationTimeout.TotalSeconds
+        timeout = ToOperationTimeout(remainingTicks);
+        return true;
+    }
+
+    /// <summary>
+    /// Converts a wait, in <see cref="TimeProvider"/> ticks, to the timeout a blocking transport operation
+    /// is bounded by, clamped to the same sane upper bound as <see cref="TryGetOperationTimeout"/>.
+    /// </summary>
+    /// <param name="ticks">The wait, in clock ticks; a non-positive value yields <see cref="TimeSpan.Zero"/>.</param>
+    /// <returns>The operation timeout.</returns>
+    public TimeSpan ToOperationTimeout(long ticks)
+    {
+        if (ticks <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        double seconds = ticks / (double)_frequency;
+        return seconds >= _maxOperationTimeout.TotalSeconds
             ? _maxOperationTimeout
             : TimeSpan.FromSeconds(seconds);
-        return true;
     }
 
     /// <summary>

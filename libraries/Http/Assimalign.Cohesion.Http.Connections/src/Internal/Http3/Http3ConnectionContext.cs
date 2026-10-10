@@ -103,8 +103,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     // #1085 — the keep-alive deadline. The connection is idle while no request stream is in flight: none
     // is having its head read, and no exchange built from one is still running. _activeRequestStreams
     // counts them (a stream from acceptance until its head yields no exchange, or until its exchange
-    // ends); _idleSince is when it last reached zero. The timer, armed at zero and re-checked when it
-    // fires, closes the connection gracefully once it has been idle for KeepAliveTimeout. Guarded by
+    // ends); _idleSince is when the receive loop started or the last exchange ended, whichever is later,
+    // so a stream that never became an exchange does not move it. The timer, armed at zero for what is
+    // left and re-checked when it fires, closes the connection gracefully once it has been idle for
+    // KeepAliveTimeout. Guarded by
     // _keepAliveLock; the timer is created when the receive loop starts and disposed when it ends.
     // TimeProvider.System in production, as on HTTP/1.1.
     private readonly TimeProvider _timeProvider = TimeProvider.System;
@@ -711,16 +713,26 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Ends a request stream's time in flight (#1085): its head yielded no exchange, or its exchange
-    /// ended. The last one to end starts the keep-alive deadline afresh.
+    /// ended. The keep-alive deadline runs from the later of the connection's start and the end of its
+    /// last exchange, so only an exchange's end moves it: a stream that never became one — reset for a
+    /// head that timed out or was malformed, answered <c>431</c>, or rejected by a request-parse
+    /// interceptor — cannot keep an idle connection open. The last stream to end arms the deadline for
+    /// what is left of it, at once when nothing is.
     /// </summary>
-    private void EndRequestStream()
+    /// <param name="exchangeEnded">Whether the stream's exchange ended, rather than its head yielding none.</param>
+    private void EndRequestStream(bool exchangeEnded)
     {
         lock (_keepAliveLock)
         {
-            if (--_activeRequestStreams == 0 && _keepAliveTimer is not null && !_keepAliveStopped)
+            if (exchangeEnded)
             {
                 _idleSince = _timeProvider.GetTimestamp();
-                _keepAliveTimer.Change(_keepAliveTimeout, Timeout.InfiniteTimeSpan);
+            }
+
+            if (--_activeRequestStreams == 0 && _keepAliveTimer is not null && !_keepAliveStopped)
+            {
+                TimeSpan remaining = _keepAliveTimeout - _timeProvider.GetElapsedTime(_idleSince);
+                _keepAliveTimer.Change(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, Timeout.InfiniteTimeSpan);
             }
         }
     }
@@ -734,7 +746,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         if (context.TryEndExchange())
         {
-            EndRequestStream();
+            EndRequestStream(exchangeEnded: true);
         }
     }
 
@@ -1507,10 +1519,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         finally
         {
             // #1085 — a stream whose head yielded no exchange is no longer in flight; one that yielded an
-            // exchange is, until the exchange ends (EndExchange).
+            // exchange is, until the exchange ends (EndExchange). Only the end of an exchange moves the
+            // keep-alive deadline.
             if (context is null)
             {
-                EndRequestStream();
+                EndRequestStream(exchangeEnded: false);
             }
 
             EndStreamWork();

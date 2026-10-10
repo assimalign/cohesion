@@ -81,13 +81,17 @@ public abstract class HttpConnectionListenerLimits
     /// <item><description><b>HTTP/1.1</b> — the connection loop waits for the first octet of each request,
     /// the first included, under this deadline, and closes a connection that sends none without a
     /// response.</description></item>
-    /// <item><description><b>HTTP/2</b> — the connection is idle while it carries no stream, from its
-    /// acceptance (the connection preface and the client's SETTINGS arrive under the deadline) and again
-    /// whenever its last stream ends. Frames such as PING do not move the deadline. An idle connection
-    /// is closed with <c>GOAWAY(NO_ERROR)</c> (RFC 9113 §9.1); one that never sent its preface is closed
-    /// without a frame.</description></item>
-    /// <item><description><b>HTTP/3</b> — the connection is idle while no request stream is in flight. An
-    /// idle connection is closed gracefully: <c>GOAWAY</c>, then the QUIC connection closes with
+    /// <item><description><b>HTTP/2</b> — the connection is idle while it carries no stream, and the
+    /// deadline runs from its acceptance (the connection preface and the client's SETTINGS arrive under
+    /// it) or from the end of its last exchange, whichever is later. Frames such as PING do not move the
+    /// deadline, and neither does a stream that never became an exchange (refused, reset as malformed,
+    /// or rejected by a request-parse interceptor). An idle connection is closed with
+    /// <c>GOAWAY(NO_ERROR)</c> (RFC 9113 §9.1); one that never sent its preface is closed without a
+    /// frame.</description></item>
+    /// <item><description><b>HTTP/3</b> — the connection is idle while no request stream is in flight, and
+    /// the deadline runs from the start of its receive loop or from the end of its last exchange,
+    /// whichever is later; a request stream whose head yields no exchange does not move it. An idle
+    /// connection is closed gracefully: <c>GOAWAY</c>, then the QUIC connection closes with
     /// <c>H3_NO_ERROR</c> (RFC 9114 §5.2). QUIC's own idle timeout, which any packet resets, still
     /// applies beneath it.</description></item>
     /// </list>
@@ -159,9 +163,11 @@ public abstract class HttpConnectionListenerLimits
     /// <list type="bullet">
     /// <item><description><b>HTTP/1.1</b> — the streaming request-body read; the connection closes after
     /// the exchange.</description></item>
-    /// <item><description><b>HTTP/2</b> — the stream's request-body read. A wait is not charged while the
-    /// connection-level receive window is low, since other streams may then be what holds the peer
-    /// back. Before the response starts the transport answers <c>408</c> and resets the stream with
+    /// <item><description><b>HTTP/2</b> — the stream's request-body read. The part of a wait during which
+    /// the connection-level receive window cannot carry a full frame is not charged, since other streams
+    /// may then be what holds the peer back, but each body is excused for at most the grace period in
+    /// total, so a peer cannot switch the rate off by pinning the window with one unread stream. Before
+    /// the response starts the transport answers <c>408</c> and resets the stream with
     /// <c>NO_ERROR</c> (RFC 9113 §8.1); after, it resets it with <c>CANCEL</c>. The connection keeps
     /// serving its other streams.</description></item>
     /// <item><description><b>HTTP/3</b> — the lazily read request body. The request stream is stopped
@@ -169,6 +175,16 @@ public abstract class HttpConnectionListenerLimits
     /// its response head is uncommitted, or the stream reset with <c>H3_REQUEST_CANCELLED</c> when a
     /// streamed response head is already on the wire.</description></item>
     /// </list>
+    /// <para>
+    /// The limit is listener-wide, with no per-request override. On HTTP/2 and HTTP/3 it applies from
+    /// this release on; earlier releases did not enforce it there. A request body that legitimately
+    /// idles — a client-streaming or duplex call, a long-lived upload that sends a message every few
+    /// seconds — fails once an idle gap outlasts what is left of its allowance, about the grace period
+    /// plus the octets received so far over the rate (5 seconds plus 1 second per 240 octets by
+    /// default). An endpoint that serves such bodies needs a longer grace period or a lower rate, or
+    /// <see langword="null"/>, each of which also weakens or removes the slow-body defence for every
+    /// other request on the endpoint.
+    /// </para>
     /// </remarks>
     public HttpMinDataRate? MinRequestBodyDataRate
     {
@@ -187,8 +203,17 @@ public abstract class HttpConnectionListenerLimits
     /// flow control paces, do not enforce it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// As with <see cref="MinRequestBodyDataRate"/>, the rate is an average measured only over time
     /// spent waiting on the peer to accept bytes; see <see cref="HttpMinDataRate"/>.
+    /// </para>
+    /// <para>
+    /// On HTTP/2 and HTTP/3 a peer that grants no flow-control credit (an HTTP/2
+    /// <c>SETTINGS_INITIAL_WINDOW_SIZE</c> of 0, or no QUIC stream credit) parks the response writer for
+    /// as long as it likes. The exchange never ends, so the connection stays busy: the
+    /// <see cref="KeepAliveTimeout"/> never arms, and one request to an endpoint with a non-empty
+    /// response holds the connection indefinitely.
+    /// </para>
     /// </remarks>
     public HttpMinDataRate? MinResponseDataRate
     {

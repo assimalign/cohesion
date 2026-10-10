@@ -149,8 +149,13 @@ The migration from the original in-core placement is complete; the pieces sit as
   the first middleware onward and only head hooks can adjust the cap; opening the same window
   there is later work. Minimum-data-rate limits (`MinRequestBodyDataRate` /
   `MinResponseDataRate`) also landed with #810, but as transport-owned limits
-  (`HttpConnectionListenerLimits`) enforced on HTTP/1.1 only, not features surfaced by this
-  package.
+  (`HttpConnectionListenerLimits`), not features surfaced by this package.
+  `MinRequestBodyDataRate` is enforced on HTTP/1.1, HTTP/2 and HTTP/3 (#1085 added the last two);
+  `MinResponseDataRate` on the HTTP/1.1 streaming response only. Neither can be changed for one
+  request: the transport seeds only `MaxRequestBodySize` into the parse context. A typed
+  per-request body-rate feature here, over a value the transport seeds and freezes at the first body
+  read as it does the cap, is the intended remedy for bodies that legitimately idle (the
+  transport's DESIGN, "HTTP/2 and HTTP/3 connection timeouts and data rates", under "Not covered").
 
 ## AOT posture
 

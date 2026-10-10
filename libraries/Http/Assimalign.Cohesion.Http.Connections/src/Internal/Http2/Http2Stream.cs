@@ -258,6 +258,14 @@ internal sealed class Http2Stream
     }
 
     /// <summary>
+    /// Gets a value indicating whether the pump handed this stream's exchange to the host
+    /// (<see cref="MarkExchangeCounted"/>). A stream refused, reset for a malformed head, or rejected by a
+    /// request-parse interceptor never was, and its end does not restart the connection's keep-alive
+    /// deadline (#1085).
+    /// </summary>
+    public bool WasDispatched => Volatile.Read(ref _exchangeAccounting) != 0;
+
+    /// <summary>
     /// Atomically claims the single "exchange complete" accounting slot for this
     /// stream. Returns <see langword="true"/> only for the first caller — and only
     /// when the stream was previously counted via <see cref="MarkExchangeCounted"/>

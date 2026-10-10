@@ -193,6 +193,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // #1085 — the minimum request-body data rate shared by the streams' body readers, or null when the
     // limit is disabled.
     private readonly Http2RequestBodyDataRate? _requestBodyDataRate;
+    // #1085 — the clock of the connection receive window's low periods, which excuse the body readers'
+    // waits: whether the window is now too low to carry a full frame, since when, and the ticks of the low
+    // periods already over. Guarded by _syncRoot, and updated wherever the window changes
+    // (TrackReceiveWindowLocked).
+    private bool _receiveWindowLow;
+    private long _receiveWindowLowSince;
+    private long _receiveWindowLowTicks;
 
     public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(connection, isSecure)
@@ -201,7 +208,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         _floodGuard = new Http2FloodGuard(limits);
         _altSvcHeaderValue = altSvcHeaderValue;
         _requestBodyDataRate = limits.MinRequestBodyDataRate is { } minRequestBodyDataRate
-            ? new Http2RequestBodyDataRate(minRequestBodyDataRate, _timeProvider, IsReceiveWindowLow, RejectSlowRequestBodyAsync)
+            ? new Http2RequestBodyDataRate(minRequestBodyDataRate, _timeProvider, IsReceiveWindowLow, GetReceiveWindowLowTicks, RejectSlowRequestBodyAsync)
             : null;
         // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
         // decoded field list; the stream's header-block accumulator enforces the raw-byte cap.
@@ -520,8 +527,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Ends a connection whose deadline elapsed while the pump waited for a frame (#1085). The read the
-    /// deadline cancelled may have consumed part of a frame, so the connection cannot read on.
+    /// Ends a connection whose deadline elapsed while the pump waited for a frame, or elapsed while it
+    /// processed one and still applied at the next read (#1085). The read the deadline cancelled may have
+    /// consumed part of a frame, so the connection cannot read on. Which deadline fired is the one the
+    /// deadline settled (<see cref="Http2ConnectionTimeout.RequestHeadersTimedOut"/>), not whether a field
+    /// block is open now.
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
@@ -538,7 +548,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// </remarks>
     private async Task CloseOnTimeoutAsync(Http2ConnectionTimeout timeout, CancellationToken cancellationToken)
     {
-        if (timeout.IsHeaderBlockOpen)
+        if (timeout.RequestHeadersTimedOut)
         {
             await TryEmitGoAwayAsync(Http2ErrorCode.EnhanceYourCalm, cancellationToken).ConfigureAwait(false);
             return;
@@ -907,6 +917,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
             stream.ReceiveWindow.TryReplenish(flowControlLength);
             _connectionReceiveWindow.TryReplenish(flowControlLength);
+            TrackReceiveWindowLocked();
         }
 
         // Connection-level credit first, then the stream-level credit.
@@ -1895,6 +1906,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     $"HTTP/2 DATA frame of {flowControlLength} octets exceeded the connection-level receive window.");
             }
 
+            TrackReceiveWindowLocked();
+
             if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out stream))
             {
                 // Disambiguate idle vs. recently-closed streams (RFC 9113 §5.1):
@@ -1933,6 +1946,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 lock (_syncRoot)
                 {
                     _connectionReceiveWindow.TryReplenish(flowControlLength);
+                    TrackReceiveWindowLocked();
                 }
 
                 await EmitWindowUpdateAsync(0, flowControlLength, cancellationToken).ConfigureAwait(false);
@@ -2294,6 +2308,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 {
                     reclaimed = (int)Math.Min(outstanding, int.MaxValue);
                     _connectionReceiveWindow.TryReplenish(reclaimed);
+                    TrackReceiveWindowLocked();
                 }
             }
 
@@ -2305,6 +2320,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             if (stream.TryRetireExchange())
             {
                 _retiredExchangeSlots++;
+            }
+            else if (stream.WasDispatched)
+            {
+                // #1085 — an exchange the host was handed leaves the count here, so the keep-alive
+                // deadline runs from now. A stream that never became one leaves it unchanged.
+                _timeout?.OnExchangeLeft();
             }
 
             UpdateIdleLocked();
@@ -2383,6 +2404,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             lock (_syncRoot)
             {
                 _retiredExchangeSlots--;
+                _timeout?.OnExchangeLeft();
                 UpdateIdleLocked();
             }
         }
@@ -2401,7 +2423,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Whether the connection-level receive window is below half its initial size (#1085), so a stream's
+    /// Whether the connection-level receive window is too low to carry a full frame (#1085), so a stream's
     /// peer may be held back by other streams' unconsumed DATA (RFC 9113 §6.9) and a body reader's wait
     /// says nothing about its own rate.
     /// </summary>
@@ -2409,8 +2431,53 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     {
         lock (_syncRoot)
         {
-            return _connectionReceiveWindow.Available < Http2ConnectionSettings.InitialInitialWindowSize / 2;
+            return _receiveWindowLow;
         }
+    }
+
+    /// <summary>
+    /// How long, in <see cref="_timeProvider"/> ticks, the connection-level receive window has been too
+    /// low to carry a full frame in total, the current low period included (#1085). A body reader reads it
+    /// at the start and end of a wait; the difference is the part of the wait the window excuses.
+    /// </summary>
+    private long GetReceiveWindowLowTicks()
+    {
+        lock (_syncRoot)
+        {
+            return _receiveWindowLow
+                ? _receiveWindowLowTicks + (_timeProvider.GetTimestamp() - _receiveWindowLowSince)
+                : _receiveWindowLowTicks;
+        }
+    }
+
+    /// <summary>
+    /// Records a change of the connection-level receive window on the clock of its low periods (#1085).
+    /// The window is low while it holds less than one frame of the size the server advertises
+    /// (<c>SETTINGS_MAX_FRAME_SIZE</c>, at most half the initial window): the peer cannot then send a full
+    /// frame on any stream. Must be called while holding <see cref="_syncRoot"/>, after every change.
+    /// </summary>
+    private void TrackReceiveWindowLocked()
+    {
+        long threshold = Math.Min(_localSettings.MaxFrameSize, Http2ConnectionSettings.InitialInitialWindowSize / 2);
+        bool low = _connectionReceiveWindow.Available < threshold;
+
+        if (low == _receiveWindowLow)
+        {
+            return;
+        }
+
+        long now = _timeProvider.GetTimestamp();
+
+        if (low)
+        {
+            _receiveWindowLowSince = now;
+        }
+        else
+        {
+            _receiveWindowLowTicks += now - _receiveWindowLowSince;
+        }
+
+        _receiveWindowLow = low;
     }
 
     /// <summary>
@@ -2955,10 +3022,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// (#1085); a HEADERS frame's header starts the request-headers deadline before its payload is read,
     /// so a field block trickled inside one frame is bounded too.
     /// </summary>
+    /// <remarks>
+    /// The payload read takes the deadline's token afresh. A keep-alive deadline that fired just as the
+    /// frame's header arrived no longer applies once the header has started a field block, so the frame
+    /// is read under the request-headers deadline instead of failing as a request-headers timeout.
+    /// </remarks>
     private static async Task<ReceivedFrame?> ReadFrameAsync(Stream stream, uint maxFrameSize, Http2ConnectionTimeout? timeout, CancellationToken cancellationToken)
     {
-        CancellationToken readToken = timeout?.Token ?? cancellationToken;
-        byte[]? header = await ReadExactOrNullAsync(stream, Http2FrameReader.HeaderLength, readToken).ConfigureAwait(false);
+        byte[]? header = await ReadExactOrNullAsync(stream, Http2FrameReader.HeaderLength, timeout?.Token ?? cancellationToken).ConfigureAwait(false);
 
         if (header is null)
         {
@@ -2987,7 +3058,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         if (payloadLength > 0)
         {
-            byte[] payload = await ReadExactOrThrowAsync(stream, payloadLength, readToken).ConfigureAwait(false);
+            byte[] payload = await ReadExactOrThrowAsync(stream, payloadLength, timeout?.Token ?? cancellationToken).ConfigureAwait(false);
             Buffer.BlockCopy(payload, 0, buffer, Http2FrameReader.HeaderLength, payload.Length);
         }
 

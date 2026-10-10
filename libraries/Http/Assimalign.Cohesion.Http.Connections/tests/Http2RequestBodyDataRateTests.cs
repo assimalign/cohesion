@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
@@ -90,12 +93,15 @@ public class Http2RequestBodyDataRateTests
         frames.ShouldNotContain(frame => frame.EndStream);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: A wait the connection's receive window causes should not be charged")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: A wait the connection's receive window causes should not be charged within the grace period")]
     public async Task ReadBody_OnConnectionWindowHeldByAnotherStream_ShouldNotChargeTheWait()
     {
         // Arrange — stream 1's unread body holds three quarters of the connection's 65,535-octet receive
-        // window, so stream 3's peer has almost no window left to send in (RFC 9113 §6.9).
-        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(configure: http2 => http2.Limits.MinRequestBodyDataRate = _rate);
+        // window, leaving less than one 16,384-octet frame, so stream 3's peer has almost no window left to
+        // send in (RFC 9113 §6.9). Unexcused, stream 3 would be answered after its 500 ms grace period;
+        // excused, its waits are charged only once the window has excused 500 ms of them.
+        HttpMinDataRate rate = new(bytesPerSecond: 100, gracePeriod: TimeSpan.FromMilliseconds(500));
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(configure: http2 => http2.Limits.MinRequestBodyDataRate = rate);
         await peer.SendHeadersAsync(1, endStream: false, Http2TestPeer.Request("POST", "/held"));
         IHttpContext held = await peer.ReceiveContextAsync();
         for (int frame = 0; frame < 3; frame++)
@@ -107,11 +113,11 @@ public class Http2RequestBodyDataRateTests
         IHttpContext waiting = await peer.ReceiveContextAsync();
         await peer.SyncAsync();
 
-        // Act — stream 3's reader waits for twice the grace period while the window is held.
+        // Act — stream 3's reader waits one and a half grace periods while the window is held.
         Task<int> read = waiting.Request.Body.ReadAsync(new byte[16]).AsTask();
-        await Task.Delay(_rate.GracePeriod * 2);
+        await Task.Delay(rate.GracePeriod * 1.5);
 
-        // Assert — the wait was not charged: stream 3 is neither answered nor reset.
+        // Assert — the wait was not charged in full: stream 3 is neither answered nor reset.
         await peer.SyncAsync();
         read.IsCompleted.ShouldBeFalse();
         peer.Output.ForStream(3).ShouldNotContain(frame => frame.IsHeaders || frame.IsRstStream);
@@ -130,6 +136,83 @@ public class Http2RequestBodyDataRateTests
 
         await peer.ConnectionContext.SendAsync(waiting).AsTask().WaitAsync(_timeout);
         await peer.ConnectionContext.SendAsync(held).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: A body trickled while an unread stream pins the receive window should be answered 408 once its exemption is spent")]
+    public async Task ReadBody_OnConnectionWindowPinnedByUnreadStream_ShouldRespond408OnceExemptionIsSpent()
+    {
+        // Arrange — stream 1's handler never reads its body, and the peer fills the connection's receive
+        // window with it, leaving less than one frame of window for as long as stream 1 lives (RFC 9113
+        // §6.9). Stream 3 then trickles its body at one octet every 100 ms, a tenth of the rate.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(configure: http2 => http2.Limits.MinRequestBodyDataRate = _rate);
+        await peer.SendHeadersAsync(1, endStream: false, Http2TestPeer.Request("POST", "/unread"));
+        IHttpContext unread = await peer.ReceiveContextAsync();
+        for (int frame = 0; frame < 3; frame++)
+        {
+            await peer.SendDataAsync(1, new byte[16 * 1024], endStream: false);
+        }
+
+        await peer.SendDataAsync(1, new byte[8 * 1024], endStream: false);
+        await peer.SendHeadersAsync(3, endStream: false, Http2TestPeer.Request("POST", "/trickled"));
+        IHttpContext trickled = await peer.ReceiveContextAsync();
+        Task<Exception> failure = ReadUntilFailureAsync(trickled.Request.Body);
+
+        // Act
+        Stopwatch elapsed = Stopwatch.StartNew();
+        while (!failure.IsCompleted && elapsed.Elapsed < _timeout)
+        {
+            await peer.SendDataAsync(3, [0x61], endStream: false);
+            await Task.WhenAny(failure, Task.Delay(100));
+        }
+
+        // Assert — the pinned window excuses stream 3's waits for its grace period at most, then every wait
+        // is charged: stream 3 is answered 408 while stream 1 still holds the window.
+        (await failure.WaitAsync(_timeout)).ShouldBeOfType<IOException>();
+        await peer.Output.ReadUntilAsync(frames => frames.Any(frame => frame.IsRstStream && frame.StreamId == 3), "the reset of stream 3");
+        HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(peer.Output.ForStream(3).Single(frame => frame.IsHeaders).Payload)[":status"].ShouldBe("408");
+        peer.Output.ForStream(1).ShouldNotContain(frame => frame.IsHeaders || frame.IsRstStream);
+
+        await peer.ConnectionContext.SendAsync(trickled).AsTask().WaitAsync(_timeout);
+        await peer.ConnectionContext.SendAsync(unread).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: A wait should be charged for the part of it the receive window was not low")]
+    public async Task ReadBody_OnReceiveWindowRecoveringMidWait_ShouldChargeTheRestOfTheWait()
+    {
+        // Arrange — the connection's receive window is low when the read begins and recovers 100 ms in. The
+        // reader's 300 ms allowance is then spent 400 ms in, so the wait it began must end in a 408 by 600 ms
+        // (its allowance plus the re-check-bounded exemption), not be excused whole because it began low.
+        ManualTimeProvider clock = new();
+        bool windowLow = true;
+        long lowTicks = 0;
+        long lowSince = clock.GetTimestamp();
+        TaskCompletionSource<long> rejected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Http2RequestBodyDataRate dataRate = new(
+            _rate,
+            clock,
+            () => windowLow,
+            () => windowLow ? lowTicks + (clock.GetTimestamp() - lowSince) : lowTicks,
+            _ =>
+            {
+                rejected.TrySetResult(clock.GetTimestamp());
+                return ValueTask.CompletedTask;
+            });
+        Channel<Http2DataChunk> pipe = Channel.CreateUnbounded<Http2DataChunk>();
+        using Http2RequestBodyStream body = new(pipe.Reader, (_, _, _) => ValueTask.CompletedTask, 1, CancellationToken.None, () => { }, dataRate);
+        long start = clock.GetTimestamp();
+
+        Task<int> read = body.ReadAsync(new byte[16]).AsTask();
+        await clock.WaitForTimersAsync(1).WaitAsync(_timeout);
+
+        // Act — the window recovers after 100 ms, and the clock runs on to 600 ms.
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+        lowTicks += clock.GetTimestamp() - lowSince;
+        windowLow = false;
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+
+        // Assert — only the 100 ms the window was low were excused: the body is rejected at 600 ms.
+        await Should.ThrowAsync<IOException>(() => read.WaitAsync(_timeout));
+        TimeSpan.FromTicks((await rejected.Task) - start).ShouldBe(TimeSpan.FromMilliseconds(600));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate: A body that keeps the rate should be read in full")]
@@ -193,5 +276,23 @@ public class Http2RequestBodyDataRateTests
         using MemoryStream received = new();
         await body.CopyToAsync(received);
         return received.ToArray();
+    }
+
+    private static async Task<Exception> ReadUntilFailureAsync(Stream body)
+    {
+        byte[] buffer = new byte[16];
+
+        try
+        {
+            while (await body.ReadAsync(buffer) > 0)
+            {
+            }
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+
+        throw new InvalidOperationException("The request body ended cleanly instead of failing.");
     }
 }

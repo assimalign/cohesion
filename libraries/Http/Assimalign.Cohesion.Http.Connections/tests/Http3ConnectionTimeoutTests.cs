@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -101,5 +102,35 @@ public class Http3ConnectionTimeoutTests
         await ready.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ready", "https", "a"));
         ready.Output.Complete();
         (await dispatch).Request.Path.Value.ShouldBe("/ready");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Timeouts: A malformed request stream on an idle connection should not restart the keep-alive deadline")]
+    public async Task ReceiveAsync_OnMalformedRequestStreamWhileIdle_ShouldKeepTheKeepAliveDeadline()
+    {
+        // Arrange — the connection is idle from the start of its receive loop under a one-second keep-alive.
+        TimeSpan keepAlive = TimeSpan.FromSeconds(1);
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 =>
+        {
+            http3.Limits.KeepAliveTimeout = keepAlive;
+            http3.Limits.RequestHeadersTimeout = _longTimeout;
+        });
+        Task<bool> next = peer.MoveNextAsync();
+
+        // Act — at 0.8 × the keep-alive, a request stream whose head lacks :method, which the server resets
+        // as malformed (RFC 9114 §4.1.2) without dispatching it.
+        await Task.Delay(keepAlive * 0.8);
+        Connection malformed = await peer.OpenRequestStreamAsync();
+        await malformed.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":scheme", "https"), (":path", "/malformed"), (":authority", "a")));
+        malformed.Output.Complete();
+        Stopwatch sinceMalformed = Stopwatch.StartNew();
+        await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(malformed));
+        bool dispatched = await next;
+        TimeSpan closedAfter = sinceMalformed.Elapsed;
+
+        // Assert — the connection closed gracefully at about 1 × the keep-alive from its start, not a whole
+        // keep-alive after the malformed stream.
+        dispatched.ShouldBeFalse();
+        closedAfter.ShouldBeLessThan(keepAlive * 0.6);
+        (await peer.ReadGoAwayAsync()).ShouldBe(4L);
     }
 }

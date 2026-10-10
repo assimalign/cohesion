@@ -1759,9 +1759,9 @@ its HTTP/2 and HTTP/3 endpoints, so configuration needs no change.
 
 | Limit | HTTP/2 | HTTP/3 |
 |---|---|---|
-| `KeepAliveTimeout` | Idle while the stream table is empty and no exchange keeps a retired slot: from acceptance (the preface and the client's SETTINGS arrive under it) and whenever the last stream ends. `GOAWAY(NO_ERROR)`, or no frame at all before the preface | Idle while no request stream is in flight. Graceful close: `GOAWAY`, the receive enumeration ends, and the host closes the QUIC connection with `H3_NO_ERROR` |
+| `KeepAliveTimeout` | Idle while the stream table is empty and no exchange keeps a retired slot, measured from acceptance (the preface and the client's SETTINGS arrive under it) or the end of the last exchange, whichever is later. A stream that never became an exchange does not restart it. `GOAWAY(NO_ERROR)`, or no frame at all before the preface | Idle while no request stream is in flight, measured from the start of the receive loop or the end of the last exchange, whichever is later. Graceful close: `GOAWAY`, the receive enumeration ends, and the host closes the QUIC connection with `H3_NO_ERROR` |
 | `RequestHeadersTimeout` | From a HEADERS frame's header to END_HEADERS: request heads, trailer sections, and blocks on refused or reset streams. `GOAWAY(ENHANCE_YOUR_CALM)` | From the request stream's acceptance until its field section has decoded. That stream alone is reset with `H3_REQUEST_REJECTED` |
-| `MinRequestBodyDataRate` | The stream's body reader, from its first read. `408` and `RST_STREAM(NO_ERROR)` before the response starts; `RST_STREAM(CANCEL)` after | The lazy body, from its first read. `STOP_SENDING(H3_NO_ERROR)` at the deadline, then `408` from the send path while the head is uncommitted |
+| `MinRequestBodyDataRate` | The stream's body reader, from its first read; a low connection receive window excuses at most the grace period of its waits. `408` and `RST_STREAM(NO_ERROR)` before the response starts; `RST_STREAM(CANCEL)` after | The lazy body, from its first read. `STOP_SENDING(H3_NO_ERROR)` at the deadline, then `408` from the send path while the head is uncommitted |
 | `MinResponseDataRate` | Not enforced; flow control paces the writer | Not enforced; QUIC flow control paces the writer |
 
 Whichever deadline fires, the connection's receive enumeration ends or the stream is answered,
@@ -1777,25 +1777,41 @@ connection's state, as `Http1ReadTimeout`'s moves through an HTTP/1.1 request:
   `SETTINGS_MAX_CONCURRENT_STREAMS`: the streams in the table plus the exchanges that kept a
   slot after their stream was reset (#1072). A stream the server resets therefore keeps the
   connection busy exactly as long as it keeps its slot. The count changes under the
-  connection's lock, wherever the table or a retired slot changes, and the deadline is set from
-  the moment the count reached zero. PING, SETTINGS and WINDOW_UPDATE frames do not move it, so
-  a chatty peer is reclaimed like a silent one.
+  connection's lock, wherever the table or a retired slot changes. When it reaches zero the
+  deadline is armed from the later of the connection's acceptance and the end of its last
+  exchange: the moment a stream the pump handed to the host left the count, as it left the
+  table or gave back its retired slot (`OnExchangeLeft`). A stream that never became an
+  exchange — refused, reset for a malformed head, or rejected by a request-parse interceptor —
+  keeps the connection busy while it lasts but does not move the deadline, so a peer that opens
+  one every so often cannot keep an idle connection open. PING, SETTINGS and WINDOW_UPDATE
+  frames do not move it either, so a chatty peer is reclaimed like a silent one.
 - **Request headers.** The header of a HEADERS frame starts the deadline before the frame's
   payload is read, so a field block trickled inside one frame is bounded as well as one whose
   CONTINUATION never comes. After each frame, the pump ends it unless a continuation is pending.
   A block that ends without opening a stream returns the connection to the keep-alive deadline
-  measured from when it became idle, so blocks on a refused or reset stream cannot keep an idle
-  connection open.
+  as it stood, so blocks on a refused or reset stream cannot keep an idle connection open.
 
-When a read is cancelled by the deadline rather than the pump's token, the connection always
-ends: the read may have consumed part of a frame. A field block left open means the
-request-headers deadline fired, and the connection ends with `GOAWAY(ENHANCE_YOUR_CALM)`. The
-block holds the whole connection, and RFC 9113 §10.5 lets an endpoint treat activity that ties
-up its resources as that connection error, the code every other HTTP/2 limit escalates to.
-Requests already received in full stay answerable, as after any connection error. Otherwise the
-keep-alive deadline fired, and the pump begins a graceful close, which writes `GOAWAY(NO_ERROR)`
-with the last accepted stream (RFC 9113 §6.8, §9.1), and stops. Before the preface has arrived
-nothing is written: the server's SETTINGS must be its first frame (RFC 9113 §3.4).
+A deadline can fire while the pump processes a frame rather than while it reads one. The
+HPACK decode, the request-parse interceptors (which run inline in the pump) and the `413` or
+`RST_STREAM` writes they cause all happen between reads, after a head that arrived in time. So
+which deadline fired is settled when the pump next takes the deadline's token, not from the
+connection's state when a read fails. If the deadline the connection now carries has elapsed,
+it is the one that fired, and the read fails with it. If it has not (the field block ended in
+time, or the connection is busy with the stream it opened), the cancelled source is replaced by
+a fresh one and the pump reads on: nothing was read under the old one. The payload of a frame
+takes the token afresh too, so a keep-alive deadline that fired just as a HEADERS frame's header
+arrived does not fail the block that header started as a request-headers timeout.
+
+When a read is cancelled by the deadline while it waits, the connection always ends: the read
+may have consumed part of a frame. While a read waits, only the pump could change which
+deadline is carried, so that deadline is the one that fired. The request-headers deadline ends
+the connection with `GOAWAY(ENHANCE_YOUR_CALM)`. The block holds the whole connection, and
+RFC 9113 §10.5 lets an endpoint treat activity that ties up its resources as that connection
+error, the code every other HTTP/2 limit escalates to. Requests already received in full stay
+answerable, as after any connection error. The keep-alive deadline begins a graceful close,
+which writes `GOAWAY(NO_ERROR)` with the last accepted stream (RFC 9113 §6.8, §9.1), and stops.
+Before the preface has arrived nothing is written: the server's SETTINGS must be its first frame
+(RFC 9113 §3.4).
 
 ### HTTP/2: the request-body rate
 
@@ -1804,12 +1820,28 @@ nothing is written: the server's SETTINGS must be its first frame (RFC 9113 §3.
 for DATA its pipe does not hold yet, bounded by what is left of the peer's allowance. Every
 octet delivered extends the allowance, whenever it arrived.
 
-One wait is not the peer's fault. A peer cannot send a stream's DATA while the connection-level
-receive window is exhausted, and on this server that window refills only as other streams'
-handlers consume their bodies (RFC 9113 §6.9). So a wait that begins or ends while the window is
-below half its initial 65,535 octets is not charged. While the window is low, a wait whose
-allowance is spent or nearly spent is bounded by a one-second re-check instead, so the reader
-neither spins nor rejects a peer that has no window to send in.
+Part of a wait may not be the peer's fault. A peer cannot send a stream's DATA while the
+connection-level receive window is exhausted, and on this server that window refills only as
+other streams' handlers consume their bodies (RFC 9113 §6.9). The connection therefore keeps a
+clock of the window's low periods: the window is low while it cannot carry one full frame (less
+than the `SETTINGS_MAX_FRAME_SIZE` the server advertises, 16,384 octets, and never more than
+half the initial 65,535). The clock is updated under the connection's lock wherever the window
+changes. A reader reads it at the start and end of each wait, and the wait is charged less the
+time the window spent low while it ran. The rest of the wait is charged, so a wait that began
+while the window was low is not excused whole once the window recovers.
+
+The excuse is bounded: each request body is excused for at most the rate's grace period in
+total, and every wait after that is charged whatever the window. Without the bound the window
+would be the peer's to hold. It is 65,535 octets, the size of one stream's window, so a client
+that sends a full window of DATA on one stream whose handler never reads its body (an SSE or
+long-poll handler, a push-only tunnel) pins it for as long as that stream lives. Every other
+stream's waits would then go uncharged, and their bodies could trickle at an octet a minute: the
+Slowloris the rate exists to stop. While the window is low and some excuse is left, a wait may
+run past the reader's allowance on what remains of it, but no longer than a second at a time.
+The reader then looks at the window again, so it neither spins nor waits long after the window
+recovers. A larger connection window, announced with a WINDOW_UPDATE on stream 0, would let more
+than one stream hold back unread DATA before the others are excused. It would not bound the
+excuse, and it would raise each connection's buffered-memory bound, so it is left out.
 
 When the allowance is spent, the reader has the connection answer the stream the way it answers
 a body over the size cap (`RejectRequestBodyAsync`). Before the response starts, the transport
@@ -1827,8 +1859,12 @@ QUIC's idle timeout cannot do this job: any packet resets it, PING included. The
 counts the request streams in flight instead. The accept loop counts a bidirectional stream
 when it accepts one. The stream stops counting when its head yields no exchange (reset,
 rejected, or answered `431`), or when the exchange it yielded ends: its `SendAsync` returns or
-throws, or the exchange is disposed (`Http3Context.TryEndExchange` makes that once). At zero an
-`ITimer` is armed for `KeepAliveTimeout`. When it fires it re-checks the count and how long the
+throws, or the exchange is disposed (`Http3Context.TryEndExchange` makes that once). The idle
+period is measured from the later of the receive loop's start and the end of the last exchange,
+so only an exchange's end moves it. A stream whose head yielded no exchange stops counting
+without moving it, and a peer cannot keep an idle connection open by opening an empty or
+malformed request stream every so often. At zero an `ITimer` is armed for what is left of
+`KeepAliveTimeout`, at once when nothing is. When it fires it re-checks the count and how long the
 connection has been idle, then begins a graceful close: no further stream is accepted, the
 `GOAWAY` announces the first unprocessed stream, and the receive enumeration ends. The host then
 disposes the connection, which closes it with `H3_NO_ERROR` (RFC 9114 §5.2). The QUIC driver's
@@ -1867,7 +1903,30 @@ octets delivered extend the allowance. When the allowance runs out:
 
 - **`MinResponseDataRate` on HTTP/2 and HTTP/3.** A peer that grants no flow-control credit
   holds a response writer for as long as its exchange runs. HTTP/1.1 enforces the response rate
-  on its streaming sink only, so the buffered paths of all three versions share the gap.
+  on its streaming sink only, so the buffered paths of all three versions share the gap. The gap
+  pins the whole connection, not just the writer. A client that advertises
+  `SETTINGS_INITIAL_WINDOW_SIZE=0` on HTTP/2, or grants no QUIC stream credit on HTTP/3, parks
+  the response of a single GET to any endpoint with a non-empty body. The exchange never ends,
+  so the connection stays busy: the keep-alive deadline never arms, and the request-headers and
+  body-rate deadlines have nothing left to bound.
+- **A per-request opt-out from `MinRequestBodyDataRate` on HTTP/2 and HTTP/3.** The rate now
+  applies to every non-tunnel request body on all three versions, with no seam for one request
+  to lower or lift it: `MaxRequestBodySize` is the only body limit seeded into
+  `HttpExchangeInterceptorRequestContext`. A body that idles for a legitimate reason —
+  client-streaming or duplex calls, a long-lived telemetry upload, one message every ten seconds —
+  fails once an idle gap outlasts what is left of its allowance, about the grace period plus the
+  octets already received over the rate (5 s plus 1 s per 240 octets by default). It fails with
+  `408` and `RST_STREAM(NO_ERROR)` on HTTP/2, or `408` and `STOP_SENDING(H3_NO_ERROR)` on HTTP/3,
+  or with a reset (`CANCEL`, `H3_REQUEST_CANCELLED`) once the response has started.
+  Before #1085 such a body was served on HTTP/2 and HTTP/3. The only remedy is listener-wide: a
+  longer grace period or a lower rate, which weakens the defence for every other request, or
+  `null`, which removes it. The
+  shape the remedy should take follows decision 20: the transport seeds the rate into the parse
+  context as it seeds `MaxRequestBodySize`, freezes it at the first body read, and the
+  `Http.RequestLimits` package exposes a typed feature over it (Kestrel's
+  `IHttpMinRequestBodyDataRateFeature`). It is not done here because the context lives in core
+  `Assimalign.Cohesion.Http` and `HttpMinDataRate` in this package, so the seam needs a decision
+  on where the value type lives.
 - **Automatic `Expect: 100-continue` on HTTP/2 and HTTP/3.** The body rate starts at the first
   read, as on HTTP/1.1, so a client that waits for `100 Continue` gets the grace period and then
   a `408`. `curl` and `HttpClient` stop waiting after about a second.

@@ -1186,6 +1186,19 @@ timeouts take effect on every version: HTTP/2 and HTTP/3 enforce
 `KeepAliveTimeout` and `RequestHeadersTimeout` as HTTP/1.1 does (#1085; the
 transport's DESIGN, "HTTP/2 and HTTP/3 connection timeouts and data rates").
 
+The same change puts the default minimum request-body data rate on every HTTP/2
+and HTTP/3 endpoint, as HTTP/1.1 already had it: 240 octets per second after a
+5-second grace period, from the first body read. No `Limits` key binds
+`MinRequestBodyDataRate` (or `MinResponseDataRate`) on any version, so an
+endpoint bound from configuration keeps the default. An endpoint registered in
+code can change it through the HTTP options callback of `UseHttp1s`, `UseHttp2s`,
+`UseHttps` or `UseHttp3`, for example
+`http2 => http2.Limits.MinRequestBodyDataRate = null`. There is no per-request
+override: a request body that legitimately idles, such as a client-streaming
+call, fails with `408` (or a stream reset once the response has started) when
+an idle gap outlasts its allowance, about 5 seconds plus 1 second per 240 octets
+already received. Before #1085 such a body was served on HTTP/2 and HTTP/3.
+
 `Limits:MaxConcurrentConnections` is not an endpoint limit: it caps the default
 server (see "Concurrency cap (`MaxConcurrentConnections`)"). The binder hands it to the
 server builder, and a cap set through `LimitConcurrentConnections` takes precedence.

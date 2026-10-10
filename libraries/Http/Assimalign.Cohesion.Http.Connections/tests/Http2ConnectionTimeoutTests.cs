@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
@@ -171,8 +172,82 @@ public class Http2ConnectionTimeoutTests
         frames.Single(frame => frame.IsGoAway).GetGoAwayErrorCode().ShouldBe(Http2ErrorCode.EnhanceYourCalm);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A malformed stream on an idle connection should not restart the keep-alive deadline")]
+    public async Task ReceiveAsync_OnMalformedStreamWhileIdle_ShouldKeepTheKeepAliveDeadline()
+    {
+        // Arrange — the connection is idle from acceptance under a one-second keep-alive.
+        TimeSpan keepAlive = TimeSpan.FromSeconds(1);
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(configure: http2 =>
+        {
+            http2.Limits.KeepAliveTimeout = keepAlive;
+            http2.Limits.RequestHeadersTimeout = _longTimeout;
+        });
+        Task receiveEnded = peer.WaitForReceiveEndAsync();
+
+        // Act — at 0.8 × the keep-alive, a HEADERS frame without :method opens stream 1, which the server
+        // resets as malformed (RFC 9113 §8.1.1) without handing it to the host.
+        await Task.Delay(keepAlive * 0.8);
+        await peer.SendHeadersAsync(1, endStream: true, (":scheme", "https"), (":path", "/malformed"), (":authority", "api.test"));
+        Stopwatch sinceMalformed = Stopwatch.StartNew();
+        await receiveEnded;
+        TimeSpan closedAfter = sinceMalformed.Elapsed;
+
+        // Assert — the stream was reset, and the connection closed at about 1 × the keep-alive from its
+        // acceptance, not a whole keep-alive after the malformed stream.
+        IReadOnlyList<Http2WireFrame> frames = await peer.Output.ReadUntilAsync(observed => observed.Any(frame => frame.IsGoAway), "the idle GOAWAY");
+        frames.ShouldContain(frame => frame.IsRstStream && frame.StreamId == 1);
+        frames.Single(frame => frame.IsGoAway).GetGoAwayErrorCode().ShouldBe(Http2ErrorCode.NoError);
+        closedAfter.ShouldBeLessThan(keepAlive * 0.6);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A request-headers deadline that fires while a received head is processed should not close the connection")]
+    public async Task ReceiveAsync_OnRequestHeadersDeadlineFiringDuringProcessing_ShouldKeepServing()
+    {
+        // Arrange — a request-parse interceptor takes twice the request-headers timeout, and runs inline in
+        // the frame pump, between two reads.
+        HttpConnectionListenerOptions options = new();
+        options.Interceptors.Add(new SlowHeadInterceptor(_shortTimeout * 2));
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options, http2 =>
+        {
+            http2.Limits.KeepAliveTimeout = _longTimeout;
+            http2.Limits.RequestHeadersTimeout = _shortTimeout;
+        });
+
+        // Act — the whole head arrives at once, so the deadline fires while the interceptor runs.
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/slow-hook"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        await peer.SyncAsync();
+
+        // Assert — the head arrived in time and the connection is busy with it, so the deadline no longer
+        // applies: no GOAWAY, and the request is answered.
+        peer.Output.Frames.ShouldNotContain(frame => frame.IsGoAway);
+        exchange.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("served"));
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
+        await peer.Output.ReadUntilAsync(observed => observed.Any(frame => frame.IsData && frame.StreamId == 1 && frame.EndStream), "the response on stream 1");
+        await peer.SyncAsync();
+        peer.Output.Frames.ShouldNotContain(frame => frame.IsGoAway);
+    }
+
     private static int GetLastStreamId(Http2WireFrame goAway)
     {
         return (int)(BinaryPrimitives.ReadUInt32BigEndian(goAway.Payload) & 0x7FFFFFFF);
+    }
+
+    /// <summary>A request-parse interceptor whose head hook blocks the frame pump for a set time.</summary>
+    private sealed class SlowHeadInterceptor : HttpExchangeInterceptor
+    {
+        private readonly TimeSpan _delay;
+
+        public SlowHeadInterceptor(TimeSpan delay)
+        {
+            _delay = delay;
+        }
+
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
+        {
+            Thread.Sleep(_delay);
+        }
     }
 }
