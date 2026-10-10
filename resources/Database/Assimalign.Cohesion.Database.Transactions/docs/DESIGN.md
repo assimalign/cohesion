@@ -43,7 +43,8 @@ interface since phase 2 of the concrete-types program
   identical private decorator for it. Sql and KeyValuePair take no view: their statement
   context captures the snapshot once and the statement runs under the transaction's own
   context, because phase two must re-read that context's fresh snapshot where a write waited
-  for a lock (a Sql cascade's index deletes, #1363 review). The view keys brackets and stamps by the shared sequence,
+  for a lock (a Sql cascade's index deletes did, #1363 review, until #1370 matched them by
+  their stamps instead). The view keys brackets and stamps by the shared sequence,
   and a manager refuses to commit or roll back a view. The end claim and the apply admission
   live on the transaction's own context only; a view forwards them, so an apply admitted
   through a view is one the transaction's end waits for.

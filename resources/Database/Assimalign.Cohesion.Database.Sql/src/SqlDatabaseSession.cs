@@ -328,9 +328,9 @@ public sealed class SqlDatabaseSession : DatabaseSession
 
                     // The scope captures the statement's snapshot after the pin began, so the pin's
                     // floor is at or below the statement's (#1363). It runs under the transaction's own
-                    // context, not a pinned view: phase two re-reads that context's snapshot where it
-                    // must see writers that committed while the statement waited for a lock (a
-                    // cascade's index deletes).
+                    // context, not a pinned view: anything phase two reads through that context's
+                    // snapshot must see writers that committed while the statement waited for a lock
+                    // (a cascade's index deletes did, until #1370 matched them by stamps).
                     var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
                         _database.Name.ToString(), transaction.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
                     _lastStatementMetrics = scope.Metrics;
@@ -424,10 +424,11 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// </para>
     /// <para>
     /// The pin only holds the bound. The statement still runs under the transaction's own context,
-    /// never a <see cref="TransactionContext.PinStatementSnapshot"/> view: a cascade that waited
-    /// for a child row's writer removes the child's index entries through that context's fresh
-    /// snapshot, which sees the writer's committed version, where the statement's older snapshot
-    /// matches nothing and leaves the deleted child's unique entry live.
+    /// never a <see cref="TransactionContext.PinStatementSnapshot"/> view. Under the first cut's
+    /// view, a cascade that waited for a child row's writer matched the child's index entries
+    /// through the statement's older snapshot, found nothing, and left the deleted child's unique
+    /// entry live. Since #1370 the index delete matches the reference's live entry by its stamps,
+    /// not through any snapshot.
     /// </para>
     /// </remarks>
     private async ValueTask<TransactionContext?> BeginSnapshotPinAsync(TransactionContext transaction, CancellationToken cancellationToken)

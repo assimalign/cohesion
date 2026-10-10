@@ -732,6 +732,25 @@ internal sealed partial class SqlPlanExecutor
     /// </exception>
     private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
     {
+        var (_, deleter) = ReadVersionStamps(table, pageId, slotIndex);
+
+        if (deleter != TransactionSequence.None && deleter != self)
+        {
+            throw new TransactionAbortedException(
+                $"Write-write conflict on '{table.Schema}.{table.Name}': the row was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
+        }
+    }
+
+    /// <summary>
+    /// Reads the writer and deleter stamps of the row version in a slot. The caller holds the
+    /// row's exclusive lock, so the slot holds a live version the purge cannot reclaim.
+    /// </summary>
+    /// <exception cref="StorageCorruptionException">
+    /// The slot holds a record too short for its version stamps: damage, not a version to retry
+    /// against (#1362).
+    /// </exception>
+    private (TransactionSequence Writer, TransactionSequence Deleter) ReadVersionStamps(SqlCatalogTable table, PageId pageId, int slotIndex)
+    {
         var record = _storage.ReadRow(pageId, slotIndex);
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
@@ -742,13 +761,7 @@ internal sealed partial class SqlPlanExecutor
                 $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
         }
 
-        var (_, deleter) = SqlRowCodec.ReadStamps(record.Span);
-
-        if (deleter != TransactionSequence.None && deleter != self)
-        {
-            throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': the row was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
-        }
+        return SqlRowCodec.ReadStamps(record.Span);
     }
 
     /// <summary>
