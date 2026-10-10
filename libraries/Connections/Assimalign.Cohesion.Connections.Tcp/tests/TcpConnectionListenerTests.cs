@@ -475,6 +475,36 @@ public class TcpConnectionListenerTests
         accept.Attempts.ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: An accepted socket that cannot be set up should be closed and the next connection accepted")]
+    public async Task AcceptAsync_AcceptedSocketSetupFails_ShouldCloseSocketAndAcceptNext()
+    {
+        // Arrange — setting up an accepted socket can fail after the accept succeeded: on macOS, setting
+        // TCP_NODELAY fails with EINVAL once the client has reset the connection. A bound UDP socket stands in
+        // for it, because setting TCP_NODELAY on one fails on every platform (InvalidArgument on Windows,
+        // ProtocolOption on Linux). That failure is the one connection's, so the listener has to close the
+        // socket and go on to the healthy client, not stop or leave the socket open.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using Socket unusable = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        unusable.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        ScriptedAccept accept = new();
+        accept.Return(unusable);
+
+        await using TcpConnectionListener listener = CreateListener(accept);
+        await listener.BindAsync(cancellation.Token);
+
+        using Socket healthy = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await healthy.ConnectAsync(listener.EndPoint, cancellation.Token);
+
+        // Act
+        await using Connection accepted = await listener.AcceptAsync(cancellation.Token);
+
+        // Assert
+        accept.Attempts.ShouldBe(2, "the connection that failed set-up is skipped and the next one accepted");
+        ((IPEndPoint)accepted.RemoteEndPoint!).Port.ShouldBe(((IPEndPoint)healthy.LocalEndPoint!).Port);
+        Should.Throw<ObjectDisposedException>(() => unusable.Available, "the listener closes a socket it could not set up");
+    }
+
     private static TcpConnectionListener CreateListener(ScriptedAccept accept)
         => new(new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) }, accept.AcceptAsync);
 

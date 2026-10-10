@@ -136,17 +136,21 @@ public sealed class TcpConnectionListener : ConnectionListener
     /// <remarks>
     /// <para>
     /// A failure that belongs to one queued connection is skipped, and the next connection is accepted: its
-    /// client reset it before the accept, or, on Linux, a network error was pending on it.
+    /// client reset it before the accept, or, on Linux, a network error was pending on it. A connection whose
+    /// accepted socket cannot be set up is closed and skipped the same way; on macOS, for example, setting
+    /// <c>TCP_NODELAY</c> fails once the client has reset the connection.
     /// </para>
     /// <para>
     /// When the process or the system has run out of descriptors or buffers, the accept is retried after a
-    /// wait that starts at 5 milliseconds and doubles with each consecutive failure up to 1 second. The
-    /// schedule starts over with every call. Cancelling <paramref name="cancellationToken"/> or disposing the
-    /// listener ends the wait at once. Each wait is reported by the <c>Assimalign.Cohesion.Connections.Tcp</c>
-    /// event source, at most once a second per listener.
+    /// wait that starts at 5 milliseconds and doubles with each consecutive failure up to 1 second. On Unix,
+    /// an accept that fails with an error .NET reports only as <see cref="SocketError.SocketError"/> is retried
+    /// the same way, because that value cannot tell <c>ENOMEM</c> from the network errors <c>EPROTO</c> and
+    /// <c>ENONET</c>. The schedule starts over with every call. Cancelling <paramref name="cancellationToken"/>
+    /// or disposing the listener ends the wait at once. Each wait is reported by the
+    /// <c>Assimalign.Cohesion.Connections.Tcp</c> event source, at most once a second per listener.
     /// </para>
     /// <para>
-    /// Any other failure escapes, because it leaves the listening socket unable to accept.
+    /// Any other failure of the accept escapes, because it leaves the listening socket unable to accept.
     /// </para>
     /// </remarks>
     public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
@@ -166,11 +170,63 @@ public sealed class TcpConnectionListener : ConnectionListener
                 listenerSocket = _socket!;
             }
 
+            Socket socket;
+
+            // The filters below classify errors of the accept, so the accept is all this block covers. Setting up
+            // the socket it returns fails for reasons of its own, and is handled per connection further down.
             try
             {
-                Socket socket = await _acceptSocket(listenerSocket, cancellationToken).ConfigureAwait(false);
-                TcpConnection? connection = null;
+                socket = await _acceptSocket(listenerSocket, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                lock (_gate)
+                {
+                    ObjectDisposedException.ThrowIf(_isDisposed, this);
+                }
 
+                continue;
+            }
+            catch (SocketException exception) when (exception.SocketErrorCode == SocketError.OperationAborted)
+            {
+                lock (_gate)
+                {
+                    ObjectDisposedException.ThrowIf(_isDisposed, this);
+                }
+
+                continue;
+            }
+            catch (SocketException exception) when (TcpAcceptErrors.IsQueuedConnectionFailure(exception.SocketErrorCode, listenerSocket))
+            {
+                // The failure belongs to the one queued connection the accept was taking: its client closed it
+                // while it waited in the accept queue, or, on Linux, a network error was pending on it. Skip it
+                // and accept the next one. Letting it escape would stop the listener, and any client could do
+                // that with one reset (#1308).
+                TcpConnectionEventSource.Log.AcceptSkipped(_listenerId, exception.SocketErrorCode);
+
+                continue;
+            }
+            catch (SocketException exception) when (TcpAcceptErrors.IsResourceExhaustion(exception.SocketErrorCode, listenerSocket))
+            {
+                // The process or the system is out of descriptors or buffers. That clears once connections
+                // close, so wait and retry. Letting it escape would stop the listener for good, and a client
+                // that holds enough connections open could do that (#1312). Retrying at once would spin.
+                backoff = TcpAcceptBackoff.NextDelay(backoff);
+
+                if (_backoff.TryReport(Stopwatch.GetTimestamp(), out int unreportedBackoffs))
+                {
+                    TcpConnectionEventSource.Log.AcceptBackoff(_listenerId, exception.SocketErrorCode, backoff, unreportedBackoffs);
+                }
+
+                await WaitBeforeRetryAsync(backoff, cancellationToken).ConfigureAwait(false);
+
+                continue;
+            }
+
+            TcpConnection? connection = null;
+
+            try
+            {
                 lock (_gate)
                 {
                     if (!_isDisposed)
@@ -186,59 +242,40 @@ public sealed class TcpConnectionListener : ConnectionListener
                         _connections.TryAdd(connection.Id, connection);
                     }
                 }
-
-                if (connection is null)
-                {
-                    socket.Dispose();
-                    throw new ObjectDisposedException(nameof(TcpConnectionListener));
-                }
-
-                connection.ConnectionClosed.Register(static state =>
-                {
-                    (TcpConnectionListener listener, TcpConnection closed) = ((TcpConnectionListener, TcpConnection))state!;
-
-                    listener._connections.TryRemove(closed.Id, out _);
-
-                }, (this, connection));
-
-                return connection;
             }
-            catch (ObjectDisposedException)
+            catch (SocketException exception)
             {
-                lock (_gate)
-                {
-                    ObjectDisposedException.ThrowIf(_isDisposed, this);
-                }
-            }
-            catch (SocketException exception) when (exception.SocketErrorCode == SocketError.OperationAborted)
-            {
-                lock (_gate)
-                {
-                    ObjectDisposedException.ThrowIf(_isDisposed, this);
-                }
-            }
-            catch (SocketException exception) when (TcpAcceptErrors.IsQueuedConnectionFailure(exception.SocketErrorCode, listenerSocket))
-            {
-                // The failure belongs to the one queued connection the accept was taking: its client closed it
-                // while it waited in the accept queue, or, on Linux, a network error was pending on it. Skip it
-                // and accept the next one. Letting it escape would stop the listener, and any client could do
-                // that with one reset (#1308).
-                TcpConnectionEventSource.Log.AcceptSkipped(_listenerId, exception.SocketErrorCode);
-            }
-            catch (SocketException exception) when (TcpAcceptErrors.IsResourceExhaustion(exception.SocketErrorCode, listenerSocket))
-            {
-                // The process or the system is out of descriptors or buffers. That clears once connections
-                // close, so wait and retry. Letting it escape would stop the listener for good, and a client
-                // that holds enough connections open could do that (#1312). Retrying at once would spin.
-                backoff = TcpAcceptBackoff.NextDelay(backoff);
+                // The accepted socket could not be set up, which is that one connection's failure: on macOS,
+                // setting TCP_NODELAY fails with EINVAL once the client has reset the connection. Close the socket,
+                // which nothing else owns yet, and accept the next connection. Letting the error escape would stop
+                // the listener over one client, as a reset before the accept did until #1308.
+                socket.Dispose();
+                TcpConnectionEventSource.Log.AcceptedConnectionDropped(_listenerId, exception.SocketErrorCode);
 
-                if (_backoff.TryReport(Stopwatch.GetTimestamp(), out int unreportedBackoffs))
-                {
-                    TcpConnectionEventSource.Log.AcceptBackoff(_listenerId, exception.SocketErrorCode, backoff, unreportedBackoffs);
-                }
-
-                await WaitBeforeRetryAsync(backoff, cancellationToken).ConfigureAwait(false);
+                continue;
             }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+
+            if (connection is null)
+            {
+                // Disposed while the accept completed: the socket was never handed out, so close it here.
+                socket.Dispose();
+                throw new ObjectDisposedException(GetType().FullName);
+            }
+
+            connection.ConnectionClosed.Register(static state =>
+            {
+                (TcpConnectionListener listener, TcpConnection closed) = ((TcpConnectionListener, TcpConnection))state!;
+
+                listener._connections.TryRemove(closed.Id, out _);
+
+            }, (this, connection));
+
+            return connection;
         }
 
         throw new OperationCanceledException(cancellationToken);

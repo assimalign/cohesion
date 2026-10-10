@@ -213,6 +213,56 @@ public class TcpConnectionEventSourceTests
         backoff.Payload[3].ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - TcpConnectionEventSource: Should report an accepted connection the listener could not set up")]
+    public async Task AcceptedConnectionDropped_SetupFails_ShouldReportDroppedConnection()
+    {
+        // Arrange — setting TCP_NODELAY on a bound UDP socket fails on every platform, which makes the set-up
+        // of an "accepted" socket fail the way a client reset can on macOS.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using EventSourceRecorder recorder = new(TcpConnectionEventSource.Log, EventLevel.Verbose);
+
+        using Socket probe = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        SocketError setupError = Should.Throw<SocketException>(() => probe.NoDelay = true).SocketErrorCode;
+
+        using Socket unusable = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        unusable.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        ScriptedAccept accept = new();
+        accept.Return(unusable);
+
+        await using TcpConnectionListener listener = new(
+            new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) },
+            accept.AcceptAsync);
+        await listener.BindAsync(cancellation.Token);
+
+        using Socket client = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(listener.EndPoint, cancellation.Token);
+
+        // Act
+        await using Connection server = await listener.AcceptAsync(cancellation.Token);
+
+        // Assert
+        IReadOnlyList<EventWrittenEventArgs> events = recorder.Events;
+        events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+
+        string listenerId = events
+            .Where(e => e.EventName == "ListenerBound" && Equals(e.Payload![2], listener.EndPoint.ToString()))
+            .ShouldHaveSingleItem()
+            .Payload![0]
+            .ShouldBeOfType<string>();
+
+        EventWrittenEventArgs dropped = events
+            .Where(e => e.EventName == "AcceptedConnectionDropped" && Equals(e.Payload![0], listenerId))
+            .ShouldHaveSingleItem();
+
+        dropped.EventId.ShouldBe(12);
+        dropped.Level.ShouldBe(EventLevel.Verbose);
+        dropped.PayloadNames.ShouldBe(["listenerId", "socketError"]);
+        dropped.Payload![1].ShouldBe(setupError.ToString());
+        events.ShouldNotContain(e => e.EventName == "AcceptSkipped" && Equals(e.Payload![0], listenerId));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - TcpConnectionEventSource: Should publish its connection counters")]
     public async Task Counters_EnabledWithInterval_ShouldPublishConnectionCounters()
     {

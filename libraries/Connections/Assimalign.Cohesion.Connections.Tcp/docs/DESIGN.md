@@ -144,7 +144,20 @@ transport security) are identical for both families — only the protocol identi
   `HostUnreachable`, `ProtocolOption` and `OperationNotSupported`, and raise `AcceptSkipped`. On
   Windows the same values mean the listening socket failed, so there they still escape. `EOPNOTSUPP`
   also means a listening socket that is not a stream socket, which can never accept, so the skip
-  applies only to a stream listener; otherwise an inherited datagram descriptor would spin.
+  applies only to a stream listener; otherwise an inherited datagram descriptor would spin. The other
+  two errors the manual lists, `EPROTO` and `ENONET`, are not skipped: .NET reports them as the generic
+  `SocketError.SocketError`, which they share with `ENOMEM`, so they are backed off instead (see
+  *Classification works from `SocketError` alone*, below). #1312's acceptance criterion asks for all
+  eight to be skipped; these two are the recorded exception.
+- **An accepted socket that cannot be set up costs only its own connection.** After the accept, the
+  listener reads the socket's local endpoint, sets `TCP_NODELAY` on a TCP socket, and wraps it in a
+  connection. Those calls can fail for the one connection: on macOS, setting `TCP_NODELAY` fails with
+  `EINVAL` once the client has reset the connection, and a client can reset right after the accept. A
+  `SocketException` there closes the socket, which nothing else owns yet, raises
+  `AcceptedConnectionDropped`, and accepts the next connection; any other exception closes the socket
+  and escapes. Only the accept call itself sits inside the accept-error filters above. They once covered
+  the set-up as well, so a set-up error that matched one was skipped without closing the socket, and one
+  that matched none stopped the listener.
 - **Running out of descriptors or buffers waits and retries (#1312).** `TooManyOpenSockets`
   (`EMFILE`/`ENFILE`, `WSAEMFILE`) and `NoBufferSpaceAvailable` (`ENOBUFS`, `WSAENOBUFS`) are transient:
   the endpoint is healthy again once connections close. Before #1312 they escaped, so a client that held
@@ -191,7 +204,8 @@ category.
 | 8 | `ConnectionReset` | Verbose | `connectionId` |
 | 9 | `ConnectionError` | Error | `connectionId`, `operation` (`receiving`/`sending`), `exceptionType`, `exceptionMessage` |
 | 10 | `AcceptSkipped` | Verbose | `listenerId`, `socketError` (`ConnectionReset`/`ConnectionAborted`, and on Linux a pending network error): a queued connection that failed before the accept |
-| 11 | `AcceptBackoff` | Warning | `listenerId`, `socketError`, `delayMilliseconds`, `unreportedBackoffs`: an accept failed for want of descriptors or buffers and is retried after the delay. At most one per listener per second; `unreportedBackoffs` counts the waits held back since the previous report |
+| 11 | `AcceptBackoff` | Warning | `listenerId`, `socketError`, `delayMilliseconds`, `unreportedBackoffs`: an accept failed and is retried after the delay. `socketError` names the cause: `TooManyOpenSockets` (out of descriptors), `NoBufferSpaceAvailable` (out of buffers), or, on Unix, `SocketError`, an `errno` .NET does not name, which is `ENOMEM`, `ENOSR`, `EPROTO` or `ENONET`; the message names no cause of its own. At most one per listener per second; `unreportedBackoffs` counts the waits held back since the previous report |
+| 12 | `AcceptedConnectionDropped` | Verbose | `listenerId`, `socketError`: the listener closed a socket it had accepted because setting it up failed, typically because the client reset it right after the accept |
 
 Counters: `current-connections`, `total-connections`, and `connections-per-second`.
 

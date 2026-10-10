@@ -7,8 +7,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 /// <summary>
-/// The TCP driver's diagnostics: listener and connection lifecycle events, skipped and backed-off accepts, and
-/// connection counters.
+/// The TCP driver's diagnostics: listener and connection lifecycle events, skipped and backed-off accepts,
+/// accepted connections dropped during set-up, and connection counters.
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools enable
@@ -71,6 +71,15 @@ internal sealed class TcpConnectionEventSource : EventSource
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
             AcceptBackoff(listenerId.ToString(), error.ToString(), (int)delay.TotalMilliseconds, unreportedBackoffs);
+        }
+    }
+
+    [NonEvent]
+    public void AcceptedConnectionDropped(ListenerId listenerId, SocketError error)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            AcceptedConnectionDropped(listenerId.ToString(), error.ToString());
         }
     }
 
@@ -192,9 +201,15 @@ internal sealed class TcpConnectionEventSource : EventSource
     private void AcceptSkipped(string listenerId, string socketError)
         => WriteEvent(10, listenerId, socketError);
 
-    [Event(11, Level = EventLevel.Warning, Message = "Listener {0} could not accept for want of descriptors or buffers ({1}) and retries in {2} ms; {3} earlier back-offs were not reported")]
+    // The message leaves the cause to socketError: on Unix the generic SocketError value may be ENOMEM, ENOSR,
+    // EPROTO or ENONET, so naming one cause here would send an operator after the wrong one.
+    [Event(11, Level = EventLevel.Warning, Message = "Listener {0} could not accept ({1}) and retries in {2} ms; {3} earlier back-offs were not reported")]
     private void AcceptBackoff(string listenerId, string socketError, int delayMilliseconds, int unreportedBackoffs)
         => WriteEvent(11, listenerId, socketError, delayMilliseconds, unreportedBackoffs);
+
+    [Event(12, Level = EventLevel.Verbose, Message = "Listener {0} closed a connection it accepted but could not set up ({1})")]
+    private void AcceptedConnectionDropped(string listenerId, string socketError)
+        => WriteEvent(12, listenerId, socketError);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

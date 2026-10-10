@@ -9,28 +9,28 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Connections.Tcp.Tests.TestObjects;
 
 /// <summary>
-/// Stands in for a listener's accept through its internal seam. Each call fails with the next scripted
-/// error, or with one error forever, and otherwise accepts on the real listening socket. Every call is
-/// recorded with its <see cref="Stopwatch"/> timestamp.
+/// Stands in for a listener's accept through its internal seam. Each call takes the next scripted step,
+/// failing with an error or returning a given socket, or fails with one error forever, and otherwise
+/// accepts on the real listening socket. Every call is recorded with its <see cref="Stopwatch"/> timestamp.
 /// </summary>
 /// <remarks>
 /// Running out of descriptors or buffers cannot be produced reliably in a test, so this is how the
-/// listener's back-off is driven.
+/// listener's back-off is driven. Returning a given socket is how a test makes setting up an accepted
+/// socket fail.
 /// </remarks>
 internal sealed class ScriptedAccept
 {
-    private readonly ConcurrentQueue<SocketError> _failures;
+    private readonly ConcurrentQueue<Func<ValueTask<Socket>>> _steps = new();
     private readonly ConcurrentQueue<long> _attempts = new();
     private readonly SocketError? _permanentFailure;
 
     public ScriptedAccept(params SocketError[] failures)
     {
-        _failures = new ConcurrentQueue<SocketError>(failures);
+        Fail(failures);
     }
 
     private ScriptedAccept(SocketError permanentFailure)
     {
-        _failures = new ConcurrentQueue<SocketError>();
         _permanentFailure = permanentFailure;
     }
 
@@ -48,8 +48,14 @@ internal sealed class ScriptedAccept
     {
         foreach (SocketError failure in failures)
         {
-            _failures.Enqueue(failure);
+            _steps.Enqueue(() => ValueTask.FromException<Socket>(new SocketException((int)failure)));
         }
+    }
+
+    /// <summary>Queues a call that returns <paramref name="socket"/> as though it had been accepted.</summary>
+    public void Return(Socket socket)
+    {
+        _steps.Enqueue(() => ValueTask.FromResult(socket));
     }
 
     /// <summary>The seam itself: the listener calls this in place of its own accept.</summary>
@@ -62,9 +68,9 @@ internal sealed class ScriptedAccept
             return ValueTask.FromException<Socket>(new SocketException((int)permanentFailure));
         }
 
-        if (_failures.TryDequeue(out SocketError failure))
+        if (_steps.TryDequeue(out Func<ValueTask<Socket>>? step))
         {
-            return ValueTask.FromException<Socket>(new SocketException((int)failure));
+            return step();
         }
 
         return listenerSocket.AcceptAsync(cancellationToken);
