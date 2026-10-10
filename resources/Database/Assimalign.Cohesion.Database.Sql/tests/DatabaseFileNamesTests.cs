@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 
@@ -39,6 +40,32 @@ public sealed class DatabaseFileNamesTests
         // Assert
         directory.ShouldBe(Path.Combine(_root, "sales"));
         DatabaseFileNames.GetStorageName(name).ShouldBe("sales");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Database names: the mapping ignores the current culture, so a Turkish culture still lowers 'I' to 'i' (#1392)")]
+    public void GetStorageName_UnderATurkishCulture_ShouldLowerInvariantly()
+    {
+        // Arrange: tr-TR lowers 'I' to the dotless 'ı' (U+0131), which DatabaseName's ordinal
+        // comparison would never call equal to 'i': a culture-sensitive mapping would give
+        // 'INVOICES' a directory no other spelling reaches.
+        var previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = new CultureInfo("tr-TR");
+        try
+        {
+            "I".ToLower(CultureInfo.CurrentCulture).ShouldBe("ı");
+
+            // Act
+            string storageName = DatabaseFileNames.GetStorageName("INVOICES");
+            string directory = DatabaseFileNames.GetDirectory(_root, "Invoices");
+
+            // Assert
+            storageName.ShouldBe("invoices");
+            directory.ShouldBe(Path.Combine(_root, "invoices"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Database names: names that differ otherwise than by case map to different directories (#1392)")]
