@@ -354,6 +354,102 @@ public sealed partial class SqlFunctionExtensibilityTests
         aggregates.ShouldBe([[4L, 40L, 4L, 15L, 3]]);
     }
 
+    /// <summary>
+    /// The engine's one-argument entry points convert the argument before the coded call, so an
+    /// argument that does not fit or does not convert is the engine's fault and never a
+    /// <c>COHSQLE007</c> that blames the function: the scalar's overflow reaches the evaluator,
+    /// which codes it <c>COHSQLE002</c>; the accumulator's is <c>COHSQLE002</c> already; a type that
+    /// does not convert is a plain database exception; and only what the function itself throws is
+    /// <c>COHSQLE007</c>. SQL cannot reach the faults (the planner types literals and parameters, and
+    /// refuses a mismatch as <c>COHSQLE006</c>), so without this an edit that moved the conversion
+    /// inside the coded call would pass every statement test.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a one-argument conversion fault is the engine's, not the function's")]
+    public void InvokeResolved_ArgumentConversionFault_ShouldNotBlameTheFunction()
+    {
+        // Arrange
+        var scalar = SqlScalarFunction.Create("small_echo", static (short value) => value);
+        var failingScalar = SqlScalarFunction.Create("small_failing", static short (short value) => throw new InvalidOperationException("no echo"));
+        var aggregate = SqlAggregateFunction.Create<long, short, long>("small_sum", static () => 0L,
+            static (long state, short value) => state + value, static (long state) => state);
+        var failingAggregate = SqlAggregateFunction.Create<long, short, long>("small_failing_sum", static () => 0L,
+            static long (long state, short value) => throw new InvalidOperationException("no sum"), static (long state) => state);
+        var context = new SqlFunctionContext(default, Collation.Binary, CancellationToken.None);
+        var accumulator = aggregate.CreateAccumulator(in context);
+        var failingAccumulator = failingAggregate.CreateAccumulator(in context);
+
+        // Act
+        object? echoed = scalar.InvokeResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None);
+        var scalarOverflow = Should.Throw<OverflowException>(() =>
+            scalar.InvokeResolved(40000L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+        var scalarMismatch = Should.Throw<DatabaseException>(() =>
+            scalar.InvokeResolved("x", DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+        var scalarFailure = Should.Throw<DatabaseException>(() =>
+            failingScalar.InvokeResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+        accumulator.AddResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None);
+        var aggregateOverflow = Should.Throw<DatabaseException>(() =>
+            accumulator.AddResolved(40000L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+        var aggregateMismatch = Should.Throw<DatabaseException>(() =>
+            accumulator.AddResolved("x", DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+        var aggregateFailure = Should.Throw<DatabaseException>(() =>
+            failingAccumulator.AddResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+
+        // Assert
+        echoed.ShouldBe((short)7);
+        scalarOverflow.ShouldBeOfType<OverflowException>();
+        scalarOverflow.Message.ShouldBe("BIGINT 40000 does not fit argument 1 of function 'small_echo', which is SMALLINT.");
+        scalarMismatch.ShouldBeOfType<DatabaseException>();
+        scalarMismatch.Message.ShouldBe("Function 'small_echo' takes SMALLINT for argument 1, but the value is TEXT.");
+        scalarFailure.Message.ShouldBe($"{FunctionFailed}: Function 'small_failing' failed: no echo");
+        aggregateOverflow.Message.ShouldBe(
+            "COHSQLE002: Numeric value out of range: BIGINT 40000 does not fit argument 1 of function 'small_sum', which is SMALLINT.");
+        aggregateOverflow.InnerException.ShouldBeOfType<OverflowException>();
+        aggregateMismatch.ShouldBeOfType<DatabaseException>();
+        aggregateMismatch.Message.ShouldBe("Function 'small_sum' takes SMALLINT for argument 1, but the value is TEXT.");
+        aggregateFailure.Message.ShouldBe($"{FunctionFailed}: Function 'small_failing_sum' failed: no sum");
+        accumulator.Finish().ShouldBe(SqlValue.FromInt64(7));
+    }
+
+    /// <summary>
+    /// A call of no arguments, a shape only an application's function has, takes the path every call
+    /// takes, from a frame of its own as <c>COUNT(*)</c> adds through one: with no argument to be
+    /// NULL a strict function is called on every row, an immutable one folds to one call, a result of
+    /// another type fails the check, and what the function throws is <c>COHSQLE007</c>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a call of no arguments is made, checked and coded as every call is")]
+    public async Task ExecuteAsync_NoArgumentCall_ShouldTakeThePathEveryCallTakes()
+    {
+        // Arrange
+        long numbered = 0;
+        long answered = 0;
+        await using var engine = await BuildAsync(functions => functions
+            .Add(new NoArgumentFunction("next_number", SqlFunctionVolatility.Volatile, () => SqlValue.FromInt64(Interlocked.Increment(ref numbered))))
+            .Add(new NoArgumentFunction("answer", SqlFunctionVolatility.Immutable, () =>
+            {
+                Interlocked.Increment(ref answered);
+                return SqlValue.FromInt64(42);
+            }))
+            .Add(new NoArgumentFunction("wrong_answer", SqlFunctionVolatility.Volatile, () => SqlValue.FromString("42")))
+            .Add(new NoArgumentFunction("no_answer", SqlFunctionVolatility.Volatile, () => throw new InvalidOperationException("nothing to say"))));
+        await using var session = await SessionAsync(engine);
+        await ExecuteAsync(session, "CREATE TABLE t (n BIGINT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES (1), (2), (3)");
+
+        // Act
+        var numbers = await RowsAsync(session, "SELECT next_number() FROM t");
+        var answers = await RowsAsync(session, "SELECT answer() FROM t");
+        var wrong = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT wrong_answer() FROM t"));
+        var failed = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT no_answer() FROM t"));
+
+        // Assert
+        numbers.Select(row => (long)row[0]!).Order().ToArray().ShouldBe([1L, 2L, 3L]);
+        numbered.ShouldBe(3);
+        answers.ShouldBe([[42L], [42L], [42L]]);
+        answered.ShouldBe(1);
+        wrong.Message.ShouldBe($"{FunctionFailed}: Function 'wrong_answer' failed: The function returned TEXT, but it declares BIGINT.");
+        failed.Message.ShouldBe($"{FunctionFailed}: Function 'no_answer' failed: nothing to say");
+    }
+
     // A test of a function that reads its context builds the context itself.
     private static SqlValue InvokeWithContext(SqlScalarFunction function, Collation collation)
     {
@@ -418,6 +514,21 @@ public sealed partial class SqlFunctionExtensibilityTests
         }
 
         protected override SqlValue InvokeCore(scoped in SqlArguments arguments) => _result(arguments.GetInt64(0));
+    }
+
+    /// <summary><c>name()</c> declared to return BIGINT, returning whatever its delegate makes: a function of no arguments.</summary>
+    private sealed class NoArgumentFunction : SqlScalarFunction
+    {
+        private readonly Func<SqlValue> _result;
+
+        public NoArgumentFunction(string name, SqlFunctionVolatility volatility, Func<SqlValue> result)
+            : base(name, [], SqlType.BigInt, volatility)
+        {
+            _result = result;
+        }
+
+        protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
+            => arguments.Count == 0 ? _result() : throw new InvalidOperationException($"Called with {arguments.Count} arguments.");
     }
 
     /// <summary><c>element_of(ANYELEMENT)</c> declared to return its argument's type, returning text.</summary>

@@ -302,8 +302,9 @@ flowchart LR
   reference slot, so handing an argument back (`UPPER` of a number, `MIN`) boxes nothing,
   and a BOOLEAN result becomes one of two shared boxes, as the evaluator's predicates do.
   `SqlValue.Compare` compares two values of one type on their payloads, in the order the
-  engine's comparer gives their row values (`MIN` over text compares the two strings under
-  the collation and nothing else), and values of two types through that comparer.
+  engine's comparer gives their row values and with the comparer's result (−1, 0 or 1 for
+  numbers of every width; `MIN` over text compares the two strings under the collation and
+  nothing else), and values of two types through that comparer.
   A binary value is read-only (`AsBinary` and `GetBinary` return `ReadOnlyMemory<byte>`):
   its bytes are a stored row's or a caller's parameter, and a typed function over `byte[]`
   receives a copy. `SqlArguments` is a ref struct over the call's values and its
@@ -372,9 +373,12 @@ flowchart LR
   scalar and the most common application one, then goes to the function's internal
   `InvokeResolved(object, …)`, one frame that converts the value, makes the coded call and
   checks the result, and holds that one `SqlValue`, the call's `SqlArguments` and the result
-  and no buffer for its prologue to clear; more arguments go to a non-inlined helper that
-  converts them into an `[InlineArray(4)]` buffer (a pooled array past four) and calls
-  `InvokeResolved(in SqlArguments)`. Each value is widened to its parameter's type unless it
+  and no buffer for its prologue to clear; a call of none, a shape only an application's
+  function has, makes the coded call over an empty argument list from a frame of its own, with
+  nothing to evaluate, test or convert and no buffer either, as `COUNT(*)` adds a row; more
+  arguments go to a non-inlined helper that converts them into an `[InlineArray(4)]` buffer
+  (a pooled array past four) and calls `InvokeResolved(in SqlArguments)`. The shape is chosen
+  by the number of arguments alone. Each value is widened to its parameter's type unless it
   has that type already, as a column of the type always does; NULL, text, BIGINT, INTEGER and
   NUMERIC row values convert inline and the other types out of line (`SqlValue.FromObject`),
   keeping the row's box. The context is built in place inside the arguments. Both entry points
@@ -669,49 +673,78 @@ statement, some 19 ns per call, on the path every call takes between the row and
 own work, and none of it in any function. The path was made cheaper for every function at once,
 as the Evaluation, result-check and Aggregates bullets above describe: one frame per
 one-argument call that converts, calls and checks, with no buffer of four values for its
-prologue to clear; the common row types converted and a value's reference returned inline;
-the result checked where the core wrote it, not copied; the grouping executor's per-row add
-inlined into its loop with each aggregate shape adding through the accumulator's own frame and
-`COUNT(*)` scanning no arguments for NULL; and `SqlValue.Compare` comparing two values of one
-type on their payloads, where `MIN` and `MAX` had boxed both back to objects. Nothing is reserved
-to the standard library: an application's leaf takes the same path, with every check.
+prologue to clear, and none for a call of no arguments either; the common row types converted
+and a value's reference returned inline; the result checked where the core wrote it, not
+copied; the grouping executor's per-row add inlined into its loop with each aggregate shape
+adding through the accumulator's own frame and `COUNT(*)` scanning no arguments for NULL; and
+`SqlValue.Compare` comparing two values of one type on their payloads, where `MIN` and `MAX` had
+boxed both back to objects. Nothing is reserved to the standard library: the path is chosen by
+the number of arguments alone, and an application's leaf takes it with every check.
 
 Measured by sampling, since the wall clock of this shared machine cannot resolve a few percent:
 the symbol-bearing NativeAOT publishes of `ff07eb5a` (with the same harness, compiled with
 `SqlBenchmarkBaseline`), of `43e3ae90` (E2 after the review, before this change) and of this
 change, each run for 150 iterations of one case at high priority on cores 8 to 11, the runs of
-the three interleaved, while a user-mode sampler suspended the measuring thread about every
-millisecond and symbolized its stack from the native PDB, inline frames included. A sample is the
-call path's when the first engine frame from the leaf is one of the path's own (the evaluator's
-call frames, the grouping executor's add, the conversions, arguments and context, the coded call,
-the result check and `SqlValue.Compare`); function bodies, value comparisons, allocation and GC
-are not. Medians, with the call path's share of all samples and its time per row (the share times
-the run's nanoseconds per row):
+the three interleaved in a rotating order, while a user-mode sampler suspended the measuring
+thread about every millisecond and symbolized its stack from the native PDB, inline frames
+included. Each sample belongs to the first frame from the leaf that is the engine's, and three
+measures count E2's share, because inlining moves work from one frame to another:
 
-| Case | `ff07eb5a` | `43e3ae90` | This change | What E2 adds over `ff07eb5a` |
+- **The call path:** samples whose first engine frame is one of the path's own (the
+  evaluator's call frames, the grouping executor's add, the conversions, arguments and
+  context, the coded call, the result check and `SqlValue.Compare`); function bodies, value
+  comparisons, allocation and GC are not.
+- **With the calling frame:** the call path and the samples whose leaf is the frame it is
+  called from or inlined into, `EvaluateCore` in Q1 and the grouping loop
+  (`ExecuteGroupAsync`) in Q3. This change inlines the per-row add into that loop, and the
+  native PDB puts most of the inlined instructions on the call's line, so the call path's own
+  count misses them: the loop's own share of Q3 is 1.6% with this change against 1.2% at
+  `43e3ae90` and at `ff07eb5a`, about 8 to 13 ns per row.
+- **All function work:** the call path, the calling frame, the function bodies and the value
+  comparisons, which no inlining can move work out of.
+
+Each is what E2 adds over `ff07eb5a`, as a share of all samples, of the non-GC samples, and in
+nanoseconds per row (the share times the run's nanoseconds per row). The medians of six runs
+per build and case of this change, and the review's five of its first version, `5f52710e`, run
+the same way on the same day (the paths Q1 and Q3 take are the same in both):
+
+| Case and measure | `43e3ae90` → this change: share | Non-GC share | ns per row | The review's runs at `5f52710e` (share / non-GC / ns) |
 | --- | --- | --- | --- | --- |
-| Q1 (n = 4 / 9 / 7) | 0.51%, 9.7 ns | 3.04%, 67.1 ns | 1.56%, 31.6 ns | 2.53 → 1.05 points (−58%); 57.4 → 21.9 ns per row, about 19 → 7 ns per call |
-| Q3 (n = 4 / 9 / 7) | 0 | 3.67%, 90.6 ns | 1.48%, 35.3 ns | 3.67 → 1.48 points (−60%); 90.6 → 35.3 ns per row, about 18 → 7 ns per aggregate call |
+| Q1, the call path | 2.47 → 1.02 points (−59%) | 6.31 → 2.49 (−61%) | 52.7 → 19.9 (−62%) | −54% / −45% / −56% |
+| Q1, with the calling frame | 2.24 → 0.84 (−63%) | 5.55 → 1.83 (−67%) | 49.9 → 15.7 (−69%) | −58% / −51% / −64% |
+| Q1, all function work | 2.46 → 1.03 (−58%) | 6.24 → 2.42 (−61%) | 58.0 → 22.4 (−61%) | −69% / −67% / −71% |
+| Q3, the call path | 3.72 → 1.67 (−55%) | 7.27 → 2.92 (−60%) | 90.8 → 40.2 (−56%) | −57% / −59% / −61% |
+| Q3, with the calling frame | 3.60 → 2.11 (−41%) | 7.09 → 3.68 (−48%) | 89.9 → 53.9 (−40%) | −52% / −49% / −46% |
+| Q3, all function work | 3.57 → 1.51 (−58%) | 6.84 → 1.78 (−74%) | 103.0 → 46.7 (−55%) | −85% / −85% / −68% |
+
+E2's addition falls by 40% to 85% on every measure in both sets of runs, and by half or more
+on all but two: Q3 counted with its grouping loop, 40% to 52%, since the inlined add's cost
+stays in the loop; and Q1's call path over non-GC samples in the review's runs, 45% (61% in
+these). Per call, Q1's three calls (`UPPER`, `ABS`, `LENGTH`) cost the call path about 6.6 ns
+each against 17.6 at `43e3ae90`, and Q3's five aggregate calls about 8.0 ns against 18.2
+(10.8 ns with the loop's share). No case calls a function of no arguments; that path now does
+less than at either earlier build (no buffer, no frame for the arguments and no NULL scan).
 
 At `ff07eb5a` an aggregate was one method of the executor's (`AggregateState.Add`), all of which
-counts as the function's work, so Q3 has no call path there. Of the non-GC samples, E2's addition goes from 5.2 to 2.6 points in Q1 (−51%) and from 7.1 to
-2.8 in Q3 (−60%). The runs of one binary spread by up to a factor of two in share (core frequency
-and the load beside them move the memory-bound scan and the compute-bound path differently), so
-only the medians of many runs mean anything. At `43e3ae90` Q1's path was the one-argument
-`InvokeScalar` frame (1.0% of samples), `InvokeResolved` with its result copies (0.8%), and
-`FromObject` and `ToObject` out of line (0.4% each); Q3's was `AddRow`'s frame (2.1%), `ToObject`
-inside `SqlValue.Compare` (0.7%), `COUNT(*)`'s NULL scan of no arguments (0.5%), `FromObject`
-(0.5%) and the coded add (0.4%). With this change Q1's path is the one-argument frame (about 1.2%:
-its prologue and conversion, and the check and return) and `EvaluateCall` (0.3%, which at
-`ff07eb5a` was the whole path); Q3's is the accumulator's one-argument add (0.8%), `COUNT(*)`'s
-(0.3%) and `SqlValue.Compare` (0.2%). `MIN` and `MAX` compare text with less work than at
-`ff07eb5a`: the comparison's share of Q3 is 2.9% against 3.5%, since two strings no longer pass
-the comparer's type tests.
+counts as the function's work, so Q3 has no call path there. The runs of one binary spread by up
+to a factor of two in share (core frequency and the load beside them, at times the whole
+machine during these runs, move the memory-bound scan and the compute-bound path differently),
+so only the medians of many runs mean anything. At `43e3ae90` Q1's path was the one-argument
+`InvokeScalar` frame (1.0% of samples), `InvokeResolved` with its result copies (0.75%), and
+`FromObject` and `ToObject` out of line (about 0.5% each); Q3's was `AddRow`'s frame (1.6%),
+`ToObject` inside `SqlValue.Compare` (0.6%), `FromObject` (0.5%), `COUNT(*)`'s NULL scan of no
+arguments (0.4%) and the coded add (0.4%). With this change Q1's path is the one-argument
+frame (1.1%: its prologue and conversion, and the check and return) and `EvaluateCall` (0.4%,
+which at `ff07eb5a` was the whole path, 0.5%); Q3's is the accumulator's one-argument add
+(1.1%), `COUNT(*)`'s (0.3%) and `SqlValue.Compare` (0.3%). The value comparisons `MIN` and `MAX`
+make take 2.6% to 3.1% of Q3 across the three sets of runs with this change against 3.3% to
+3.5% at `ff07eb5a`, since two strings no longer pass the comparer's type tests.
 
 Timed as before (alternating process rounds, rotating order, high priority, cores 8 to 11, the
-median of the per-process medians), eight three-way rounds of every case, nanoseconds per row:
+median of the per-process medians), eight three-way rounds of every case at `5f52710e`, the
+first version of this change, nanoseconds per row:
 
-| Case | `ff07eb5a` | `43e3ae90` | This change | Over its process's Q6C: `ff07eb5a` / `43e3ae90` / this change |
+| Case | `ff07eb5a` | `43e3ae90` | `5f52710e` | Over its process's Q6C: `ff07eb5a` / `43e3ae90` / `5f52710e` |
 | --- | --- | --- | --- | --- |
 | Q1 | 1,885 | 1,961 (+4.0%) | 2,005 (+6.4%) | 1.258 / 1.393 (+10.8%) / 1.281 (+1.8%) |
 | Q2 | 1,614 | 1,743 (+8.0%) | 1,726 (+6.9%) | 1.112 / 1.141 (+2.6%) / 1.104 (−0.7%) |
@@ -720,18 +753,25 @@ median of the per-process medians), eight three-way rounds of every case, nanose
 
 The function-free control moved by 6.5 points between two builds whose Q6C path is the same, so the
 raw medians resolve nothing at this size; each process's case over its own Q6C (the same scan and
-decode of the same rows, without a function) removes the process's own speed, and by it this
+decode of the same rows, without a function) removes the process's own speed, and by it the
 change takes Q1 and Q2 back to `ff07eb5a` and Q3 most of the way, and against `43e3ae90` is −8.1%
 on Q1, −3.2% on Q2, −13.7% on Q3 and −12.1% on Q4. Sixteen two-way rounds of Q1 to Q3, Q6C and
 Q7 against `43e3ae90` (the same within half a point without the one round another build ran
 beside): Q1 −5.4% (faster in 12 of 16 rounds, paired −6.4%), Q2 −0.4%, Q3 −5.4% (12 of 16,
-paired −4.2%), Q7 +2.5% (slower in 9 of 16, inside its ±10% spread; its CHECK's calls take the
-cheaper path) and the control Q6C −0.9%. No bytes are added per row or
-statement (Q1 1,015.6, Q2 927.6, Q3 1,040.4, Q4 1,015.6, Q6 911.6, Q7 14,759.2 as at `43e3ae90`),
-and Q4 sits within 4.4% of Q1 in-process. Q8 and Q8C allocate about 34 KB less per build than at
-`43e3ae90` (4,252,464 bytes against 4,287,784, and 6,032,344 against 6,065,848), in every
-process; it is not explained, and like the 160 KB the review's re-measurement describes it points
-at ILC code generation rather than at an allocation the change removes.
+paired −4.2%) and the control Q6C −0.9%. The review's own rounds against `43e3ae90` found
+nothing slower: Q1 −6.0%, Q4 −9.8%, Q5L −8.3% and Q5T −2.1% over six rounds, with the control
+Q6C at −7.6%; Q8C's +26% in an eight-round campaign, which two rounds beside another session's
+tests made, was +1.3% (paired −2.0%) over sixteen. Q7 is unresolved within this machine's ±10%
+noise, not measured: it was slower in 9 of the 16 rounds above (+2.5%) and in 18 of 30 with the
+review's rounds pooled (+1.3% to +11.9% by campaign, a sign test's p about 0.18), while Q7R,
+the same inserts with a registered function in the CHECK, is flat (−0.1%, paired −0.5%) and
+no mechanism is known (the CHECK's calls take the cheaper path); a profile of Q7's inserts on a
+quiet machine would settle it. No bytes are added
+per row or statement (Q1 1,015.6, Q2 927.6, Q3 1,040.4, Q4 1,015.6, Q6 911.6, Q7 14,759.2 as at
+`43e3ae90`), and Q4 sits within 4.4% of Q1 in-process. Q8 and Q8C allocate about 34 KB less per
+build than at `43e3ae90` (4,252,464 bytes against 4,287,784, and 6,032,344 against 6,065,848),
+in every process; it is not explained, and like the 160 KB the review's re-measurement describes
+it points at ILC code generation rather than at an allocation the change removes.
 
 ## Compiled-schema provisioning
 

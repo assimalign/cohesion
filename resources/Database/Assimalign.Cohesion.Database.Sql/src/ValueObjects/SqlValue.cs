@@ -333,7 +333,9 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         }
 
         // Two values of one type compare on the payload, in the order the engine's comparer gives
-        // them: no box is read back and no type is tested again.
+        // them and with its result (-1, 0 or 1 for a number): no box is read back and no type is
+        // tested again. SMALLINT and TINYINT widen first, since short.CompareTo and
+        // sbyte.CompareTo return the difference of the two values.
         return type switch
         {
             DatabaseType.String => (collation ?? Collation.Binary).Compare(Unsafe.As<string>(left._reference!), Unsafe.As<string>(right._reference!)),
@@ -341,8 +343,8 @@ public readonly struct SqlValue : IEquatable<SqlValue>
             DatabaseType.Int32 => left.Read<int>().CompareTo(right.Read<int>()),
             DatabaseType.Decimal => left.Read<decimal>().CompareTo(right.Read<decimal>()),
             DatabaseType.Float64 => left.Read<double>().CompareTo(right.Read<double>()), // NaN first, as the comparer orders it
-            DatabaseType.Int16 => left.Read<short>().CompareTo(right.Read<short>()),
-            DatabaseType.Int8 => left.Read<sbyte>().CompareTo(right.Read<sbyte>()),
+            DatabaseType.Int16 => ((int)left.Read<short>()).CompareTo(right.Read<short>()),
+            DatabaseType.Int8 => ((int)left.Read<sbyte>()).CompareTo(right.Read<sbyte>()),
             DatabaseType.Float32 => left.Read<float>().CompareTo(right.Read<float>()),
             DatabaseType.Boolean => left.Read<bool>().CompareTo(right.Read<bool>()),
             DatabaseType.Binary => Unsafe.As<byte[]>(left._reference!).AsSpan().SequenceCompareTo(Unsafe.As<byte[]>(right._reference!)),

@@ -109,7 +109,8 @@ public sealed class SqlValueTests
     /// Pairs of one type each, including the cases the order defines specially: NaN below every
     /// number and equal to itself, signed zeros equal, a TIMESTAMP by its ticks whatever its kind, a
     /// TIMESTAMPTZ by its instant whatever its offset, binary by content and length, text under a
-    /// collation.
+    /// collation, and the extremes of SMALLINT and TINYINT, whose own comparisons return the
+    /// difference of the two values where the comparer returns -1 or 1.
     /// </summary>
     public static TheoryData<object, object, string?> SameTypePairs => new()
     {
@@ -127,7 +128,9 @@ public sealed class SqlValueTests
         { 1.5d, -1.5d, null },
         { float.NaN, 1f, null },
         { (short)-3, (short)3, null },
+        { short.MinValue, short.MaxValue, null },
         { (sbyte)5, (sbyte)-5, null },
+        { sbyte.MinValue, sbyte.MaxValue, null },
         { false, true, null },
         { new byte[] { 1, 2 }, new byte[] { 1, 2, 0 }, null },
         { new byte[] { 2 }, new byte[] { 1, 9 }, null },
@@ -141,7 +144,7 @@ public sealed class SqlValueTests
         { Guid.Parse("00000000-0000-0000-0000-000000000002"), Guid.Parse("00000000-0000-0000-0000-000000000001"), null },
     };
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - SqlValue: values of one type compare in the engine's order")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - SqlValue: values of one type compare in the engine's order, with its result")]
     [MemberData(nameof(SameTypePairs))]
     public void Compare_SameType_ShouldMatchTheEngineOrder(object left, object right, string? collationName)
     {
@@ -155,8 +158,10 @@ public sealed class SqlValueTests
         int backward = SqlValue.Compare(second, first, collation);
         int self = SqlValue.Compare(first, first, collation);
 
-        // Assert
-        Math.Sign(forward).ShouldBe(Math.Sign(SqlValueComparer.Compare(left, right, collation)));
+        // Assert: the comparer's own result, not only its sign. Compare returned exactly that before
+        // it compared payloads, and an application's aggregate may test for -1 or 1.
+        forward.ShouldBe(SqlValueComparer.Compare(left, right, collation));
+        backward.ShouldBe(SqlValueComparer.Compare(right, left, collation));
         Math.Sign(backward).ShouldBe(-Math.Sign(forward));
         self.ShouldBe(0);
     }

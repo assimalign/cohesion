@@ -845,7 +845,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// </para>
     /// <para>
     /// Every function takes the same path, whoever wrote it: the strict test, the conversion of
-    /// each argument to its parameter's type, the coded call and the result's check.
+    /// each argument to its parameter's type, the coded call and the result's check. Each shape
+    /// has a frame of its own, chosen by the number of arguments alone: one, none (only an
+    /// application's function has that shape) and more.
     /// </para>
     /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -854,7 +856,7 @@ internal sealed partial class SqlExpressionEvaluator
         var arguments = call.Arguments;
         if (arguments.Length != 1)
         {
-            return EvaluateCallArguments(call, row);
+            return arguments.Length == 0 ? InvokeScalarNone(call) : EvaluateCallArguments(call, row);
         }
 
         object? value = EvaluateCore(arguments[0], row);
@@ -868,7 +870,16 @@ internal sealed partial class SqlExpressionEvaluator
         return function.InvokeResolved(value, call.FirstTarget, call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken);
     }
 
-    /// <summary>Evaluates the arguments of a call with none or more than one, then calls it.</summary>
+    /// <summary>
+    /// Calls a function of no arguments: nothing to evaluate, test for NULL or convert, so the one
+    /// coded call over an empty argument list is made from a frame that holds no buffer, as the
+    /// grouping executor adds a row of <c>COUNT(*)</c>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? InvokeScalarNone(SqlBoundCall call)
+        => call.Function.InvokeResolved(new SqlArguments([], call.Database, call.Collation.Resolve(_subqueryValues), _cancellationToken));
+
+    /// <summary>Evaluates the arguments of a call with more than one, then calls it.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private object? EvaluateCallArguments(SqlBoundCall call, object?[] row)
     {
@@ -903,7 +914,7 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Calls a function over its evaluated arguments, none or more than one: NULL without a call
+    /// Calls a function over its evaluated arguments, more than one: NULL without a call
     /// when the function is strict and an argument is NULL (PostgreSQL's
     /// <c>EEOP_FUNCEXPR_STRICT</c>), otherwise the arguments converted to the value ABI, in an
     /// inline buffer of four (a pooled one past four), each to its parameter's type, and one call
