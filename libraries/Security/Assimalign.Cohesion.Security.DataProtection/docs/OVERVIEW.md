@@ -12,7 +12,9 @@ key ring, and pluggable persistence — so consumers stop hand-rolling key manag
   derives a per-purpose subkey from the ring's active key.
 - **A rotating key ring.** Keys have a lifetime; the ring rotates lazily and keeps unprotecting
   retired keys for a configurable grace window, so tokens survive restarts, rotation, and
-  multi-node fan-out.
+  multi-node fan-out. A payload naming a key the ring does not hold reloads the repository at
+  most once per `UnknownKeyReloadInterval`, so a client cannot force a read per request, and a
+  key another node writes resolves within one interval.
 - **Pluggable persistence.** An `IKeyRepository` seam with a file-system default; point every
   node at one shared directory to share keys with no raw bytes copied by hand.
 
@@ -29,6 +31,7 @@ IDataProtectionProvider provider = DataProtectionProvider.Create(
         options.ApplicationDiscriminator = "myapp";        // isolates co-located apps
         options.KeyLifetime = TimeSpan.FromDays(90);
         options.UnprotectGracePeriod = TimeSpan.FromDays(7);
+        options.UnknownKeyReloadInterval = TimeSpan.FromSeconds(30); // the default
     });
 
 // Consumer code:

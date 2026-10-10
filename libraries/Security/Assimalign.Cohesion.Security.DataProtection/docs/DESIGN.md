@@ -33,7 +33,8 @@ implementations, and builder-time composition pushed out to consumers' `*.Hostin
   material.
 - `IKeyRepository` + `KeyDocument` — the persistence seam; a pure opaque-blob store.
 - `KeyRepository.CreateFileSystem(path)` — the default file-system repository.
-- `DataProtectionOptions` — discriminator, key lifetime, unprotect grace period.
+- `DataProtectionOptions` — discriminator, key lifetime, unprotect grace period, unknown-key
+  reload interval.
 - `DataProtectionProvider.Create(...)` — factory that assembles the ring + provider.
 - `DataProtectionException` — the area-scoped exception root.
 
@@ -75,8 +76,8 @@ partitioning.
 ## Key ring, rotation, and grace
 
 `KeyRing` holds the deserialized keys in memory and owns the lifecycle rules. Time is read
-through an injected `TimeProvider` (BCL) so rotation and grace are unit-testable without real
-delays.
+through an injected `TimeProvider` (BCL) so rotation, grace, and the reload throttle are
+unit-testable without real delays.
 
 - **Active key selection** (`GetActiveKey`, protect path): the newest non-revoked key whose
   `[ActivatedAt, ExpiresAt)` window contains "now". If none qualifies (first run, or the active
@@ -90,8 +91,57 @@ delays.
   `DataProtectionException` with a distinct (safe) message — AEAD has no padding oracle, so
   distinguishing lifecycle failures leaks nothing about plaintext and aids operators.
 - **Cross-node freshness**: if a payload names a key not in the in-memory snapshot, the ring
-  reloads from the repository once before failing — this is how a node picks up a key another
-  node created after it last loaded.
+  may reload from the repository before failing — this is how a node picks up a key another
+  node created after it last loaded. The payload's sender chooses that key id, so the reload is
+  throttled (next section).
+
+## Reloads and the unknown-key throttle
+
+The key id in a payload header comes from the client. Antiforgery tokens and authentication
+cookies arrive from unauthenticated clients, and the ring has to resolve the id before the GCM
+tag can be checked, because the tag needs the key. Until #1155, every unknown id reloaded the
+whole repository under the ring's only lock, and every other protect and unprotect waited behind
+that read. One request with a random key id bought a full repository read and a process-wide
+stall.
+
+- **Snapshot.** The keys live in an immutable `FrozenDictionary` held in a volatile field.
+  `Protect` and `Unprotect` read it without a lock. A reload or a key creation builds a new
+  snapshot and swaps it in, one at a time under the reload lock, so snapshots are published in
+  the order their reads ran. Protecting or unprotecting with a key the ring holds never waits
+  on a repository read.
+- **Throttle.** A miss may reload only once `DataProtectionOptions.UnknownKeyReloadInterval`
+  (default 30 seconds, must be positive) has passed since the previous miss-triggered read
+  began. Inside that window a miss costs one timestamp read and is reported unknown, without
+  taking the lock. The window is measured from the start of the read, and a read that throws
+  closes it too, so a failing repository is not read again on every miss.
+- **Single flight.** Misses that arrive while a reload runs wait for it on the lock, then look
+  their id up in the snapshot it published. They share its result instead of reading again, so
+  a burst of payloads under a freshly rotated key costs one read.
+- **No per-id negative cache.** The throttle counts reloads, not ids. An id that is still
+  unknown after a reload is reported unknown without another read until the window passes,
+  which is all a negative cache would add. Against invented ids, which are new every time, a
+  per-id cache would add nothing and would need its own memory bound.
+- **The first miss after startup reloads at once.** The constructor's load does not open the
+  window, so a node that starts just before another node rotates picks up the new key on first
+  sight.
+- **Monotonic time.** The window runs on `TimeProvider.GetTimestamp()`, so a wall clock stepped
+  backward cannot hold it shut. Key lifetimes and grace still use `GetUtcNow()`, because they
+  are persisted instants.
+- **Protect-path reloads are not throttled.** `GetActiveKey` reloads only while its snapshot
+  holds no active key, and the key it then finds or creates ends that, so a client cannot make
+  it repeat. It takes the reload lock, so its snapshot is ordered with the miss reloads, but it
+  does not move the miss window. Rotation is exactly when misses are legitimate, and a protect
+  that reloaded a moment earlier must not make another node's new key wait.
+
+**The propagation bound.** A key another node writes at time *t* resolves here no later than
+*t* + `UnknownKeyReloadInterval`. If the last miss-triggered read started after *t*, it already
+loaded the key. Otherwise it started before *t*, so its window closes before
+*t* + `UnknownKeyReloadInterval`, and the payload that names the key is the miss that reloads.
+With no other miss inside the preceding interval, the key resolves on first sight, as it did
+before the throttle. Under a flood of invented ids, the repository is read once per interval,
+and a payload under a just-rotated key can be rejected as unknown for up to one interval on
+nodes that did not create the key. A shorter interval narrows that window and raises the
+worst-case read rate in proportion.
 
 ## Persistence: opaque documents
 
@@ -132,6 +182,10 @@ inherited from the libraries build props.
 - Every protection/verification/key-lifecycle failure surfaces as `DataProtectionException`
   (the area root), wrapping the underlying `CryptographicException` on authentication failure.
   Messages never reveal key material or plaintext.
+- A repository read that fails during an unknown-key reload propagates unchanged from
+  `Unprotect`, because it is an infrastructure failure rather than a verdict on the payload.
+  Only the caller whose miss ran the read sees it. Callers that waited on that read, and every
+  miss inside the window it closes, get the ordinary unknown-key `DataProtectionException`.
 
 ## Non-goals (this iteration)
 

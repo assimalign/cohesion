@@ -52,7 +52,12 @@ public static class DataProtectionProvider
     {
         options.Validate();
 
-        KeyRing ring = new(repository, timeProvider, options.KeyLifetime, options.UnprotectGracePeriod);
+        KeyRing ring = new(
+            repository,
+            timeProvider,
+            options.KeyLifetime,
+            options.UnprotectGracePeriod,
+            options.UnknownKeyReloadInterval);
         return new KeyRingProtectionProvider(ring, options.ApplicationDiscriminator);
     }
 }
