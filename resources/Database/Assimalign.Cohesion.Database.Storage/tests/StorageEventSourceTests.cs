@@ -603,7 +603,8 @@ public sealed class StorageEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should allocate nothing but the handle on a pin hit while nobody listens")]
     public void Pin_HitWithoutListener_ShouldAllocateOnlyTheHandle()
     {
-        // Arrange: a resident page, the hit path warmed up, and the size of one handle measured.
+        // Arrange: a resident page, the hit path warmed up, and the size of one handle measured as
+        // the fewest bytes of three probes.
         const int Pins = 10_000;
         using var stream = StreamWithPages(1);
         using var pool = new StorageBufferPool(4) { StorageName = UniqueName() };
@@ -614,10 +615,14 @@ public sealed class StorageEventSourceTests
         }
 
         using var resident = pool.Pin((PageId)0L, stream);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        var probe = new StoragePageHandle((PageId)0L, resident.Entry, pool);
-        long handleBytes = GC.GetAllocatedBytesForCurrentThread() - before;
-        GC.KeepAlive(probe);
+        long handleBytes = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var probe = new StoragePageHandle((PageId)0L, resident.Entry, pool);
+            handleBytes = Math.Min(handleBytes, GC.GetAllocatedBytesForCurrentThread() - before);
+            GC.KeepAlive(probe);
+        }
 
         // Act: the fewest bytes of three rounds. A pin path that allocates does so in every round,
         // while the runtime can now and then charge an allocation of its own to this thread
@@ -625,7 +630,7 @@ public sealed class StorageEventSourceTests
         long allocated = long.MaxValue;
         for (int round = 0; round < 3; round++)
         {
-            before = GC.GetAllocatedBytesForCurrentThread();
+            long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < Pins; i++)
             {
                 pool.Pin((PageId)0L, stream).Dispose();

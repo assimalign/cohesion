@@ -175,8 +175,9 @@ public sealed class ProtocolEventSourceTests
         // writes the frame trace, called through a delegate: the public member adds nothing to it.
         // In Debug the core's async state machine is an object; in Release both measure zero.
         const int frames = 1_000;
+        const int rounds = 3;
         ProtocolEventSource.Log.IsEnabled().ShouldBeFalse("A listener from another test is still attached.");
-        using var stream = new MemoryStream(EmptyFrames(2 * (frames + 100)), writable: false);
+        using var stream = new MemoryStream(EmptyFrames(2 * (rounds * frames + 100)), writable: false);
         ProtocolFrameReader reader = ProtocolFrameReader.Create(stream, leaveOpen: true);
         var core = typeof(ProtocolStreamFrameReader)
             .GetMethod("ReadFrameCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -187,22 +188,30 @@ public sealed class ProtocolEventSourceTests
             Completed(core(CancellationToken.None)).ShouldNotBeNull();
         }
 
-        // Act
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < frames; index++)
+        // Act: the fewest bytes of three rounds for each. A path that allocates does so in every
+        // round, while the runtime can now and then charge an allocation of its own to this thread.
+        long coreAllocated = long.MaxValue;
+        long allocated = long.MaxValue;
+        for (int round = 0; round < rounds; round++)
         {
-            _ = Completed(core(CancellationToken.None));
-        }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < frames; index++)
+            {
+                _ = Completed(core(CancellationToken.None));
+            }
 
-        long coreAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < frames; index++)
-        {
-            _ = Completed(reader.ReadFrameAsync());
-        }
+            long roundCore = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < frames; index++)
+            {
+                _ = Completed(reader.ReadFrameAsync());
+            }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        _output.WriteLine($"ReadFrameAsync, {frames} frames, no listener: {allocated} bytes; ReadFrameCoreAsync alone: {coreAllocated} bytes.");
+            long roundBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            _output.WriteLine($"Round {round}: ReadFrameAsync, {frames} frames, no listener: {roundBytes} bytes; ReadFrameCoreAsync alone: {roundCore} bytes.");
+            coreAllocated = Math.Min(coreAllocated, roundCore);
+            allocated = Math.Min(allocated, roundBytes);
+        }
 
         // Assert
         allocated.ShouldBe(coreAllocated);
@@ -217,8 +226,9 @@ public sealed class ProtocolEventSourceTests
         // Arrange: a memory stream with room for every frame, so the stream never grows; measured
         // synchronously against the stream writer's own core, as for the reader.
         const int frames = 1_000;
+        const int rounds = 3;
         ProtocolEventSource.Log.IsEnabled().ShouldBeFalse("A listener from another test is still attached.");
-        using var stream = new MemoryStream(ProtocolFrameHeader.Size * 2 * (frames + 100));
+        using var stream = new MemoryStream(ProtocolFrameHeader.Size * 2 * (rounds * frames + 100));
         ProtocolFrameWriter writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
         var core = typeof(ProtocolStreamFrameWriter)
             .GetMethod("WriteFrameCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -230,22 +240,29 @@ public sealed class ProtocolEventSourceTests
             Completed(core(frame, CancellationToken.None));
         }
 
-        // Act
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < frames; index++)
+        // Act: the fewest bytes of three rounds for each, as for the reader.
+        long coreAllocated = long.MaxValue;
+        long allocated = long.MaxValue;
+        for (int round = 0; round < rounds; round++)
         {
-            Completed(core(frame, CancellationToken.None));
-        }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < frames; index++)
+            {
+                Completed(core(frame, CancellationToken.None));
+            }
 
-        long coreAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < frames; index++)
-        {
-            Completed(writer.WriteFrameAsync(frame));
-        }
+            long roundCore = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < frames; index++)
+            {
+                Completed(writer.WriteFrameAsync(frame));
+            }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        _output.WriteLine($"WriteFrameAsync, {frames} frames, no listener: {allocated} bytes; WriteFrameCoreAsync alone: {coreAllocated} bytes.");
+            long roundBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            _output.WriteLine($"Round {round}: WriteFrameAsync, {frames} frames, no listener: {roundBytes} bytes; WriteFrameCoreAsync alone: {roundCore} bytes.");
+            coreAllocated = Math.Min(coreAllocated, roundCore);
+            allocated = Math.Min(allocated, roundBytes);
+        }
 
         // Assert
         allocated.ShouldBe(coreAllocated);

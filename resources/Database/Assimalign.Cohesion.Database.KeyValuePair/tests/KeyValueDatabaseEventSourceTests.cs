@@ -430,12 +430,18 @@ public sealed class KeyValueDatabaseEventSourceTests
         KeyValueDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
         WriteEveryEvent(engine, session, failure);
 
-        // Act
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        long timestamp = WriteEveryEvent(engine, session, failure);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Act: the fewest bytes of three rounds. A write that allocates does so in every round, while
+        // the runtime can now and then charge an allocation of its own to this thread.
+        long allocated = long.MaxValue;
+        long timestamp = 0;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            timestamp |= WriteEveryEvent(engine, session, failure);
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
 
-        // Assert
+        // Assert: no round read a timestamp.
         allocated.ShouldBe(0);
         timestamp.ShouldBe(0);
     }

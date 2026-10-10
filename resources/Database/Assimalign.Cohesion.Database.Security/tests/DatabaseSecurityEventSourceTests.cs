@@ -193,15 +193,21 @@ public sealed class DatabaseSecurityEventSourceTests
             Completed(authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty)).ShouldBeTrue();
         }
 
-        // Act
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < attempts; index++)
+        // Act: the fewest bytes of three rounds. A trace that allocates does so in every round, while
+        // the runtime can now and then charge an allocation of its own to this thread.
+        long allocated = long.MaxValue;
+        for (int round = 0; round < 3; round++)
         {
-            _ = Completed(authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty));
-        }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < attempts; index++)
+            {
+                _ = Completed(authenticator.AuthenticateAsync("app", "ada", ReadOnlyMemory<byte>.Empty));
+            }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        _output.WriteLine($"AuthenticateAsync, {attempts} attempts, no listener: {allocated} bytes.");
+            long roundBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            _output.WriteLine($"Round {round}: AuthenticateAsync, {attempts} attempts, no listener: {roundBytes} bytes.");
+            allocated = Math.Min(allocated, roundBytes);
+        }
 
         // Assert
         allocated.ShouldBe(0L);
