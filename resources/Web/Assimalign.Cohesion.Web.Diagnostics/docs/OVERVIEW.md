@@ -69,9 +69,14 @@ preflight that names it, which is logged with the configured fields.
 | `Assimalign.Cohesion.Web.Routing` | reads the endpoint metadata bag for per-endpoint overrides |
 | `Assimalign.Cohesion.Http.Forwarded` | the effective scheme, host, and client address (`Effective*`), resolved by `UseForwardedHeaders` behind a trusted proxy |
 | `Assimalign.Cohesion.Logging` | the emission model (`ILogger`, `LoggerEntry`, `LoggerProvider`) |
+| `Assimalign.Cohesion.Web.Server` | `IWebClientFaultFeature`: a request body that broke its framing or a limit is logged as a client fault at the configured level with the status sent, not escalated to `Error` (#1340) |
+| `Assimalign.Cohesion.Http.Streaming` | whether the response had started, so a client fault logs the status that reached the wire |
 
 Trace correlation comes from the request's `traceparent` header. The package does not read the
-server's request id (`IWebRequestIdFeature`, in `Web.Server` since #1379) and does not reference
-`Web.Server`.
+server's request id (`IWebRequestIdFeature`, in `Web.Server` since #1379).
+
+An exchange whose downstream pipeline throws is logged at `Error` with the exception, except a client
+fault: an entry marked `http.client_fault = true`, at the configured level, without the exception,
+whose `http.response.status` is the `400`, `413`, `408` or `431` the transport answered with.
 
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.

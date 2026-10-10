@@ -179,6 +179,19 @@ top-level cap is sufficient even for a nested chain. The guard trip surfaces as 
 the handler's read, which the middleware catches and turns into `413`; a decoder rejecting a
 malformed body surfaces (through a typed wrapper) as `400`.
 
+### The transport's failure is not the content's (#1340)
+
+The decoders read the transport's body, and that body throws the same `InvalidDataException` when the
+message framing is malformed (a broken chunk size or trailer section). Before #1340 the wrapper
+relabeled that too, so the middleware answered `400` for "malformed coded content" and swallowed an
+exception the handler, a body binder and the access log should have seen as the client's framing
+fault. The wire status happened to match (the transport answers `400` itself), but the failure was
+misattributed. The middleware now hands the wrapper the server's client-fault report
+(`IWebClientFaultFeature`, `Web.Server`): when it reports a status, the transport latched the fault
+before throwing, so the exception passes through unchanged and the transport answers with its own
+status. A decoder's own failure still becomes `400` here. A transport limit failure (an
+`IOException`) was never caught and is unchanged.
+
 ### Ordering requirement
 
 Because the guard surfaces during the handler's body read, `UseRequestDecompression` must be
@@ -195,7 +208,8 @@ conventionally the outermost middleware, so this is the natural order.
   runs).
 - `400 Bad Request` — a malformed coded request body (internal `RequestDecompressionFormatException`
   wrapping the decoder's `InvalidDataException`, so an unrelated handler `InvalidDataException` is
-  never mis-mapped).
+  never mis-mapped). A malformed message framing under the decoders is not wrapped when the server
+  reports it as a client fault: it propagates, and the transport answers it (#1340).
 - On any of these, a response that has already started streaming is aborted at the protocol layer
   (`IHttpContext.CancelAsync`) instead, since its head is locked.
 

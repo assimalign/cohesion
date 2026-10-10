@@ -38,8 +38,9 @@ namespace Assimalign.Cohesion.Http;
 /// </para>
 /// <para>
 /// Capability probes (<see cref="CanWriteInterimResponse"/>, <see cref="CanTakeOver"/>,
-/// <see cref="CanAcceptTunnel"/>) are the report-don't-throw discovery path: a caller checks them
-/// and learns the exchange state without provoking an exception. The imperative members throw only
+/// <see cref="CanAcceptTunnel"/>) and the client-fault report (<see cref="ClientFaultStatusCode"/>)
+/// are the report-don't-throw discovery path: a caller checks them and learns the exchange state
+/// without provoking or inspecting an exception. The imperative members throw only
 /// on genuine misuse (taking over an exchange that cannot be taken over, writing an interim
 /// response after the final response started, accepting a tunnel twice) or on a stream the peer
 /// already reset. The control is exchange-scoped and is not thread-safe; it must be driven from the
@@ -54,6 +55,38 @@ public interface IHttpExchangeControl
     /// response status/headers are effectively locked.
     /// </summary>
     bool HasResponseStarted { get; }
+
+    /// <summary>
+    /// Gets the status the transport answers this exchange with because the client's request was at
+    /// fault, or <see langword="null"/> when it was not, or when this control does not report client
+    /// faults.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A transport that dispatches a request at its head learns some of the client's faults only while
+    /// the application reads the request body: the body breaks the message framing, or it breaks a
+    /// configured limit (its size, its data rate, the bounds on a trailer section). The body stream
+    /// throws, as any stream does: an <see cref="System.IO.InvalidDataException"/> for a malformed
+    /// body and an <see cref="IOException"/> for a broken limit. The transport also latches the
+    /// <c>4xx</c> status it answers the exchange with (<c>400</c>, <c>408</c>, <c>413</c> or
+    /// <c>431</c>), which replaces any response that has not started, and it closes the connection
+    /// after the exchange. A response that had already started is finished or reset as the host
+    /// decides; the status then does not reach the wire, and this member still reports it.
+    /// </para>
+    /// <para>
+    /// This member reports that latched status. Code that observes the body read's exception, such as
+    /// a host's fault boundary, its access log or its telemetry, reads it to classify the failure as
+    /// the client's rather than the application's, without inspecting the exception's type. Once it
+    /// reports a status, it reports the same status for the rest of the exchange.
+    /// </para>
+    /// <para>
+    /// The default implementation returns <see langword="null"/>, which a caller reads as "no client
+    /// fault reported": an implementation that predates this member, or a protocol version whose
+    /// transport does not report client faults, keeps compiling and is classified as before. The
+    /// server transport reports it for HTTP/1.1 exchanges.
+    /// </para>
+    /// </remarks>
+    HttpStatusCode? ClientFaultStatusCode => null;
 
     /// <summary>
     /// Gets whether an interim (<c>1xx</c>) response can still be emitted for this exchange — the

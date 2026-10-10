@@ -222,6 +222,7 @@ Binding failures are outcomes the thunk writes imperatively as RFC 9457 `applica
 | The form is otherwise unreadable (a malformed multipart or urlencoded body) | 400 | `errors` extension keyed `$form` |
 | The request carries no parseable Content-Type, or the registry has no reader for it (an empty registry included) | 415 | problem+json |
 | `System.Text.Json.JsonException` while deserializing the body | 400 | `errors` extension keyed `$body` |
+| `InvalidDataException` while reading the body: a malformed message framing, which the HTTP/1.1 transport also answers `400` (#1340) | 400 | `errors` extension keyed `$body` |
 | The bound body model fails its registered validator (an application with `Web.Validation`, see "Validation") | 400 | `errors` extension keyed by member path |
 
 Validation runs after every parameter is bound, so a binding failure is answered first.

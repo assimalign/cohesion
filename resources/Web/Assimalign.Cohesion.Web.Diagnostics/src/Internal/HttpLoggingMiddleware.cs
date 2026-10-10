@@ -21,12 +21,23 @@ using Assimalign.Cohesion.Web.Routing;
 /// reflection.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The scheme, host, and client address it logs are the <em>effective</em> values from
 /// <see cref="HttpContextForwardedExtensions"/>: what a trusted proxy chain vouched for when the
 /// forwarded-headers middleware ran, otherwise the transport's. They are read when the entry is
 /// emitted, after the pipeline unwinds, so the forwarded identity is logged even though this
 /// middleware is registered ahead of <c>UseForwardedHeaders</c>. When the logged client differs from
 /// the transport peer, the peer (the nearest proxy) is logged beside it.
+/// </para>
+/// <para>
+/// An exchange whose downstream pipeline throws is an application fault, logged at
+/// <see cref="LogLevel.Error"/> with the exception, unless the server reports a client fault
+/// (<see cref="IWebClientFaultFeature"/>): reading a request body that broke its framing or a
+/// configured limit failed, and the transport answers the exchange itself (#1340). A client fault is
+/// logged at the configured level with the status the transport sends, marked with
+/// <see cref="HttpLoggingAttributes.ClientFault"/>, and carries no exception, whether or not the
+/// exception reached this middleware.
+/// </para>
 /// </remarks>
 internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 {
@@ -193,7 +204,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         return new LoggerEntry(
             _snapshot.Level,
             _snapshot.Category,
-            BuildMessage(context, fields, status: null, duration: null, faulted: false, started: true),
+            BuildMessage(context, fields, status: null, duration: null, faulted: false, clientFault: false, started: true),
             attributes: attributes,
             timestamp: _snapshot.TimeProvider.GetUtcNow());
     }
@@ -266,9 +277,23 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             attributes[HttpLoggingAttributes.RequestBody] = Encoding.UTF8.GetString(requestCapture.Captured);
         }
 
+        // The server reports that the client's request was at fault: reading its body failed on the
+        // client's side, and the transport answers the exchange itself (#1340). Any client can cause
+        // that at will, so it is logged at the configured level, not escalated to Error, and with the
+        // status the transport sends in place of a response that has not started.
+        HttpStatusCode? clientFault = context.Features.Get<IWebClientFaultFeature>()?.StatusCode;
+        int status = clientFault is { } faultStatus && context.Features.Get<IHttpResponseStreamingFeature>() is not { HasStarted: true }
+            ? faultStatus.Value
+            : response.StatusCode.Value;
+
+        if (clientFault is not null)
+        {
+            attributes[HttpLoggingAttributes.ClientFault] = true;
+        }
+
         if ((fields & HttpLoggingFields.ResponseStatusCode) != 0)
         {
-            attributes[HttpLoggingAttributes.ResponseStatusCode] = response.StatusCode.Value;
+            attributes[HttpLoggingAttributes.ResponseStatusCode] = status;
         }
 
         if ((fields & HttpLoggingFields.ResponseHeaders) != 0)
@@ -312,11 +337,15 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             attributes[HttpLoggingAttributes.SpanId] = spanId;
         }
 
+        // A client fault carries no exception: the exception is the transport's answer to the client's
+        // bytes, not an application defect, and the status and the client-fault attribute record it.
+        bool applicationFault = exception is not null && clientFault is null;
+
         var entry = new LoggerEntry(
-            exception is null ? _snapshot.Level : LogLevel.Error,
+            applicationFault ? LogLevel.Error : _snapshot.Level,
             _snapshot.Category,
-            BuildMessage(context, fields, response.StatusCode.Value, elapsed, faulted: exception is not null, started: false),
-            exception,
+            BuildMessage(context, fields, status, elapsed, faulted: applicationFault, clientFault: clientFault is not null, started: false),
+            applicationFault ? exception : null,
             attributes,
             timestamp: _snapshot.TimeProvider.GetUtcNow());
 
@@ -396,6 +425,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         int? status,
         TimeSpan? duration,
         bool faulted,
+        bool clientFault,
         bool started)
     {
         string method = (fields & HttpLoggingFields.RequestMethod) != 0 ? context.Request.Method.Value : "-";
@@ -412,7 +442,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         string durationText = duration is { } d && (fields & HttpLoggingFields.Duration) != 0
             ? string.Create(CultureInfo.InvariantCulture, $" in {d.TotalMilliseconds:F3} ms")
             : string.Empty;
-        string faultText = faulted ? " (faulted)" : string.Empty;
+        string faultText = faulted ? " (faulted)" : clientFault ? " (client fault)" : string.Empty;
 
         return string.Create(CultureInfo.InvariantCulture, $"{method} {path} -> {statusText}{durationText}{faultText}");
     }

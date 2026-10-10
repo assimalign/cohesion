@@ -797,6 +797,43 @@ nothing here dials the request's authority. `AcceptTunnelAsync` is the stream tu
 `CONNECT` over HTTP/2 or HTTP/3 (RFC 9113 §8.5) would need, so adding that later is a package change,
 not a core one.
 
+## The client-fault report
+
+### What it is
+
+`IHttpExchangeControl.ClientFaultStatusCode` reports the `4xx` status the transport answers an
+exchange with because the client's request was at fault, or `null`. A transport that dispatches a
+request at its head learns some faults only while the application reads the body: the body breaks the
+message framing (a malformed chunk size, a malformed trailer section) or a configured limit (its size,
+its data rate, the bounds on a trailer section). The read throws, as any stream read does, and the
+transport answers the exchange itself, replacing a response that has not started and closing the
+connection (`Http.Connections` DESIGN, "Reporting the client fault"). The member tells the code that
+observes the exception that it was the client's fault, without inspecting the exception.
+
+### Why a probe on the control, not a typed exception or a feature contract
+
+Owner decision 28 (2026-10-09) chose the seam for #1340, under decision 20's rule that the core holds
+base contracts and generic seams only:
+
+- **The body stays a plain `Stream`.** It keeps throwing `InvalidDataException` and `IOException`, so
+  every reader that already catches them keeps working. A core exception type carrying the status would
+  be a concern-specific contract in the core, and every wrapper stream (decompression, capture, a form
+  parser) would have to preserve it.
+- **The control is the transport's per-exchange surface.** It already reports exchange state through
+  report-don't-throw probes (`HasResponseStarted`, `CanTakeOver`, `CanAcceptTunnel`); a client fault is
+  one more fact of that kind. A feature package wraps it into a typed feature from the control its
+  response interceptor captures, as `Http.ProtocolUpgrade` wraps `TakeOver`. The Web host does
+  (`IWebClientFaultFeature`, `Web.Server`).
+
+### Why a default member
+
+Unlike `CanAcceptTunnel` and `AcceptTunnelAsync`, the member has a default implementation that returns
+`null`, the precedent of the trailer collections ("Interface evolution via a default member", above).
+`null` means "no client fault reported", which is exactly what an implementation that predates the
+member, or a protocol version whose transport does not report faults yet, can honestly say. Nothing is
+hidden behind a runtime failure, so adding it is not a source break. The server transport overrides it
+for HTTP/1.1; HTTP/2 and HTTP/3 keep the default until #1378.
+
 ## The exchange interceptor seam
 
 ### One seam, one interface, one registration
@@ -1145,8 +1182,9 @@ context instead of per-capability members:
   single generic surface for the transport-owned wire mechanisms outside the
   normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
   `WriteInterimResponseAsync`), the raw-connection takeover (`CanTakeOver` /
-  `TakeOver()`), and the extended CONNECT stream tunnel (`CanAcceptTunnel` /
-  `AcceptTunnelAsync`). One control deliberately replaces the former per-capability
+  `TakeOver()`), the extended CONNECT stream tunnel (`CanAcceptTunnel` /
+  `AcceptTunnelAsync`), and the client-fault report (`ClientFaultStatusCode`, "The
+  client-fault report" above). One control deliberately replaces the former per-capability
   contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`, and the
   core `IHttpExtendedConnectFeature` that #1368 removed): a new
   wire mechanism composes from the hooks plus this control instead of adding a
@@ -1189,7 +1227,9 @@ word — it fires immediately before the commit on whichever path commits first.
   `CanWriteInterimResponse` flips to `false` once the final head is committed.
   Feature packages degrade (e.g. `context.Upgrade == null`,
   `context.ExtendedConnect == null`) rather than surface a feature whose action
-  could never work.
+  could never work. `ClientFaultStatusCode` reports in the same spirit: `null`
+  until the transport latches a client fault, then that status for the rest of the
+  exchange, and `null` from any control that does not report faults.
 - **`AcceptTunnelAsync` registers the tunnel before writing the head**, the
   per-stream analogue of `TakeOver` claiming the connection first: from that
   instant the exchange is taken over, so neither the transport's send path nor

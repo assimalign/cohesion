@@ -129,6 +129,33 @@ becomes "suppress the diagnostic hook the boundary exposes". A throwing `OnExcep
 observation must never defeat response rendering — whereas a throwing `IErrorHandler` propagates; the
 distinction is deliberate (an observer only watches; a handler owns the response).
 
+### Client faults are outcomes, not faults (#1340)
+
+A request body that breaks its framing (a malformed chunk size or trailer section) or a configured
+limit (the body-size cap, the minimum data rate, the trailer-section bounds) fails the application's
+read with an `InvalidDataException` or an `IOException`. That exception is the transport's answer to
+the client's bytes: the transport latches a `400`, `413`, `408` or `431`, sends it in place of any
+response that has not started, and closes the connection. Before #1340 the boundary treated it as a
+fault like any other: `OnException` ran and a `500` problem was staged, which the transport then
+replaced. Any client could make the application's fault observer fire at will.
+
+The server reports such an exchange through `IWebClientFaultFeature` (`Web.Server`; the default Web
+server installs it on an HTTP/1.1 request with a body). When the feature reports a status the boundary:
+
+- still publishes `IHttpExceptionFeature`, so a reader can see what the read threw;
+- skips `OnException`, as `SuppressDiagnosticsCallback` would, without the application writing a
+  predicate for it;
+- skips the `OnError` handlers and the terminal, because a client fault is an outcome on the line drawn
+  above, and stages the transport's status with no headers and an empty body. The transport then keeps
+  that response, since its status is the one it sends, and every reader downstream of the boundary (the
+  HTTP access log, the server's telemetry) sees the status that reaches the wire;
+- still aborts a started response, as for any other fault.
+
+The classification is by exchange state, not by exception type, so it survives a reader that wraps the
+read's exception. A custom server that does not install the feature leaves the boundary as it was. The
+reference to `Web.Server` is a feature-to-feature one the Web dependency rule allows; the package is
+already an `App.Web` member.
+
 ## Status-code pages and the 404 terminal (#881)
 
 `UseStatusCodePages()` installs `StatusCodePagesMiddleware`, which runs after `next` and upgrades a
@@ -155,7 +182,8 @@ terminal (not chain to `next`); a bodyless-`200` fall-through is read as unhandl
 The issue posed the choice: an area-root seam or a feature package. The default handler decides
 it — it renders `Web.ProblemDetails`, and the area root must not reference feature packages, so
 a root-homed hook would either lose its default or invert the dependency direction. This is a
-feature package referencing `Http`, `Web`, and `Web.ProblemDetails`; `Web.Hosting` references
+feature package referencing `Http`, `Http.Streaming`, `Web`, `Web.ProblemDetails` and `Web.Server`
+(for `IWebClientFaultFeature`, #1340); `Web.Hosting` references
 none of it (COHRES002 forbade that until 2026-10-09), and applications receive it through the `App.Web` shared framework.
 The #881 boundary middleware — a pipeline feature, not runtime code — consumes it as an ordinary
 cross-feature reference.

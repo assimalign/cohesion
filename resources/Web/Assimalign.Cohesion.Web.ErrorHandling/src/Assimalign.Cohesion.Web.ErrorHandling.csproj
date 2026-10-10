@@ -11,5 +11,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<!-- IWebClientFaultFeature tells the boundary that the transport answers a client fault itself
+		     (#1340), so it skips OnException and the 500 problem. Feature-to-feature, as the Web
+		     dependency rule allows. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 	</ItemGroup>
 </Project>

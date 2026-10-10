@@ -30,12 +30,13 @@ into `trace.id`/`span.id` attributes when valid. Optionally (`LogRequestStart`),
 seeds an `IScopedLogger` scope so the completion entry correlates via `ILoggerEntry.ParentId` —
 the Logging library's own correlation mechanism, not a bespoke one.
 
-The package does not read the server's request id (`IWebRequestIdFeature`), and so takes no
-`Web.Server` reference. The request id is the same W3C trace id the header carries when it is valid,
-but the default server also invents one for a request without a valid `traceparent`. Logging that id
-would give every entry a `trace.id`, including entries no span or caller shares. That is a separate
-decision: if it is taken, the middleware reads the feature from `Web.Server`, where it moved from
-the Web root with #1379, and handles its absence under a custom server.
+The package does not read the server's request id (`IWebRequestIdFeature`). It references
+`Web.Server` only for the client-fault report (`IWebClientFaultFeature`, "Emission model" below). The
+request id is the same W3C trace id the header carries when it is valid, but the default server also
+invents one for a request without a valid `traceparent`. Logging that id would give every entry a
+`trace.id`, including entries no span or caller shares. That is a separate decision: if it is taken,
+the middleware reads the feature from `Web.Server`, where it moved from the Web root with #1379, and
+handles its absence under a custom server.
 
 ## Why-this-not-that
 
@@ -115,9 +116,22 @@ One entry per completed exchange, emitted in the middleware's `finally`:
 
 - **Level** — `Options.Level` (default `Information`); escalated to `Error` with the exception
   attached when the downstream pipeline throws (the exception is rethrown — observing is this
-  package's job, the exception *boundary* is #881's).
+  package's job, the exception *boundary* is #881's), unless the exchange is a client fault (below).
 - **Message** — `"GET /orders -> 200 in 12.345 ms"`, composed only from enabled fields
-  (invariant culture, `string.Create`); `"(faulted)"` appended on exceptions.
+  (invariant culture, `string.Create`); `"(faulted)"` appended on exceptions, `"(client fault)"` on a
+  client fault.
+- **Client faults (#1340).** A request body that breaks its framing or a configured limit fails the
+  application's read, and the transport answers the exchange itself with `400`, `413`, `408` or `431`.
+  Any client can cause that, so it is not an application defect, and escalating it filled the log with
+  `Error` entries on demand. The server reports it through `IWebClientFaultFeature` (`Web.Server`,
+  installed by the default Web server on an HTTP/1.1 request with a body). When the feature reports a
+  status, the entry stays at `Options.Level`, carries no exception, is marked
+  `http.client_fault = true` (`HttpLoggingAttributes.ClientFault`), and logs the status that reaches
+  the wire: the transport's, unless the response had already started
+  (`IHttpResponseStreamingFeature.HasStarted`, from `Http.Streaming`), in which case the transport ends
+  that response as it stands and its own status is logged. That holds whether the read's exception
+  reaches the middleware or a binder or the exception boundary answered it first. Under a server that
+  does not install the feature, the entry is escalated as before.
 - **Attributes** — per the `HttpLoggingAttributes` contract, only for enabled fields.
 - **Never throws.** Attribute building is guarded; a logging failure cannot fail an exchange or
   mask an application exception mid-unwind. Sink failures are already isolated by the logging

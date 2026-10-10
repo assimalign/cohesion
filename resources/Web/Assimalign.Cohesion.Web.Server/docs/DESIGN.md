@@ -3,9 +3,9 @@
 ## Design intent
 
 `Assimalign.Cohesion.Web.Server` holds the per-exchange contracts the Web server publishes:
-`IWebRequestIdFeature`, `IWebResponseCompletionFeature` and `IWebServerDrainFeature`. It is a
-contracts-only feature package. The default server in `Web.Hosting` implements and installs all
-three; feature libraries and applications read them.
+`IWebRequestIdFeature`, `IWebResponseCompletionFeature`, `IWebServerDrainFeature` and
+`IWebClientFaultFeature`. It is a contracts-only feature package. The default server in
+`Web.Hosting` implements and installs all four; feature libraries and applications read them.
 
 The package exists because of two rules that point in opposite directions:
 
@@ -27,28 +27,32 @@ The packages that publish, declare and read the contracts, with every arrow mean
 flowchart LR
     Server["Assimalign.Cohesion.Web.Server"] --> Root["Assimalign.Cohesion.Web"]
     Server --> Http["Assimalign.Cohesion.Http"]
-    Hosting["Web.Hosting — publishes all three"] --> Server
+    Hosting["Web.Hosting — publishes all four"] --> Server
     WebSockets["Web.WebSockets — reads the drain"] --> Server
     Resources["Web.Hosting.Resources — reads completion"] --> Server
+    Faults["Web.Diagnostics, Web.ErrorHandling, Web.Compression — read the client fault"] --> Server
     WebSockets -.->|"COHRES001 ✗"| Hosting
 ```
 
 | Package | Role | Reference to `Web.Server` |
 |---|---|---|
-| `Assimalign.Cohesion.Web.Server` | declares the three contracts | — |
-| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all three on every exchange | project reference (COHRES002, relaxed by decision 32) |
+| `Assimalign.Cohesion.Web.Server` | declares the four contracts | — |
+| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all four (the client fault on an HTTP/1.1 request with a body) | project reference (COHRES002, relaxed by decision 32) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | defers a control-plane stop until its `202` is written | project reference |
+| `Assimalign.Cohesion.Web.Diagnostics` | logs a client fault at the configured level with the status sent, not at `Error` | project reference |
+| `Assimalign.Cohesion.Web.ErrorHandling` | skips `OnException` and the `500` problem for a client fault | project reference |
+| `Assimalign.Cohesion.Web.Compression` | leaves the transport's framing failure under a decoder unrelabeled | project reference |
 
 The dotted edge is the reference COHRES001 rejects: a feature library may never reference the
 runtime module, which is why the contracts could not move into `Web.Hosting`. No other Web library
 reads these contracts today. `Web.Diagnostics` correlates its logs with the `traceparent` header
 rather than the request id.
 
-## Why three contracts in one package
+## Why the contracts share one package
 
-The three have one publisher, the server, and one lifetime, the exchange. A package per contract
-would add two packages to every framework that carries `Web.Hosting`, for interfaces of one or two
+They have one publisher, the server, and one lifetime, the exchange. A package per contract
+would add three packages to every framework that carries `Web.Hosting`, for interfaces of one or two
 members each. The owner chose two homes over one shared features package (decision 33): contracts a
 feature publishes go with that feature (the endpoint and the path base went to `Web.Routing`), and
 contracts the server publishes come here.
@@ -79,9 +83,26 @@ out. The default server installs one shared instance on every exchange. It is a 
 than a member of `IWebApplicationServer` because the consumer is code running inside an exchange,
 which sees the exchange's features and not the server.
 
+**`IWebClientFaultFeature`** is the client-fault seam (#1340, owner decision 28). Its `StatusCode` is
+the `4xx` the transport answers an exchange with because the client's request was at fault while the
+application read its body: `400` for a malformed body, `413` over the body-size cap, `408` below the
+minimum data rate, `431` for a trailer section over its bounds. The read throws as any stream read
+does; this feature is how the code that sees the exception learns it was not an application defect.
+`Web.Diagnostics` then logs the exchange at its configured level with the status sent,
+`Web.ErrorHandling` skips `OnException` and the `500` problem, and `Web.Compression` leaves the
+transport's framing failure under a decoder unrelabeled. It is a Web contract because decision 20
+keeps the core to generic seams: the transport reports the fault on
+`IHttpExchangeControl.ClientFaultStatusCode`, which exists only in the exchange's response phase, and
+the default server publishes it from an interceptor. To keep the transport's fast path, the server
+installs the feature only on an HTTP/1.1 request that declares a body, the only exchanges whose
+transport reports faults today (HTTP/2 and HTTP/3 are #1378); it reads `null` until a fault is
+latched. The value is read through on each access, because the fault is latched while the pipeline
+runs.
+
 **Every contract is optional.** A custom `IWebApplicationServer` may omit any of them, so every
-reader handles an absent feature: the control plane falls back to a direct stop, and WebSockets has
-no drain-time close, so a socket ends by its own close or by the exchange's cancellation.
+reader handles an absent feature: the control plane falls back to a direct stop, WebSockets has
+no drain-time close, so a socket ends by its own close or by the exchange's cancellation, and a
+reader of the client fault treats an absent feature as no fault reported.
 
 ## Namespace: `Assimalign.Cohesion.Web`
 

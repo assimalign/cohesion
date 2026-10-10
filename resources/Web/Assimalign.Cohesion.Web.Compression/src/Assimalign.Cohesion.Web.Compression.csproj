@@ -8,5 +8,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<!-- IWebClientFaultFeature: a malformed message framing under the decoders is the transport's
+		     client fault, not malformed coded content (#1340). Feature-to-feature, as the Web
+		     dependency rule allows; an App.Web member already. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 	</ItemGroup>
 </Project>

@@ -26,13 +26,17 @@ its own failures — a listener that cannot bind, a connection fault, a drain th
 short — through `builder.Logging`, never with request content. Disposing the application
 disposes the service provider and every factory-created service.
 
-Every listener the default server composes gets three interceptors before any of the application's
-own: the request-size limit, the HTTP/1.1 protocol upgrade, and the HTTP/2 and HTTP/3 extended
-CONNECT, so `context.Upgrade`, `context.ExtendedConnect` and a WebSocket handshake
-(`context.WebSockets`) work on every protocol without listener configuration. A request no handler
-accepts is served as before. A `UseServer` callback that clears `options.Interceptors` removes
-them, and with them WebSockets on every protocol: the HTTP/2 and HTTP/3 transports keep advertising
-extended CONNECT, but nothing surfaces it.
+Every listener the default server composes gets four interceptors before any of the application's
+own: the request-size limit, the HTTP/1.1 protocol upgrade, the HTTP/2 and HTTP/3 extended
+CONNECT, and the client fault. The first three make `context.Upgrade`, `context.ExtendedConnect` and a
+WebSocket handshake (`context.WebSockets`) work on every protocol without listener configuration. A
+request no handler accepts is served as before. The last publishes `IWebClientFaultFeature` on an
+HTTP/1.1 request with a body: when the body breaks its framing or a limit while it is read, the
+transport answers `400`, `413`, `408` or `431` itself, and the HTTP logging middleware and the
+exception boundary treat the read's exception as the client's fault, not an application defect
+(#1340). A `UseServer` callback that clears `options.Interceptors` removes them, and with them
+WebSockets on every protocol (the HTTP/2 and HTTP/3 transports keep advertising extended CONNECT, but
+nothing surfaces it) and the client-fault classification.
 
 A handler that throws before its response starts is answered with a bare `500`. So is a response
 the transport refuses to send because a header or trailer name is not a token or a value holds CR,

@@ -35,6 +35,12 @@ public sealed class ExceptionBoundaryOptions
     /// throws is swallowed: fault observation must never defeat the boundary's core job of rendering
     /// the error response.
     /// </summary>
+    /// <remarks>
+    /// The hook is not invoked for a client fault: an exchange whose <see cref="IWebClientFaultFeature"/>
+    /// reports a status, because reading a request body that broke its framing or a configured limit
+    /// failed. The transport answers such an exchange itself, and any client can cause one at will, so
+    /// it is not an application defect.
+    /// </remarks>
     public Func<IHttpContext, Exception, ValueTask>? OnException { get; set; }
 
     /// <summary>

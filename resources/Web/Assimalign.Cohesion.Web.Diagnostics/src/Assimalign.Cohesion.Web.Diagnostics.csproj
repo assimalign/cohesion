@@ -8,5 +8,10 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
+		<!-- IWebClientFaultFeature keeps a client fault off the Error level (#1340), and
+		     IHttpResponseStreamingFeature.HasStarted tells whether the transport's status replaced the
+		     response. Both packages are App.Web members already. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
 </Project>

@@ -47,7 +47,10 @@ public sealed class HttpLoggingOptions
     /// Gets or sets the level exchange entries are emitted at. Defaults to
     /// <see cref="LogLevel.Information"/>. When the composed logger reports the level disabled at
     /// request time, the middleware is a pure pass-through — nothing is captured or timed. An
-    /// exchange whose downstream middleware throws is escalated to <see cref="LogLevel.Error"/>.
+    /// exchange whose downstream middleware throws is escalated to <see cref="LogLevel.Error"/>,
+    /// unless the server reports that the client's request was at fault
+    /// (<see cref="IWebClientFaultFeature"/>): such an exchange stays at this level, with the status
+    /// the transport sends and <see cref="HttpLoggingAttributes.ClientFault"/>.
     /// </summary>
     public LogLevel Level { get; set; } = LogLevel.Information;
 

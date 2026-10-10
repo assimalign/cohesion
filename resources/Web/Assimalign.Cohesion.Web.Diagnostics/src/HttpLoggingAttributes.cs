@@ -72,8 +72,20 @@ public static class HttpLoggingAttributes
     /// <summary>Request body bytes observed at the application layer (W3C <c>cs-bytes</c> source). Long.</summary>
     public const string RequestBodyBytes = "http.request.body.bytes";
 
-    /// <summary>The response status code. Int.</summary>
+    /// <summary>
+    /// The response status code. Int. For a client fault (<see cref="ClientFault"/>) it is the status
+    /// the transport answers the exchange with in place of a response that has not started.
+    /// </summary>
     public const string ResponseStatusCode = "http.response.status";
+
+    /// <summary>
+    /// Present, and <see langword="true"/>, when the server reported that the client's request was at
+    /// fault: reading a request body that broke its framing or a configured limit failed, and the
+    /// transport answered the exchange itself (<c>IWebClientFaultFeature</c>). Such an exchange is
+    /// logged at the configured level rather than escalated to <c>Error</c>, without the exception.
+    /// Absent otherwise. Bool.
+    /// </summary>
+    public const string ClientFault = "http.client_fault";
 
     /// <summary>Prefix for response header attributes; the suffix is the lower-cased header name. String values.</summary>
     public const string ResponseHeaderPrefix = "http.response.header.";

@@ -1578,11 +1578,16 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     }
 
     // Reads the body through the content-serialization registry. Only the client's own errors are
-    // outcomes: a Content-Type the registry has no reader for (415) and a payload the reader rejects
-    // (400). The registry's non-throwing lookup decides the 415 before anything is read, so an
+    // outcomes: a Content-Type the registry has no reader for (415), a payload the reader rejects
+    // (400), and a body whose message framing is malformed (400) — the transport's body stream throws
+    // InvalidDataException for a broken chunked framing or trailer section, answers the exchange 400
+    // itself, and keeps this problem body because its status is the same (#1333, #1340), as the form
+    // read maps it. The registry's non-throwing lookup decides the 415 before anything is read, so an
     // HttpContentSerializationException from the read itself is a composition fault on the server — no
     // registry at all, or a reader with no contract for the parameter type — and propagates to the
-    // exception boundary, as it does when a returned value is written.
+    // exception boundary, as it does when a returned value is written. A transport limit (an
+    // IOException: the body-size cap, the minimum data rate) is not caught either: the transport answers
+    // it 413 or 408, and the server reports it to the boundary and the access log as a client fault.
     private static void EmitBody(StringBuilder builder, ParameterBinding parameter, int index, string indent)
     {
         builder.Append(indent).Append(parameter.DeclaredType).Append(" __arg").Append(index).AppendLine(";");
@@ -1603,6 +1608,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.Append(inner).AppendLine("}");
         builder.Append(inner).AppendLine("catch (global::System.Text.Json.JsonException)");
         EmitBadRequest(builder, inner, "$body", "The request body could not be deserialized.");
+        builder.Append(inner).AppendLine("catch (global::System.IO.InvalidDataException)");
+        EmitBadRequest(builder, inner, "$body", "The request body could not be read.");
         builder.Append(indent).AppendLine("}");
     }
 

@@ -84,6 +84,12 @@ Each interceptor:
   direct injections. The body is probed through the registry's non-throwing lookup first: a missing or
   unparseable `Content-Type`, or one `IHttpContentSerializationFeature.GetReader` has no reader for,
   is a 415. `ReadContentAsync<T>` then reads it, and a `JsonException` is a 400. An
+  `InvalidDataException` is a 400 too, with `errors` keyed `$body` (#1340): the transport's body
+  stream throws it for a malformed message framing (a broken chunk size or trailer section) and
+  answers the exchange `400` itself, keeping the binding's problem body since its status is the same.
+  The form read already mapped it that way. A transport limit (an `IOException`: the body-size cap,
+  the minimum data rate) is not caught; the transport answers it `413` or `408`, and the server
+  reports it to the exception boundary and the access log as a client fault. An
   `HttpContentSerializationException` from the read is not caught (#1173): after the probe it can only
   mean no registry at all or a reader with no contract for the type, a composition fault that reaches
   the exception boundary exactly as it does when a returned value is written.

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -32,7 +33,8 @@ public class ExceptionBoundaryMiddlewareTests
         Action<ExceptionBoundaryOptions>? configure,
         Func<IHttpContext, Task> downstream,
         IErrorHandlingFeature? hook = null,
-        IHttpResponseStreamingFeature? streaming = null)
+        IHttpResponseStreamingFeature? streaming = null,
+        IWebClientFaultFeature? clientFault = null)
     {
         TestPipelineBuilder builder = new();
         builder.UseErrorHandling(configure);
@@ -50,8 +52,93 @@ public class ExceptionBoundaryMiddlewareTests
             context.Features.Set(streaming);
         }
 
+        if (clientFault is not null)
+        {
+            context.Features.Set(clientFault);
+        }
+
         await pipeline.ExecuteAsync(context);
         return context;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: A client fault should stage the transport's status without observing the fault or rendering a 500")]
+    public async Task InvokeAsync_ClientFault_ShouldStageTheTransportStatusWithoutObservingOrRendering()
+    {
+        // Arrange — reading the body failed on the client's side: the transport answers 400 itself (#1340).
+        InvalidDataException fault = new("RFC 9112 §7.1: malformed chunk-size.");
+        Exception? observed = null;
+        RecordingErrorHandler handler = new(handles: true);
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            options => options.OnException = (_, exception) =>
+            {
+                observed = exception;
+                return ValueTask.CompletedTask;
+            },
+            ctx =>
+            {
+                ctx.Response.Headers[HttpHeaderKey.ContentType] = "text/plain";
+                ctx.Response.Body.Write("partial-body"u8);
+                throw fault;
+            },
+            hook: Hook(composition => composition.OnError(handler)),
+            clientFault: new FakeClientFaultFeature(HttpStatusCode.BadRequest));
+
+        // Assert
+        observed.ShouldBeNull();
+        handler.WasConsulted.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        context.Response.Headers.ContainsKey(HttpHeaderKey.ContentType).ShouldBeFalse();
+        context.ResponseBodyText().ShouldBeEmpty();
+        context.CancelRequested.ShouldBeFalse();
+        context.Features.Get<IHttpExceptionFeature>().ShouldNotBeNull().Error.ShouldBeSameAs(fault);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: A client fault after the response started should abort the exchange without observing the fault")]
+    public async Task InvokeAsync_ClientFaultAfterResponseStarted_ShouldAbortWithoutObserving()
+    {
+        // Arrange
+        bool observed = false;
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            options => options.OnException = (_, _) =>
+            {
+                observed = true;
+                return ValueTask.CompletedTask;
+            },
+            _ => throw new IOException("The request body exceeds the size cap."),
+            streaming: new FakeResponseStreamingFeature(hasStarted: true),
+            clientFault: new FakeClientFaultFeature(HttpStatusCode.RequestEntityTooLarge));
+
+        // Assert — the started response cannot be replaced, so it is aborted, as for any other fault.
+        observed.ShouldBeFalse();
+        context.CancelRequested.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: A client-fault feature reporting no fault should leave the fault an application fault")]
+    public async Task InvokeAsync_ClientFaultFeatureReportingNoFault_ShouldObserveAndRender500()
+    {
+        // Arrange — the server installs the feature on every HTTP/1.1 request with a body; it reports a
+        // status only once the transport latches one.
+        InvalidOperationException fault = new("boom");
+        Exception? observed = null;
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            options => options.OnException = (_, exception) =>
+            {
+                observed = exception;
+                return ValueTask.CompletedTask;
+            },
+            _ => throw fault,
+            clientFault: new FakeClientFaultFeature(statusCode: null));
+
+        // Assert
+        observed.ShouldBeSameAs(fault);
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        context.ResponseBodyText().ShouldContain("about:blank", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: Should publish the caught fault as an IHttpExceptionFeature")]

@@ -23,9 +23,10 @@ public sealed class WebApplicationServerBuilder
     /// The number of features the default server's exchanges carry besides the application's own:
     /// the <c>IHttpMaxRequestBodySizeFeature</c> the first default interceptor attaches while the
     /// request is parsed (see <see cref="ApplyDefaultInterceptors"/>), and the request id, response
-    /// completion and drain features the server installs before the pipeline runs. The other two
-    /// default interceptors attach a feature only to an upgrade or an extended CONNECT. Each
-    /// exchange's feature collection is sized for these plus the stamped application features (#1381).
+    /// completion and drain features the server installs before the pipeline runs. The other default
+    /// interceptors attach a feature only to an upgrade, an extended CONNECT, or an HTTP/1.1 request that
+    /// declares a body (the client-fault feature, #1340). Each exchange's feature collection is sized for
+    /// these plus the stamped application features (#1381).
     /// </summary>
     internal const int HostFeatureCount = 4;
 
@@ -261,13 +262,19 @@ public sealed class WebApplicationServerBuilder
     /// <c>AfterRequestHead</c> hooks can observe it (all three protocol versions run the
     /// request-parse seam). The HTTP/1.1 protocol-upgrade interceptor follows, so
     /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1
-    /// listener. The extended CONNECT interceptor comes last, so <c>context.ExtendedConnect</c>, and
-    /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. A
-    /// request that no application accepts is served exactly as before, and an ordinary exchange keeps
-    /// the transport's fast path under all three. User configurations may still inspect or clear
+    /// listener. The extended CONNECT interceptor follows, so <c>context.ExtendedConnect</c>, and
+    /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. The
+    /// client-fault interceptor comes last: it publishes the transport's client-fault report as
+    /// <see cref="IWebClientFaultFeature"/> on an HTTP/1.1 request that declares a body, so the HTTP
+    /// logging middleware, the exception boundary and request decompression classify a malformed or
+    /// over-limit body as the client's fault rather than the application's (#1340). A request that no
+    /// application accepts is served exactly as before, and an ordinary exchange keeps the transport's
+    /// fast path under all four; an HTTP/1.1 request with a body takes the response phase, for its
+    /// exchange control. User configurations may still inspect or clear
     /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
     /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended
-    /// CONNECT but no feature then surfaces it.
+    /// CONNECT but no feature then surfaces it, and a malformed body is then classified as an
+    /// application fault again.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
@@ -275,6 +282,7 @@ public sealed class WebApplicationServerBuilder
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(new WebClientFaultInterceptor());
     }
 
     /// <summary>

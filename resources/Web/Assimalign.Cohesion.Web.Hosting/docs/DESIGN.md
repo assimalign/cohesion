@@ -348,6 +348,20 @@ and closes the connection (#1339); a malformed body gets `400` the same way (#13
 `500` reaches the client. HTTP/2 and HTTP/3 answer an over-cap body with `413` on their
 own stream.
 
+**A client fault is not an application fault (#1340).** The read above throws an
+`InvalidDataException` or an `IOException`, and before #1340 everything in the pipeline that
+observed it treated it as an application defect: the HTTP logging middleware logged it at
+`Error`, the exception boundary ran `OnException` and rendered a `500` problem, and the request
+decompression middleware relabeled a framing failure under its decoders as malformed content.
+Any client could trigger that at will. The server now publishes the transport's report,
+`IHttpExchangeControl.ClientFaultStatusCode`, as `IWebClientFaultFeature` (`Web.Server`), which
+those consumers read; see "Default interceptors" for how it is installed. The server's own
+finalization needs no change: it still stages its `500`, the transport still replaces it, and
+the exchange's telemetry reads the status the transport set, so the span and the duration carry
+`http.response.status_code` `400`, `413` or `408`, no `error.type`, and an unset span status
+(`WebServerTelemetryTests` pins it). The faulted pipeline is otherwise handled as before, since
+it is the application's code that did not catch the read's exception.
+
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
 boundary around arbitrary user code** — middleware, completion callbacks, application
@@ -611,6 +625,7 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | How the exchange ended | `http.response.status_code` | `error.type` |
 | --- | --- | --- |
 | A response was sent with a status below 500 | the status | none |
+| The request body broke its framing or a limit while it was read, and the HTTP/1.1 transport answered it in place of the staged response (#1333, #1339, #1340) | the transport's `400`, `413`, `408` or `431`, which it also sets on the exchange | none |
 | A response was sent with a 5xx status, including the server's replacement `500` after a fault | the status | the status, for example `500` |
 | The exchange was cancelled (a peer reset or closed connection, the server stopping, `IHttpContext.Cancel`) and reset | only when a streamed response had started | `request_canceled` |
 | The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
@@ -861,9 +876,9 @@ exchange passes through them, and in an ordinary application those sit on most e
   default authenticate scheme is configured, and `IAuthenticationFeature` too on each exchange that
   authenticates. `UseCookiePolicy` installs `ICookieConsentFeature` and its
   `IHttpResponseCookieFeature`.
-- **Only some exchanges:** the upgrade and extended CONNECT features, the WebSocket policy feature on a
-  handshake, the rewrite feature on a rewritten request, the exception feature on a failure, and the
-  TLS feature built on first read.
+- **Only some exchanges:** the upgrade and extended CONNECT features, the client-fault feature on an
+  HTTP/1.1 request with a body (#1340), the WebSocket policy feature on a handshake, the rewrite feature
+  on a rewritten request, the exception feature on a failure, and the TLS feature built on first read.
 
 The server cannot count these itself: the transport learns only a number (owner decision 20), and
 the pipeline's middleware are opaque delegates. A host adds one slot in a listener configuration for
@@ -1029,7 +1044,13 @@ by behavior) and by `WebApplicationProtocolUpgradeTests` over a real loopback co
 upgrade nobody accepts is served as an ordinary `200`, and an accepted one answers `101` and hands
 the handler the raw connection. The default extended CONNECT interceptor is pinned by the same
 defaults suite (slot 2, by behavior) and by `WebApplicationServerExtendedConnectTests`, a WebSocket
-echo over a real HTTP/2 extended CONNECT.
+echo over a real HTTP/2 extended CONNECT. The client-fault interceptor (#1340) is pinned by the defaults
+suite (slot 3, by behavior: it joins the response phase only for an HTTP/1.1 request that declares a
+body, and its feature reads the control on each access) and by `WebApplicationServerClientFaultTests`
+over a raw in-memory connection: a malformed chunked body and a body over the cap are reported to the
+pipeline as the `400` and `413` the transport sends, a well-formed body reports nothing, and a plain
+`GET` carries no feature. `WebServerTelemetryTests` pins that the same two faults end the span with the
+transport's status, no `error.type` and an unset status.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
@@ -1330,7 +1351,7 @@ registration verbs, and certificate files load through the BCL's
 When the web host composes the `HttpConnectionListener`, it installs the
 default interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
-There are three, in this order:
+There are four, in this order:
 
 1. `Http.RequestLimits`' max-request-body-size interceptor (request scope), in slot 0, described
    below.
@@ -1344,6 +1365,11 @@ There are three, in this order:
    extended CONNECT (RFC 8441, RFC 9220) as `context.ExtendedConnect`, bound to the exchange
    control's `AcceptTunnelAsync`, so a WebSocket handshake works on every HTTP/2 and HTTP/3 listener
    too. A request no application accepts is served exactly as before.
+4. `WebClientFaultInterceptor`, internal to this module (#1340, owner decision 28). It publishes the
+   exchange control's client-fault report (`IHttpExchangeControl.ClientFaultStatusCode`) as
+   `IWebClientFaultFeature`, so the pipeline can tell a malformed or over-limit request body from an
+   application defect. The feature reads the control on each access, because the transport latches the
+   status while the pipeline runs.
 
 `Web.Hosting` references `Http.ProtocolUpgrade` and `Http.ExtendedConnect` for this, references
 outside the Web area (COHRES002 is about same-area references); both are private members of every
@@ -1366,13 +1392,27 @@ context's new `Protocol` field (8 B), paid by every exchange that runs a request
 the upgrade interceptor cost 12,912 B and 10,125 B when it still sat in every exchange's response
 phase (measured against 12,552 B and 9,840 B without it, before it moved to the request scope).
 
+The client-fault interceptor follows the same rule with a wider condition. Only an exchange whose
+body is read after dispatch can fault that way, so it joins the response phase of an HTTP/1.1 request
+that declares a body (a `Transfer-Encoding`, or a `Content-Length` other than zero, RFC 9112 §6) and
+installs the feature there. Its head hook allocates nothing, so a request without a body (a plain `GET`)
+keeps the fast path and carries no feature. The feature collection's capacity does not count it
+(`HostFeatureCount` stays four), because the rounding absorbs an uncounted feature. A request with a
+body pays for the response sink, the control, the response context and the feature: measured over the
+in-memory transport with a raw keep-alive client, a 3-byte `POST` allocated about 600 B more (35,640 B
+against 34,990 B), while a plain `GET` stayed within the run-to-run noise. HTTP/2 and HTTP/3 exchanges
+are left alone: their controls keep the interface's `null` default until #1378, so the response phase
+would buy nothing there.
+
 **Clearing the defaults removes WebSockets.** A `UseServer` callback that clears
 `HttpConnectionListenerOptions.Interceptors` removes both transition interceptors: HTTP/1.1
 upgrades no longer surface as `context.Upgrade`, and HTTP/2 and HTTP/3 extended CONNECT no longer
 surface as `context.ExtendedConnect`. The transports still advertise
 `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` on HTTP/2 and HTTP/3, so browsers keep sending WebSocket
 handshakes as extended CONNECT, and `context.WebSockets.IsWebSocketRequest` reads `false` for them.
-A host that clears the list and still serves WebSockets adds the two interceptors back.
+A host that clears the list and still serves WebSockets adds the two interceptors back. Clearing it
+also removes the client-fault interceptor: a malformed or over-limit body is then logged at `Error`
+and observed by `OnException` again, while the transport still answers it with its own status.
 
 The max-request-body-size interceptor occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
@@ -1402,6 +1442,17 @@ transport offers the tunnel as a mechanism on its exchange control and reference
 no feature package (core Http DESIGN, "The extended CONNECT seam"). There is no
 Web-root seam through which a feature library could register an interceptor, so
 the composition root registers it, as it does the upgrade interceptor.
+
+The client-fault interceptor lives in this module, unlike the other three, because
+the contract it fills is the server's: `IWebClientFaultFeature` sits beside the
+other server-published features in `Web.Server`, whose readers are feature libraries
+that may not reference this module (COHRES001). The transport reports the fault on
+its exchange control rather than through a core feature contract (core Http DESIGN,
+"The client-fault report"), and the control exists only in the response phase, so an
+interceptor is the one place the server can reach it. A zero-cost alternative, an
+`Http.Connections` extension read by the server like `HasResponseStarted`, was not
+taken: decision 28 routes the fault through the control, so a package outside this
+module can wrap it the same way.
 
 ### Non-goals
 

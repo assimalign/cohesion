@@ -198,6 +198,20 @@ public class EndpointBindingGeneratorTests
         run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a body whose message framing is malformed is answered 400, as the form read answers it")]
+    public void Generator_BodyParameter_MapsAMalformedBodyToBadRequest()
+    {
+        // Act — #1340: the transport's body stream throws InvalidDataException for a broken chunked
+        // framing; the binding answers it 400 like a payload the reader rejects.
+        GeneratorRun run = Generate("""app.MapPost("/widgets", (Widget widget) => "ok");""");
+
+        // Assert
+        run.Generated.ShouldContain("catch (global::System.IO.InvalidDataException)", Case.Sensitive);
+        run.Generated.ShouldContain("The request body could not be read.", Case.Sensitive);
+        run.Generated.ShouldNotContain("catch (global::System.IO.IOException)", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: explicit header attribute overrides inference")]
     public void Generator_HeaderAttribute_EmitsHeaderBinding()
     {

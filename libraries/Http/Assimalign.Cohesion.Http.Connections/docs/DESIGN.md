@@ -1634,6 +1634,39 @@ chunked). Load-bearing invariants:
   connection stream, so `Dispose` only bars further public reads; it does not
   close or drain the connection.
 
+### Reporting the client fault (#1340)
+
+The `400`, `408`, `413` and `431` above reach the wire, but the read that found
+them only throws: an `InvalidDataException` for a malformed body, an
+`IOException` (`Http1LimitExceededException`) for a broken limit. Code that
+observes that exception, such as a host's fault boundary, its access log or its
+telemetry, could not tell the client's fault from the application's, so a Web host
+logged it at `Error`, ran the application's fault observer and staged a `500` that
+the transport then replaced. Any client could cause that at will.
+
+`Http1ExchangeControl.ClientFaultStatusCode` reports the latched status, the same
+`Http1Context.RequestBodyRejectedStatusCode` that `SendAsync` answers with. It is
+the core report-don't-throw member `IHttpExchangeControl.ClientFaultStatusCode`
+(owner decision 28, after decision 20's seam rule), so a feature package reads it
+from the control its response interceptor captures, as it reads the other probes.
+The exception types are unchanged: the body is a `Stream`, and a reader that
+catches `InvalidDataException` or `IOException` keeps working.
+
+- **When it reports.** `null` until a read fails on the client's side, then the
+  latched status for the rest of the exchange. A read cancelled by the
+  application, or one that stopped inside the framing because of it, is not a
+  client fault and reports nothing. A body the application never read is found
+  malformed or over its limit only by the drain, after the response, so its
+  report comes too late for the pipeline; the connection still closes.
+- **Where it does not report.** `Http2ExchangeControl` and `Http3ExchangeControl`
+  keep the interface's default, `null`, until #1378 (Stage 12) reports their
+  rejections.
+- **Who reads it.** `Web.Hosting` installs a request-scoped interceptor that adds
+  itself to the response phase of an HTTP/1.1 request declaring a body and
+  publishes the report as `IWebClientFaultFeature` (`Web.Server`). Every other
+  exchange keeps this transport's fast path. Web.Hosting's DESIGN carries the
+  consumers.
+
 ### Keep-alive realignment (draining)
 
 Because the application may leave the body unread (or partially read) — an early

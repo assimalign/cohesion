@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Web.Server — Overview
 
 The contracts the Web server publishes on each exchange. Contracts only: the default server in
-`Assimalign.Cohesion.Web.Hosting` installs all three before the pipeline runs, and middleware and
+`Assimalign.Cohesion.Web.Hosting` installs them before the pipeline runs, and middleware and
 handlers read them from `context.Features`.
 
 ## Scope
@@ -15,8 +15,14 @@ handlers read them from `context.Features`.
 - **Drain signal** — `IWebServerDrainFeature.Draining` is cancelled when the server begins its
   lame-duck drain, so a long-lived exchange can end itself within the stop's budget. It cancels
   nothing. `Web.WebSockets` closes open sockets with `1001 Going Away` on it.
+- **Client fault** — `IWebClientFaultFeature.StatusCode` is the `4xx` the transport answers the
+  exchange with because the request body broke its framing or a configured limit while it was read
+  (`400`, `413`, `408` or `431`), or `null`. The read still throws; this tells the code that sees the
+  exception it was the client's fault, not an application defect (#1340). The default server
+  installs it on an HTTP/1.1 request that declares a body. `Web.Diagnostics`, `Web.ErrorHandling` and
+  `Web.Compression` read it.
 
-A custom `IWebApplicationServer` may omit any of the three, so every reader handles an absent
+A custom `IWebApplicationServer` may omit any of the four, so every reader handles an absent
 feature.
 
 ## Namespace
@@ -41,6 +47,9 @@ context.Features.Get<IWebResponseCompletionFeature>()?.Register(() => ValueTask.
 
 // End a long-lived exchange cleanly when the server starts draining.
 CancellationToken draining = context.Features.Get<IWebServerDrainFeature>()?.Draining ?? CancellationToken.None;
+
+// After a body read threw: was it the client's fault, and which status does the transport send?
+HttpStatusCode? clientFault = context.Features.Get<IWebClientFaultFeature>()?.StatusCode;
 ```
 
 `Sdk.Web` applications get the package through the `App.Web` shared framework. A library that reads

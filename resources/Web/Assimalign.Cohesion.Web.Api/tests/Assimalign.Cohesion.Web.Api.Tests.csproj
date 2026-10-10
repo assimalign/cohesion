@@ -26,6 +26,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<!-- The malformed-body tests assert the level the HTTP logging middleware logs a client fault at (#1340). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
 		<!-- Activate the endpoint-binding generator on this project's typed Map* call sites so the
 		     generated thunks can be exercised end-to-end through the factory. -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />

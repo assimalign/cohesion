@@ -129,6 +129,18 @@ internal sealed class FakeResponseStreamingFeature : IHttpResponseStreamingFeatu
 }
 
 /// <summary>
+/// A fake client-fault report, as the default server publishes it when reading a request body failed on
+/// the client's side and the transport answers the exchange with the reported status.
+/// </summary>
+internal sealed class FakeClientFaultFeature : IWebClientFaultFeature
+{
+    public FakeClientFaultFeature(HttpStatusCode? statusCode) => StatusCode = statusCode;
+
+    public string Name => nameof(IWebClientFaultFeature);
+    public HttpStatusCode? StatusCode { get; }
+}
+
+/// <summary>
 /// A minimal <see cref="IWebApplicationPipelineBuilder"/> that composes middleware in registration
 /// order — the same shape the real <c>WebApplication</c> builder produces, with the same silent
 /// <c>Task.CompletedTask</c> terminal — so the pipeline verbs (<c>UseErrorHandling</c>,

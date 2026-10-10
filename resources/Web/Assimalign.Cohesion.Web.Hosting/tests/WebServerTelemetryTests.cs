@@ -427,6 +427,53 @@ public class WebServerTelemetryTests
         span.Status.ShouldBe(ActivityStatusCode.Unset);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A client fault found reading the body should report the transport's status, not a 500 error")]
+    [InlineData("Transfer-Encoding: chunked\r\n\r\nzz\r\nabc\r\n0\r\n\r\n", 400)]
+    [InlineData("Content-Length: 32\r\n\r\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 413)]
+    public async Task ServerSpan_ClientFaultReadingTheBody_ShouldReportTheTransportStatusWithoutAnError(string framingAndBody, int expectedStatus)
+    {
+        // Arrange — the pipeline reads the body and lets the failed read escape, so the server's fault
+        // boundary stages a 500 that the transport replaces with its own status (#1333, #1339, #1340).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new();
+
+        string path = $"/telemetry/client-fault/{Guid.NewGuid():N}";
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp1(transport, http1 => http1.Limits.MaxRequestBodySize = 16));
+        factory.Application.Use(async (context, next) =>
+        {
+            byte[] buffer = new byte[256];
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        Stream stream = client.AsStream();
+
+        // Act
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"POST {path} HTTP/1.1\r\nHost: localhost\r\n{framingAndBody}"), cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+        RecordedMeasurement duration = await recorder.WaitForMeasurementAsync(
+            m => m.Instrument == "http.server.request.duration" && Equals(m.Tags.GetValueOrDefault("http.response.status_code"), expectedStatus),
+            cancellationToken);
+
+        // Assert
+        span.GetTagItem("http.response.status_code").ShouldBe(expectedStatus);
+        span.GetTagItem("error.type").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+        duration.Tags.ContainsKey("error.type").ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A cancelled exchange should report request_canceled and no status code")]
     public async Task ServerSpan_CanceledExchange_ShouldReportRequestCanceled()
     {
