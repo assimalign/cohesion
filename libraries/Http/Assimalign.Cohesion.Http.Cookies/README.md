@@ -81,6 +81,13 @@ well-formed on the wire — not cookie *policy* (see the split below):
   `ArgumentException` — so a hostile value can never split or corrupt the
   emitted `Set-Cookie` line. The invariant holds for the object's lifetime
   because `Name`/`Value` are immutable.
+- **Attribute grammar.** The `HttpCookieOptions.Path` and `Domain` setters
+  throw `ArgumentException` for a value outside RFC 6265 §4.1.1, so a path
+  or domain built from untrusted input cannot add an attribute
+  (`Path=/x; SameSite=None`) or a control character to the line. `Path` is
+  US-ASCII without `;` or controls. `Domain` is dot-separated
+  letter-digit-hyphen labels, optionally preceded by one dot. `null` (and an
+  empty `Domain`) omits the attribute.
 - **Parse-side size limits.** `HttpCookieCollection` enforces
   `HttpCookieLimits` (name+value ≤ 4096, attribute value ≤ 1024, bounded
   attribute count) while parsing; oversized cookies/attributes are ignored,

@@ -150,8 +150,9 @@ The package owns the RFC 6265 / 6265bis rules that make a cookie
 that decide whether a well-formed cookie is **allowed by policy**. The
 dividing line is: *"could this corrupt the header or the store?"* is a
 model concern; *"should this cookie be permitted / rewritten for this
-site?"* is a policy concern. Three model-level guards were added under
-issue [L01.01.11.30]:
+site?"* is a policy concern. The first three model-level guards were
+added under issue [L01.01.11.30], and the fourth under [L01.01.11.30.01]
+(#1153):
 
 1. **Octet-grammar validation at construction (anti header-splitting).**
    `HttpCookie` validates its `Name` against the RFC 6265 §4.1.1
@@ -197,6 +198,49 @@ issue [L01.01.11.30]:
    trigger is left to the emitter / `Web.CookiePolicy`. Keeping the clock
    out of the model is what makes the cap deterministically testable.
 
+4. **Attribute grammar in the `Path` and `Domain` setters (#1153).**
+   `HttpCookie.ToString()` appends both values verbatim, so before #1153
+   a path of `/x; SameSite=None` added an attribute to the line, and a
+   control character corrupted it. Applications build these values from
+   untrusted input (a tenant segment, a forwarded host), and
+   `Web.CookiePolicy` trusts them, so the model has to refuse them.
+   - **`Path`** must be an RFC 6265 §4.1.1 `path-value`: US-ASCII with
+     no control character (`0x00`–`0x1F`, `0x7F`) and no `;`. RFC 6265bis
+     writes the same set as `av-octet = %x20-3A / %x3C-7E`. The empty
+     string is in the grammar.
+   - **`Domain`** must be a `domain-value`: an RFC 1034 §3.5 `subdomain`
+     as enhanced by RFC 1123 §2.1. That is dot-separated labels of 1–63
+     letters, digits and hyphens that neither start nor end with a
+     hyphen, at most 253 characters in all. One leading dot is tolerated
+     because a user agent ignores it (RFC 6265 §5.2.3). An empty label, a
+     trailing dot, an underscore, a port, an IPv6 literal and a
+     non-ASCII name are refused; an internationalized name is written as
+     its `xn--` A-label.
+   - **`null` stays legal for both**, because `CookiePolicyRules` repairs
+     a `__Host-` cookie with `Domain = null` and the collection parser
+     starts from `Path = null`. An empty `Domain` also means "no
+     attribute", as `ToString()` has always read it, and as RFC 6265
+     §5.2.3 tells a user agent to treat an empty `Domain=`.
+   - **The setters throw `ArgumentException`** whose `ParamName` and
+     message name the attribute. The message does not echo the value,
+     which may hold the control character that made it invalid. Like the
+     name and value checks, this is a server bug surfacing, not a request
+     rejection.
+   - **Validation is in the setter**, so every reader sees only valid
+     values: the copy constructor (which copies the checked fields
+     without checking them again), `HttpCookie`'s copy of its options,
+     and a later write to `cookie.Options`.
+   - **The parser drops a cookie** whose `Path` or `Domain` attribute is
+     outside the grammar, as it drops an out-of-grammar name or value,
+     instead of throwing on wire input. It does not keep the cookie
+     without the attribute: re-emitted that way, the cookie would have a
+     different scope from the one its sender wrote. An empty `Domain=` is
+     the exception; it is ignored, per §5.2.3.
+   - **What it does not cover.** `Extensions` are still appended
+     verbatim; each one is an attribute by design. The transports' head
+     writers refuse CR, LF and the other control characters in any field
+     value at encode time (#1183), whatever builds the value.
+
 **What stays here vs. what is `Web.CookiePolicy`'s job.** Everything above
 is wire-safety / well-formedness and lives in this model library. The
 following are *policy* and are explicitly **not** implemented here — they
@@ -225,7 +269,8 @@ as JIT-time constant keys into the underlying
 `Dictionary<Type, object>`; trim and AOT roots are unaffected. The
 parser is a string-tokenization loop with no regex, and the octet-grammar
 guard (`HttpCookieGrammar`) classifies characters with
-`SearchValues<char>` membership scans — again no regex, no reflection.
+`SearchValues<char>` membership scans and character-range scans — again
+no regex, no reflection.
 
 ## Non-goals
 

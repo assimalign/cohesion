@@ -38,8 +38,8 @@ namespace Assimalign.Cohesion.Http;
 /// whose individual attributes exceed the configured
 /// <see cref="HttpCookieLimits"/> are ignored (not truncated, not thrown),
 /// the retained attribute count per cookie is bounded, and cookies whose
-/// name or value falls outside the RFC 6265 &#167; 4.1.1 grammar are dropped
-/// rather than surfaced. This is wire-safety hardening, not cookie policy;
+/// name, value, <c>Path</c>, or <c>Domain</c> falls outside the RFC 6265
+/// &#167; 4.1.1 grammar are dropped rather than surfaced. This is wire-safety hardening, not cookie policy;
 /// prefix/pairing enforcement lives in
 /// <c>Assimalign.Cohesion.Web.CookiePolicy</c>.
 /// </para>
@@ -375,7 +375,14 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
                     continue;
                 }
 
-                ApplyValueAttribute(attrName, attrValue, options);
+                // RFC 6265 §4.1.1 attribute grammar guard — a Path or Domain the
+                // options refuse makes the cookie unrepresentable, so it is dropped
+                // like an out-of-grammar name or value, rather than kept without
+                // the attribute and re-emitted with a different scope.
+                if (!ApplyValueAttribute(attrName, attrValue, options))
+                {
+                    return null;
+                }
             }
         }
 
@@ -402,14 +409,33 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         }
     }
 
-    private static void ApplyValueAttribute(string name, string value, HttpCookieOptions options)
+    /// <summary>
+    /// Applies one <c>name=value</c> attribute to <paramref name="options"/>.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false"/> when the attribute is a <c>Domain</c> or <c>Path</c>
+    /// outside the RFC 6265 &#167; 4.1.1 grammar, which the options setters refuse;
+    /// otherwise <see langword="true"/>.
+    /// </returns>
+    private static bool ApplyValueAttribute(string name, string value, HttpCookieOptions options)
     {
         if (string.Equals(name, "Domain", StringComparison.OrdinalIgnoreCase))
         {
+            // An empty Domain is ignored (RFC 6265 §5.2.3); the options read it as absent.
+            if (value.Length > 0 && !HttpCookieGrammar.IsValidDomain(value))
+            {
+                return false;
+            }
+
             options.Domain = value;
         }
         else if (string.Equals(name, "Path", StringComparison.OrdinalIgnoreCase))
         {
+            if (!HttpCookieGrammar.IsValidPath(value))
+            {
+                return false;
+            }
+
             options.Path = value;
         }
         else if (string.Equals(name, "Expires", StringComparison.OrdinalIgnoreCase))
@@ -457,5 +483,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         {
             options.Extensions.Add(name + "=" + value);
         }
+
+        return true;
     }
 }
