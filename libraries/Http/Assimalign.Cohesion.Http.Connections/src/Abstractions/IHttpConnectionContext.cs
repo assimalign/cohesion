@@ -25,6 +25,15 @@ public interface IHttpConnectionContext
     /// </summary>
     /// <param name="cancellationToken">The cancellation token for enumeration.</param>
     /// <returns>An asynchronous sequence of received HTTP contexts.</returns>
+    /// <remarks>
+    /// Every exchange this yields must be finalized with <see cref="SendAsync"/> or disposed, also after
+    /// its <see cref="IHttpContext.RequestCancelled"/> fired. On HTTP/2 the exchange keeps its stream's
+    /// slot against <c>SETTINGS_MAX_CONCURRENT_STREAMS</c> until then, even once the stream was reset
+    /// (RFC 9113 §5.1.2): a handler that ignores cancellation is still work in flight. An exchange the
+    /// host drops without either never gives its slot back, and once
+    /// <see cref="Http2ConnectionListenerOptions.Http2Limits.MaxStreamsPerConnection"/> such slots are
+    /// held, the connection refuses every new stream for the rest of its life.
+    /// </remarks>
     IAsyncEnumerable<IHttpContext> ReceiveAsync(CancellationToken cancellationToken = default);
 
     /// <summary>

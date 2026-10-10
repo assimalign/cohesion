@@ -86,7 +86,9 @@ public sealed class Http2ConnectionListenerOptions
         /// stream that is reset, by the peer or by the server, keeps its slot until its exchange ends:
         /// the host's <c>SendAsync</c> for it returns, or the host disposes the exchange. A handler
         /// that ignores <c>RequestCancelled</c> therefore cannot be multiplied past the cap by resetting
-        /// its stream (CVE-2023-44487).
+        /// its stream (CVE-2023-44487). A host must finalize or dispose every exchange it receives;
+        /// otherwise a reset stream's slot is never given back. A response that completes normally
+        /// gives its slot back as soon as its stream is closed, before the after-response hooks run.
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is less than <c>1</c>.</exception>
         public int MaxStreamsPerConnection
@@ -130,16 +132,17 @@ public sealed class Http2ConnectionListenerOptions
         /// Two kinds of reset count. The peer's own <c>RST_STREAM</c> on a stream it opened is the
         /// rapid-reset pattern (CVE-2023-44487). A <c>RST_STREAM</c> the server sends because of a
         /// frame from the peer — a zero-increment <c>WINDOW_UPDATE</c>, an overrun flow-control window,
-        /// a malformed request head or trailer section, a request a request-parse interceptor rejects —
-        /// is its server-reset variant (CVE-2025-8671, MadeYouReset), which ends the stream for the peer
-        /// just as cheaply.
+        /// a malformed request head or trailer section — is its server-reset variant (CVE-2025-8671,
+        /// MadeYouReset), which ends the stream for the peer just as cheaply.
         /// </para>
         /// <para>
         /// A stream the server refuses with <c>REFUSED_STREAM</c> (over
         /// <see cref="MaxStreamsPerConnection"/>, or during a graceful close) does not count: it started
-        /// no work, and the peer may retry it. Neither do the resets the application asks for
-        /// (<c>CANCEL</c>), nor the <c>NO_ERROR</c> reset that stops a request body after the response
-        /// is complete (RFC 9113 §8.1).
+        /// no work, and the peer may retry it. Neither does the <c>CANCEL</c> that answers a request a
+        /// request-parse interceptor rejects: that is the server's policy, taken before the request is
+        /// dispatched. Nor do the resets the application asks for (<c>CANCEL</c>), or the
+        /// <c>NO_ERROR</c> reset that stops a request body after the response is complete
+        /// (RFC 9113 §8.1).
         /// </para>
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is less than <c>1</c>.</exception>

@@ -1686,11 +1686,11 @@ The reset counter counts the resets the peer causes, in two ways (#1072):
 - **A `RST_STREAM` the server sends because of the peer's frame** — every stream
   error the frame pump raises and answers with a reset, in `TryProcessFrameAsync`:
   a zero-increment `WINDOW_UPDATE`, an overrun flow-control window, a malformed
-  request head or trailer section, a request a request-parse interceptor rejects.
-  This is MadeYouReset (CVE-2025-8671). Before #1072 these resets were free, so a
-  client could churn streams at any rate without sending a single `RST_STREAM`.
+  request head or trailer section. This is MadeYouReset (CVE-2025-8671). Before
+  #1072 these resets were free, so a client could churn streams at any rate without
+  sending a single `RST_STREAM`.
 
-Three deliberate exclusions keep the accounting honest:
+Four deliberate exclusions keep the accounting honest:
 
 - A `RST_STREAM` on a never-opened (idle) stream is a *different* violation —
   the RFC 9113 §6.4 `PROTOCOL_ERROR` handled just below — and is excluded so
@@ -1701,6 +1701,16 @@ Three deliberate exclusions keep the accounting honest:
   exchange (see below) is not pushed toward `ENHANCE_YOUR_CALM`. The option's
   documentation said refusals counted; the code never counted them, and the
   documentation now says so.
+- A request a **request-parse interceptor rejects** (Http.DigestFields' `400` for a
+  malformed `Content-Digest`, say) does not count either, although the pump raises
+  it as a stream error. The rejection is the server's policy, taken before the
+  request is dispatched, so it starts no work and orphans no handler: it costs what
+  a refusal costs. Its reset carries `CANCEL` so as not to blame the peer (see
+  "Per-request feature injection — request-parse interceptors"), and no other
+  stream error the pump raises carries `CANCEL`, so the exclusion is by code. A
+  client whose requests a policy keeps rejecting would otherwise draw
+  `GOAWAY(ENHANCE_YOUR_CALM)` after 200 of them in five seconds, which kills its
+  healthy streams too. #1072 counted them at first; its review took them out.
 - The server's resets on its **own** account — the `RST_STREAM(NO_ERROR)` that
   stops an undrained body after a complete response (RFC 9113 §8.1), the `CANCEL`
   the application requests, the reset after the transport's `413` — are not raised
@@ -1719,29 +1729,50 @@ the reset budget allowed (CVE-2023-44487, and CVE-2025-8671 through server
 resets).
 
 Admission now counts the stream table plus `_retiredExchangeSlots`: the streams
-that left the table while their exchange was still running.
+that left the table while their exchange was still running. Each stream carries
+one exchange state (`none`, `running`, `finishing`, `retired`), changed with
+`Interlocked`:
 
-- **When an exchange starts running.** The frame pump marks the stream
-  (`Http2Stream.ExchangeRunning`, through `BeginExchange`) as it hands the
-  exchange to the host, and attaches the exchange to the connection.
+- **When an exchange starts running.** The frame pump sets the stream `running`
+  (`BeginExchange`) as it hands the exchange to the host, and attaches the
+  exchange to the connection. It takes no lock: until the host has the exchange,
+  only the pump can remove its stream.
+- **Removal.** `RemoveStreamAsync` turns a `running` exchange `retired` and counts
+  its slot in `_retiredExchangeSlots`, under `_syncRoot`, the lock admission reads.
+  That covers a peer reset, a reset the server sends, the transport's own `413`, and
+  any other removal while the handler may still run.
+- **A response the send path completes.** Once `SendAsync` has put the response's
+  `END_STREAM` out, it sets the exchange `finishing` before it removes the stream
+  (or resets it with `NO_ERROR`), so the removal gives the slot back at once. The
+  peer has `END_STREAM`, so under RFC 9113 §5.1.2 the stream no longer counts for
+  it, and the handler has returned. A client that keeps exactly
+  `MAX_CONCURRENT_STREAMS` requests in flight (a gRPC channel, `h2load -m N`, a
+  browser draining its queue) opens its next stream at once, while the
+  after-response hooks may still run; holding the slot through those hooks
+  refused that stream.
 - **When it ends.** `SendAsync` ends the exchange when it returns or throws,
   whatever it wrote — for a reset stream that is the call that observes the
   reset. Disposing the exchange ends it too, so a host that never calls
   `SendAsync` for a reset exchange still gives the slot back. `EndExchange` is
-  idempotent.
-- **Removal.** `RemoveStreamAsync` moves the slot of a running exchange from the
-  table to `_retiredExchangeSlots` (`HoldsRetiredSlot`), under `_syncRoot`, the
-  lock admission reads. Every removal path does this — a peer reset, a reset the
-  server sends, and a response that completed while `SendAsync` is still running
-  its after-response hooks — so the slot is held for exactly as long as the
-  exchange runs, and never twice.
+  idempotent, and takes the lock only to give back a `retired` slot.
 - **Never dispatched.** A stream reset or refused before the pump handed its
   exchange over holds no slot after its removal: nothing runs for it.
+
+`finishing` is set by the send path, not derived from the response having ended.
+A `HEAD` response streamed through the raw sink ends the stream with its HEADERS
+frame while the handler that wrote it keeps running, and an extended CONNECT
+tunnel can end the server's side the same way. A peer that resets such a stream
+would otherwise free a slot the handler still uses.
+
+The host's side of the bargain is in `IHttpConnectionContext.ReceiveAsync`'s
+contract: every exchange it yields is finalized with `SendAsync` or disposed. A
+host that drops a reset exchange without either never gets its slot back.
 
 The cost is that a client cancelling requests whose handlers are slow to stop
 sees `REFUSED_STREAM` until they stop. That is the RFC's own signal that the
 request was not processed and may be retried (RFC 9113 §8.7); the refusal does
-not count toward the reset budget (above), so it never escalates to `GOAWAY`.
+not count toward the reset budget (above), so it never escalates to `GOAWAY`. A
+client whose streams end with a complete response never pays it.
 
 ### PING validation
 

@@ -223,14 +223,7 @@ internal sealed partial class Http2ConnectionContext
             return;
         }
 
-        if (stream.IsClosed)
-        {
-            await RemoveStreamAsync(context.StreamId, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await EmitRstStreamAsync(context.StreamId, Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
-        }
+        await FinishCompletedResponseAsync(stream, cancellationToken).ConfigureAwait(false);
     }
 
     private bool IsTunnelWritable(Http2Stream stream) => stream.CanWriteResponse && !IsSendCreditClosed;

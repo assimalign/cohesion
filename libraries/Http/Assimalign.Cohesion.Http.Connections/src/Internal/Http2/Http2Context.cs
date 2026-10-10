@@ -57,19 +57,14 @@ internal sealed class Http2Context : TransportHttpContext
         Tunnel is not null ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
 
     /// <summary>
-    /// Disposes the exchange, then ends it on its connection. A host that never finalizes the exchange
+    /// Ends the exchange on its connection, then disposes it. A host that never finalizes the exchange
     /// through <c>SendAsync</c> still releases, by disposing it, the concurrency slot a reset stream
-    /// keeps while its exchange runs (RFC 9113 §5.1.2).
+    /// keeps while its exchange runs (RFC 9113 §5.1.2). Ending the exchange first means a disposal walk
+    /// that throws cannot keep the slot.
     /// </summary>
-    public override async ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
-        try
-        {
-            await base.DisposeAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            Connection?.EndExchange(Stream);
-        }
+        Connection?.EndExchange(Stream);
+        return base.DisposeAsync();
     }
 }

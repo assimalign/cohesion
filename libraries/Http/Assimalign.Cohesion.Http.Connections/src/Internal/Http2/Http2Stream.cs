@@ -44,6 +44,20 @@ internal sealed class Http2Stream
     private const int responseOwnerApplication = 1;
     private const int responseOwnerTransport = 2;
 
+    // _exchangeState values. RFC 9113 §5.1.2 / CVE-2023-44487 — the exchange dispatched on this stream
+    // keeps the stream's slot against SETTINGS_MAX_CONCURRENT_STREAMS while it runs, even after the
+    // stream leaves the stream table.
+    // none      — never dispatched, or ended (its SendAsync returned or threw, or it was disposed);
+    // running   — dispatched to the host, and the stream still holds its slot through the table;
+    // finishing — the send path completed the response and only its cleanup remains, so a removal
+    //             gives the slot back at once;
+    // retired   — the stream left the table while the exchange ran, and holds one of the connection's
+    //             retired-exchange slots until the exchange ends.
+    private const int exchangeNone = 0;
+    private const int exchangeRunning = 1;
+    private const int exchangeFinishing = 2;
+    private const int exchangeRetired = 3;
+
     private readonly MemoryStream _headerBlock;
     // RFC 9113 §6.10 / §10.5.1 — cap the raw header-block bytes accumulated across a HEADERS frame
     // and its CONTINUATION frames. Without this bound a CONTINUATION flood — an endless run of
@@ -98,6 +112,11 @@ internal sealed class Http2Stream
 
     // Set once the END_STREAM completing the application's final response is on the wire.
     private volatile bool _responseCompleted;
+
+    // The exchange* constants. The pump begins the exchange at dispatch, the send path, a removal and
+    // the end of the exchange race for the later transitions, so they are taken with Interlocked; the
+    // connection changes its retired-slot count under its synchronization root.
+    private int _exchangeState;
 
     // RFC 9110 §15.5.14 — the effective request-body cap frozen at dispatch (null = unbounded; always
     // null for CONNECT, whose post-head octets are tunnel traffic, not a message body), the running
@@ -155,22 +174,6 @@ internal sealed class Http2Stream
     /// consumption crediting.
     /// </summary>
     public bool ReceiveReclaimed { get; set; }
-
-    /// <summary>
-    /// Whether the exchange dispatched on this stream is still running: set when the frame pump hands
-    /// the exchange to the host, cleared when the exchange ends (its <c>SendAsync</c> returns, or its
-    /// context is disposed). While it runs, the stream keeps its slot against
-    /// <c>SETTINGS_MAX_CONCURRENT_STREAMS</c> even after a reset removes it from the stream table
-    /// (RFC 9113 §5.1.2). Guarded by the connection's synchronization root.
-    /// </summary>
-    public bool ExchangeRunning { get; set; }
-
-    /// <summary>
-    /// Whether this stream left the stream table while its exchange was still running, and so holds one
-    /// of the connection's retired-exchange slots until the exchange ends. Guarded by the connection's
-    /// synchronization root.
-    /// </summary>
-    public bool HoldsRetiredSlot { get; set; }
 
     public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow, int maxHeaderBlockSize)
     {
@@ -266,6 +269,55 @@ internal sealed class Http2Stream
     public bool TryClaimExchangeAccounting()
     {
         return Interlocked.CompareExchange(ref _exchangeAccounting, 2, 1) == 1;
+    }
+
+    /// <summary>
+    /// Marks the exchange dispatched on this stream as running, so the stream keeps its slot against
+    /// <c>SETTINGS_MAX_CONCURRENT_STREAMS</c> until the exchange ends, even after it leaves the stream
+    /// table (RFC 9113 §5.1.2). Called by the frame pump as it hands the exchange to the host; only the
+    /// pump can remove the stream before then, and the pump is the caller.
+    /// </summary>
+    public void BeginExchange()
+    {
+        Volatile.Write(ref _exchangeState, exchangeRunning);
+    }
+
+    /// <summary>
+    /// Marks a running exchange as finishing: the send path completed its response, and only the
+    /// stream's cleanup remains before <c>SendAsync</c> returns. A removal from then on gives the slot
+    /// back at once, since the peer saw <c>END_STREAM</c> and no handler is left running for the stream.
+    /// A no-op for an exchange that already left the table, or never ran.
+    /// </summary>
+    public void FinishExchange()
+    {
+        Interlocked.CompareExchange(ref _exchangeState, exchangeFinishing, exchangeRunning);
+    }
+
+    /// <summary>
+    /// Retires a running exchange as its stream leaves the stream table: the stream keeps a slot
+    /// outside the table until the exchange ends (CVE-2023-44487). The caller counts the slot under the
+    /// connection's synchronization root.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the exchange was running and now holds a retired slot;
+    /// <see langword="false"/> when it is finishing, ended, or never ran.
+    /// </returns>
+    public bool TryRetireExchange()
+    {
+        return Interlocked.CompareExchange(ref _exchangeState, exchangeRetired, exchangeRunning) == exchangeRunning;
+    }
+
+    /// <summary>
+    /// Ends the exchange: its <c>SendAsync</c> returned or threw, or its context was disposed.
+    /// Idempotent.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the exchange held a retired slot, which the caller gives back under
+    /// the connection's synchronization root; otherwise <see langword="false"/>.
+    /// </returns>
+    public bool EndExchange()
+    {
+        return Interlocked.Exchange(ref _exchangeState, exchangeNone) == exchangeRetired;
     }
 
     /// <summary>
