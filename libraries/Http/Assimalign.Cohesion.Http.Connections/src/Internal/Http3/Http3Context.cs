@@ -8,7 +8,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http3Context : TransportHttpContext
 {
     // 0 while the exchange runs, 1 once it has ended (SendAsync returned or threw, or the exchange was
-    // disposed). Interlocked: the send path and the host's disposal race to end it.
+    // disposed). A SendAsync that refused the head or a buffered trailer section (#1183) does not end it:
+    // nothing reached the wire, and the exchange runs until the caller finalizes it again or disposes it.
+    // Interlocked: the send path and the host's disposal race to end it.
     private int _exchangeEnded;
 
     /// <summary>
@@ -62,8 +64,9 @@ internal sealed class Http3Context : TransportHttpContext
     /// <summary>
     /// The transport's request-body stream for this exchange — the innermost stream, independent of
     /// any wrapper a request interceptor installed on <see cref="HttpRequest.Body"/>. The send path
-    /// consults it for a body-size rejection (413), for a transport reset, and to stop reading the
-    /// request stream once the complete response is on the wire.
+    /// consults it for a rejected body (413 over the size cap, 408 below the minimum data rate, 431 for
+    /// an oversized trailer section), for a transport reset, and to stop reading the request stream
+    /// once the complete response is on the wire.
     /// </summary>
     public Http3RequestBodyStream RequestBody { get; }
 
@@ -96,7 +99,10 @@ internal sealed class Http3Context : TransportHttpContext
         Tunnel is not null ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
 
     /// <summary>
-    /// Claims the end of the exchange: its <c>SendAsync</c> returned or threw, or it was disposed.
+    /// Claims the end of the exchange: its <c>SendAsync</c> returned or threw, or it was disposed. A
+    /// <c>SendAsync</c> that refused the head or a buffered trailer section (#1183) does not claim it:
+    /// nothing reached the wire and the response has not started, so the exchange stays running until
+    /// the caller finalizes it again or disposes it.
     /// </summary>
     /// <returns><see langword="true"/> for the first caller only.</returns>
     public bool TryEndExchange()

@@ -176,9 +176,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
     /// <summary>
     /// Gets the status the exchange is answered with because the request body was rejected — 413 when it
-    /// exceeded the body-size cap, 431 when its trailer section exceeded
-    /// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> before the response started — or <see langword="null"/> when
-    /// it was not rejected.
+    /// exceeded the body-size cap, 408 when it arrived below the minimum data rate (#1085), 431 when its
+    /// trailer section exceeded <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> before the response started — or
+    /// <see langword="null"/> when it was not rejected.
     /// </summary>
     public HttpStatusCode? RejectedStatusCode { get; private set; }
 

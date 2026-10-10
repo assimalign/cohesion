@@ -41,8 +41,8 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     /// <inheritdoc />
     /// <remarks>
     /// Also <see langword="true"/> once the transport has answered the stream itself — a request body
-    /// that crossed its cap is answered <c>413</c> by the frame pump — since that is the stream's final
-    /// response.
+    /// that crossed its cap is answered <c>413</c> by the frame pump, and one that fell below the minimum
+    /// data rate <c>408</c> by the body reader — since that is the stream's final response.
     /// </remarks>
     public bool HasResponseStarted => _context.HasFinalResponseStarted || _context.Stream.IsResponseClaimed;
 
@@ -87,8 +87,9 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     /// <remarks>
     /// The guards run in the order <see cref="HttpExtendedConnectRules"/> records. The response counts
     /// as started once the stream's final response is claimed, too — by the transport's own
-    /// <c>413</c>, which a CONNECT never draws since its octets are not a message body, but the claim
-    /// rules it out regardless.
+    /// <c>413</c> or <c>408</c>, which a CONNECT never draws since its octets are not a message body
+    /// (neither the body-size cap nor the minimum data rate applies to them), but the claim rules it out
+    /// regardless.
     /// </remarks>
     public async ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
     {

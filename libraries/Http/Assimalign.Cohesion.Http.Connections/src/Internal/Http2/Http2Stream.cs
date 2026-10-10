@@ -47,7 +47,10 @@ internal sealed class Http2Stream
     // _exchangeState values. RFC 9113 §5.1.2 / CVE-2023-44487 — the exchange dispatched on this stream
     // keeps the stream's slot against SETTINGS_MAX_CONCURRENT_STREAMS while it runs, even after the
     // stream leaves the stream table.
-    // none      — never dispatched, or ended (its SendAsync returned or threw, or it was disposed);
+    // none      — never dispatched, or ended (its SendAsync returned or threw, or it was disposed). A
+    //             SendAsync that refused the head or a buffered trailer section (#1183) does not end
+    //             it: nothing reached the wire, so the exchange stays running, slot included, until
+    //             the caller finalizes it again or disposes it;
     // running   — dispatched to the host, and the stream still holds its slot through the table;
     // finishing — the send path completed the response and only its cleanup remains, so a removal
     //             gives the slot back at once;
@@ -317,7 +320,9 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Ends the exchange: its <c>SendAsync</c> returned or threw, or its context was disposed.
-    /// Idempotent.
+    /// Idempotent. A <c>SendAsync</c> that refused the head or a buffered trailer section (#1183) does
+    /// not end it: nothing reached the wire and the response has not started, so the exchange stays
+    /// running, slot included, until the caller finalizes it again or disposes it.
     /// </summary>
     /// <returns>
     /// <see langword="true"/> when the exchange held a retired slot, which the caller gives back under
@@ -815,8 +820,8 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Fires <see cref="RequestAborted"/> for an exchange the transport ended without a reset — its
-    /// own <c>413</c> completed a stream the peer had already half-closed — so a handler still running
-    /// learns its request is over. Idempotent.
+    /// own <c>413</c> or <c>408</c> completed a stream the peer had already half-closed — so a handler
+    /// still running learns its request is over. Idempotent.
     /// </summary>
     public void AbortRequest()
     {

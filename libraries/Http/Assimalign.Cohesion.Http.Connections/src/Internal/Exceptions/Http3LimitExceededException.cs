@@ -4,8 +4,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Raised when an HTTP/3 request exceeds a limit the server answers with a status: the request-body
-/// stream's per-request body-size cap (<c>413 Content Too Large</c>, RFC 9110 §15.5.14), or the QPACK
-/// decoder's <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> on a request head or trailer section
+/// stream's per-request body-size cap (<c>413 Content Too Large</c>, RFC 9110 §15.5.14), its minimum
+/// data rate (<c>408 Request Timeout</c>, RFC 9110 §15.5.9, #1085), or the QPACK decoder's
+/// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> on a request head or trailer section
 /// (<c>431 Request Header Fields Too Large</c>, RFC 9114 §4.2.2). The HTTP/3 counterpart of
 /// <see cref="Http1LimitExceededException"/>.
 /// </summary>

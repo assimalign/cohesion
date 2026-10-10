@@ -739,7 +739,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Ends <paramref name="context"/>'s exchange on this connection: its <c>SendAsync</c> returned or
-    /// threw, or it was disposed. Idempotent per exchange.
+    /// threw, or it was disposed. A <c>SendAsync</c> that refused the head or a buffered trailer section
+    /// (#1183) does not call this: nothing reached the wire and the response has not started, so the
+    /// exchange stays running, and its request stream keeps the connection busy, until the caller
+    /// finalizes it again or disposes it. Idempotent per exchange.
     /// </summary>
     /// <param name="context">The exchange that ended.</param>
     internal void EndExchange(Http3Context context)
@@ -1738,9 +1741,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
         catch (Http3LimitExceededException exception)
         {
-            // A request hook read the body before dispatch and the body exceeded the cap. The request
-            // never became an exchange, so the transport answers the rejection (413) itself and then
-            // stops reading the request stream.
+            // A request hook read the body before dispatch and the body was rejected: over the cap (413),
+            // below the minimum data rate (408), or with a trailer section over the field-section limit
+            // (431). The request never became an exchange, so the transport answers the rejection itself
+            // and then stops reading the request stream.
             await AnswerRejectedRequestAsync(streamConnection, body, requestStreamId, exception.StatusCode, headToken).ConfigureAwait(false);
             return null;
         }
@@ -2036,11 +2040,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
-        // RFC 9110 §15.5.14 — the request body exceeded the body-size cap (or, RFC 9114 §4.2.2, its trailer
-        // section exceeded SETTINGS_MAX_FIELD_SECTION_SIZE) and the final response head has not been
-        // committed, so the exchange is answered 413 Content Too Large (or 431 Request Header Fields Too
-        // Large), whatever the application staged from a request it never fully received — unless it
-        // answered that status itself, whose representation is kept.
+        // RFC 9110 §15.5.14 — the request body exceeded the body-size cap (or, §15.5.9, it arrived below
+        // the minimum data rate, #1085; or, RFC 9114 §4.2.2, its trailer section exceeded
+        // SETTINGS_MAX_FIELD_SECTION_SIZE) and the final response head has not been committed, so the
+        // exchange is answered 413 Content Too Large (or 408 Request Timeout, or 431 Request Header Fields
+        // Too Large), whatever the application staged from a request it never fully received — unless it
+        // answered that status itself, whose representation is kept. The BeforeResponseHead hooks run
+        // after this replacement, so a field one of them adds can still have the head refused (#1183).
         if (requestBody.RejectedStatusCode is { } rejectedStatus && http3Context.Response.StatusCode != rejectedStatus)
         {
             await ReplaceWithStatusOnlyResponseAsync(http3Context, rejectedStatus).ConfigureAwait(false);

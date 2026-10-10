@@ -246,7 +246,7 @@ internal static class Http3HeaderCodec
     /// the <c>:status</c> pseudo-header and <c>content-length: 0</c> — used when a request is
     /// refused before it ever became an exchange: a request head over
     /// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> (431), or a request-body limit violated while a request
-    /// interceptor read the body (413, or 431 for its trailer section).
+    /// interceptor read the body (413, 408 below the minimum data rate, or 431 for its trailer section).
     /// </summary>
     /// <param name="statusCode">The final status code.</param>
     /// <returns>The QPACK-encoded field section.</returns>

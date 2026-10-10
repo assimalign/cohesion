@@ -2221,9 +2221,9 @@ Four deliberate exclusions keep the accounting honest:
   healthy streams too. #1072 counted them at first; its review took them out.
 - The server's resets on its **own** account — the `RST_STREAM(NO_ERROR)` that
   stops an undrained body after a complete response (RFC 9113 §8.1), the `CANCEL`
-  the application requests, the reset after the transport's `413` — are not raised
-  as stream errors, so ordinary server operation cannot trip the peer-abuse
-  detector.
+  the application requests, the reset after the transport's `413` or `408` — are
+  not raised as stream errors, so ordinary server operation cannot trip the
+  peer-abuse detector.
 
 ### A reset stream keeps its slot until its exchange ends
 
@@ -2247,8 +2247,8 @@ one exchange state (`none`, `running`, `finishing`, `retired`), changed with
   only the pump can remove its stream.
 - **Removal.** `RemoveStreamAsync` turns a `running` exchange `retired` and counts
   its slot in `_retiredExchangeSlots`, under `_syncRoot`, the lock admission reads.
-  That covers a peer reset, a reset the server sends, the transport's own `413`, and
-  any other removal while the handler may still run.
+  That covers a peer reset, a reset the server sends, the transport's own `413` or
+  `408`, and any other removal while the handler may still run.
 - **A response the send path completes.** Once `SendAsync` has put the response's
   `END_STREAM` out, it sets the exchange `finishing` before it removes the stream
   (or resets it with `NO_ERROR`), so the removal gives the slot back at once. The
@@ -2260,9 +2260,13 @@ one exchange state (`none`, `running`, `finishing`, `retired`), changed with
   refused that stream.
 - **When it ends.** `SendAsync` ends the exchange when it returns or throws,
   whatever it wrote — for a reset stream that is the call that observes the
-  reset. Disposing the exchange ends it too, so a host that never calls
-  `SendAsync` for a reset exchange still gives the slot back. `EndExchange` is
-  idempotent, and takes the lock only to give back a `retired` slot.
+  reset. A `SendAsync` that refuses the head or a buffered trailer section
+  (#1183) does not end it: nothing is on the wire, the caller may still send a
+  replacement, and the exchange keeps running, slot included, until it is
+  finalized again or disposed. Disposing the exchange ends it too, so a host that
+  never calls `SendAsync` for a reset exchange still gives the slot back.
+  `EndExchange` is idempotent, and takes the lock only to give back a `retired`
+  slot.
 - **Never dispatched.** A stream reset or refused before the pump handed its
   exchange over holds no slot after its removal: nothing runs for it.
 
@@ -2710,7 +2714,7 @@ head (#1328):
   should not fail on one of them. Trailers differ: the trailer collection exists only
   where HTTP/2 or HTTP/3 sends it, so `HttpTrailerFieldRules` refuses such a field
   when it is staged.
-- **Transport-built heads** (the HTTP/2 `413`, the HTTP/3 status-only response) carry
+- **Transport-built heads** (the HTTP/2 `413` or `408`, the HTTP/3 status-only response) carry
   only fields the transport chose, and HTTP/1.1, where these fields have meaning,
   does not use the rule.
 
@@ -3004,8 +3008,10 @@ buffered and the streaming path alike:
   server omit the fields it determines while generating the content. The collection stays
   supported, so a handler shared with GET stages trailers without branching on the method.
 - **Replaced responses.** When HTTP/3 replaces the application's staged response with a
-  bodyless `413` (the request body crossed its cap), the staged trailers are dropped with
-  it. The HTTP/2 transport's own `413` never carries them.
+  bodyless `413`, `408` or `431` (the request body crossed its cap, fell below the minimum
+  data rate, or carried a trailer section over the field-section limit), the staged
+  trailers are dropped with it. The HTTP/2 transport's own `413` or `408` never carries
+  them.
 - **CONNECT.** A CONNECT exchange reports the collection unsupported: once the tunnel is
   up, the stream carries only DATA (RFC 9113 §8.5, RFC 9114 §4.4), so a trailer section
   could never be sent, and adding one fails loudly instead.

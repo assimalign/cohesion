@@ -669,9 +669,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// <remarks>
     /// The exchange ends when this call returns or throws, whatever it wrote: from then on the stream
     /// no longer holds a concurrency slot it kept only because its exchange was still running
-    /// (<see cref="EndExchange"/>). The one exception is a head the encoder refused (#1183): nothing
-    /// reached the wire, so the exchange stays running, slot included, until the caller finalizes it
-    /// again or disposes it.
+    /// (<see cref="EndExchange"/>). The one exception is a head or buffered trailer section the encoder
+    /// refused (#1183): nothing reached the wire and the response has not started, so the exchange stays
+    /// running, slot included, until the caller finalizes it again or disposes it.
     /// </remarks>
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
@@ -2239,8 +2239,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             new HttpHeaderCollection(),
             bodyLength: 0);
 
-        // The frame pump writes a 413, and the pump must never queue behind response DATA, so the
-        // HEADERS go through the gate at control urgency.
+        // The frame pump writes the 413, and the pump must never queue behind response DATA, so the
+        // HEADERS go through the gate at control urgency. The 408 comes from the body reader
+        // (RejectSlowRequestBodyAsync), not the pump, and takes the same gate.
         await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -2432,9 +2433,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
     /// <summary>
     /// Ends the exchange on <paramref name="stream"/>: its <c>SendAsync</c> returned or threw, or its
-    /// context was disposed. A stream that left the stream table while the exchange ran gives back the
-    /// concurrency slot it kept (RFC 9113 §5.1.2); only then is the lock taken. Idempotent, and a no-op
-    /// for a stream whose exchange never reached the host.
+    /// context was disposed. A <c>SendAsync</c> that refused the head or a buffered trailer section
+    /// (#1183) does not call this: nothing reached the wire and the response has not started, so the
+    /// exchange stays running, slot included, until the caller finalizes it again or disposes it.
+    /// A stream that left the stream table while the exchange ran gives back the concurrency slot it
+    /// kept (RFC 9113 §5.1.2); only then is the lock taken. Idempotent, and a no-op for a stream whose
+    /// exchange never reached the host.
     /// </summary>
     /// <param name="stream">The stream whose exchange ended.</param>
     internal void EndExchange(Http2Stream stream)
@@ -2858,7 +2862,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             // An interim response may only precede the final response on a live stream. Once the
             // stream is reset, or its final response is claimed (the application's own, or the
-            // transport's 413 for a rejected request body), the interim is discarded (RFC 9113 §8.1).
+            // transport's 413 or 408 for a rejected request body), the interim is discarded (RFC 9113 §8.1).
             if (context.Stream.IsReset || context.Stream.IsResponseClaimed)
             {
                 return;
