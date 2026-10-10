@@ -47,7 +47,10 @@ entries and splits stay correct.
   excluded by the lock, and aborted writers' entries were physically reverted.
 - **Concurrency (MVP): a tree-level reader/writer latch.** Writers exclusive;
   cursors materialize their range's visible entries under the read latch, so no
-  latch is held across awaits and readers never see a torn structure. Lock
+  latch is held across awaits and readers never see a torn structure. The latch is
+  the storage's `StoragePageLatch`, and every page write passes it to the storage,
+  so a storage transaction's rollback restores the tree's pages under it too
+  (#1371, "A rollback restores the tree under its latch", below). Lock
   coupling / latch-per-node is a measured-need follow-up. The argument that the
   entry order below keeps this protocol correct is under "Concurrency and
   recovery".
@@ -456,6 +459,111 @@ review rather than fenced with a new Documents or Graph marker.
   `BTreeEntryOrderTests` covers a crash with a committed duplicate run and an
   in-flight one, the undo pair over 600 versions of one reference that span
   seventeen leaves, and the newest-first lookups across leaves an erase emptied.
+
+### A rollback restores the tree under its latch (#1371)
+
+The physical rollback was the one writer of index pages that did not take the tree
+latch. A storage transaction's rollback (`Storage.RollbackTransaction`) restores each
+page it touched in place: `PageImageCodec.TryApplyImage` clears the page and then
+writes the pre-image's runs back. Until #1371 it did so with no latch at all, so a
+cursor materializing under the read latch could read a leaf in the middle of that
+rewrite, or a parent already restored over a child that was not yet. The engine reaches
+this on every failed statement that changed an index: a multi-row `INSERT` that fails
+on a `UNIQUE` index has inserted its earlier rows' entries (and split leaves for them)
+when the violation rolls its bracket back. Three symptoms followed, all from the same
+torn read:
+
+- the runs are written in page order, so a leaf's header and entry directory come back
+  before the entry bytes at the end of the page, and for a moment a restored directory
+  slot points at cleared bytes: an entry with an empty key and reference, writer and
+  deleter all zero. Writer zero is below every snapshot's minimum and deleter zero means
+  live, so the entry is visible, and the SQL seek unpacked reference zero to page 0 and
+  failed with `StorageIOException` "Page 0 is the file header";
+- a cleared leaf also hides the committed entries it held, so a seek of a committed key
+  returned no row, with no error. The heap page the same rollback restores hid committed
+  rows too, by another path that the tree latch does not reach: the row read found the
+  page cleared and skipped the row as reclaimed. The #1371 review found that half and the
+  storage now closes it (below, and `Database.Storage` DESIGN, "No reader sees a
+  rollback's restore half done");
+- the root, or any node, read while its header was cleared failed the node check as
+  `IndexCorruptionException` (`COHDBI002`) on an undamaged tree. The message's "found
+  format 2" is a second read of the header, made after the restore had written it back.
+
+`SqlUniqueViolationRollbackRaceTests`' workload (two sessions inserting 40 fresh keys
+and then a committed one under a unique index, four sessions seeking committed keys)
+failed every one-second run against `f17d8bc0`: 40 of 40 in Release, 27 as
+`COHDBI002` on the root, 9 as an empty seek and 4 as page 0, within 0.2–1 s of the
+start. With the fix, 0 of 40 one-second runs and one 40-second run failed (5.0 million
+seeks against 177,000 rolled-back statements).
+
+**The fix: the rollback holds the latch the tree's readers hold.** The latch moved into
+the storage as `StoragePageLatch`, and `BTreeIndex` passes it with every page write
+(`Storage.OpenPageForWrite(transaction, page, latch)` and the matching
+`AllocatePageForWrite`). The storage requires the latch held exclusively for such a
+write, enlists it with the transaction and marks the page as latched, and
+`RollbackTransaction` restores the bracket's other pages first, outside every latch, then
+takes every enlisted latch exclusively, in creation order, restores the latched pages,
+and releases the latches before it appends the rollback record (the first version held
+the latches across the heap pages too, which the #1371 review measured as index readers
+held off for a large failed statement's whole restore). A cursor therefore sees the
+tree as the failed statement left it or as it was before the statement, and the
+pre-images form that earlier tree, because no other bracket can change the tree's pages
+while this one holds their page write locks. `BTreeRollbackLatchTests` pins both sides
+against the tree: a rollback waits while a reader holds the latch (the root still the
+grown tree's under the hold, the committed one after), and cursors racing rolled-back
+splits read exactly the committed entries (both fail against a rollback that takes no
+latch: a cursor read 62 or 304 of 400 entries, or met `COHDBI002`).
+
+- **No new wait cycle.** A rollback waits only for the latch's readers (a cursor holds
+  one latch, briefly, and waits for nothing else while it holds it) and its writers
+  (each waits for no other latch, and a page another bracket holds fails the write
+  instead of waiting). Two rollbacks that enlisted the same latches in different orders
+  take them in creation order, so neither holds one while it waits for the other
+  (`StoragePageLatchTests`). A rollback on a thread that holds an enlisted latch
+  exclusively skips it; one that holds it shared would not be able to take it, and no
+  caller rolls back inside a cursor.
+- **The root allocation is outside the latch.** `CreateRoot` runs before the tree, and
+  so its latch, exists. Nothing reads the root until the tree is published, and the
+  build that follows in the same bracket enlists the latch, so the rollback still holds
+  it for the root.
+- **The cost is on the rollback path.** A page write adds a thread-ownership check of
+  the latch, a scan of the transaction's enlisted latches (one per tree it wrote) and an
+  insert of the page id into the transaction's set of latched pages; the rollback takes
+  one latch per tree and waits for readers already inside. Measured
+  in one process on a shared machine (Release, four runs of seven interleaved rounds of
+  two million calls), re-opening a page the transaction already holds cost 89.9–151.5 ns
+  per call without a latch and 89.4–173.8 ns with one (round medians per run): inside the
+  run-to-run spread, on a path a B-tree insert takes a few times per entry.
+
+**The design question this leaves: should an index page be physically rolled back at
+all?** PostgreSQL never does. nbtree changes a page only under that page's buffer
+content lock (`_bt_doinsert`, `src/backend/access/nbtree/nbtinsert.c:105`; readers
+take a share lock on each page they read, `README:63-68`), and an aborted inserter's
+tuples stay where they are: they are invisible because the heap tuple's inserting
+transaction aborted, and they are marked `LP_DEAD` when a scan or a unique check finds
+them dead (`_bt_killitems`, `nbtutils.c:191`; `_bt_check_unique`, `nbtinsert.c:411`,
+`:677-704`), then removed by simple or bottom-up deletion or VACUUM
+(`_bt_delitems_delete_check`, `nbtpage.c:1523`; `btvacuumpage`, `nbtree.c:1415`). An
+abort writes nothing to the index. RavenDB's Voron does not restore pages either: a
+write transaction changes private copies (`LowLevelTransaction.ModifyPage`,
+`src/Voron/Impl/LowLevelTransaction.cs:533-573`) and a rollback frees them
+(`Rollback`, `:1433-1465`), so readers never see an uncommitted page. Here the bracket
+rollback is what makes a failed statement vanish from a transaction that continues: an
+entry carries the transaction's sequence, not the statement's, so an entry left behind
+by a failed statement would read as the transaction's own write, and the unique check
+would count it as live. Dropping the physical rollback for index pages needs either a
+statement-level stamp (PostgreSQL's subtransaction ids) or a logical statement undo
+through the tree (the `EraseAsync` the transaction rollback already uses, under the
+latch), and a bracket that commits its index pages while it rolls back its heap pages,
+which the storage cannot do: a bracket commits or rolls back whole. Both are larger
+than #1371, which closes the race inside the existing design; the question is recorded
+for the owner. The heap pages the same rollback restores are read under a pin, without a
+latch, and the first version of this fix left them as they were: SQL range seeks beside
+failing inserts and committing updates missed committed rows 56 to 247 times a minute,
+each a row read that found its page half restored and skipped the row (#1371 review).
+The storage now restores every page in one copy that a row read confirms against and
+repeats when a restore overlapped it, so no row read sees a restore half done either
+(`Database.Storage` DESIGN, "No reader sees a rollback's restore half done").
 
 ### Measurements (2026-10-02)
 

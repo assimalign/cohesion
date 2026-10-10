@@ -171,7 +171,11 @@ rollback, and it throws nothing:
 1. **Drain.** The rollback waits for the statement apply already admitted for the
    context, if one is running. The wait observes no token and is bounded (nothing
    awaited inside the apply gate may actually wait), so it cannot stop a started
-   rollback; a commit drains the same way before its commit record.
+   rollback; a commit drains the same way before its commit record. A failed
+   statement's bracket rollback inside the gate does wait for one thing: the readers of
+   each B-tree the bracket changed, whose latch it holds while it restores the tree's
+   pages (#1371, `Database.Storage` DESIGN). A reader holds that latch only while it
+   materializes a range and waits for nothing the gate holds, so that wait is bounded too.
 2. **Undo.** `VersionStore.PurgeWriterAsync(writer)` removes the writer's versions.
 3. **State.** The state becomes `RolledBack`, or `Faulted` for an abort a failed commit
    or disposal forced.

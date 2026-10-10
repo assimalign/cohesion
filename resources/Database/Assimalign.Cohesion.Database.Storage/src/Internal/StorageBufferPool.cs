@@ -900,6 +900,10 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         public long Version;
         private long _cleanVersion;
 
+        // Odd while a rollback rewrites the page in place, advanced by two by every restore
+        // (BeginRestore, EndRestore); read by record readers that hold only a pin (BeginRead).
+        private int _restoreSequence;
+
         public BufferEntry(byte[] buffer)
         {
             // A pinned-object-heap array never moves, so its address is stable for the
@@ -913,5 +917,58 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         public void MarkDirty() => Interlocked.Increment(ref Version);
 
         public void MarkClean(long version) => Volatile.Write(ref _cleanVersion, version);
+
+        /// <summary>
+        /// Starts a read of the page that must not observe a rollback's restore half done, and
+        /// returns the restore sequence to confirm it with (<see cref="IsUnchangedSince"/>). Waits
+        /// while a restore is rewriting the page; a restore is one copy of the page, so the wait is
+        /// short unless the restoring thread is descheduled.
+        /// </summary>
+        /// <remarks>
+        /// A sequence lock, PostgreSQL's <c>st_changecount</c> protocol
+        /// (<c>src/include/utils/backend_status.h:101-116</c>, <c>:181-238</c>): the restore makes
+        /// the sequence odd before it changes the page and even again after, and a read that saw
+        /// the same even value before and after it saw no restore. The page's own writers do not
+        /// advance it: a bracket's forward changes publish in an order a pinned reader can follow
+        /// (<see cref="SlottedPage"/>), and only the restore rewrites bytes a reader may be copying.
+        /// </remarks>
+        public int BeginRead()
+        {
+            int sequence = Volatile.Read(ref _restoreSequence);
+            return (sequence & 1) == 0 ? sequence : WaitForRestore();
+        }
+
+        /// <summary>
+        /// Returns whether no restore started or ran since <paramref name="sequence"/> was read
+        /// (<see cref="BeginRead"/>): every load the read made before this call happened before the
+        /// sequence is read again, so a read this confirms saw one state of the page.
+        /// </summary>
+        public bool IsUnchangedSince(int sequence)
+        {
+            Volatile.ReadBarrier();
+            return Volatile.Read(ref _restoreSequence) == sequence;
+        }
+
+        /// <summary>
+        /// Marks the page as being restored in place; the restoring thread holds the page's write
+        /// lock, so no other writer changes it, and calls <see cref="EndRestore"/> when the page is
+        /// whole again, also on failure.
+        /// </summary>
+        public void BeginRestore() => Interlocked.Increment(ref _restoreSequence);
+
+        /// <summary>Marks the restore <see cref="BeginRestore"/> started as finished.</summary>
+        public void EndRestore() => Interlocked.Increment(ref _restoreSequence);
+
+        private int WaitForRestore()
+        {
+            var spinner = new SpinWait();
+            int sequence;
+            while (((sequence = Volatile.Read(ref _restoreSequence)) & 1) != 0)
+            {
+                spinner.SpinOnce();
+            }
+
+            return sequence;
+        }
     }
 }

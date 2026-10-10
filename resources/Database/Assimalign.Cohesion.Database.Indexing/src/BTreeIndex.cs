@@ -47,6 +47,13 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// belong to the vacuum feature that follows version pruning.
 /// </para>
 /// <para>
+/// The latch is a <see cref="StoragePageLatch"/>, and every page write goes through the storage
+/// overloads that take it, so a storage transaction that changed the tree restores its pages
+/// under the latch when it rolls back (#1371): a failed statement's bracket rollback rewrites
+/// each page in place, and a cursor that read during it saw cleared leaves (an entry reference
+/// of zero, an empty seek) and a root that was no node.
+/// </para>
+/// <para>
 /// Entry order (#1194): keys repeat — secondary indexes repeat a value per row, and
 /// every MVCC version adds an entry — so entries are ordered by their identity
 /// <c>(key, entry reference, writer)</c> (<see cref="BTreeEntryOrder"/>), which is
@@ -61,7 +68,7 @@ public sealed class BTreeIndex
     private readonly Func<TransactionContext, StorageTransaction> _transactionSource;
     private readonly LockManager? _lockManager;
     private readonly ulong _objectId;
-    private readonly ReaderWriterLockSlim _latch = new(LockRecursionPolicy.NoRecursion);
+    private readonly StoragePageLatch _latch = StoragePageLatch.Create();
     private readonly long _rootPageId;
 
     internal BTreeIndex(
@@ -104,6 +111,12 @@ public sealed class BTreeIndex
     /// between the split and the catalog's next persistence point.
     /// </summary>
     internal long RootPageId => _rootPageId;
+
+    /// <summary>
+    /// Gets the tree latch: the storage page latch every reader holds shared and every writer, and
+    /// a rolling-back storage transaction that changed the tree, hold exclusively.
+    /// </summary>
+    internal StoragePageLatch Latch => _latch;
 
     /// <summary>
     /// Allocates the root leaf of a new tree inside the given storage transaction.
@@ -192,7 +205,7 @@ public sealed class BTreeIndex
 
         var storageTransaction = _transactionSource(transaction);
 
-        _latch.EnterWriteLock();
+        _latch.EnterWrite();
         try
         {
             // Uniqueness is enforced against the LATEST state, not the begin
@@ -210,7 +223,7 @@ public sealed class BTreeIndex
         }
         finally
         {
-            _latch.ExitWriteLock();
+            _latch.ExitWrite();
         }
     }
 
@@ -261,7 +274,7 @@ public sealed class BTreeIndex
 
         var storageTransaction = _transactionSource(transaction);
 
-        _latch.EnterWriteLock();
+        _latch.EnterWrite();
         try
         {
             // The reference's live mapping — tombstone it under the transaction's
@@ -276,7 +289,7 @@ public sealed class BTreeIndex
                 out long leafId,
                 out int index))
             {
-                using var writable = _storage.OpenPageForWrite(storageTransaction, (PageId)leafId);
+                using var writable = _storage.OpenPageForWrite(storageTransaction, (PageId)leafId, _latch);
                 var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
                 writableNode.SetDeleter(index, transaction.Sequence.Value);
                 writable.MarkDirty();
@@ -284,7 +297,7 @@ public sealed class BTreeIndex
         }
         finally
         {
-            _latch.ExitWriteLock();
+            _latch.ExitWrite();
         }
     }
 
@@ -326,14 +339,14 @@ public sealed class BTreeIndex
 
         var results = new List<(byte[] Key, ulong EntryReference)>();
 
-        _latch.EnterReadLock();
+        _latch.EnterRead();
         try
         {
             CollectVisible(snapshot, range, results);
         }
         finally
         {
-            _latch.ExitReadLock();
+            _latch.ExitRead();
         }
 
         if (reverse)
@@ -374,14 +387,14 @@ public sealed class BTreeIndex
             throw new IndexException($"Index key of {key.Length} bytes exceeds the {BTreeNode.MaxKeyLength}-byte maximum.");
         }
 
-        _latch.EnterWriteLock();
+        _latch.EnterWrite();
         try
         {
             InsertCore(transaction, key.Encoded.Span, entryReference, writer.Value, deleter.Value);
         }
         finally
         {
-            _latch.ExitWriteLock();
+            _latch.ExitWrite();
         }
 
         return default;
@@ -406,7 +419,7 @@ public sealed class BTreeIndex
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
 
-        _latch.EnterWriteLock();
+        _latch.EnterWrite();
         try
         {
             // The full identity is known: the descent lands on the entry's leaf.
@@ -416,7 +429,7 @@ public sealed class BTreeIndex
                 out long leafId,
                 out int index))
             {
-                using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch);
                 var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
                 writableNode.RemoveLeafEntry(index);
                 writable.MarkDirty();
@@ -424,7 +437,7 @@ public sealed class BTreeIndex
         }
         finally
         {
-            _latch.ExitWriteLock();
+            _latch.ExitWrite();
         }
 
         return default;
@@ -447,7 +460,7 @@ public sealed class BTreeIndex
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
 
-        _latch.EnterWriteLock();
+        _latch.EnterWrite();
         try
         {
             // The deleter is not part of the order: look among the reference's
@@ -460,7 +473,7 @@ public sealed class BTreeIndex
                 out long leafId,
                 out int index))
             {
-                using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch);
                 var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
                 writableNode.SetDeleter(index, 0);
                 writable.MarkDirty();
@@ -468,7 +481,7 @@ public sealed class BTreeIndex
         }
         finally
         {
-            _latch.ExitWriteLock();
+            _latch.ExitWrite();
         }
 
         return default;
@@ -485,7 +498,7 @@ public sealed class BTreeIndex
     {
         long purged = 0;
 
-        _latch.EnterWriteLock();
+        _latch.EnterWrite();
         try
         {
             long leafId = DescendToLeftmostLeaf();
@@ -516,7 +529,7 @@ public sealed class BTreeIndex
 
                             if (writable is null)
                             {
-                                writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                                writable = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch);
                                 node = OpenNode(writable.Page.AsBodySpan(), leafId);
                             }
 
@@ -546,7 +559,7 @@ public sealed class BTreeIndex
         }
         finally
         {
-            _latch.ExitWriteLock();
+            _latch.ExitWrite();
         }
 
         return purged;
@@ -811,7 +824,7 @@ public sealed class BTreeIndex
 
             if (fits || fitsAfterCompaction)
             {
-                using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch);
                 var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
 
                 // The position the read pass found still holds: the write latch kept
@@ -883,8 +896,8 @@ public sealed class BTreeIndex
         long siblingId;
         int count;
 
-        using (var leafHandle = _storage.OpenPageForWrite(transaction, (PageId)leafId))
-        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
+        using (var leafHandle = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch))
+        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch))
         {
             var leaf = OpenNode(leafHandle.Page.AsBodySpan(), leafId);
             count = leaf.EntryCount;
@@ -917,7 +930,7 @@ public sealed class BTreeIndex
 
             if (oldNext >= 0)
             {
-                using var oldNextHandle = _storage.OpenPageForWrite(transaction, (PageId)oldNext);
+                using var oldNextHandle = _storage.OpenPageForWrite(transaction, (PageId)oldNext, _latch);
                 var oldNextNode = OpenNode(oldNextHandle.Page.AsBodySpan(), oldNext);
                 oldNextNode.PrevLeaf = siblingId;
                 oldNextHandle.MarkDirty();
@@ -996,7 +1009,7 @@ public sealed class BTreeIndex
         // separator goes to directory index p and its child becomes c(p + 1).
         int position = splitSlot + 1;
 
-        using (var parentHandle = _storage.OpenPageForWrite(transaction, (PageId)parentId))
+        using (var parentHandle = _storage.OpenPageForWrite(transaction, (PageId)parentId, _latch))
         {
             var parent = OpenNode(parentHandle.Page.AsBodySpan(), parentId);
 
@@ -1020,7 +1033,7 @@ public sealed class BTreeIndex
         long target = position <= mid ? parentLeftId : parentSiblingId;
         int targetPosition = position <= mid ? position : position - mid - 1;
 
-        using var targetHandle = _storage.OpenPageForWrite(transaction, (PageId)target);
+        using var targetHandle = _storage.OpenPageForWrite(transaction, (PageId)target, _latch);
         var targetNode = OpenNode(targetHandle.Page.AsBodySpan(), target);
         EnsureSeparatorOrder(targetNode, target, targetPosition, separator);
         targetNode.InsertInternalEntry(targetPosition, separator.AsSearchKey(), childId);
@@ -1040,8 +1053,8 @@ public sealed class BTreeIndex
     {
         long leftId;
 
-        using (var rootHandle = _storage.OpenPageForWrite(transaction, (PageId)RootPageId))
-        using (var leftHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
+        using (var rootHandle = _storage.OpenPageForWrite(transaction, (PageId)RootPageId, _latch))
+        using (var leftHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch))
         {
             var rootBody = rootHandle.Page.AsBodySpan();
             var leftBody = leftHandle.Page.AsBodySpan();
@@ -1056,14 +1069,14 @@ public sealed class BTreeIndex
                 // sibling, which must now point back at the relocated half.
                 if (left.PrevLeaf >= 0)
                 {
-                    using var previousHandle = _storage.OpenPageForWrite(transaction, (PageId)left.PrevLeaf);
+                    using var previousHandle = _storage.OpenPageForWrite(transaction, (PageId)left.PrevLeaf, _latch);
                     OpenNode(previousHandle.Page.AsBodySpan(), left.PrevLeaf).NextLeaf = leftId;
                     previousHandle.MarkDirty();
                 }
 
                 if (left.NextLeaf >= 0)
                 {
-                    using var nextHandle = _storage.OpenPageForWrite(transaction, (PageId)left.NextLeaf);
+                    using var nextHandle = _storage.OpenPageForWrite(transaction, (PageId)left.NextLeaf, _latch);
                     OpenNode(nextHandle.Page.AsBodySpan(), left.NextLeaf).PrevLeaf = leftId;
                     nextHandle.MarkDirty();
                 }
@@ -1102,8 +1115,8 @@ public sealed class BTreeIndex
         long siblingId;
         int count;
 
-        using (var nodeHandle = _storage.OpenPageForWrite(transaction, (PageId)nodeId))
-        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
+        using (var nodeHandle = _storage.OpenPageForWrite(transaction, (PageId)nodeId, _latch))
+        using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index, _latch))
         {
             var node = OpenNode(nodeHandle.Page.AsBodySpan(), nodeId);
             count = node.EntryCount;

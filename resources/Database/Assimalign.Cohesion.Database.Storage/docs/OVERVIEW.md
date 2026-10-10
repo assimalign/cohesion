@@ -18,6 +18,10 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages, storage transactions (`StorageTransaction`), and `StorageUnitIterator` full scans.
+  A rollback restores each page in one copy that record reads confirm against, so a committed
+  record beside a failed bracket's changes is never read as reclaimed; a structure whose readers
+  take no page write lock (a B-tree) writes its pages under its `StoragePageLatch`, and a
+  rollback restores them last, under that latch (#1371).
 - **Journal** — `StorageJournal` write-ahead logging with begin/commit/rollback
   markers and CRC-32C-protected frames. A page is journaled as a full image once per
   checkpoint interval, on its first change since the checkpoint, and each commit journals only

@@ -33,13 +33,15 @@ internal sealed partial class SqlPlanExecutor
     /// </para>
     /// <para>
     /// The read holds a pin, not a latch (Storage DESIGN, "Reading a record through a
-    /// reference"), so it can copy a slot while a writer reclaims it: a failed statement's
-    /// bracket rollback restoring the page, or the version purge freeing and clearing it. That
-    /// copy is torn, not damaged, so a failed decode is confirmed before it is reported
-    /// (<see cref="DecodeConfirmed"/>). The confirmation narrows the window and does not close it:
-    /// a writer descheduled half-way through rewriting the page leaves the same torn bytes for
-    /// every read. PostgreSQL needs no second read, because it reads a heap page under a share
-    /// lock (<c>src/backend/access/heap/heapam.c:647</c>, <c>:1706</c>).
+    /// reference"), so it can copy a slot while a writer reclaims it, such as the version purge
+    /// freeing and clearing the page. That copy is torn, not damaged, so a failed decode is
+    /// confirmed before it is reported (<see cref="DecodeConfirmed"/>). The confirmation narrows
+    /// the window and does not close it: a writer descheduled half-way through rewriting the page
+    /// leaves the same torn bytes for every read. A failed statement's bracket rollback is not
+    /// such a writer since #1371: the storage read confirms itself against the page's restore
+    /// (Storage DESIGN, "No reader sees a rollback's restore half done"). PostgreSQL needs no
+    /// second read, because it reads a heap page under a share lock
+    /// (<c>src/backend/access/heap/heapam.c:647</c>, <c>:1706</c>).
     /// </para>
     /// </remarks>
     /// <param name="record">The stored record.</param>

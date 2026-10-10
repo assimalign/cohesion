@@ -14,7 +14,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// <remarks>
 /// The iterator pins at most one page at a time; disposing it releases that pin. The pin is not a
 /// latch: a slot deleted or reverted and a page freed while the scan runs are skipped, and a page
-/// the scan cannot read (a failed checksum, a malformed page, an I/O error) fails it (#1342).
+/// the scan cannot read (a failed checksum, a malformed page, an I/O error) fails it (#1342). A
+/// read that a rollback's restore of the page overlapped is read again, so the scan sees each
+/// page whole (#1371).
 /// </remarks>
 public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
 {
@@ -120,31 +122,9 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
                 _pagesVisited++;
             }
 
-            // An owner-scoped scan verifies membership under the pin: a page freed
-            // and reallocated after the snapshot was taken no longer matches and is
-            // skipped rather than misread.
-            bool eligible = _currentHandle.Page.Type == PageType.Data
-                && (_ownerPages is null || _currentHandle.Page.OwnerId == _ownerId);
-
-            if (eligible)
+            if (TryReadNextSlot((PageId)pageId, _currentHandle))
             {
-                var slotted = new SlottedPage(_currentHandle.Page);
-                _currentSlotIndex++;
-
-                // The pin holds no latch, so a writer can delete a slot or revert the page to
-                // fewer slots between any two reads here. TryReadSlot checks and copies one
-                // snapshot of the slot entry against the live slot count, and reads a slot that
-                // stopped holding a record as one to skip, not as an error (#1342).
-                while (_currentSlotIndex < slotted.SlotCount)
-                {
-                    if (slotted.TryReadSlot(_currentSlotIndex, out byte[] data))
-                    {
-                        _current = new StorageUnit((PageId)pageId, _currentSlotIndex, data);
-                        return true;
-                    }
-
-                    _currentSlotIndex++;
-                }
+                return true;
             }
 
             _currentHandle.Dispose();
@@ -184,5 +164,75 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
     {
         _pagePosition++;
         _currentSlotIndex = -1;
+    }
+
+    /// <summary>
+    /// Moves to the next slot of the pinned page that holds a record, when the page is still one
+    /// of the scan's; false when the page has no further record for it.
+    /// </summary>
+    /// <remarks>
+    /// A failed bracket's rollback can rewrite the page while the scan stands on it, so each
+    /// attempt is confirmed against the page's restore sequence and repeated when a restore
+    /// overlapped it: the scan never skips a committed record because the page was half restored
+    /// when it read it, and a malformed read a restore overlapped is not reported as damage (#1371).
+    /// </remarks>
+    private bool TryReadNextSlot(PageId pageId, StoragePageHandle handle)
+    {
+        var entry = handle.Entry;
+        while (true)
+        {
+            int restore = entry.BeginRead();
+            try
+            {
+                int slotIndex = FindNextSlot(handle.Page, out byte[] data);
+                if (!entry.IsUnchangedSince(restore))
+                {
+                    continue;
+                }
+
+                if (slotIndex < 0)
+                {
+                    return false;
+                }
+
+                _currentSlotIndex = slotIndex;
+                _current = new StorageUnit(pageId, slotIndex, data);
+                return true;
+            }
+            catch (StorageCorruptionException) when (!entry.IsUnchangedSince(restore))
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// One attempt of <see cref="TryReadNextSlot"/>: the index of the next slot after the current
+    /// one that holds a record, with a copy of it, or -1.
+    /// </summary>
+    private int FindNextSlot(Page page, out byte[] data)
+    {
+        data = [];
+
+        // An owner-scoped scan verifies membership under the pin: a page freed and reallocated
+        // after the snapshot was taken no longer matches and is skipped rather than misread.
+        if (page.Type != PageType.Data || (_ownerPages is not null && page.OwnerId != _ownerId))
+        {
+            return -1;
+        }
+
+        // The pin holds no latch, so a writer can delete a slot or revert the page to fewer slots
+        // between any two reads here. TryReadSlot checks and copies one snapshot of the slot entry
+        // against the live slot count, and reads a slot that stopped holding a record as one to
+        // skip, not as an error (#1342).
+        var slotted = new SlottedPage(page);
+        for (int slotIndex = _currentSlotIndex + 1; slotIndex < slotted.SlotCount; slotIndex++)
+        {
+            if (slotted.TryReadSlot(slotIndex, out data))
+            {
+                return slotIndex;
+            }
+        }
+
+        return -1;
     }
 }

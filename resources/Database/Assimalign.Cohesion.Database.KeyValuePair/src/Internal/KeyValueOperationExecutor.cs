@@ -378,9 +378,10 @@ internal sealed class KeyValueOperationExecutor
     /// fails its checksum or cannot be read fails the command (#1342).
     /// </summary>
     /// <remarks>
-    /// The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (a
-    /// failed command's bracket rollback restoring the page, the version purge freeing and
-    /// clearing it), and that copy is torn rather than damaged. A record that does not decode is
+    /// The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (the
+    /// version purge freeing and clearing it; a failed command's bracket rollback restoring the
+    /// page did too until #1371, when the storage read began confirming itself against the
+    /// restore), and that copy is torn rather than damaged. A record that does not decode is
     /// therefore confirmed before it is reported (#1362, <see cref="DecodeConfirmed"/>). The
     /// confirmation narrows the window and does not close it: a writer descheduled half-way
     /// through rewriting the page leaves the same torn bytes for every read.
