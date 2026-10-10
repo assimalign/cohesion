@@ -72,6 +72,10 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **8 — API surface** | Handler return values, validation, files, OpenAPI. | #1055 |
 | **9 — Server and operations** | ALPN multi-protocol endpoints, diagnostics, lame-duck drain, telemetry, mTLS. | #1049 |
 | **10 — Gated** | WebSockets, rewrite, OIDC, trailers/gRPC, distributed stores. | an ADR, a decision, or another program |
+| **11 — Close the remote-triggerable holes** *(Phase 2 follow-ups, opened 2026-10-09)* | Every advisory candidate in the follow-up backlog, plus defects any client can turn into a 5xx or a log flood. | Stage 10 approved |
+| **12 — Protocol conformance** | Response framing, HTTP/3 stream lifecycle, request-target and cookie rules, telemetry conformance. | Stage 11 reviewed |
+| **13 — Web correctness** | Host start, the response-starting hook, repeated query and form values, validation error keys, trace ids. | Stage 12 reviewed |
+| **14 — Performance, operations and DX** | Allocation and thread-hop costs, transport rejection telemetry, certificate authentication, template and docs gaps. | Stage 13 reviewed |
 
 **The single most important edge in the whole program:** **#762 (rewrite `WebApplicationServer`) is the gate for nearly all Web middleware.** It is a Stage-1, P001 item. Land it early. Until it merges, the only Web-side work that is safe is the Stage-0 deletions and pure-primitive Http-library items.
 
@@ -260,7 +264,7 @@ Commits, behavior changes and follow-ups are in §5.
 
 ### Stage 10 — Gated
 
-**Status:** delivered 2026-10-07 on the Phase 2 branch and approved in the owner's review on 2026-10-09 (§7.4, decisions 19–20). The review follow-ups (#1367–#1369) are delivered and in owner review. Three ADRs cleared three gates (§7.4, decisions 16–18): WebSockets (#765), Web.Rewrite (#782) and trailers (#1314, #1315) are built. Defects found along the way were fixed in the same stage, among them an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1. Commits, behavior changes and follow-ups are in §5.
+**Status:** delivered 2026-10-07 on the Phase 2 branch and approved in the owner's review on 2026-10-09 (§7.4, decisions 19–20). The review follow-ups (#1367–#1369) were delivered and approved the same day (decision 21). Three ADRs cleared three gates (§7.4, decisions 16–18): WebSockets (#765), Web.Rewrite (#782) and trailers (#1314, #1315) are built. Defects found along the way were fixed in the same stage, among them an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1. Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -269,6 +273,82 @@ Commits, behavior changes and follow-ups are in §5.
 | #829, #830 | C | OIDC discovery/JWKS runtime and keyed token crypto in IdentityModel; after those, an OIDC handler and JWT Bearer `Authority` discovery | the IdentityModel program |
 | #1314, #1315 | A | HTTP/2 request trailers decoded (a defect); response trailers on HTTP/2 and HTTP/3 | cleared by decision 18 |
 | #806–#808 | C | Distributed data-protection key storage; distributed session and output-cache stores get filed alongside | post-v1 |
+
+### Stages 11–14 — the Phase 2 follow-ups (lined up 2026-10-09)
+
+Stages 5–10 filed 75 follow-ups that the branch did not close. A reconciliation on 2026-10-09 checked each one against the code at `305c5232`, and two skeptics tried to refute every closure:
+- #1076 and #1081 are already fixed on the branch.
+- #1071 duplicates #1339 and was closed.
+- #1074 is only half fixed.
+
+The planning critic found three defects nobody had filed: #1375, #1376 and the request-line half of #1341. The lineup, the scope changes and the decisions are in §7.4, decisions 22–31.
+
+Project #13 has no Wave option past W06, so items in these stages keep W06. This plan is the authority for their order.
+
+### Stage 11 — Close the remote-triggerable holes
+
+**Status:** in progress (2026-10-09). Sessions in the same row edit the same files, so they run serially as one session with one commit per issue. The rows run in parallel. Wave 2 starts once wave 1 is integrated.
+
+| Session | Issues (in order) | Lane | Blocked by | Why |
+|---|---|---|---|---|
+| 1 | #1072 → #1075 → #1074 | A | — | HTTP/2 stream slots stay held while a reset exchange runs (rapid-reset and MadeYouReset class). A cancelled send leaks a slot under that rule, and the WINDOW_UPDATE half of #1074 edits the same bookkeeping |
+| 2 | #1082 | A | — | HTTP/3 field sections have no decoded-size limit: 32 KB of QPACK costs ~0.85 s of CPU and 4 GB (P001) |
+| 3 | #1080 | C/A | — | QUIC aborts carry no code, so complete HTTP/3 responses fail behind unread uploads. Widened to the connection close code |
+| 4 | #1339 → #1375 | A | — | HTTP/1.1 body limits answered 500. Chunk framing lines and trailers are unbounded on every listener (P001) |
+| 5 | #1341 | A/B | — | NUL, bare CR and bare LF are kept in HTTP/1.1 field values (smuggling vector). A non-ASCII request line is routed as a different path. Introduces the core field rule |
+| 6 | #1301 | B/E | — | HTTP methods are case-folded (ACL and WAF bypass behind a proxy), Web.Cors included |
+| 7 | #1186 | B/E | — | An extensionless file named `html` is served as HTML (stored XSS) |
+| 8 | #1155 | C | — | An unknown key id forces an unthrottled key-ring reload under a process-wide lock |
+| 9 | #1077 | F | — | `RequireHost` matches the raw host, not the effective one, behind a trusted proxy |
+| 10 | #1377 | F | — | The Email validation rule backtracks quadratically, and Web.Validation runs it on request bodies (P001) |
+| 11 | #1312 | C | #1308 (merged here) | An accept that fails for want of descriptors or buffers stops the endpoint |
+| 12 | #1210 | E | — | `UseForms` answers an oversized or malformed form with a 500 |
+| 13 (wave 2) | #1085 → #1084 | A | sessions 1, 3 | HTTP/2 and HTTP/3 Slowloris: no timeouts or data rates. The HTTP/3 streamed send path #1085 relies on gets #1084's body-cap gate |
+| 14 (wave 2) | #1183 → #1376 | A/B | sessions 2, 5 | CR, LF and NUL are not rejected in response fields (CWE-113) on any writer, the Http.ProtocolUpgrade 101 writer included. HTTP/2 and HTTP/3 never validate inbound fields |
+| 15 (wave 2) | #1340 | D/E | session 4 | A malformed body is logged as a 500 application fault on HTTP/1.1, and the client got 400. The HTTP/2 and HTTP/3 half is #1378, in Stage 12 |
+
+### Stage 12 — Protocol conformance
+
+**Status:** lined up. Gate: Stage 11 reviewed.
+
+| Issue | Lane | Blocked by | Note |
+|---|---|---|---|
+| #1073 | A | — | `Content-Length` on 204, 304 and empty HTTP/1.1 HEAD (HTTP/2 and HTTP/3 HEAD done) |
+| #1083 → #1306 | A | #1080 | HTTP/3 control-stream FIN and push PRIORITY_UPDATE. Requests after GOAWAY are reset with H3_REQUEST_REJECTED |
+| #1330 | C/A | #1080, #1084 | A QUIC stream cannot half-close, which breaks extended CONNECT tunnels over real QUIC |
+| #1378 | A/D | #1080, #1340 | #1340's client-fault report on HTTP/2 and HTTP/3 |
+| #1334 | A/B | #1073 | Classic CONNECT and asterisk-form targets are unvalidated on HTTP/2 and HTTP/3 |
+| #1153 → #1154 | B | #1183 | Cookie `Path`/`Domain` grammar. One `Set-Cookie` line per value on a 101 |
+| #1185, #1204 | B | — | Exact `If-Range` date match. RFC 9110 reason phrases |
+| #1298 → #1299 | D | — | A redacted `url.query` on server spans. Traces continue from a future-version `traceparent` |
+| #1324 | E | — | Redirect `Location` paths are percent-encoded in HttpsPolicy and StaticFiles |
+
+### Stage 13 — Web correctness
+
+**Status:** lined up. Gate: Stage 12 reviewed.
+- #1079 → #1078: a failed host start, and late middleware throws.
+- #1156: the response-starting hook.
+- #1335 → #1211: repeated query and form values; a single read returns the first value (decision 31).
+- #1208 → #1209: validation errors kept and keyed by JSON name and index.
+- #1297 → #1325: HTTP logging trace ids, and body capture behind a request view.
+
+### Stage 14 — Performance, operations and DX
+
+**Status:** lined up. Gate: Stage 13 reviewed.
+- #1338 → #1300: no HTTP/3 thread hop; transport rejections reported through a Meter and an EventSource (decision 31).
+- #1337: allocation-free feature lookup.
+- #1311: the QUIC handshake timeout option.
+- #1092: the `cohesion-spa` fallback route.
+- #1303 → #1305: the missing OVERVIEW files; certificate authentication in a new `Web.Authentication.Certificate` (decision 31).
+- #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
+
+**Other programs**, not scheduled here:
+- **FileSystem:** #1181, #1182, #1212–#1216.
+- **ObjectValidation:** #1207, #1222–#1224, #1294, #1295, and #1293 without its Email half.
+- **OpenApi:** #1170, #1171, #1178, #1179, #1201, #1203, #1217's model change.
+- **Other:** DependencyInjection #1177, Configuration #1220, Database #1219, release #1290, build #1302.
+
+#1290 matters to this program: every pending advisory publishes with the next preview promotion, and that promotion needs #1290's batching.
 
 ### Post-v1 follow-ups (filed, not scheduled)
 Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
@@ -599,7 +679,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - **QUIC.** #1330 (half-close).
   - **HTTP/1.1 and Web.** #1339 (413 and 408 after dispatch are answered as 500), #1340 (a malformed body is logged as an application defect), #1341 (field values trimmed of Unicode whitespace).
 
-  The owner's review (2026-10-09) confirmed decisions 16–18 and adopted 19 and 20 (§7.4). Decision 20 produced these follow-ups, delivered and in owner review:
+  The owner's review (2026-10-09) confirmed decisions 16–18 and adopted 19 and 20 (§7.4). Decision 20 produced these follow-ups, delivered and approved the same day (decision 21):
   - **#1367 `d7f271bc`: Http.Tls.** `IHttpTlsConnectionFeature` and `context.TlsConnection` move to a new `Assimalign.Cohesion.Http.Tls`. The transport publishes an `ITlsConnectionInfo` facet on its connection info, which is a snapshot that never holds the live connection. The accessor builds the feature on first read.
   - **#1368 `6a453c25`: the extended CONNECT feature goes back to Http.ExtendedConnect.**
     - `HttpExtendedConnect.CreateInterceptor()` installs it over two generic core seams: `HttpExchangeInterceptorRequestContext.Protocol`, and `IHttpExchangeControl.CanAcceptTunnel` with `AcceptTunnelAsync`.
@@ -759,7 +839,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20. Decision 5 is open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation. The owner confirmed them in the Stage 10 review on 2026-10-09, together with decisions 19–20, and adopted decision 21 in the review of decision 20's follow-ups the same day. Decision 31 proposes an answer to decision 5, pending the owner's date.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -768,7 +848,7 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
 2. **How to split routing.** Recommendation: `UseRouting()` becomes non-terminal (match, publish the endpoint, call `next`), and the pipeline's terminal runs the matched endpoint. This is a breaking change: middleware registered after `UseRouting()` would start running for matched requests.
 3. **Forwarded headers: read the effective values, or rewrite the request.** Recommendation: keep the documented model where middleware read the effective values, and make every consumer read them (D7).
 4. **Security-headers middleware in v1?** Recommendation: yes; it is small, P3.
-5. **The Web v1 date.** `DELIVERY_ROADMAP.md` ends L3.1 on 2026-10-15, and Stages 5–7 alone are about 20 items. Either move the date or cut v1 at the end of Stage 7.
+5. **The Web v1 date.** `DELIVERY_ROADMAP.md` ends L3.1 on 2026-10-15, and Stages 5–7 alone are about 20 items. Either move the date or cut v1 at the end of Stage 7. *(Decision 31, 2026-10-09: gate v1 on Stages 11 and 12; the owner sets the date at the Stage 12 review.)*
 6. **Standing gates, open since July:** the WebSockets ADR (#765) and the request-mutation seam for rewrite (#782). Resolved 2026-10-07 by decisions 16 and 17.
 7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7, adopted 2026-10-01).**
    - Stage 7 first shipped ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that required authorization inside an anonymous group therefore ran anonymously, while routing's last-wins dispatch check still treated it as protected and demanded `UseAuthorization`.
@@ -811,6 +891,30 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
       - `Features.Get<IHttpTlsConnectionFeature>()` is null until something reads `context.TlsConnection`.
       - Http.ExtendedConnect becomes a private member of the 17 non-Web area frameworks, and Http.Tls a public member of App.Web.
       - An ordinary request pays 8 bytes for the new `Protocol` field. The interceptor itself allocates nothing, and an ordinary exchange still gets no response sink.
+21. **The extended CONNECT advertisement stays unconditional (raised by the review of #1367–#1369, adopted 2026-10-09).** The owner approved the follow-ups (#1367–#1369).
+    - The HTTP/2 and HTTP/3 transports keep advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL` whether or not a listener registers `HttpExtendedConnect.CreateInterceptor()`.
+    - Gating the setting would need a listener option, and the only configuration it would help is a documented misconfiguration: the HTTP/1.1 upgrade interceptor registered without the extended CONNECT one.
+    - Web.Hosting registers both by default. Http.ExtendedConnect's DESIGN states the consequence for a bare listener.
+
+Decisions 22–31 line up Stages 11–14 (2026-10-09). The integrator made them under the owner's standing delegation ("go with all recommendations or make the best decision you feel is correct"), after the owner said to continue with the next work. Each is open to revision at the Stage 11 review.
+
+22. **Reconciling the backlog.** Of the 75 open follow-ups:
+    - #1076 and #1081 are fixed on this branch (`a8435d7d`; `a7347f20` under #1329), and PR #1094 closes them.
+    - #1071 is closed as a duplicate of #1339.
+    - #1074 is half fixed: its WINDOW_UPDATE path still draws a second reset, reproduced at runtime.
+23. **Lineup and order.** Stages 11–14 (§4) take security and remote-client-triggerable defects first, then conformance, correctness, and performance and DX. Hot transport files are split into serial sessions that run in parallel with each other. FileSystem, ObjectValidation, OpenApi, DI, Configuration, Database, release and build items stay with their programs.
+24. **Advisories.** #1082 rises to P001. As in decision 14, every Stage 11 defect that an unauthenticated client can reach in 10.0.0-preview.1 gets a private advisory draft, published with the first preview that ships its fix. #1290's batched promotion is on that path.
+25. **The Email ReDoS ships here.** #1377 is split from ObjectValidation's #1293 and lands in Stage 11, because Web.Validation runs the rule on request bodies.
+26. **HTTP methods become case-sensitive (#1301).** `get` is an unknown method on every protocol, and Web.Cors compares ordinally. The break is accepted on decision 15's terms.
+27. **Response fields are checked at encode time (#1183).** Every head writer rejects CR, LF and NUL before writing a byte, the Http.ProtocolUpgrade 101 writer included. One core field rule serves #1183, #1341 and #1376. A check in the header collection alone can be bypassed by any `IHttpHeaderCollection` implementation.
+28. **How a client fault reaches the Web layer (#1340).** `IHttpExchangeControl` gets a generic report-don't-throw member with a default implementation that returns null, following decision 20's seam rule. Body streams keep throwing `IOException`/`InvalidDataException`. HTTP/1.1 lands in Stage 11, and HTTP/2 and HTTP/3 are #1378.
+29. **Content-type lookup (#1186).** It splits into a file-name lookup and an extension lookup that requires the leading dot. A name with no dot, and a bare dotfile, map to nothing. The source break is accepted during the previews.
+30. **#1080 and #1085 land whole in Stage 11.** #1080 widens to carry the connection-close code. #1084 rides #1085's session, because #1085's HTTP/3 rejections use the streamed send path that #1084 gates.
+31. **Later stages, settled now so their sessions need no gate:**
+    - A single read of a repeated query or form key returns the first value, and a multi-value view replaces urlencoded's comma-join (#1335, #1211).
+    - Certificate authentication goes in a new `Web.Authentication.Certificate` (#1305).
+    - Transport rejections are reported through a Meter and an EventSource (#1300).
+    - Decision 5 is answered the same way: Web v1 is gated on Stages 11 and 12, not on `DELIVERY_ROADMAP.md`'s 2026-10-15. The owner sets the new date at the Stage 12 review.
 
 ### 7.5 Lineup
 
