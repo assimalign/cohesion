@@ -54,8 +54,10 @@ public sealed class AuthenticationBuilder
     /// <c>DataProtection-Keys</c> under <see cref="AppContext.BaseDirectory"/> is created on first use.
     /// </summary>
     /// <remarks>
-    /// Reading the provider fixes it: a scheme verb derives its protector from it at registration, so
-    /// <see cref="UseDataProtection"/> must run before the first scheme that reads it.
+    /// Reading the provider fixes it, whoever reads it: a scheme verb derives its protector from it at
+    /// registration, and the builder cannot tell that read from any other, so <see cref="UseDataProtection"/>
+    /// must run before the first read, by a scheme or by a caller sharing the key ring with another
+    /// feature.
     /// </remarks>
     public IDataProtectionProvider DataProtectionProvider
     {
@@ -75,8 +77,9 @@ public sealed class AuthenticationBuilder
     /// <returns>This builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="dataProtectionProvider"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    /// A scheme registered earlier already derived its protector from <see cref="DataProtectionProvider"/>,
-    /// so it would keep sealing tickets with the earlier provider.
+    /// <see cref="DataProtectionProvider"/> was already read, by a scheme registered earlier or by a caller,
+    /// and <paramref name="dataProtectionProvider"/> is a different provider; a scheme that derived its
+    /// protector from the earlier provider would keep sealing tickets with it.
     /// </exception>
     public AuthenticationBuilder UseDataProtection(IDataProtectionProvider dataProtectionProvider)
     {
@@ -85,8 +88,9 @@ public sealed class AuthenticationBuilder
         if (_isDataProtectionProviderResolved && !ReferenceEquals(_dataProtectionProvider, dataProtectionProvider))
         {
             throw new InvalidOperationException(
-                "The data-protection provider has already been read by a registered scheme. " +
-                "Call UseDataProtection before registering the schemes that derive ticket protectors from it.");
+                "The data-protection provider has already been read, by a registered scheme or by a caller of " +
+                "AuthenticationBuilder.DataProtectionProvider. Call UseDataProtection before registering the " +
+                "schemes that derive ticket protectors from it and before reading DataProtectionProvider.");
         }
 
         _dataProtectionProvider = dataProtectionProvider;

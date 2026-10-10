@@ -240,7 +240,10 @@ that Hosting used to supply is gone — pass a provider explicitly to
 control key placement). Reading the provider fixes it: a scheme verb
 derives its protector at registration, so `UseDataProtection` after a
 scheme has read the provider throws instead of leaving that scheme on
-the earlier key ring. `AuthenticationService.Create` and the public
+the earlier key ring. The builder cannot tell a scheme's read from any
+other, so a caller that reads `DataProtectionProvider` (to share the key
+ring with antiforgery, say) fixes it too, and the error says either may
+have read it. `AuthenticationService.Create` and the public
 handler factories (`CookieAuthentication.CreateHandler`,
 `JwtBearerAuthentication.CreateHandler`) remain the seams the verbs use
 while the concrete handler and service implementations stay `internal`.
@@ -280,8 +283,10 @@ serialization or runtime-policy surface is consumed by this package.
   `IAuthenticationHandler`. This package ships no handler.
 - **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer` ship with their
   handler packages as `extension(AuthenticationBuilder)` members; this
-  package exposes only the scheme-agnostic surface (`AddAuthentication`,
-  `AddScheme`, `UseDataProtection`, `UseAuthentication`).
+  package exposes only the scheme-agnostic surface (`AuthenticationBuilder`
+  with `AddScheme`, `UseDataProtection` and `Build`, which the projected
+  `builder.Services.AddAuthentication` verb drives, and
+  `UseAuthentication`).
 - **OAuth2 / OIDC interactive login.** Authorization-code and other
   redirect-based sign-in flows are follow-ups behind the IdentityModel
   and IdentityHub epics, not part of this scheme model.

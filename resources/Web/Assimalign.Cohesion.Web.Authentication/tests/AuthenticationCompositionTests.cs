@@ -111,6 +111,24 @@ public sealed class AuthenticationCompositionTests : IDisposable
         auth.DataProtectionProvider.ShouldBeSameAs(_dataProtection);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseDataProtection after a caller read the provider fails and says a caller may have read it")]
+    public void UseDataProtection_AfterCallerReadTheProvider_ShouldThrowNamingEitherReader()
+    {
+        // Arrange
+        IDataProtectionProvider other = DataProtectionProvider.Create(
+            KeyRepository.CreateFileSystem(Path.Combine(_keysDirectory, "other")));
+        AuthenticationBuilder auth = new AuthenticationBuilder().UseDataProtection(_dataProtection);
+        _ = auth.DataProtectionProvider;
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => auth.UseDataProtection(other));
+
+        // Assert — no scheme is registered; the caller's read fixed the provider.
+        exception.Message.ShouldContain("by a registered scheme or by a caller", Case.Sensitive);
+        auth.Options.Schemes.ShouldBeEmpty();
+        auth.DataProtectionProvider.ShouldBeSameAs(_dataProtection);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseDataProtection supplies the provider scheme verbs read")]
     public void UseDataProtection_BeforeSchemes_ShouldBeTheProviderSchemesRead()
     {
