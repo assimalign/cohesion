@@ -198,7 +198,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
-        _readyContexts =Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
+        _readyContexts = Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = true,
