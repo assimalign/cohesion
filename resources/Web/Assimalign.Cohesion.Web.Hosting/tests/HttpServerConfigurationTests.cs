@@ -83,6 +83,7 @@ public class HttpServerConfigurationTests
             ["Http:Limits:MaxRequestLineSize"] = "4096",
             ["Http:Limits:MaxRequestHeaderCount"] = "50",
             ["Http:Limits:MaxRequestHeadersTotalSize"] = "16384",
+            ["Http:Limits:MaxChunkFramingLineSize"] = "2048",
             ["Http:Limits:MaxRequestBodySize"] = "1048576",
             ["Http:Limits:KeepAliveTimeout"] = "00:01:00",
             ["Http:Limits:RequestHeadersTimeout"] = "00:00:15",
@@ -94,6 +95,7 @@ public class HttpServerConfigurationTests
         limits.MaxRequestLineSize.ShouldBe(4096);
         limits.MaxRequestHeaderCount.ShouldBe(50);
         limits.MaxRequestHeadersTotalSize.ShouldBe(16384);
+        limits.MaxChunkFramingLineSize.ShouldBe(2048);
         limits.MaxRequestBodySize.ShouldBe(1048576);
         limits.KeepAliveTimeout.ShouldBe(TimeSpan.FromMinutes(1));
         limits.RequestHeadersTimeout.ShouldBe(TimeSpan.FromSeconds(15));

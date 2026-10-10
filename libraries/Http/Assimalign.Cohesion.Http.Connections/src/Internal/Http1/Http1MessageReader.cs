@@ -239,15 +239,15 @@ internal static class Http1MessageReader
             bool solicitContinue = !isConnectTunnel && ShouldSolicitContinue(headers);
 
             // The lazy body stream: read incrementally after dispatch, enforcing the (frozen-at-
-            // first-read) body-size cap and the minimum request-body data rate. No body byte is read
-            // here — the request is dispatched at head.
+            // first-read) body-size cap, the minimum request-body data rate, and the bounds on a
+            // chunked body's framing lines and trailer section. No body byte is read here — the
+            // request is dispatched at head.
             requestBody = new Http1RequestBodyStream(
                 stream,
                 framing,
                 solicitContinue,
                 interception,
-                limits.MaxRequestBodySize,
-                limits.MinRequestBodyDataRate,
+                limits,
                 timeProvider,
                 connectionToken,
                 trailers);

@@ -1207,7 +1207,10 @@ be closed *inside the transport*, before a request ever reaches the application:
   accumulates into a `MemoryStream`. With no cap, a peer that opens a connection
   and streams an endless request line — or an endless run of header bytes with
   no terminating CRLF — grows that buffer without bound and exhausts the heap.
-  This is a *live* memory-exhaustion vector, not a theoretical one.
+  This is a *live* memory-exhaustion vector, not a theoretical one. A chunked
+  body has the same shape after dispatch: its chunk-size lines (chunk extensions
+  included) and its trailer section are read line by line too, by the application
+  or by the keep-alive drain (#1375).
 - **Idle / slow peers (Slowloris).** The receive loop was previously bounded
   only by the ambient connection token. A peer that connects and then dribbles
   (or never sends) request bytes ties up a connection indefinitely; enough of
@@ -1231,11 +1234,18 @@ of the box:
 | `MaxRequestLineSize` | 8 KB | `Http1MessageReader` request-line read | `414` URI Too Long (RFC 9110 §15.5.15) |
 | `MaxRequestHeaderCount` | 100 | header loop | `431` Request Header Fields Too Large (§15.5.22) |
 | `MaxRequestHeadersTotalSize` | 32 KB | per-line cap = remaining budget | `431` |
+| `MaxChunkFramingLineSize` | 8 KB | `Http1RequestBodyStream` chunk framing-line read | `400` for a chunk-size line (extensions included), `431` for a trailer field line, after dispatch (#1375) |
 | `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1RequestBodyStream` (frozen at first read) | `413` Content Too Large (§15.5.14), after dispatch (#1339) |
 | `MinRequestBodyDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1RequestBodyStream` | `408` Request Timeout (§15.5.9), after dispatch (#1339) |
 | `MinResponseDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1ResponseBodyStream` (streaming sink) | exchange aborted (`IOException`) |
 | `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
 | `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
+
+A chunked body's trailer section is held to `MaxRequestHeaderCount` and
+`MaxRequestHeadersTotalSize` as well, with a budget of its own: every trailer field
+line counts, repeated names included, and each line's cap is the smaller of
+`MaxChunkFramingLineSize` and what is left of the section's size. A breach is
+answered `431` (#1375).
 
 The limits flow `UseHttp1` → `Http1ConnectionFactory` → `Http1Connection` →
 `Http1ConnectionContext` → reader as a plain object reference, captured per
@@ -1393,6 +1403,14 @@ chunked). Load-bearing invariants:
   so octets a client pipelines behind this request (or behind an accepted upgrade
   / CONNECT handshake) stay in the connection stream for the next reader. This is
   the same no-over-read invariant the connection-takeover path already depends on.
+- **Bounded framing lines (#1375).** Every framing line is read into one reused
+  buffer under a cap, and the first octet past it fails the read, so a line that
+  never ends costs at most the cap. A chunk-size line, chunk extensions included,
+  is capped by `MaxChunkFramingLineSize` and rejected as malformed (`400`, below);
+  a chunk terminator may hold nothing but its CRLF; a trailer field line is capped
+  as described under "Trailers on completion". Before the cap, a chunk extension or
+  trailer line was appended to a `StringBuilder` for as long as the peer sent it, on
+  any route, since the keep-alive drain reads a body the application never touched.
 - **Cap frozen at first read.** `EnsureStarted` (first read) freezes the parse
   context's body-size knob and resolves the cap. Up to that point head hooks
   *and* middleware may raise or lower it via `IHttpMaxRequestBodySizeFeature`. A
@@ -1406,7 +1424,16 @@ chunked). Load-bearing invariants:
   section's syntax (`Http1FieldLine`: a token name, nothing between it and the colon)
   and is held to the trailer rule set HTTP/2 and HTTP/3 share (see "One trailer rule
   set for every version"); a line that breaks either fails the body read with an
-  `InvalidDataException`.
+  `InvalidDataException`. The section is held to the header section's bounds
+  (#1375): each field line counts against `MaxRequestHeaderCount` and, with its
+  CRLF, against `MaxRequestHeadersTotalSize`, repeated names included, and no line
+  may exceed `MaxChunkFramingLineSize` or what is left of the section's size. A
+  breach fails the read with `Http1LimitExceededException(431)`, latched like the
+  other limits (below). Repeated fields are gathered per name and published once
+  the section ends, one entry per name with its values in arrival order, so a
+  section of repeats costs time linear in its size (combining on each repeat
+  copied the values so far every time), and a section that fails is never
+  published in part.
 - **A malformed body is rejected by the transport (#1333).** The first
   `InvalidDataException` from the chunked decoder — a broken chunk framing or a
   malformed trailer section — latches `IsMalformed`. The body is never read again,
@@ -1422,7 +1449,8 @@ chunked). Load-bearing invariants:
   `Http1LimitExceededException` the stream throws latches its status in
   `RejectedStatusCode`: `413` for a declared `Content-Length` or an accumulated
   chunked body over the frozen cap, `408` for a read that fell below the minimum
-  data rate. `Http1Context.RequestBodyRejectedStatusCode` reports it beside the
+  data rate, `431` for a trailer section over its bounds (#1375).
+  `Http1Context.RequestBodyRejectedStatusCode` reports it beside the
   `400` of a malformed body, and `SendAsync` takes one branch for both: the status
   replaces a response that has not started, `Connection: close` included, and sets
   the exchange's `StatusCode` so a host reports what went on the wire; an
@@ -1464,6 +1492,12 @@ served a request smuggled inside the rejected chunk. A `Content-Length` body ove
 cap was drained in full, past the cap it had just been rejected for. The
 `RejectedStatusCode` latch makes the drain return `false` at once, as `IsMalformed`
 does.
+
+The drain reads framing lines under the same caps as the application (#1375). A
+drain that meets an over-long chunk extension or trailer line, or a trailer section
+over its bounds, stops at the breach, returns `false`, and the connection closes;
+it never reads on to find where the line ends. The response the application sent
+before the drain is not changed.
 
 ### Graceful close (`BeginGracefulClose`)
 

@@ -984,6 +984,7 @@ command-line configuration providers; it adds no reflection binder or
   "Limits": {
     "MaxConcurrentConnections": 1000,
     "MaxRequestLineSize": 8192,
+    "MaxChunkFramingLineSize": 8192,
     "MaxRequestBodySize": 30000000,
     "KeepAliveTimeout": "00:02:10",
     "RequestHeadersTimeout": "00:00:30",

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -23,6 +24,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// a time. That byte-exact discipline is load-bearing — it keeps octets that a client pipelines
 /// behind this request (or behind an accepted upgrade / CONNECT handshake) in the connection stream
 /// for the next reader, and lets the connection realign for keep-alive via <see cref="DrainAsync"/>.
+/// </para>
+/// <para>
+/// Every chunk framing line is capped (<see cref="Http1ConnectionListenerOptions.Http1Limits.MaxChunkFramingLineSize"/>,
+/// chunk extensions included), and the trailer section is held to the header section's count and
+/// size bounds, so what a chunked body buffers outside its data is bounded however the peer frames
+/// it (#1375).
 /// </para>
 /// <para>
 /// The stream does not own the connection stream (the connection does), so disposal never closes or
@@ -53,6 +60,9 @@ internal sealed class Http1RequestBodyStream : Stream
     private readonly HttpExchangeInterceptorRequestContext? _interception;
     private readonly long? _fallbackCap;
     private readonly HttpMinDataRate? _rate;
+    private readonly int _maxFramingLineSize;
+    private readonly int _maxTrailerFieldCount;
+    private readonly int _maxTrailerSectionSize;
     private readonly TimeProvider _timeProvider;
     private readonly CancellationToken _connectionToken;
     private readonly HttpTrailerCollection _trailers;
@@ -63,6 +73,10 @@ internal sealed class Http1RequestBodyStream : Stream
     private TransportHttpContext? _owner;
 
     private readonly byte[] _oneByte = new byte[1];
+
+    // The buffer each chunk framing line is read into, reused across lines. Never grows past the
+    // largest line the limits allow.
+    private StringBuilder? _line;
 
     private bool _started;
     private bool _completed;
@@ -89,11 +103,14 @@ internal sealed class Http1RequestBodyStream : Stream
     /// </param>
     /// <param name="interception">
     /// The request-parse context whose body-size knob is frozen on first read, or
-    /// <see langword="null"/> on the zero-interceptor fast path (the cap is fixed at
-    /// <paramref name="fallbackCap"/>).
+    /// <see langword="null"/> on the zero-interceptor fast path (the cap is fixed at the listener's
+    /// <see cref="HttpConnectionListenerLimits.MaxRequestBodySize"/>).
     /// </param>
-    /// <param name="fallbackCap">The listener-wide body-size cap used when <paramref name="interception"/> is <see langword="null"/>.</param>
-    /// <param name="rate">The minimum request-body data rate to enforce, or <see langword="null"/> to disable it.</param>
+    /// <param name="limits">
+    /// The listener's HTTP/1.1 limits: the body-size cap used when <paramref name="interception"/> is
+    /// <see langword="null"/>, the minimum request-body data rate, the chunk framing-line cap, and the
+    /// header-section bounds the trailer section is held to.
+    /// </param>
     /// <param name="timeProvider">The monotonic clock used for data-rate measurement and deadlines.</param>
     /// <param name="connectionToken">The ambient connection token that aborts the body read on connection teardown.</param>
     /// <param name="trailers">
@@ -106,8 +123,7 @@ internal sealed class Http1RequestBodyStream : Stream
         Http1RequestBodyFraming framing,
         bool solicitContinue,
         HttpExchangeInterceptorRequestContext? interception,
-        long? fallbackCap,
-        HttpMinDataRate? rate,
+        Http1ConnectionListenerOptions.Http1Limits limits,
         TimeProvider timeProvider,
         CancellationToken connectionToken,
         HttpTrailerCollection trailers)
@@ -118,8 +134,11 @@ internal sealed class Http1RequestBodyStream : Stream
         _remaining = framing.ContentLength;
         _solicitContinue = solicitContinue;
         _interception = interception;
-        _fallbackCap = fallbackCap;
-        _rate = rate;
+        _fallbackCap = limits.MaxRequestBodySize;
+        _rate = limits.MinRequestBodyDataRate;
+        _maxFramingLineSize = limits.MaxChunkFramingLineSize;
+        _maxTrailerFieldCount = limits.MaxRequestHeaderCount;
+        _maxTrailerSectionSize = limits.MaxRequestHeadersTotalSize;
         _timeProvider = timeProvider;
         _connectionToken = connectionToken;
         _trailers = trailers;
@@ -151,8 +170,9 @@ internal sealed class Http1RequestBodyStream : Stream
 
     /// <summary>
     /// The status the body was rejected with because it broke a configured limit — <c>413</c> over the
-    /// body-size cap, <c>408</c> below the minimum data rate — or <see langword="null"/> while it has
-    /// not. Latched where the <see cref="Http1LimitExceededException"/> is thrown. Once set, the body is
+    /// body-size cap, <c>408</c> below the minimum data rate, <c>431</c> for a trailer section over the
+    /// header-section bounds (#1375) — or <see langword="null"/> while it has not. Latched where the
+    /// <see cref="Http1LimitExceededException"/> is thrown. Once set, the body is
     /// never read again: a later read fails with the same status, the drain gives up so the connection
     /// closes, and the exchange's response becomes this status when it has not started (#1339).
     /// </summary>
@@ -378,14 +398,10 @@ internal sealed class Http1RequestBodyStream : Stream
             if (_chunkRemaining < 0)
             {
                 // RFC 9112 §7.1 — every chunk's data is terminated by CRLF before the next size line.
+                // The line may hold nothing else, so its cap is zero: the first other octet fails it.
                 if (_needChunkTerminator)
                 {
-                    string terminator = await ReadFramingLineAsync(cancellationToken).ConfigureAwait(false);
-                    if (terminator.Length != 0)
-                    {
-                        throw new InvalidDataException(
-                            $"RFC 9112 §7.1: chunk terminator must be CRLF only; got '{terminator}'.");
-                    }
+                    await ReadFramingLineAsync(0, FramingLine.ChunkTerminator, cancellationToken).ConfigureAwait(false);
                     _needChunkTerminator = false;
                 }
 
@@ -432,7 +448,10 @@ internal sealed class Http1RequestBodyStream : Stream
 
     private async ValueTask<int> ReadChunkSizeAsync(CancellationToken cancellationToken)
     {
-        string sizeLine = await ReadFramingLineAsync(cancellationToken).ConfigureAwait(false);
+        // RFC 9112 §7.1.1 — a server ought to limit the total length of chunk extensions. The whole
+        // line is capped, extensions included, so an extension that never ends is rejected as
+        // malformed (400) at the cap instead of being buffered for as long as the peer sends it (#1375).
+        string sizeLine = await ReadFramingLineAsync(_maxFramingLineSize, FramingLine.ChunkSize, cancellationToken).ConfigureAwait(false);
 
         // RFC 9112 §7.1.1 — strip the optional ";<chunk-ext>" (BWS allowed before the ';').
         int semicolon = sizeLine.IndexOf(';');
@@ -484,12 +503,44 @@ internal sealed class Http1RequestBodyStream : Stream
     private async ValueTask ReadTrailersAsync(CancellationToken cancellationToken)
     {
         // RFC 9112 §7.1.2 — the trailer-section follows the last chunk and ends with an empty line.
+        // RFC 9110 §5.4 — it is held to the header section's bounds (#1375): every field line counts
+        // against MaxRequestHeaderCount and, with its CRLF, against MaxRequestHeadersTotalSize,
+        // repeated names included, and no line may exceed MaxChunkFramingLineSize. A breach is
+        // answered 431, latched like the other limits, so nothing past it is read.
+        Dictionary<HttpHeaderKey, List<string>>? fields = null;
+        int fieldCount = 0;
+        int sectionRemaining = _maxTrailerSectionSize;
+
         while (true)
         {
-            string line = await ReadFramingLineAsync(cancellationToken).ConfigureAwait(false);
+            // As in the header section, a line may never push the section past its total bound.
+            int lineCap = Math.Min(_maxFramingLineSize, sectionRemaining);
+            string line = await ReadFramingLineAsync(
+                lineCap,
+                lineCap < _maxFramingLineSize ? FramingLine.TrailerSection : FramingLine.TrailerField,
+                cancellationToken).ConfigureAwait(false);
+
             if (line.Length == 0)
             {
+                PublishTrailers(fields);
                 return;
+            }
+
+            int consumed = line.Length + 2;
+            if (consumed > sectionRemaining)
+            {
+                throw Reject(
+                    HttpStatusCode.RequestHeaderFieldsTooLarge,
+                    $"RFC 9112 §7.1.2: the trailer section exceeds the configured maximum size ({_maxTrailerSectionSize} octets).");
+            }
+
+            sectionRemaining -= consumed;
+
+            if (++fieldCount > _maxTrailerFieldCount)
+            {
+                throw Reject(
+                    HttpStatusCode.RequestHeaderFieldsTooLarge,
+                    $"RFC 9112 §7.1.2: the trailer section contains more than the configured maximum of {_maxTrailerFieldCount} fields.");
             }
 
             // RFC 9112 §5.1 / §7.1.2 — a trailer field line has the header section's syntax: the name
@@ -508,20 +559,54 @@ internal sealed class Http1RequestBodyStream : Stream
             // connection-specific field. The InvalidDataException fails the body read as malformed.
             HttpTrailerFieldRules.EnsureReceivable(key, "HTTP/1.1");
 
-            if (_trailers.TryGetValue(key, out HttpHeaderValue existing))
+            // Repeated fields are gathered per name and combined once, when the section ends, so a
+            // section of repeats costs time linear in its size; combining on each repeat copied the
+            // values gathered so far every time.
+            fields ??= new Dictionary<HttpHeaderKey, List<string>>();
+
+            if (!fields.TryGetValue(key, out List<string>? values))
             {
-                _trailers[key] = HttpHeaderValue.Concat(existing, value);
+                values = new List<string>(1);
+                fields.Add(key, values);
             }
-            else
-            {
-                _trailers[key] = value;
-            }
+
+            values.Add(value);
         }
     }
 
-    private async ValueTask<string> ReadFramingLineAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Publishes a complete trailer section on the request's trailer collection, one entry per field
+    /// name with its values in arrival order. A section that fails is never published in part.
+    /// </summary>
+    private void PublishTrailers(Dictionary<HttpHeaderKey, List<string>>? fields)
     {
-        StringBuilder builder = new();
+        if (fields is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<HttpHeaderKey, List<string>> field in fields)
+        {
+            List<string> values = field.Value;
+            _trailers[field.Key] = values.Count == 1
+                ? new HttpHeaderValue(values[0])
+                : new HttpHeaderValue(values.ToArray());
+        }
+    }
+
+    /// <summary>
+    /// Reads one CRLF-terminated chunk framing line, holding it to <paramref name="maxLength"/> octets
+    /// before its CRLF. An octet past the cap fails the read at once, so a line that never ends costs
+    /// at most the cap, whether the application or the keep-alive drain is reading.
+    /// </summary>
+    /// <param name="maxLength">The most octets the line may hold before its CRLF.</param>
+    /// <param name="line">Which line is read, which decides how an over-long one is rejected.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The line, without its CRLF.</returns>
+    private async ValueTask<string> ReadFramingLineAsync(int maxLength, FramingLine line, CancellationToken cancellationToken)
+    {
+        StringBuilder builder = _line ??= new StringBuilder();
+        builder.Clear();
         bool sawCarriageReturn = false;
 
         while (true)
@@ -540,7 +625,7 @@ internal sealed class Http1RequestBodyStream : Stream
                     return builder.ToString();
                 }
 
-                builder.Append('\r');
+                AppendFramingOctet(builder, '\r', maxLength, line);
                 sawCarriageReturn = false;
             }
 
@@ -550,9 +635,38 @@ internal sealed class Http1RequestBodyStream : Stream
                 continue;
             }
 
-            builder.Append((char)b);
+            AppendFramingOctet(builder, (char)b, maxLength, line);
         }
     }
+
+    private void AppendFramingOctet(StringBuilder builder, char octet, int maxLength, FramingLine line)
+    {
+        if (builder.Length >= maxLength)
+        {
+            throw FramingLineTooLong(line, maxLength);
+        }
+
+        builder.Append(octet);
+    }
+
+    /// <summary>
+    /// The rejection for a framing line over its cap. A chunk-size line or a chunk terminator is
+    /// malformed framing (400, through <see cref="IsMalformed"/>); a trailer line breaks the
+    /// header-section bounds (431, latched in <see cref="RejectedStatusCode"/>).
+    /// </summary>
+    private Exception FramingLineTooLong(FramingLine line, int maxLength) => line switch
+    {
+        FramingLine.ChunkTerminator => new InvalidDataException(
+            "RFC 9112 §7.1: chunk terminator must be CRLF only."),
+        FramingLine.ChunkSize => new InvalidDataException(
+            $"RFC 9112 §7.1.1: the chunk-size line, chunk extensions included, exceeds the configured maximum of {maxLength} octets."),
+        FramingLine.TrailerField => Reject(
+            HttpStatusCode.RequestHeaderFieldsTooLarge,
+            $"RFC 9112 §7.1.2: a trailer field line exceeds the configured maximum of {maxLength} octets."),
+        _ => Reject(
+            HttpStatusCode.RequestHeaderFieldsTooLarge,
+            $"RFC 9112 §7.1.2: the trailer section exceeds the configured maximum size ({_maxTrailerSectionSize} octets)."),
+    };
 
     private async ValueTask<int> ReadFromConnectionAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
@@ -642,5 +756,24 @@ internal sealed class Http1RequestBodyStream : Stream
         // is the transport's job via DrainAsync, which keeps working after disposal.
         _disposed = true;
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// The chunk framing lines <see cref="ReadFramingLineAsync"/> reads (RFC 9112 §7.1), which decide
+    /// how a line over its cap is rejected.
+    /// </summary>
+    private enum FramingLine
+    {
+        /// <summary>A chunk-size line, chunk extensions included.</summary>
+        ChunkSize,
+
+        /// <summary>The CRLF that ends a chunk's data.</summary>
+        ChunkTerminator,
+
+        /// <summary>A trailer field line, capped by the framing-line limit.</summary>
+        TrailerField,
+
+        /// <summary>A trailer field line, capped by what is left of the trailer section's size limit.</summary>
+        TrailerSection,
     }
 }

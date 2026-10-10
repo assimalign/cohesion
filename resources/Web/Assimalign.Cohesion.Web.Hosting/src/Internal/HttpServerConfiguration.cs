@@ -45,6 +45,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 ///     "MaxRequestLineSize":        8192,
 ///     "MaxRequestHeaderCount":     100,
 ///     "MaxRequestHeadersTotalSize": 32768,
+///     "MaxChunkFramingLineSize":   8192,
 ///     "MaxRequestBodySize":        30000000,
 ///     "KeepAliveTimeout":          "00:02:10",
 ///     "RequestHeadersTimeout":     "00:00:30",
@@ -211,6 +212,11 @@ internal static class HttpServerConfiguration
         if (TryGetInt(configuration, $"{sectionKey}:Limits:MaxRequestHeadersTotalSize", out int maxRequestHeadersTotalSize))
         {
             limits.MaxRequestHeadersTotalSize = maxRequestHeadersTotalSize;
+        }
+
+        if (TryGetInt(configuration, $"{sectionKey}:Limits:MaxChunkFramingLineSize", out int maxChunkFramingLineSize))
+        {
+            limits.MaxChunkFramingLineSize = maxChunkFramingLineSize;
         }
 
         string? maxRequestBodySize = GetString(configuration, $"{sectionKey}:Limits:MaxRequestBodySize");
@@ -669,6 +675,7 @@ internal static class HttpServerConfiguration
         target.MaxRequestLineSize = source.MaxRequestLineSize;
         target.MaxRequestHeaderCount = source.MaxRequestHeaderCount;
         target.MaxRequestHeadersTotalSize = source.MaxRequestHeadersTotalSize;
+        target.MaxChunkFramingLineSize = source.MaxChunkFramingLineSize;
         CopySharedLimits(source, target);
     }
 
