@@ -353,8 +353,11 @@ public class DatabaseEngineWorkerTests
             }
         }, TimeSpan.FromMilliseconds(1));
         using var stop = new CancellationTokenSource();
-        var thread = StartPump(worker, stop.Token);
+        // The clock starts before the pump: the first attempt runs as soon as the pump does, so a
+        // clock started after it reads short of the time since that attempt (macOS CI: 2.997
+        // backoffs' worth for three attempts).
         var watch = Stopwatch.StartNew();
+        var thread = StartPump(worker, stop.Token);
 
         // Act: let a fail for about two backoffs.
         bool retried = SpinUntil(() => Volatile.Read(ref attemptsOnA) >= 3);
@@ -380,8 +383,11 @@ public class DatabaseEngineWorkerTests
         // Arrange: a worker whose trigger fires every millisecond and whose every pass throws.
         var worker = new ScriptedWorker((_, pass) => throw new InvalidOperationException($"pass {pass} failed"), TimeSpan.FromMilliseconds(1));
         using var stop = new CancellationTokenSource();
-        var thread = StartPump(worker, stop.Token);
+        // The clock starts before the pump: the first attempt runs as soon as the pump does, so a
+        // clock started after it reads short of the time since that attempt (macOS CI: 2.997
+        // backoffs' worth for three attempts).
         var watch = Stopwatch.StartNew();
+        var thread = StartPump(worker, stop.Token);
 
         // Act: let it fail for about three backoffs.
         bool retried = SpinUntil(() => worker.ConsecutiveFailures >= 3);
