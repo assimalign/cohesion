@@ -548,8 +548,18 @@ same features onto every exchange sets it; Web.Hosting does, from its
 application features plus the four it always installs. Without it, a
 host stamping eight features onto a collection that grows from three slots
 pays for the 3-, 7- and 17-slot dictionaries on every exchange. With it, the
-collection allocates one dictionary of the right size, and a feature beyond the
-count still works: the dictionary grows exactly as an unsized one does.
+collection allocates one dictionary of the right size.
+
+A feature beyond the count still works, but the dictionary grows from the size
+the count chose, and that overflow can cost more than never presizing. An
+unsized dictionary grows through 3, 7, 17, 37, 89 and on, each the runtime's
+smallest table prime at least twice the last. A size between two of those grows
+to another size between them: sized for 11, a twelfth feature grows the
+dictionary to 23 slots, and the dictionary allocates 1,136 B in all where an
+unsized one holding twelve allocates 992 B. Sized at one of the chain's own sizes, an
+overflow grows exactly as an unsized dictionary does and never costs more. The
+transport takes the count as given; a host that cannot count every feature an
+exchange carries rounds it up to the chain itself, as Web.Hosting does.
 
 ### Protocol coverage
 

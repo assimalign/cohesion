@@ -126,10 +126,17 @@ public sealed class HttpConnectionListenerOptions
     /// <para>
     /// Count every feature an ordinary exchange carries: the ones the registered
     /// <see cref="Interceptors"/> attach while the request is parsed, and the ones the host and its
-    /// middleware install before the application reads them. A collection that outgrows the
-    /// capacity still works; it grows exactly as an unsized one does. A capacity larger than needed
-    /// costs memory on every exchange, so prefer the count an ordinary exchange carries over the
-    /// largest count any exchange can carry.
+    /// middleware install before the application reads them. A capacity larger than needed costs
+    /// memory on every exchange, so prefer the count an ordinary exchange carries over the largest
+    /// count any exchange can carry.
+    /// </para>
+    /// <para>
+    /// A collection that outgrows the capacity still works, but it grows from the size the capacity
+    /// chose, not through the sizes an unsized collection passes through, so the overflow can allocate
+    /// more than not presizing would have. Sized for 11 features, a collection that receives a twelfth
+    /// allocates more than an unsized collection holding twelve. A host that cannot count every
+    /// feature can round its count up to a size an unsized collection grows through (on .NET 10, 3,
+    /// 7, 17, 37, 89 and so on); an overflow from one of those costs no more than not presizing.
     /// </para>
     /// <para>
     /// The value is a sizing hint and changes no behavior. It applies to every protocol the listener
