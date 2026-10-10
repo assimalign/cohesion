@@ -28,12 +28,22 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// request learns that its peer abandoned the stream without having to read or write. A half that
 /// ends cleanly (the peer's FIN, this end's own completion) does not fire it.
 /// </para>
+/// <para>
+/// The stream carries an application error code per direction through <see cref="IMultiplexedStreamAbort"/>:
+/// <see cref="AbortRead(long)"/> sends <c>STOP_SENDING</c> and <see cref="AbortWrite(long)"/> sends
+/// <c>RESET_STREAM</c>, each with the caller's code. <see cref="QuicStream"/> ends each direction once, so a
+/// direction aborted with a code keeps it when <see cref="Abort(Exception)"/> or disposal later ends the
+/// stream with the default code.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-internal sealed class QuicStreamConnection : Connection
+internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
 {
+    // RFC 9000 §16 — an application error code is a variable-length integer.
+    private const long maxApplicationErrorCode = (1L << 62) - 1;
+
     private readonly QuicStream _stream;
     private readonly long _defaultStreamErrorCode;
     private readonly Action<QuicStreamConnection> _onDisposed;
@@ -153,10 +163,24 @@ internal sealed class QuicStreamConnection : Connection
             _state = ConnectionState.Aborted;
         }
 
+        // A direction already aborted through IMultiplexedStreamAbort keeps its code: QuicStream ends each
+        // direction once and skips one that has ended.
         _stream.Abort(QuicAbortDirection.Both, _defaultStreamErrorCode);
 
         CancelConnectionClosedToken();
         ReportClosed();
+    }
+
+    /// <inheritdoc />
+    public void AbortRead(long errorCode)
+    {
+        AbortDirection(QuicAbortDirection.Read, errorCode);
+    }
+
+    /// <inheritdoc />
+    public void AbortWrite(long errorCode)
+    {
+        AbortDirection(QuicAbortDirection.Write, errorCode);
     }
 
     /// <inheritdoc />
@@ -202,6 +226,28 @@ internal sealed class QuicStreamConnection : Connection
             {
                 _state = ConnectionState.Closed;
             }
+        }
+    }
+
+    // QuicStream.Abort skips a direction that has already ended (read to its end, completed, or aborted),
+    // and a stream that is disposed. The connection may be gone underneath the stream, which leaves
+    // nothing to tell the peer.
+    private void AbortDirection(QuicAbortDirection direction, long errorCode)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
+
+        try
+        {
+            _stream.Abort(direction, errorCode);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The stream was released underneath the call.
+        }
+        catch (QuicException)
+        {
+            // The stream or its connection has already ended.
         }
     }
 

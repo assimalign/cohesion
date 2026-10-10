@@ -11,12 +11,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The transport hands this exception to the connection abstraction as the reason whenever it resets a
-/// request stream (<see cref="Assimalign.Cohesion.Connections.IConnection.Abort(Exception)"/>) or stops
-/// reading one (<see cref="System.IO.Pipelines.PipeReader.Complete(Exception)"/>), so the intended code
-/// travels with the signal. The in-memory driver surfaces the reason to the peer verbatim; the QUIC
-/// driver resets with its configured default stream error code, because the connection contract has no
-/// per-call application error code (see docs/DESIGN.md, "Request streams").
+/// The code reaches the wire through the stream's code-carrying abort
+/// (<see cref="Assimalign.Cohesion.Connections.IMultiplexedStreamAbort"/>, which the QUIC and in-memory
+/// drivers implement): a reset aborts both directions with it, and stopping a request aborts the receiving
+/// direction. The exception is then handed to the connection abstraction as the reason, when the transport
+/// resets the stream (<see cref="Assimalign.Cohesion.Connections.IConnection.Abort(Exception)"/>) or stops
+/// reading it (<see cref="System.IO.Pipelines.PipeReader.Complete(Exception)"/>). On a stream that cannot
+/// carry a code, the reason is the only place the code travels, and a test double surfaces it to the peer
+/// (see docs/DESIGN.md, "Request streams").
 /// </para>
 /// <para>
 /// Derives from <see cref="IOException"/> so an application reading the request body observes a stream

@@ -21,13 +21,6 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     // length beyond this bound is refused rather than buffered.
     private const int maxControlFramePayloadSize = 16 * 1024;
 
-    // Before a response ends, an unread remainder of its request — up to about one QUIC stream receive
-    // window, arriving within the timeout — is read and discarded so the peer's upload finishes normally.
-    // Stopping the stream instead would signal STOP_SENDING, whose H3_NO_ERROR code (RFC 9114 §4.1) the
-    // connection contract cannot yet carry (see Http3RequestBodyStream.TryDrainAsync).
-    private const long requestBodyDrainBudget = 64 * 1024;
-    private static readonly TimeSpan _requestBodyDrainTimeout = TimeSpan.FromSeconds(5);
-
     private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
     // The QUIC handshake's facts, published on every request stream's connection info as the
@@ -628,6 +621,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// QPACK decode, and every request-body read still in flight. The enumeration ends after the contexts
     /// already published. Called from any stream's processing and from request-body reads; idempotent.
     /// </summary>
+    /// <remarks>
+    /// The connection closes with the error's RFC 9114 §8.1 / RFC 9204 §6 code wherever the driver can
+    /// carry one (<see cref="IMultiplexedConnectionAbort"/>, which the QUIC driver implements); a driver
+    /// without it closes with its own default.
+    /// </remarks>
     /// <param name="error">The connection error, carrying the code the connection is closed with.</param>
     internal void AbortConnection(Http3ConnectionException error)
     {
@@ -637,7 +635,15 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
 
         _teardownSource.Cancel();
-        _connection.Abort(error);
+
+        if (_connection is IMultiplexedConnectionAbort coded)
+        {
+            coded.Abort((long)error.ErrorCode, error);
+        }
+        else
+        {
+            _connection.Abort(error);
+        }
     }
 
     /// <summary>
@@ -659,7 +665,43 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             _ = TrySendStreamCancellationAsync(requestStreamId);
         }
 
+        ResetStream(streamConnection, reason);
+    }
+
+    /// <summary>
+    /// Resets a request stream in both directions with the stream error's RFC 9114 §8.1 code
+    /// (<c>RESET_STREAM</c> and <c>STOP_SENDING</c>), then aborts it with the error as the reason, which
+    /// ends the stream's lifecycle and fires the exchange's <c>RequestCancelled</c>. The code reaches the
+    /// wire wherever the stream can carry one (<see cref="IMultiplexedStreamAbort"/>, which the QUIC and
+    /// in-memory drivers implement); on a stream without it the abort alone resets the stream, with the
+    /// driver's default code.
+    /// </summary>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="reason">The stream error, carrying the code.</param>
+    internal static void ResetStream(IConnection streamConnection, Http3StreamException reason)
+    {
+        if (streamConnection is IMultiplexedStreamAbort coded)
+        {
+            coded.AbortWrite((long)reason.ErrorCode);
+            coded.AbortRead((long)reason.ErrorCode);
+        }
+
         streamConnection.Abort(reason);
+    }
+
+    /// <summary>
+    /// Stops reading a request stream with <paramref name="errorCode"/> (<c>STOP_SENDING</c>), leaving the
+    /// response direction and the stream's lifecycle alone. Has no effect on a stream that cannot carry a
+    /// code, whose driver stops it with its default code when its input is completed.
+    /// </summary>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="errorCode">The RFC 9114 §8.1 code the peer receives.</param>
+    internal static void StopReadingWithCode(IConnection streamConnection, Http3ErrorCode errorCode)
+    {
+        if (streamConnection is IMultiplexedStreamAbort coded)
+        {
+            coded.AbortRead((long)errorCode);
+        }
     }
 
     /// <summary>
@@ -1266,7 +1308,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // longer be answered, so it is reset.
         catch (Exception exception)
         {
-            streamConnection.Abort(new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception));
+            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception));
             _readyContexts.Writer.TryComplete(exception);
         }
         finally
@@ -1695,7 +1737,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // instead of writing a buffered response.
         if (http3Context.ResponseBodySink is { HasStarted: true } sink)
         {
-            await requestBody.TryDrainAsync(requestBodyDrainBudget, _requestBodyDrainTimeout).ConfigureAwait(false);
+            requestBody.RefuseRemainder();
             await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
             StopReadingRequestStream(requestBody, http3Context.StreamId);
             await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
@@ -1726,7 +1768,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // then already on the wire) — finalize that response rather than writing a second one.
         if (http3Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
         {
-            await requestBody.TryDrainAsync(requestBodyDrainBudget, _requestBodyDrainTimeout).ConfigureAwait(false);
+            requestBody.RefuseRemainder();
             await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
             StopReadingRequestStream(requestBody, http3Context.StreamId);
             await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
@@ -1771,9 +1813,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 
-        // Let a nearly finished upload complete before the response ends (see TryDrainAsync): on the QUIC
-        // driver, ending the response releases the stream, and an unread request is then stopped.
-        await requestBody.TryDrainAsync(requestBodyDrainBudget, _requestBodyDrainTimeout).ConfigureAwait(false);
+        // RFC 9114 §4.1 — the complete response is flushed, so the rest of an unread request is refused
+        // with STOP_SENDING(H3_NO_ERROR). It goes out before the FIN: on the QUIC driver, ending the
+        // response releases the stream, which would stop an unread request with the default code instead.
+        requestBody.RefuseRemainder();
 
         // RFC 9114 §4.1 — an HTTP/3 response body is delimited by the request stream's end, so the
         // response is not complete on the wire until the server ends its write side. End it now, with
@@ -1806,9 +1849,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Stops reading a request stream once its complete response is on the wire (RFC 9114 §4.1): an
-    /// unread remainder of the request is refused with <c>STOP_SENDING(H3_NO_ERROR)</c>. With the dynamic
-    /// table enabled, abandoning the stream before its end also emits a Stream Cancellation (RFC 9204
-    /// §4.4.2), since a trailer section left unread will never be acknowledged.
+    /// unread remainder of the request is refused with <c>STOP_SENDING(H3_NO_ERROR)</c>, if
+    /// <see cref="Http3RequestBodyStream.RefuseRemainder"/> has not already refused it, and the stream's
+    /// input is released. With the dynamic table enabled, abandoning the stream before its end also emits
+    /// a Stream Cancellation (RFC 9204 §4.4.2), since a trailer section left unread will never be
+    /// acknowledged.
     /// </summary>
     private void StopReadingRequestStream(Http3RequestBodyStream requestBody, long requestStreamId)
     {
@@ -1858,7 +1903,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
             await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
             await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            await requestBody.TryDrainAsync(requestBodyDrainBudget, _requestBodyDrainTimeout).ConfigureAwait(false);
+            requestBody.RefuseRemainder();
             CompleteResponseStreamWrites(streamConnection);
         }
         catch (OperationCanceledException)

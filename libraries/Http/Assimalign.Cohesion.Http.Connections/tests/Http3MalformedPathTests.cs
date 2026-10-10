@@ -61,8 +61,8 @@ public class Http3MalformedPathTests
         Encoding.ASCII.GetString(frames.Single(frame => frame.FrameType == (long)Http3FrameType.Data).Payload).ShouldBe("ok");
 
         // The malformed stream alone was reset, with H3_MESSAGE_ERROR (RFC 9114 §4.1.2) …
-        Http3StreamException reset = await Should.ThrowAsync<Http3StreamException>(() => Http3InMemoryPeer.ReadToEndAsync(malformed));
-        reset.ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
+        ConnectionResetException reset = await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(malformed));
+        reset.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.MessageError);
 
         // … and the connection was not: it is still open and dispatches a new request stream.
         peer.Server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();

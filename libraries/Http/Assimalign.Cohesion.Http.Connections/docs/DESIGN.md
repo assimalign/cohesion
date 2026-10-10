@@ -459,10 +459,9 @@ thread-safe; all per-request state belongs in the context's feature collection.
     stream (RFC 9114 §4.1) with an `Http3StreamException` carrying
     `H3_REQUEST_REJECTED` — the request was refused before any application
     processing, so the peer may retry it (RFC 9114 §4.1.1) — leaving the QUIC
-    connection and its other streams intact. The intended code rides on the abort
-    reason; the `IConnection` abort contract resets with the transport's configured
-    default stream error code rather than a per-call one — a limitation of the
-    connection abstraction, not the seam.
+    connection and its other streams intact. The code reaches the wire through
+    the stream's code-carrying abort (`IMultiplexedStreamAbort`, #1080), on the
+    QUIC driver as on the in-memory one.
 
   In every case the request-parse interceptor pipeline has already torn down the
   partially-built body-wrapper chain and every hook-attached feature before the
@@ -2609,7 +2608,7 @@ sequenceDiagram
     Head->>App: context with a lazy body
     Client->>App: DATA frames, read on demand
     App->>Client: response HEADERS and DATA
-    Note over App,Client: unread remainder drained up to 64 KiB, otherwise STOP_SENDING
+    Note over App,Client: unread remainder refused with STOP_SENDING(H3_NO_ERROR)
     App->>Client: FIN
 ```
 
@@ -2691,19 +2690,16 @@ exchange exists, so the transport writes the bodyless 413 itself.
 
 **Ending the exchange.** The response ends with the stream's FIN (see "Ending
 the request stream at response completion"). If the request was not read to its
-end by then, the transport first drains the remainder — at most 64 KiB, about
-one QUIC stream receive window, arriving within five seconds — so a nearly
-finished upload completes normally; otherwise it stops reading. Only a body
-positioned at a frame boundary is drained: one never read, one read in part,
-or one rejected for its size (the offending DATA frame's payload is still
-accounted). A read that failed any other way — cancelled inside the trailer
-section, say — leaves the stream mid-frame, so the transport stops reading
-instead of parsing what follows as frames. The signals, with the codes the
-transport intends (RFC 9114 §8.1):
+end by then, the transport refuses the rest with `STOP_SENDING(H3_NO_ERROR)` as
+soon as the complete response is flushed, before the FIN, and reads nothing
+more (`Http3RequestBodyStream.RefuseRemainder`). A body read still in flight —
+a handler that left one running past its response — fails instead of waiting
+for octets the client will no longer send. The signals and their RFC 9114 §8.1
+codes:
 
 | Situation | Signal | Code | Why |
 |---|---|---|---|
-| Complete response sent; request not read to its end and not drainable | `STOP_SENDING` | `H3_NO_ERROR` | RFC 9114 §4.1: the server does not need the rest of a request it fully answered |
+| Complete response sent; request not read to its end | `STOP_SENDING` | `H3_NO_ERROR` | RFC 9114 §4.1: the server does not need the rest of a request it fully answered |
 | Application cancelled the exchange (`IHttpContext.Cancel`) | reset (both directions) | `H3_REQUEST_CANCELLED` | §4.1.1: processing began, so never `H3_REQUEST_REJECTED`, which promises the request was not processed |
 | Refused before dispatch — an interceptor rejection, teardown before dispatch, or assembled but never handed over | reset | `H3_REQUEST_REJECTED` | §4.1.1: no application processing, so the peer may retry |
 | Malformed request (field section, `:path`, Content-Length, trailers) | reset | `H3_MESSAGE_ERROR` | §4.1.2 |
@@ -2713,22 +2709,44 @@ transport intends (RFC 9114 §8.1):
 | DATA before HEADERS; DATA or HEADERS after the trailer section; HEADERS after a CONNECT head; a control, push, reserved HTTP/2, or PRIORITY_UPDATE frame on a request stream | connection close | `H3_FRAME_UNEXPECTED` | §4.1, §4.4, §7.2.x, §7.2.8, RFC 9218 §7.2 |
 | QPACK decompression failure | connection close | `QPACK_DECOMPRESSION_FAILED` | RFC 9204 §2.2 |
 
-The code travels as the reason — an `Http3StreamException` passed to
-`IConnection.Abort` for a reset or to `Input.Complete` for `STOP_SENDING`, an
-`Http3ConnectionException` passed to the multiplexed connection's `Abort` for a
-connection error — because **the connection contract has no per-call
-application error code**. The in-memory driver surfaces the reason to the peer
-verbatim (which is how the tests assert codes). The QUIC driver uses its
-configured defaults: resets and `STOP_SENDING` carry `DefaultStreamErrorCode`
-(`H3_REQUEST_CANCELLED`, `0x10c`, by default) and a connection close carries
-`DefaultCloseErrorCode` (`H3_NO_ERROR`). That gap has a real interop cost for
-`STOP_SENDING`: .NET's `HttpClient` fails a request whose upload is stopped with
-anything but `H3_NO_ERROR`, even after the complete response arrived — measured
-with the real-QUIC round-trip tests, and the reason the drain exists. Ending the
-response on the QUIC driver also releases the QUIC stream, so the drain has to
-happen before the FIN, not after. Putting `H3_NO_ERROR` on the wire needs a
-per-direction abort with an application error code on `IConnection`, which is
-tracked follow-up work in `Assimalign.Cohesion.Connections`.
+**The codes reach the wire through the connection contracts' code-carrying
+aborts (#1080).** The QUIC and in-memory drivers implement both facets, and the
+transport finds them with a type test:
+
+- **`STOP_SENDING`** is `IMultiplexedStreamAbort.AbortRead(code)` on the
+  request stream.
+- **A reset** is `AbortWrite(code)` and `AbortRead(code)`, then
+  `IConnection.Abort(Http3StreamException)`. The abort keeps its job of ending
+  the stream's lifecycle and firing the exchange's `RequestCancelled`, and the
+  directions already carry the code, so the driver's default never reaches the
+  wire (`Http3ConnectionContext.ResetStream`).
+- **A connection error** is `IMultiplexedConnectionAbort.Abort(code,
+  Http3ConnectionException)`, so the QUIC `CONNECTION_CLOSE` carries the error's
+  code (`AbortConnection`).
+
+On a stream or connection without the facets, such as a test double, the code
+travels only as the reason, and the driver sends its own default. The in-memory
+driver reports a code to the peer as `ConnectionResetException.ApplicationErrorCode`,
+which is how the in-memory tests assert codes. A real QUIC peer sees
+`QuicException.ApplicationErrorCode`, which `Http3ErrorCodeRoundTripTests`
+asserts.
+
+Before #1080 the contract could not carry a code, so the QUIC driver sent its
+configured defaults: `H3_REQUEST_CANCELLED` on every reset and `STOP_SENDING`,
+and `H3_NO_ERROR` on every connection close. .NET's `HttpClient` fails a request
+whose upload is stopped with anything but `H3_NO_ERROR`, even after the complete
+response arrived, so the transport drained up to 64 KiB of an unread upload for
+up to five seconds before ending each response, and a larger upload still failed
+at the client. The drain is gone: `STOP_SENDING(H3_NO_ERROR)` is what the client
+expects, at any upload size, with no wait.
+
+**Order on the QUIC driver.** Completing a QUIC stream's `Output` or `Input`
+disposes the whole QUIC stream (its pipes are created with `leaveOpen: false`,
+see #1330), and the disposal stops a read direction still open with the default
+code. So the refusal goes out after the response is flushed and before the FIN,
+and the input pipe is released after the FIN (`StopReading`). RFC 9114 §4.1
+allows exactly this order: abort reading, send the complete response, then end
+the sending direction cleanly.
 
 A **HEAD** response carries its HEADERS frame and no DATA frame or trailer
 section, on the buffered and the streaming path alike (RFC 9110 §9.3.2). The buffered path synthesizes a
@@ -2737,8 +2755,8 @@ the HTTP/2 path follows (see "HTTP/2 response flow control, HEAD, and the
 request-body cap"). A **CONNECT** request is
 dispatched at its HEADERS frame like any other, and its tunnel octets are read
 through the request body as they arrive; neither the body-size cap nor the
-Content-Length rule applies to them, and the drain skips them (see "Extended
-CONNECT (`:protocol`)", "The tunnel").
+Content-Length rule applies to them (see "Extended CONNECT (`:protocol`)",
+"The tunnel").
 
 Why this shape, and not the obvious alternatives:
 
@@ -2759,9 +2777,12 @@ Why this shape, and not the obvious alternatives:
   owns that boundary). Answering at `SendAsync`, with the application's own 413
   kept, gives the client the right status whether the fault was swallowed,
   rendered as a 500, or rethrown.
-- **Drain, then stop.** Stopping at once is what RFC 9114 §4.1 describes, but
-  with the QUIC driver's default code it fails .NET clients; draining without a
-  bound would reintroduce the unbounded read this work removed.
+- **Stop at once, with `H3_NO_ERROR`.** It is what RFC 9114 §4.1 describes,
+  and now that the code reaches the wire it is what clients accept. The
+  bounded drain it replaced held every response with an unread upload for up
+  to five seconds, and a client could still hold a stream for that long each
+  time; draining without a bound would bring back the unbounded read #1066
+  removed.
 
 ### Ending the request stream at response completion
 
@@ -2798,12 +2819,15 @@ and the teardown completion remains the fallback for an exchange that never prod
 response.
 
 With request bodies read lazily, the FIN is also where the request direction is settled.
-If the request was not read to its end, the send path first drains the remainder
-(bounded — see "Request streams: dispatch at HEADERS, lazy body"), then ends the
-response, then stops reading the request (`STOP_SENDING`, intended `H3_NO_ERROR`). The
-order matters on the QUIC driver: completing the stream's `Output` releases the whole
-QUIC stream, so nothing can be read after the FIN, and an unread request direction is
-stopped as the stream is released.
+If the request was not read to its end, the send path refuses the remainder with
+`STOP_SENDING(H3_NO_ERROR)` through the stream's code-carrying abort, then ends the
+response, then releases the request stream's input (see "Request streams: dispatch at
+HEADERS, lazy body"). The order matters on the QUIC driver: completing the stream's
+`Output` releases the whole QUIC stream, so nothing can be read after the FIN, and a
+request direction still open when the stream is released is stopped with the driver's
+default code instead of `H3_NO_ERROR`. A buffered response, a streamed response
+(`CompleteFramedAsync`), a transport-written rejection, and the end of an extended
+CONNECT tunnel all refuse before their FIN.
 
 ### A client's cancellation fires `RequestCancelled` (#1329)
 
@@ -3018,11 +3042,12 @@ queue is a `System.Threading.Channels` channel.
   automatic `100 Continue` are enforced on HTTP/1.1 only. With the body now
   read lazily, HTTP/3 can adopt the same first-read solicitation and data-rate
   gate; both are follow-up work.
-- **Choosing the wire error code.** The transport decides every RFC 9114 §8.1
-  code (see the table under "Request streams"), but the `IConnection` contract
-  cannot yet carry one, so the QUIC driver sends its configured defaults. A
-  per-direction abort with an application error code belongs in
-  `Assimalign.Cohesion.Connections`.
+- **Error codes on a driver without the code-carrying facets.** The transport
+  decides every RFC 9114 §8.1 code (see the table under "Request streams") and
+  puts it on the wire through `IMultiplexedStreamAbort` and
+  `IMultiplexedConnectionAbort` (#1080). A multiplexed driver that implements
+  neither, such as a third-party transport or a test double, sends its own
+  defaults, and the code travels only as the abort reason.
 
 ## QPACK field-section compression
 
@@ -3457,7 +3482,9 @@ sequenceDiagram
   the application left open, then removes the stream once both sides have
   ended or stops a client still sending — `RST_STREAM(NO_ERROR)` on HTTP/2
   (RFC 9113 §8.1), `STOP_SENDING(H3_NO_ERROR)` on HTTP/3 (RFC 9114 §4.1) — as
-  after any response that completes before its request. A cancelled
+  after any response that completes before its request. On HTTP/3 the stop
+  goes out before the FIN, because on the QUIC driver the FIN releases the
+  stream (see "Known limitation", below). A cancelled
   exchange, or a tunnel whose head never reached the wire, is reset instead:
   `RST_STREAM(CANCEL)`, RFC 8441 §5's abortive close, or
   `H3_REQUEST_CANCELLED`. No second head is ever written.
@@ -3478,11 +3505,12 @@ the stream, which also stops its read side with the driver's default error
 code. On real QUIC, ending the server's side therefore ends the tunnel in
 both directions: a server that closes first cannot read what the client
 still sends. A WebSocket closes after its close handshake, when nothing more
-is expected, so it is unaffected. A write-only half-close needs a
-per-direction completion on `IConnection`, the same follow-up work in
-`Assimalign.Cohesion.Connections` that putting `H3_NO_ERROR` on the wire
-needs (see "Request streams: dispatch at HEADERS, lazy body"). The in-memory
-driver half-closes exactly.
+is expected, so it is unaffected. A write-only half-close needs the QUIC driver
+to complete only the write direction when the output completes (#1330). It
+builds on the per-direction, code-carrying abort that #1080 added to the
+connection contracts, which already puts `H3_NO_ERROR` on the wire (see
+"Request streams: dispatch at HEADERS, lazy body"). The in-memory driver
+half-closes exactly.
 
 ### AOT posture
 

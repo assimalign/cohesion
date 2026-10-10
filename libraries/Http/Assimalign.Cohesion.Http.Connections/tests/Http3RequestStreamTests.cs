@@ -112,8 +112,8 @@ public class Http3RequestStreamTests
 
         await peer.StopReceivingAsync();
 
-        Http3StreamException rejection = await Should.ThrowAsync<Http3StreamException>(() => Http3InMemoryPeer.ReadToEndAsync(stalled));
-        rejection.ErrorCode.ShouldBe(Http3ErrorCode.RequestRejected);
+        ConnectionResetException rejection = await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(stalled));
+        rejection.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestRejected);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A blocking request hook should stall only its own stream")]
@@ -269,13 +269,13 @@ public class Http3RequestStreamTests
         await streaming.WriteAsync(Encoding.ASCII.GetBytes("partial"));
         await streaming.FlushAsync();
 
-        // Act — nothing may park here: not the request-body drain, not the response finalization.
+        // Act — nothing may park here: not the unread request body, not the response finalization.
         await context.CancelAsync();
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
 
         // Assert — the stream is reset with H3_REQUEST_CANCELLED (RFC 9114 §4.1.1).
-        Http3StreamException reset = await Should.ThrowAsync<Http3StreamException>(() => Http3InMemoryPeer.ReadToEndAsync(request));
-        reset.ErrorCode.ShouldBe(Http3ErrorCode.RequestCancelled);
+        ConnectionResetException reset = await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(request));
+        reset.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
     }
 
     // ------------------------------------------------------------ body-size cap (413) and stop-sending
@@ -283,8 +283,7 @@ public class Http3RequestStreamTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A body over MaxRequestBodySize should fail the read, answer 413, and stop reading with H3_NO_ERROR")]
     public async Task ReadBody_OnBodyOverMaxRequestBodySize_ShouldAnswer413AndStopSending()
     {
-        // Arrange — a 128 KiB DATA frame against a 1 KiB cap; the client keeps its side open. The frame is
-        // larger than the drain budget, so the server stops reading rather than draining it.
+        // Arrange — a 128 KiB DATA frame against a 1 KiB cap; the client keeps its side open.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MaxRequestBodySize = 1024);
         Connection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
@@ -308,8 +307,8 @@ public class Http3RequestStreamTests
 
         // … and, the complete response sent, the server stops reading: STOP_SENDING(H3_NO_ERROR),
         // RFC 9114 §4.1.
-        Http3StreamException stop = await Should.ThrowAsync<Http3StreamException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
-        stop.ErrorCode.ShouldBe(Http3ErrorCode.NoError);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: 413 should replace a staged application response that is not already a 413")]
@@ -378,8 +377,7 @@ public class Http3RequestStreamTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: An unread body should be stopped with H3_NO_ERROR once the complete response is sent")]
     public async Task SendAsync_OnUnreadBody_ShouldStopSendingWithNoError()
     {
-        // Arrange — the handler answers without reading the 1 MiB body the client is still sending; the
-        // declared remainder is beyond the drain budget, so the server stops reading.
+        // Arrange — the handler answers without reading the 1 MiB body the client is still sending.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
         Connection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
@@ -399,14 +397,14 @@ public class Http3RequestStreamTests
         frames.Select(frame => frame.FrameType).ToArray().ShouldBe(new[] { (long)Http3FrameType.Headers, (long)Http3FrameType.Data });
         Encoding.ASCII.GetString(frames[1].Payload).ShouldBe("done");
 
-        Http3StreamException stop = await Should.ThrowAsync<Http3StreamException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
-        stop.ErrorCode.ShouldBe(Http3ErrorCode.NoError);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A small unread body should be drained, not stopped, before the response ends")]
-    public async Task SendAsync_OnSmallUnreadBody_ShouldDrainBeforeEndingResponse()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A small unread body should be stopped at once, without waiting for the rest of the upload")]
+    public async Task SendAsync_OnSmallUnreadBody_ShouldStopSendingWithoutWaiting()
     {
-        // Arrange — the handler ignores a body that is still arriving but small enough to drain.
+        // Arrange — the handler ignores a small body that is still arriving; the client keeps its side open.
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
         Connection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
@@ -416,23 +414,52 @@ public class Http3RequestStreamTests
         IHttpContext context = await peer.NextContextAsync();
         context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("done"));
 
-        // Act — the send waits for the rest of the upload (up to the drain budget) before ending the response.
-        Task send = peer.ConnectionContext.SendAsync(context).AsTask();
-        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, new byte[512]));
-        request.Output.Complete();
-        await send.WaitAsync(_timeout);
+        // Act — the send ends the response without holding it for the rest of the upload (#1080: it used to
+        // drain up to 64 KiB for up to 5 s, because the stop could not carry H3_NO_ERROR on the QUIC driver).
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
 
-        // Assert — the complete response arrives, and the upload finished normally instead of being stopped.
+        // Assert — the complete response arrives, then STOP_SENDING(H3_NO_ERROR), RFC 9114 §4.1.
         IReadOnlyList<(long FrameType, byte[] Payload)> frames =
             HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
         Encoding.ASCII.GetString(frames.Single(frame => frame.FrameType == (long)Http3FrameType.Data).Payload).ShouldBe("done");
 
-        // What the drain discarded was never delivered, so the body is no longer readable as if it ended.
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
+
+        // The rest of the body was never delivered, so it is no longer readable as if it ended.
         await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[1]).AsTask());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A read cancelled inside the trailer section should stop the stream instead of draining it")]
-    public async Task SendAsync_AfterReadCancelledInsideTrailers_ShouldStopSendingWithoutDraining()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A body read left in flight past the response should fail, and not hold back STOP_SENDING(H3_NO_ERROR)")]
+    public async Task SendAsync_OnBodyReadInFlight_ShouldFailTheReadAndStopSending()
+    {
+        // Arrange — the handler starts a body read that waits for octets the client never sends, and answers
+        // without awaiting it.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
+
+        IHttpContext context = await peer.NextContextAsync();
+        Task<int> leakedRead = context.Request.Body.ReadAsync(new byte[64]).AsTask();
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("done"));
+
+        // Act
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+
+        // Assert — the client is told to stop at once, the response arrives whole, and the read fails rather
+        // than waiting for octets that will never come.
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
+
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
+        Encoding.ASCII.GetString(frames.Single(frame => frame.FrameType == (long)Http3FrameType.Data).Payload).ShouldBe("done");
+
+        await Should.ThrowAsync<IOException>(() => leakedRead.WaitAsync(_timeout));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A read cancelled inside the trailer section should still stop the stream with H3_NO_ERROR")]
+    public async Task SendAsync_AfterReadCancelledInsideTrailers_ShouldStopSendingWithNoError()
     {
         // Arrange — the body, then a trailing HEADERS frame whose field section is only partly sent: the
         // two-octet QPACK prefix of a declared eight.
@@ -458,8 +485,8 @@ public class Http3RequestStreamTests
 
         context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("done"));
 
-        // Act — the send must not drain (the octets after the consumed frame header are not a frame), so
-        // it neither misreads them nor waits out the drain's deadline.
+        // Act — the send must not read on (the octets after the consumed frame header are not a frame), so
+        // it neither misreads them nor waits for the rest of the upload.
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(TimeSpan.FromSeconds(1));
 
         // Assert — the complete response arrives, then STOP_SENDING(H3_NO_ERROR), RFC 9114 §4.1.
@@ -467,8 +494,8 @@ public class Http3RequestStreamTests
             HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
         Encoding.ASCII.GetString(frames.Single(frame => frame.FrameType == (long)Http3FrameType.Data).Payload).ShouldBe("done");
 
-        Http3StreamException stop = await Should.ThrowAsync<Http3StreamException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
-        stop.ErrorCode.ShouldBe(Http3ErrorCode.NoError);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
 
         // The cancelled trailer read left the body unreadable.
         await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[1]).AsTask());

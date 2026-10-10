@@ -24,8 +24,8 @@ correct for the protocols that run over it.
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes. Both default ALPN to HTTP/3 (see "Error model"). |
-| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts"). |
-| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. |
+| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts") and `IMultiplexedConnectionAbort` (see "Application error codes"). |
+| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Implements `IMultiplexedStreamAbort`. |
 
 `QuicMultiplexedConnection` and the listener/factory are `public sealed`
 concretes (not interface-first `internal` implementations) because they
@@ -98,7 +98,11 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
 - **`Abort` (immediate)** — synchronous; fires the connection close
   (fire-and-forget, observing its own faults) and cancels
   `ConnectionClosed`. In-flight data may be discarded; that is the
-  contract of abort.
+  contract of abort. `Abort(Exception?)` closes with
+  `DefaultCloseErrorCode`; `Abort(long errorCode, Exception?)`
+  (`IMultiplexedConnectionAbort`) closes with the caller's code. The
+  first abort or disposal decides the close: `QuicConnection` sends one
+  `CONNECTION_CLOSE`, and a later close request has no effect on the wire.
 
 A stream's `ConnectionClosed` fires on its own `Abort` and `DisposeAsync`,
 and also when the stream ends underneath it (#1329): the stream watches
@@ -153,7 +157,42 @@ is routine for streams released after their owning connection closed.
   follow the same default so the out-of-the-box configuration is
   self-consistent and RFC-honest on the wire. A listener or factory
   serving a different ALPN protocol overrides the codes alongside
-  `ApplicationProtocols`.
+  `ApplicationProtocols`. The defaults apply only where the caller gives
+  no code (see "Application error codes").
+
+## Application error codes
+
+The driver implements the contracts library's two code-carrying facets
+(#1080), so a protocol chooses the code each abort puts on the wire:
+
+| Call | `System.Net.Quic` call | Frame |
+| --- | --- | --- |
+| stream `AbortRead(errorCode)` | `QuicStream.Abort(QuicAbortDirection.Read, errorCode)` | `STOP_SENDING` |
+| stream `AbortWrite(errorCode)` | `QuicStream.Abort(QuicAbortDirection.Write, errorCode)` | `RESET_STREAM` |
+| connection `Abort(errorCode, reason)` | `QuicConnection.CloseAsync(errorCode)` | `CONNECTION_CLOSE` |
+
+- **A direction ends once.** `QuicStream.Abort` skips a direction that
+  has already ended (read to its end, completed, or aborted), so a stream
+  `Abort(Exception?)` or disposal after a coded abort sends the default
+  code only for a direction still open. That is how the HTTP/3 transport
+  resets with a code: both directions, then `Abort(reason)`.
+- **A half abort is not the stream ending.** It changes no `State` and
+  does not fire the stream's `ConnectionClosed`: the `ReadsClosed` or
+  `WritesClosed` fault it causes is `OperationAborted`, which the
+  peer-closure watch ignores (see "Lifecycle and teardown").
+- **Aborting a stream that has ended does nothing.** A disposed stream,
+  or one whose connection is gone, has nothing to tell the peer, so the
+  driver swallows `ObjectDisposedException` and `QuicException` there. A
+  code outside 0 to 2^62 - 1 throws `ArgumentOutOfRangeException` before
+  the stream is touched.
+- **Abort the read direction before completing `Output` on an unread
+  stream.** Completing either pipe disposes the `QuicStream`
+  (`leaveOpen: false`), and the disposal stops a read direction that is
+  still open with `DefaultStreamErrorCode`. A protocol that ends its
+  sending direction while the peer is still sending therefore calls
+  `AbortRead` with its own code first. #1330 separates the two
+  directions, so that completing `Output` sends the FIN and leaves
+  reading open.
 
 ## Diagnostics
 

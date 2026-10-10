@@ -44,8 +44,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <para>
 /// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
 /// particular it never completes the input pipe — on the QUIC driver that would dispose the whole QUIC
-/// stream, response direction included. Reading is stopped by the send path once the complete response
-/// is on the wire (<see cref="StopReading"/>).
+/// stream, response direction included. The send path refuses the rest of an unread request before the
+/// response's FIN (<see cref="RefuseRemainder"/>) and releases the input once the complete response is on
+/// the wire (<see cref="StopReading"/>).
 /// </para>
 /// <para>
 /// <b>CONNECT.</b> For a CONNECT request the DATA frames carry tunnel octets rather than a message body
@@ -81,12 +82,14 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private bool _endDelivered;
     private ExceptionDispatchInfo? _failure;
 
-    // Guarded by _gate. _reading marks an in-flight read (the application's or the drain's); _closed bars
-    // any further application read (a drain started, reading was stopped, or the stream was reset);
-    // _stopRequested asks for the input pipe to be completed as soon as no read is in flight; and
-    // _inputReleased records that it has been — by this stream, or by the reset that aborted it.
+    // Guarded by _gate. _reading marks an in-flight application read; _closed bars any further application
+    // read (the remainder was refused, reading was stopped, or the stream was reset); _stopSent records that
+    // the remainder was refused with STOP_SENDING(H3_NO_ERROR); _stopRequested asks for the input pipe to be
+    // completed as soon as no read is in flight; and _inputReleased records that it has been — by this
+    // stream, or by the reset that aborted it.
     private bool _reading;
     private bool _closed;
+    private bool _stopSent;
     private bool _stopRequested;
     private bool _inputReleased;
     private bool _disposed;
@@ -243,130 +246,49 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The HTTP/3 request body stream is read-only.");
 
     /// <summary>
-    /// Reads and discards what remains of the request stream before the response ends, so a peer whose
-    /// upload is nearly done finishes it normally instead of being stopped: at most
-    /// <paramref name="budget"/> octets of frame payload, within <paramref name="timeout"/>. DATA frames
-    /// (including the unread payload of a frame rejected for the body-size cap) and frames of unknown type
-    /// are discarded; a trailer section or a prohibited frame ends the drain. Nothing is validated or
-    /// surfaced — the exchange's response is already written. A CONNECT tunnel is never drained.
+    /// Refuses what remains of the request once the server no longer needs it — its complete response is
+    /// flushed, or its tunnel is done: the peer is asked to stop sending with
+    /// <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1), and no application read follows. Called before the
+    /// response's FIN, because on the QUIC driver ending the response releases the stream, which would stop
+    /// an unread request with the driver's default code instead — a code .NET's <c>HttpClient</c> reports
+    /// as a failed request even after a complete response. A body read to its end, or a reset stream, needs
+    /// no signal. Idempotent.
     /// </summary>
     /// <remarks>
-    /// The drain exists because stopping a stream is not free on today's connection contract: RFC 9114
-    /// §4.1 asks for <c>STOP_SENDING(H3_NO_ERROR)</c>, but the contract cannot carry an application error
-    /// code, so the QUIC driver signals its configured default instead — which some clients treat as a
-    /// failed request even after a complete response. Reaching the peer's FIN first avoids the signal
-    /// entirely (see docs/DESIGN.md).
+    /// The stop is sent at once, even while a read is in flight (a handler that leaked its reader past the
+    /// response): aborting the stream's receiving direction fails that read rather than completing its pipe
+    /// underneath it. The input pipe itself is released later, by <see cref="StopReading"/>. On a stream that
+    /// cannot carry a code the call only bars further reads, and the driver stops the peer with its default
+    /// code when the input is released.
     /// </remarks>
-    /// <param name="budget">The most frame-payload octets to discard.</param>
-    /// <param name="timeout">How long to wait for the peer to send the rest.</param>
-    /// <returns>
-    /// <see langword="true"/> when the stream's end (the peer's FIN) was reached; otherwise
-    /// <see langword="false"/>, and the caller stops reading instead.
-    /// </returns>
-    public async ValueTask<bool> TryDrainAsync(long budget, TimeSpan timeout)
+    public void RefuseRemainder()
     {
-        if (_reader.IsCompleted)
+        if (_reader.IsCompleted || IsReset)
         {
-            return true;
-        }
-
-        if (_isTunnel || IsReset || (_declaredContentLength is { } declared && declared - _received > budget))
-        {
-            // A tunnel is not a body to drain, a reset stream has nothing left, and a declared remainder
-            // beyond the budget cannot be drained within it.
-            return false;
+            return;
         }
 
         lock (_gate)
         {
-            if (_reading || _closed)
+            if (_stopSent)
             {
-                return false;
+                return;
             }
 
-            if (_failure is not null && RejectedStatusCode is null)
-            {
-                // Only a body-size rejection stops reading at a frame boundary this stream tracks. Any
-                // other failed read (one cancelled inside the trailer section, a failed stream) leaves the
-                // stream at no known position, so what follows cannot be parsed as frames. Checked under
-                // the gate, where a read that has just ended has already recorded its failure.
-                return false;
-            }
-
-            // What the drain discards is never delivered, so no application read may follow it.
-            _reading = true;
             _closed = true;
+            _stopSent = true;
         }
 
-        try
-        {
-            // The drain gives up when the peer is too slow or the connection goes away.
-            using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(_connection.ConnectionClosed);
-            deadline.CancelAfter(timeout);
-            long remainingBudget = budget;
-
-            while (true)
-            {
-                long pending = _dataRemaining + _skipRemaining;
-
-                if (pending > 0)
-                {
-                    if (pending > remainingBudget)
-                    {
-                        return false;
-                    }
-
-                    remainingBudget -= pending;
-
-                    while (pending > 0)
-                    {
-                        pending -= await _reader.SkipAvailableAsync(pending, deadline.Token).ConfigureAwait(false);
-                    }
-
-                    _dataRemaining = 0;
-                    _skipRemaining = 0;
-                    continue;
-                }
-
-                if (await _reader.ReadFrameHeaderAsync(deadline.Token).ConfigureAwait(false) is not { } frame)
-                {
-                    return true;
-                }
-
-                if (frame.Type == (long)Http3FrameType.Headers || Http3RequestStreamReader.IsProhibitedOnRequestStream(frame.Type))
-                {
-                    return false;
-                }
-
-                if (frame.Type == (long)Http3FrameType.Data)
-                {
-                    _dataRemaining = frame.Length;
-                }
-                else
-                {
-                    _skipRemaining = frame.Length;
-                }
-            }
-        }
-        catch (Exception exception) when (exception is OperationCanceledException or IOException or ConnectionException or InvalidOperationException)
-        {
-            // The deadline passed, the stream ended inside a frame, or the stream failed underneath: the
-            // caller stops reading instead.
-            return false;
-        }
-        finally
-        {
-            EndRead();
-        }
+        Http3ConnectionContext.StopReadingWithCode(_streamConnection, Http3ErrorCode.NoError);
     }
 
     /// <summary>
     /// Stops reading the request stream once the complete response is on the wire. When the body was not
-    /// read to its end, the input completes with an <c>H3_NO_ERROR</c> <see cref="Http3StreamException"/>
-    /// — the <c>STOP_SENDING</c> RFC 9114 §4.1 asks for when a server no longer needs the rest of a
-    /// request it has fully answered; otherwise it completes cleanly. A read still in flight (a handler
-    /// that leaked its reader past the response) completes the input itself when it returns, so the pipe
-    /// is never completed underneath an active read. Idempotent.
+    /// read to its end, the peer is asked to stop sending with <c>H3_NO_ERROR</c> — the
+    /// <c>STOP_SENDING</c> RFC 9114 §4.1 asks for when a server no longer needs the rest of a request it
+    /// has fully answered (see <see cref="RefuseRemainder"/>) — and the input is completed. A read still in
+    /// flight (a handler that leaked its reader past the response) completes the input itself when it
+    /// returns, so the pipe is never completed underneath an active read. Idempotent.
     /// </summary>
     public void StopReading()
     {
@@ -550,7 +472,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                 }
 
                 // The frame header is consumed, so its payload is next on the stream whether or not it is
-                // delivered; a rejected frame's payload stays accounted for the drain (TryDrainAsync).
+                // delivered.
                 _dataRemaining = frame.Length;
 
                 if (!_isTunnel)
@@ -716,12 +638,18 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private void CompleteInput()
     {
         // RFC 9114 §4.1 — H3_NO_ERROR asks the peer to stop sending the rest of a request the server has
-        // fully answered. A body read to its end needs no signal.
-        Exception? reason = _reader.IsCompleted
-            ? null
-            : new Http3StreamException(
+        // fully answered. A body read to its end needs no signal. The code reaches the wire through the
+        // stream's code-carrying abort, which a path that did not refuse the remainder before the FIN
+        // sends now; the reason then only ends the pipe, or carries the code on a stream without one.
+        Exception? reason = null;
+
+        if (!_reader.IsCompleted)
+        {
+            Http3ConnectionContext.StopReadingWithCode(_streamConnection, Http3ErrorCode.NoError);
+            reason = new Http3StreamException(
                 Http3ErrorCode.NoError,
                 "The server stopped reading the request stream after sending a complete response (RFC 9114 §4.1).");
+        }
 
         try
         {

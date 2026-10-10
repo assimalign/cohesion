@@ -230,6 +230,64 @@ The cost is the usual one for decorators. A layer composed above TLS that return
 connection hides the facet unless it implements the facet too and forwards it. A pass-through
 layer, which returns the connection it was given, keeps it visible.
 
+### Application error codes: `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` (#1080)
+
+`Abort(Exception?)` ends a whole stream or connection and says nothing on the wire about why. A
+multiplexed transport can: QUIC's `RESET_STREAM`, `STOP_SENDING`, and `CONNECTION_CLOSE` frames each
+carry an application error code (RFC 9000 §19.4, §19.5, §19.19). Until #1080 the QUIC driver sent its
+configured defaults in all three, so an HTTP/3 server could not send what RFC 9114 §8.1 asks of it:
+
+- After a complete response, the server stops an unread request with `H3_NO_ERROR`. The default,
+  `H3_REQUEST_CANCELLED`, made .NET's `HttpClient` fail a request whose response had arrived, and the
+  HTTP/3 transport drained up to 64 KiB of upload for up to 5 seconds to avoid sending it.
+- A rejected or malformed request is reset with `H3_REQUEST_REJECTED` or `H3_MESSAGE_ERROR`, so a client
+  can tell a request it may retry from one it must not.
+- A connection error closes with its own code, such as `H3_FRAME_UNEXPECTED`, not `H3_NO_ERROR`.
+
+Two facets carry the code. A consumer finds each with a type test and falls back to `Abort` without it:
+
+| Facet | Member | QUIC frame | Implemented by |
+|---|---|---|---|
+| `IMultiplexedStreamAbort` | `AbortRead(errorCode)` | `STOP_SENDING` | the QUIC driver's streams, the in-memory driver's stream ends |
+| `IMultiplexedStreamAbort` | `AbortWrite(errorCode)` | `RESET_STREAM` | the same |
+| `IMultiplexedConnectionAbort` | `Abort(errorCode, reason)` | `CONNECTION_CLOSE` | `QuicMultiplexedConnection` |
+
+The rules:
+
+- **One direction at a time.** A stream's directions end separately, so a server stops the request
+  direction and still ends its response with a FIN.
+- **The first signal for a direction wins.** A later `Abort` or `DisposeAsync` does not signal a
+  direction again. A reset with a code is therefore both `AbortWrite` and `AbortRead`, then `Abort(reason)`,
+  which keeps the lifecycle (`State`, `ConnectionClosed`) on the member that already owns it. The same holds
+  for the connection: the first `Abort` or disposal decides the close code.
+- **A half abort leaves the holder's lifecycle alone.** It changes no `State` and does not signal the
+  holder's `ConnectionClosed`. The peer's stream reports an abandoned stream, as for any reset (#1329).
+- **Codes range from 0 to 2^62 - 1**, the values a QUIC variable-length integer carries (RFC 9000 §16).
+  Anything else throws `ArgumentOutOfRangeException`. The in-memory driver enforces the same range, so a
+  test over it fails where QUIC would.
+- **The peer sees the code** as `QuicException.ApplicationErrorCode` on QUIC, and as
+  `ConnectionResetException.ApplicationErrorCode` on the in-memory driver.
+
+Why this shape:
+
+- **Facets, not members of `IConnection` or `IMultiplexedConnection`.** A new member breaks every
+  implementation outside this repository (the contracts shipped in 10.0.0-preview.1), and only a
+  transport with codes can honor it: a TCP connection has none to send. `ITlsConnectionInfo` is a facet for
+  the same reason.
+- **Not a code carried on the reason exception.** The reason types belong to the protocol (HTTP/3's are
+  internal to it), so a driver would have to recognize them, or the protocol would have to throw this
+  area's exceptions at its own application. The code is wire data, so it is an argument.
+- **Two named members, not a direction enum.** Each direction has its own frame and fails something
+  different on the peer, its reads or its writes. `ConnectionDirection` says which halves a stream has, not
+  which to abort.
+- **The half-close of #1330 builds on it.** The QUIC driver's stream pipes are created with
+  `leaveOpen: false`, so completing either `Input` or `Output` disposes the QUIC stream: ending one direction
+  ends both, and the disposal stops an unread direction with the default code. #1330 maps `Output`
+  completion to the FIN alone and `Input` completion to a read-direction abort with the default code. A
+  consumer that needs another code calls `AbortRead` first, and the first signal wins. Until then a consumer
+  that ends its sending direction while the peer is still sending calls `AbortRead` before completing
+  `Output`, as the HTTP/3 transport does after a complete response.
+
 ### Precedents
 
 The shape matches the systems that survived production: Kestrel
@@ -274,7 +332,9 @@ to it. The interface remains the canonical surface consumers depend on.
   connection whose client reset it before the accept, which Windows reports by failing the
   accept (#1308).
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
-  `Abort(Exception?)` to tear down immediately, discarding in-flight data. `ConnectionClosed` is
+  `Abort(Exception?)` to tear down immediately, discarding in-flight data. A multiplexed transport's
+  streams and connections can also abort with an application error code, one stream direction at a time
+  (see "Application error codes", above). `ConnectionClosed` is
   signaled on closure. A stream of a multiplexed connection also signals it when its peer abandons
   the stream (a QUIC `RESET_STREAM` or `STOP_SENDING`, or the in-memory equivalents), so a consumer
   such as an HTTP/3 request learns of it without reading or writing (#1329). `ConnectionState` tracks
@@ -283,6 +343,9 @@ to it. The interface remains the canonical surface consumers depend on.
   `Exception`; no framework-wide ancestry, per repository rules), with
   `ConnectionAbortedException` and `ConnectionResetException` for the common failures. Transports
   surface reset/abort conditions through this family so consumers catch one hierarchy.
+  `ConnectionResetException.ApplicationErrorCode` carries the code a peer reset or stopped a stream with,
+  when the driver reports the reset through this family (the in-memory driver does; the QUIC driver
+  surfaces `System.Net.Quic`'s `QuicException`).
 
 ## Layered Listeners: Where an Upgrade Runs and How a Failure Is Contained
 

@@ -19,10 +19,11 @@ internal sealed partial class Http3ConnectionContext
     /// <item><description><b>The exchange was cancelled, or the head never reached the wire</b> — the
     /// request stream is reset with <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §4.1.1), unless both sides had
     /// already ended it.</description></item>
-    /// <item><description><b>Otherwise</b> — the server's side is ended with a FIN if the application
-    /// left it open, then reading stops: a peer still sending is told to stop with
+    /// <item><description><b>Otherwise</b> — a peer still sending is told to stop with
     /// <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1), as after any response that completes before its
-    /// request.</description></item>
+    /// request, then the server's side is ended with a FIN if the application left it open, and reading
+    /// stops. The stop goes first because on the QUIC driver the FIN releases the stream, which would stop
+    /// the peer with the default code instead.</description></item>
     /// </list>
     /// The after-response interceptor hooks do not run: the tunnel took the exchange over.
     /// </remarks>
@@ -50,6 +51,7 @@ internal sealed partial class Http3ConnectionContext
             return;
         }
 
+        requestBody.RefuseRemainder();
         await tunnel.CloseAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
         StopReadingRequestStream(requestBody, context.StreamId);
     }

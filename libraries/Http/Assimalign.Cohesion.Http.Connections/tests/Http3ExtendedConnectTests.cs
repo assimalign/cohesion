@@ -134,8 +134,8 @@ public class Http3ExtendedConnectTests
         output.DataPayload().ShouldBe(Encoding.ASCII.GetBytes("last"));
         output.Frames.Count(frame => frame.FrameType == (long)Http3FrameType.Headers).ShouldBe(1);
 
-        Http3StreamException stop = await Should.ThrowAsync<Http3StreamException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
-        stop.ErrorCode.ShouldBe(Http3ErrorCode.NoError);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 ExtendedConnect: The exchange's end should end a tunnel the application left open, with no second head")]
@@ -285,7 +285,7 @@ public class Http3ExtendedConnectTests
 
         // Assert — RFC 9114 §4.1.1: an abandoned exchange is reset with H3_REQUEST_CANCELLED, never ended
         // with a FIN.
-        output.Failure.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.RequestCancelled);
+        output.Failure.ShouldBeOfType<ConnectionResetException>().ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
         output.IsCompleted.ShouldBeFalse();
         await Should.ThrowAsync<ObjectDisposedException>(() => tunnel.WriteAsync(new byte[1]).AsTask());
     }

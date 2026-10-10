@@ -248,10 +248,9 @@ public class Http3RoundTripTests
             return;
         }
 
-        // Arrange — the handler answers without touching a 32 KiB body; the server drains it before ending
-        // the response, so the client's upload completes normally. (A remainder beyond the drain budget is
-        // stopped instead, and the QUIC driver can only signal that with its default stream error code —
-        // which the .NET client reports as a failed request; see docs/DESIGN.md.)
+        // Arrange — the handler answers without touching a 32 KiB body; the server refuses the rest with
+        // STOP_SENDING(H3_NO_ERROR), which the .NET client accepts after a complete response (RFC 9114 §4.1).
+        // Http3ErrorCodeRoundTripTests covers an upload far beyond the QUIC stream window.
         using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 

@@ -28,12 +28,21 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// keep their closed tokens local.
 /// </para>
 /// <para>
+/// An end of a multiplexed stream also implements <see cref="IMultiplexedStreamAbort"/>, the in-memory
+/// <c>STOP_SENDING</c> and <c>RESET_STREAM</c> with an application error code: the other end's writes, or
+/// its reads, fail with a <see cref="ConnectionResetException"/> that carries the code. An end of a
+/// byte-stream pair does not implement it, as a single-stream transport cannot carry a code.
+/// </para>
+/// <para>
 /// This type carries no diagnostics dependency and performs no reflection; it is a pure
 /// <see cref="System.IO.Pipelines"/> composition and is fully trim-safe.
 /// </para>
 /// </remarks>
-internal sealed class InMemoryConnection : Connection
+internal class InMemoryConnection : Connection
 {
+    // RFC 9000 §16 — the codes the QUIC driver accepts, so a test over this driver fails where QUIC would.
+    private const long maxApplicationErrorCode = (1L << 62) - 1;
+
     // Non-pausing pipes: the in-memory transport favors deterministic, non-blocking byte movement
     // over back-pressure realism, so a synchronous prime write or a write-then-read on the same task
     // never blocks waiting for the peer. HTTP/2 and HTTP/3 exercise their own flow control above this.
@@ -57,6 +66,8 @@ internal sealed class InMemoryConnection : Connection
     private ConnectionState _state = ConnectionState.Open;
     private bool _outputCompleted;
     private bool _inputCompleted;
+    // Set when this end abandoned its receiving direction with a code (AbortRead): reads fail from then on.
+    private volatile bool _readAborted;
     private bool _isDisposed;
 
     // The other end of a multiplexed stream, which this end signals when it abandons the stream; null
@@ -218,8 +229,12 @@ internal sealed class InMemoryConnection : Connection
             _ => ConnectionDirection.Bidirectional
         };
 
-        InMemoryConnection a = new(bToA.Reader, aToB.Writer, directionA, capabilities, endPointA, endPointB, isStream);
-        InMemoryConnection b = new(aToB.Reader, bToA.Writer, directionB, capabilities, endPointB, endPointA, isStream);
+        InMemoryConnection a = isStream
+            ? new StreamEnd(bToA.Reader, aToB.Writer, directionA, capabilities, endPointA, endPointB)
+            : new InMemoryConnection(bToA.Reader, aToB.Writer, directionA, capabilities, endPointA, endPointB, signalsPeer: false);
+        InMemoryConnection b = isStream
+            ? new StreamEnd(aToB.Reader, bToA.Writer, directionB, capabilities, endPointB, endPointA)
+            : new InMemoryConnection(aToB.Reader, bToA.Writer, directionB, capabilities, endPointB, endPointA, signalsPeer: false);
 
         if (isStream)
         {
@@ -319,6 +334,103 @@ internal sealed class InMemoryConnection : Connection
         _peer?.CancelConnectionClosed();
     }
 
+    // The in-memory STOP_SENDING: completing the receive pipe with the reset makes the other end's next
+    // flush throw it. A read waiting on the pipe is woken first, because completing a pipe reader leaves a
+    // pending read waiting for the writer; the delegating reader then fails it.
+    private void AbortInput(long errorCode)
+    {
+        ValidateErrorCode(errorCode);
+
+        lock (_gate)
+        {
+            if (_inputCompleted || _direction == ConnectionDirection.WriteOnly)
+            {
+                return;
+            }
+
+            _inputCompleted = true;
+            _readAborted = true;
+        }
+
+        _input.CancelPendingRead();
+
+        try
+        {
+            _input.Complete(new ConnectionResetException(
+                $"The peer stopped reading the stream with application error code 0x{errorCode:x}.",
+                errorCode));
+        }
+        catch (InvalidOperationException)
+        {
+            // The underlying reader was already completed; nothing to do.
+        }
+
+        SignalPeer();
+    }
+
+    // The in-memory RESET_STREAM: completing the send pipe with the reset makes the other end's reads throw
+    // it, a pending read included.
+    private void AbortOutput(long errorCode)
+    {
+        ValidateErrorCode(errorCode);
+
+        lock (_gate)
+        {
+            if (_outputCompleted || _direction == ConnectionDirection.ReadOnly)
+            {
+                return;
+            }
+
+            _outputCompleted = true;
+        }
+
+        try
+        {
+            _outputInner.Complete(new ConnectionResetException(
+                $"The peer reset the stream with application error code 0x{errorCode:x}.",
+                errorCode));
+        }
+        catch (InvalidOperationException)
+        {
+            // The underlying writer was already completed; nothing to do.
+        }
+
+        SignalPeer();
+    }
+
+    private static void ValidateErrorCode(long errorCode)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
+    }
+
+    private static ConnectionAbortedException ReadAborted()
+        => new("Reading was aborted on this end of the stream.");
+
+    /// <summary>
+    /// One end of a stream of an in-memory multiplexed connection, which can abandon either direction with an
+    /// application error code.
+    /// </summary>
+    private sealed class StreamEnd : InMemoryConnection, IMultiplexedStreamAbort
+    {
+        public StreamEnd(
+            PipeReader input,
+            PipeWriter output,
+            ConnectionDirection direction,
+            ConnectionCapabilities capabilities,
+            EndPoint? localEndPoint,
+            EndPoint? remoteEndPoint)
+            : base(input, output, direction, capabilities, localEndPoint, remoteEndPoint, signalsPeer: true)
+        {
+        }
+
+        /// <inheritdoc />
+        public void AbortRead(long errorCode) => AbortInput(errorCode);
+
+        /// <inheritdoc />
+        public void AbortWrite(long errorCode) => AbortOutput(errorCode);
+    }
+
     /// <summary>
     /// A delegating <see cref="PipeWriter"/> that transitions the owning connection to
     /// <see cref="ConnectionState.Closing"/> when the holder completes the send side, mirroring a real
@@ -388,7 +500,10 @@ internal sealed class InMemoryConnection : Connection
 
     /// <summary>
     /// A delegating <see cref="PipeReader"/> for an end of a multiplexed stream: completing it with an
-    /// error stops the peer's sending half, which the other end is told about.
+    /// error stops the peer's sending half, which the other end is told about. Once the end abandons its
+    /// receiving direction (<see cref="IMultiplexedStreamAbort.AbortRead(long)"/>), a read in flight and every
+    /// later read fail with <see cref="ConnectionAbortedException"/>, as a QUIC stream's reads fail after
+    /// its own <c>STOP_SENDING</c>.
     /// </summary>
     private sealed class SignalingPipeReader : PipeReader
     {
@@ -401,15 +516,53 @@ internal sealed class InMemoryConnection : Connection
             _inner = inner;
         }
 
-        public override void AdvanceTo(SequencePosition consumed) => _inner.AdvanceTo(consumed);
+        public override void AdvanceTo(SequencePosition consumed)
+        {
+            if (!_connection._readAborted)
+            {
+                _inner.AdvanceTo(consumed);
+            }
+        }
 
-        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => _inner.AdvanceTo(consumed, examined);
+        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined)
+        {
+            if (!_connection._readAborted)
+            {
+                _inner.AdvanceTo(consumed, examined);
+            }
+        }
 
-        public override void CancelPendingRead() => _inner.CancelPendingRead();
+        public override void CancelPendingRead()
+        {
+            if (!_connection._readAborted)
+            {
+                _inner.CancelPendingRead();
+            }
+        }
 
-        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => _inner.ReadAsync(cancellationToken);
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
+        {
+            if (_connection._readAborted)
+            {
+                return ValueTask.FromException<ReadResult>(ReadAborted());
+            }
 
-        public override bool TryRead(out ReadResult result) => _inner.TryRead(out result);
+            ValueTask<ReadResult> read = _inner.ReadAsync(cancellationToken);
+
+            return read.IsCompletedSuccessfully && !_connection._readAborted
+                ? read
+                : AwaitReadAsync(read);
+        }
+
+        public override bool TryRead(out ReadResult result)
+        {
+            if (_connection._readAborted)
+            {
+                throw ReadAborted();
+            }
+
+            return _inner.TryRead(out result);
+        }
 
         public override void Complete(Exception? exception = null)
         {
@@ -419,6 +572,29 @@ internal sealed class InMemoryConnection : Connection
             {
                 _connection.SignalPeer();
             }
+        }
+
+        // A read the abort overtook fails, whatever the pipe handed it: the canceled result that woke it, or
+        // the InvalidOperationException of a pipe reader completed underneath it.
+        private async ValueTask<ReadResult> AwaitReadAsync(ValueTask<ReadResult> read)
+        {
+            ReadResult result;
+
+            try
+            {
+                result = await read.ConfigureAwait(false);
+            }
+            catch (InvalidOperationException) when (_connection._readAborted)
+            {
+                throw ReadAborted();
+            }
+
+            if (_connection._readAborted)
+            {
+                throw ReadAborted();
+            }
+
+            return result;
         }
     }
 

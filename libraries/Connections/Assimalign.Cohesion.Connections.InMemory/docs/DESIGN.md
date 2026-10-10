@@ -104,6 +104,27 @@ writes. A clean completion (`Output` without an error, the FIN) is a half-close 
 To see an errored `Input` completion, a stream end hands out a thin delegating `PipeReader` instead of
 the pipe's own reader.
 
+**A stream end carries application error codes (#1080).** It implements the contracts'
+`IMultiplexedStreamAbort`, the in-memory `STOP_SENDING` and `RESET_STREAM` with a code, so a protocol
+tested over this driver puts its codes where the QUIC driver puts them:
+
+- `AbortRead(errorCode)` completes the end's receive pipe with a `ConnectionResetException` whose
+  `ApplicationErrorCode` is the code, so the other end's next flush throws it. A read waiting on the
+  pipe is woken first: completing a pipe reader leaves a pending read waiting for the writer, so the
+  delegating reader cancels it and fails it, and every later read, with `ConnectionAbortedException`.
+- `AbortWrite(errorCode)` completes the end's send pipe with the same exception, so the other end's
+  reads throw it, a read in flight included.
+- Both signal the other end's `ConnectionClosed`, leave this end's state alone, and do nothing for a
+  direction that has already ended or that a unidirectional end lacks. A later `Abort(reason)` or
+  dispose does not complete an aborted direction again, so the other end keeps seeing the code, not the
+  reason. Codes outside 0 to 2^62 - 1 throw, as on the QUIC driver.
+- The ends of a byte-stream pair do not implement the facet: a single-stream transport has no code to
+  carry, and a consumer's type test should say so. The stream ends are a private subclass of the
+  connection type, created only for multiplexed streams.
+
+The multiplexed connection itself does not implement `IMultiplexedConnectionAbort`: its abort reaches
+no peer, so a close code would have nowhere to go.
+
 ## Dial / Accept Model
 
 `InMemoryConnectionListener` holds an unbounded `Channel<Connection>` of accepted server ends and

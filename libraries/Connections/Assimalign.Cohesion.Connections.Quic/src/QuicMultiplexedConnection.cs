@@ -28,12 +28,21 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// control channels in multiplexed protocols — HTTP/3 treats its control and QPACK streams as
 /// critical (RFC 9114 §6.2.1) — so the connection close must reach the peer before any
 /// stream-level teardown signal for them.
+/// <para>
+/// The connection and its streams carry application error codes: <see cref="Abort(long, Exception)"/>
+/// closes the connection with the caller's code (<see cref="IMultiplexedConnectionAbort"/>), and every
+/// stream implements <see cref="IMultiplexedStreamAbort"/>. <see cref="Abort(Exception)"/> and
+/// <see cref="DisposeAsync"/> close with the configured default close code.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo
+public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo, IMultiplexedConnectionAbort
 {
+    // RFC 9000 §16 — an application error code is a variable-length integer.
+    private const long maxApplicationErrorCode = (1L << 62) - 1;
+
     private readonly QuicConnection _connection;
     private readonly long _defaultStreamErrorCode;
     private readonly long _defaultCloseErrorCode;
@@ -147,24 +156,22 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The connection closes with the configured default close code; <see cref="Abort(long, Exception)"/>
+    /// chooses the code.
+    /// </remarks>
     public override void Abort(Exception? reason = null)
     {
-        lock (_stateLock)
-        {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
-            {
-                return;
-            }
+        AbortCore(_defaultCloseErrorCode);
+    }
 
-            _state = ConnectionState.Aborted;
-        }
+    /// <inheritdoc />
+    public void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
 
-        // Abort is synchronous while closing a QUIC connection is asynchronous; fire and forget
-        // the close, which observes its own faults so nothing surfaces as unobserved.
-        _ = CloseConnectionAsync();
-
-        CancelConnectionClosedToken();
-        ReportClosed();
+        AbortCore(errorCode);
     }
 
     /// <inheritdoc />
@@ -203,7 +210,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
             }
         }
 
-        await CloseConnectionAsync().ConfigureAwait(false);
+        await CloseConnectionAsync(_defaultCloseErrorCode).ConfigureAwait(false);
 
         // The connection is closed; disposing the remaining (unidirectional) streams releases
         // their pipes and handles without putting stream-level frames on the wire.
@@ -291,11 +298,33 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         _streams.TryRemove(stream.Id, out _);
     }
 
-    private async Task CloseConnectionAsync()
+    // The first abort or disposal decides the close: QuicConnection.CloseAsync sends CONNECTION_CLOSE once,
+    // and a later call has no effect on the wire.
+    private void AbortCore(long errorCode)
+    {
+        lock (_stateLock)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                return;
+            }
+
+            _state = ConnectionState.Aborted;
+        }
+
+        // Abort is synchronous while closing a QUIC connection is asynchronous; fire and forget
+        // the close, which observes its own faults so nothing surfaces as unobserved.
+        _ = CloseConnectionAsync(errorCode);
+
+        CancelConnectionClosedToken();
+        ReportClosed();
+    }
+
+    private async Task CloseConnectionAsync(long errorCode)
     {
         try
         {
-            await _connection.CloseAsync(_defaultCloseErrorCode).ConfigureAwait(false);
+            await _connection.CloseAsync(errorCode).ConfigureAwait(false);
         }
         catch (ObjectDisposedException)
         {
