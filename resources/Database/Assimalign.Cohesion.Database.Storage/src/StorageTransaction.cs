@@ -37,10 +37,12 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// commit or its rollback.
 /// </para>
 /// <para>
-/// A rollback restores pages in place. A structure whose readers read its pages without a page
-/// write lock (a B-tree) changes them through the overloads that take its
-/// <see cref="StoragePageLatch"/>, and the rollback restores every page while it holds each such
-/// latch exclusively, so those readers never see a page half restored (#1371).
+/// A rollback restores pages in place, and no reader sees a page half restored (#1371). A record
+/// read holds only a pin and confirms its read against the page's restore, which copies the
+/// restored page over the live one in one pass. A structure whose readers read its pages without a
+/// page write lock (a B-tree) changes them through the overloads that take its
+/// <see cref="StoragePageLatch"/>, and the rollback restores those pages, after every other page,
+/// while it holds each such latch exclusively, so those readers see the structure whole.
 /// </para>
 /// <para>
 /// Disposing an active transaction rolls it back. The type is sealed and created only by its
@@ -59,6 +61,7 @@ public sealed class StorageTransaction : IDisposable
     private readonly Storage _owner;
     private readonly Dictionary<long, StoragePreImage> _preImages = new();
     private List<StoragePageLatch>? _latches;
+    private HashSet<long>? _latchedPages;
     private Dictionary<long, ulong>? _pendingFrees;
     private long _preImageBytes;
     private int _spilledPreImages;
@@ -159,6 +162,19 @@ public sealed class StorageTransaction : IDisposable
 
         latches.Add(latch);
     }
+
+    /// <summary>
+    /// Records that a page belongs to a latched structure: it was changed through an overload that
+    /// takes the structure's latch, so the rollback restores it while it holds the enlisted latches,
+    /// and every other page before it takes them.
+    /// </summary>
+    internal void MarkLatchedPage(long pageId) => (_latchedPages ??= new HashSet<long>()).Add(pageId);
+
+    /// <summary>
+    /// Returns true when the page was changed through an overload that takes a latch
+    /// (<see cref="MarkLatchedPage"/>).
+    /// </summary>
+    internal bool IsLatchedPage(long pageId) => _latchedPages is { } pages && pages.Contains(pageId);
 
     /// <summary>
     /// Takes every enlisted latch exclusively for a rollback's restore, in the order the latches
@@ -271,9 +287,10 @@ public sealed class StorageTransaction : IDisposable
     /// in the buffer pool and journals a rollback record.
     /// </summary>
     /// <remarks>
-    /// The restore holds the latch of every latched structure whose pages the transaction changed
-    /// (<see cref="StoragePageLatch"/>) exclusively, so it waits for those structures' readers. A
-    /// thread that holds one of those latches shared must release it before it rolls back.
+    /// The pages of latched structures (<see cref="StoragePageLatch"/>) are restored last, while
+    /// the rollback holds each of their latches exclusively, so it waits for those structures'
+    /// readers; every other page is restored first, with no latch held. A thread that holds one of
+    /// those latches shared must release it before it rolls back.
     /// </remarks>
     /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
     public void Rollback()

@@ -1780,24 +1780,33 @@ description + exported registrations), the engine binds them.
   policy); the statement's bracket has rolled back, the session stays usable.
   Unique keys treat nulls as values (stricter than ANSI; consistent with the
   codec's nulls-first ordering — documented dialect decision).
-- **A failed statement's index pages are restored under each tree's latch** (#1371).
+- **A failed statement's pages are restored where no seek sees them half done** (#1371).
   A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
-  `SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row's entries, splitting
+  `SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting
   leaves as it goes, before a later row fails the unique check; the coordinator then
   rolls the statement bracket back, which rewrites each touched page in place from
   its pre-image. Until #1371 that rewrite took no tree latch, and a concurrent seek
   read cleared leaves: it failed with `StorageIOException` "Page 0 is the file header"
   (a zeroed entry, visible to every snapshot, whose reference unpacks to page 0),
   returned no row for a committed key, or reported the root as `IndexCorruptionException`.
-  Every one-second run of `SqlUniqueViolationRollbackRaceTests`' workload failed against
-  `f17d8bc0` (40 of 40, Release); none of 40, nor a 40-second run, fails now. The fix is
-  in the index and storage layers, not here: the tree's latch is a `StoragePageLatch`
-  the rollback holds while it restores (`Database.Indexing` DESIGN, "A rollback restores
-  the tree under its latch", which also records the open question of whether index
-  pages should be physically rolled back at all; PostgreSQL leaves an aborted
-  statement's index entries for later pruning). The executor's apply and rollback path
-  is unchanged, and a reclaimed-row skip in the seek (`TryReadRecord` returning false for
-  page 0) would only have hidden the torn read.
+  Every one-second run of `SqlUniqueViolationRollbackRaceTests`' first workload failed
+  against `f17d8bc0` (40 of 40, Release); none of 40, nor a 40-second run, fails now. The
+  same rewrite cleared the table's current heap page, which the failed rows share with
+  the newest committed rows, and a seek that reached a committed entry then found its row
+  "reclaimed" (`TryReadRecord` false) and skipped it without an error. The first fix,
+  which latched only the index pages, still missed committed rows from range seeks 56 to
+  247 times a minute beside failing inserts and committing updates (#1371 review), and
+  the test's heap-page race (a committer and failing inserts sharing the write page,
+  readers seeking the newest keys) failed 3 of 3 runs against it. The fix is in the
+  index and storage layers, not here: the tree's latch is a `StoragePageLatch` the
+  rollback holds while it restores the tree's pages (`Database.Indexing` DESIGN, "A
+  rollback restores the tree under its latch", which also records the open question of
+  whether index pages should be physically rolled back at all; PostgreSQL leaves an
+  aborted statement's index entries for later pruning), and every page is restored in
+  one copy that the row read confirms against and repeats when a restore overlapped it
+  (`Database.Storage` DESIGN, "No reader sees a rollback's restore half done"). The
+  executor's apply and rollback path is unchanged, and a reclaimed-row skip in the seek
+  (`TryReadRecord` returning false for page 0) would only have hidden the torn read.
 - **Registrations re-export at persistence points**: index DDL itself, each
   checkpoint pass, and instance disposal — each compares against the stored set
   first, so an idle checkpoint writes nothing. Root splits no longer move a
@@ -2977,9 +2986,9 @@ type, because the codec read whatever type the tag named rather than the column'
 raises `ERRCODE_DATA_CORRUPTED` for a stored value that disagrees with its own header
 (`src/backend/access/heap/heaptoast.c:740-760`), as the
 Graph, Documents and Blob codecs here raise `StorageCorruptionException` for a malformed record.
-The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (a failed
-statement's bracket rollback restoring the page, the purge freeing and clearing it); that copy is
-torn, not damaged. `DecodeRow` therefore confirms a failed decode before it reports it
+The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (the purge
+freeing and clearing it; a failed statement's bracket rollback restoring the page did too until
+#1371, below); that copy is torn, not damaged. `DecodeRow` therefore confirms a failed decode before it reports it
 (`DecodeConfirmed`): it reads the slot again with the same owner check, skips a slot reclaimed by
 then, and uses a re-read that decodes. A re-read that still does not decode is corrupt when its
 bytes equal the read before it, because damage is stable and a copy a writer tore is not; when
@@ -2988,14 +2997,19 @@ re-read, a scan racing a writer that reverts inserts and frees pages failed with
 each of three runs, reading a cleared page as "Expected a Int64 component but found Null"
 (`SqlRecordDecodeIntegrityTests`); the code before #1362 reads such a copy the same way and fails
 the statement with that type error. The confirmation narrows the torn-copy window and does not
-close it: a writer descheduled half-way through rewriting the page (a rollback applying a
-pre-image, a free clearing the body) leaves the same torn bytes for every read. Closing it needs a
+close it: a writer descheduled half-way through rewriting the page (a free clearing the body, an
+in-place update) leaves the same torn bytes for every read. Closing it needs a
 read that confirms against the page write lock, which every bracket holds from its first touch of
 a page until it ends; the storage does not expose that check yet (a follow-up). PostgreSQL needs
 no second read because it reads a heap page under a share lock
-(`src/backend/access/heap/heapam.c:647`, `:1706`). The index read before the row read has no
-such window since #1371: the rollback restores a tree's pages under the tree latch the seek's
-cursor holds ("Secondary indexes", above).
+(`src/backend/access/heap/heapam.c:647`, `:1706`). A rollback applying a pre-image is no longer
+such a writer since #1371: the storage restores each page in one copy bracketed by a restore
+sequence that `TryReadRecord` and the scan confirm against and repeat after, so neither the
+decode nor the reclaimed-row skip before it sees a page half restored (`Database.Storage` DESIGN,
+"No reader sees a rollback's restore half done"). Before that, the skip was the worse half: a
+committed row on the page read as reclaimed and was dropped with no error, which no re-read
+reached ("Secondary indexes", above). The index read before the row read has no such window
+either: the rollback restores a tree's pages under the tree latch the seek's cursor holds.
 The slot directory the read walks had a torn read of its own, below the decode: on ARM64 a scan
 beside an insert could see the new slot count before the slot's entry and fail with "Slotted page
 N is malformed" on a healthy page, which no re-read of the record reaches. The slotted page now

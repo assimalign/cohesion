@@ -47,8 +47,9 @@ and phase 2 replaced the remaining six with sealed types.
   it, and its former `Dispose` did nothing.
 - **`StoragePageLatch` is sealed with a private constructor and `Create()`** (rule 1). Indexing
   creates one per tree and passes it to the latched page-write overloads, so it is public; its
-  creation order, its owner check and its waiter count are internal (#1371, "A rollback restores
-  a latched structure under its latch").
+  creation order, its owner check and its waiter count are internal (#1371, "No reader sees a
+  rollback's restore half done"). The restore sequence a record read confirms against lives on
+  the internal buffer-pool frame, so the fix adds no other public surface.
 - **The buffer pool is internal.** `Storage.BufferPool` returns the internal
   `StorageBufferPool`; only the storage and its own tests read it.
 - **The unused `IStorageBackupManager` and `IStorageRecoveryManager` placeholders were
@@ -439,13 +440,14 @@ instead of dereferencing it:
   writer — a scan takes a pin, not a latch — so they enforce only what holds in every state a
   well-formed page passes through: the slot index lies inside a directory a page can
   hold, and the record lies inside the page body. That is what keeps a read inside the
-  buffer. A read racing a change can still copy a torn record — stale bytes, or bytes a
-  rollback's page restore or a page clear is overwriting — which is the content-isolation
+  buffer. A read racing a change can still copy a torn record — stale bytes, or bytes an
+  in-place `UpdateSlot` or a page clear is overwriting — which is the content-isolation
   question page latches would answer; the layers above own it today (the SQL and key-value
   reads confirm a record that does not decode by reading it again, each model's DESIGN,
-  "Error model"). A structure that guards its pages with its own latch has the rollback's
-  restore honor it ("A rollback restores a latched structure under its latch", #1371); slotted
-  record pages have no such latch. A reader that walks slots uses `TryReadSlot`,
+  "Error model"). A rollback's page restore is not among them: `TryReadRecord` and the unit
+  iterator confirm each read against the page's restore sequence and read again when a restore
+  overlapped it, and a latched structure's pages are restored under its latch ("No reader sees a
+  rollback's restore half done", #1371). A reader that walks slots uses `TryReadSlot`,
   which reads the slot count and one snapshot of the slot entry and copies the record from
   that snapshot: a slot deleted or reverted between two separate reads would otherwise fail
   the read ("Reading a record through a reference", below).
@@ -563,6 +565,7 @@ reclamation positively and returns `false`; every other failure throws:
 | Its page was freed | `StoragePageManager.TryGetPage`, which checks `FreeSpaceMap.IsAllocated` and pins only an allocated page | `false` |
 | Its page now holds a non-data page, or (owner overload) another owner's records | the page header's type and owner tag, under the pin | `false` |
 | Its slot lies past the slot directory (a rollback reverted it), or is deleted | `SlottedPage.TryReadSlot`, over one snapshot of the slot entry | `false` |
+| Its page is being restored by a failed bracket's rollback | the buffer-pool frame's restore sequence, read before and after | read again once the page is whole (#1371) |
 | Its page fails its checksum, or its header or slot addresses bytes outside the page | the buffer-pool load; the slotted geometry checks | `StorageCorruptionException` |
 | Its page ends inside the stream, or every buffer-pool frame is pinned | the buffer-pool load | `StorageIOException` |
 | The device fails the read | the file handle | its `IOException` |
@@ -577,14 +580,17 @@ which a two-second race test (`StorageRecordReclamationTests`) reproduces on eve
 without an owner serves the version ledger, which does not know a record's owner and rechecks its
 stamps instead. The checks share the caveat of every pinned read beside the page's single writer
 (above): a read that races a free, a reallocation and a rewrite of the same frame can still see
-torn geometry.
+torn geometry. A rollback's restore is the one rewrite the read confirms against: until #1371 a
+read during the restore found a committed record's page cleared and returned `false`, and the
+models dropped live rows ("No reader sees a rollback's restore half done").
 
 A scan meets the same reclamation without a reference. `StorageUnitIterator` pins a page and
 holds the pin across `MoveNext` calls, but not a latch, so the version purge deletes slots, a
 failed statement's rollback reverts the page to fewer slots, and an emptied page is freed while
 the scan stands on it or between its allocation check and its pin. The iterator pins through
 `TryGetPage` and reads each slot through `TryReadSlot`, so it skips what was reclaimed and still
-fails on a page it cannot read. Until #1342 it read the slot count, the slot's length and the
+fails on a page it cannot read; a read a restore overlapped is read again, as above (#1371).
+Until #1342 it read the slot count, the slot's length and the
 slot as three separate reads, and a SQL `UPDATE` or `DELETE` that scanned its target table beside
 the purge failed with "Cannot read a deleted slot", an out-of-range slot index, or "Page N is not
 allocated"; the storage race test fails that way on every run against the old iterator.
@@ -890,27 +896,89 @@ pages of a write transaction, with scratch files (`MaxScratchBufferSize`, 256 Mi
 `src/Voron/StorageEnvironmentOptions.cs:272`), because its transactions are no-steal; a steal
 pool with a journal of images makes the journal the natural spill target.
 
-### A rollback restores a latched structure under its latch (#1371)
+### No reader sees a rollback's restore half done (#1371)
 
-A rollback restores each page in place: `LoadPreImage` clears the page outside its LSN and
-checksum (`PageImageCodec.TryApplyImage`) and writes the pre-image's runs back. Readers that hold
-only a pin can see that rewrite half done. For a slotted page the readers above cope (the slot
-read and the record confirmation, "The record layer"); for a B-tree node they did not. The index
-reads its nodes under a tree latch that every writer of the tree also took, except the rollback,
-which no tree latch reached: a SQL seek beside a failed multi-row `INSERT` read cleared leaves and
-followed an entry reference of zero to page 0, missed committed keys, or met a root that was no
-node (`Database.Indexing` DESIGN, "A rollback restores the tree under its latch", which has the
-failure rates).
+A rollback restores each page it touched in place, and two kinds of reader read those pages
+without the page write lock the bracket holds: a record read (`TryReadRecord` or `ReadRecord`
+through a reference, or the `StorageUnitIterator` scan), which pins one page, and a latched
+structure's reader (a B-tree cursor), which follows references from page to page under the
+structure's latch. Until #1371 the
+restore applied the pre-image to the live page: `PageImageCodec.TryApplyImage` cleared the page
+outside its LSN and checksum and wrote the pre-image's runs back in page order, with no latch and
+nothing a reader could check. Both kinds of reader saw it half done:
 
-`StoragePageLatch` is that tree latch, owned by the storage so a rollback can take it. A structure
-whose readers take no page write lock passes its latch to
-`OpenPageForWrite(transaction, page, latch)` or `AllocatePageForWrite(transaction, type, latch)`.
-The storage refuses the write unless the calling thread holds the latch exclusively, and enlists
-the latch with the transaction (once per latch). `RollbackTransaction` then takes every enlisted
-latch exclusively before it restores the first page and releases them after the last one, before
-the rollback record is appended; a latch the rolling-back thread already holds exclusively is left
-as it is.
+- **The index.** Every other writer of a tree took the tree latch its cursors read under; the
+  rollback took none. A SQL seek beside a failed multi-row `INSERT` read cleared leaves and
+  followed an entry reference of zero to page 0, missed committed keys, or met a root that was no
+  node (`Database.Indexing` DESIGN, "A rollback restores the tree under its latch", which has the
+  failure rates).
+- **The records.** A failed statement's rows go to its table's current write page, which also
+  holds the committed rows inserted just before it ("Per-owner record chains"). While that page
+  was cleared, a read of a committed row found the page's type zeroed or its slot past the slot
+  count, and `TryReadRecord` returned false, which every model reads as "reclaimed": the SQL seek
+  and range seek, the key-value lookups, the Documents index reads and the Graph store skipped
+  the row without an error. The #1362 decode re-read never ran, because nothing was decoded. The
+  first #1371 fix, which latched only the index pages, still lost 56 to 247 committed rows a
+  minute from SQL range seeks beside failing inserts and committing updates (#1371 review; every
+  such skip was a read that overlapped a restore). `StorageRollbackRestoreReadTests`' race
+  reproduces it at the storage level within 8 to 130 ms on every run, and
+  `SqlUniqueViolationRollbackRaceTests`' heap-page race (a committer and failing inserts sharing
+  the write page, readers seeking the newest keys) failed 3 of 3 runs, two within 0.3 s.
 
+**A record page is restored in one copy that the read confirms against.** `RestorePage` builds
+the restored page in a scratch buffer first (the live page's bytes, then the pre-image over them,
+including the journal read of a spilled pre-image), and only then copies it over the live page in
+one pass. The bytes the pre-image shares with the page keep their value throughout, so committed
+records beside the failed bracket's inserts never change at all. The copy is bracketed by the
+buffer-pool frame's restore sequence, a sequence lock: the restore makes it odd before the copy and
+even again after, and the three pinned record reads (`TryReadRecord`, the unit iterator, and the
+protected `ReadRecord` behind the model storages' `ReadEntry`, `ReadRow` and `ReadDocument`) load
+it before and after each read (with `Volatile.ReadBarrier` between the read and the second load),
+wait while it is odd, and read again when it moved. That covers what the single copy does not: a
+committed record the failed bracket rewrote in place, and the failed bracket's own records, which
+a scan returns (the models filter them by their stamps) and which the copy zeroes under the
+reader. A malformed read that a
+restore overlapped is read again rather than reported as corruption. PostgreSQL publishes its
+backend status entries with the same protocol (`st_changecount`,
+`src/include/utils/backend_status.h:101-116`, `:181-238`); it reads a heap page under a buffer
+share lock instead (`src/backend/access/heap/heapam.c:647`, `:1706`), which a pinned reader here
+does not take.
+
+- **Each half is needed.** With the read's check disabled, the single copy alone kept every
+  committed record readable, but the scan race read the failed bracket's records torn (3 of 3
+  runs), and the tests that hold a restore open while a read or a scan starts
+  (`StorageRollbackRestoreReadTests`) fail at once. Without the single copy the sequence alone
+  would be correct, but a reader would wait out a journal read for a spilled pre-image.
+- **The page's own writers do not advance the sequence.** A bracket's forward changes publish in
+  an order a pinned reader follows ("The record layer"), and only the restore rewrites bytes a
+  reader may be copying. A reader waits only while one page is copied, and a restore holds no
+  lock while it copies, so the wait cannot be part of a cycle.
+- **Cost.** On the ARM64 development host an isolated `TryReadRecord` measured 172 to 202 ns per
+  call (run medians) with the check and 160 to 197 ns without it, about 10 ns and inside the
+  run-to-run spread; owner scans and a bracket of 40 inserts rolled back showed no difference
+  beyond noise. The restore copies each page twice, 16 KiB per page, on the rollback path only.
+
+**A latched structure's pages are restored last, under its latch.** `StoragePageLatch` is the
+tree latch, owned by the storage so a rollback can take it. A structure whose readers take no
+page write lock passes its latch to `OpenPageForWrite(transaction, page, latch)` or
+`AllocatePageForWrite(transaction, type, latch)`. The storage refuses the write unless the calling
+thread holds the latch exclusively, enlists the latch with the transaction (once per latch) and
+marks the page as latched. `RollbackTransaction` restores every other page first, with no latch
+held, then takes every enlisted latch exclusively, restores the latched pages, and releases the
+latches before the rollback record is appended; a latch the rolling-back thread already holds
+exclusively is left as it is. A cursor therefore sees the tree as the failed statement left it or
+as it was before.
+
+- **Record pages first, outside the latches (#1371 review).** The first version of the fix held
+  every enlisted latch for the whole restore, record pages and the journal reads of their spilled
+  pre-images included, so a large failed statement held off every reader of the indexes it
+  changed for its whole restore. The record pages need no latch, and no reader needs them restored
+  together with the index pages: the failed bracket's index entries are invisible to every
+  snapshot, and the committed entries name committed records the restore leaves in place. For a
+  failed 20,001-row `INSERT ... SELECT` into a table with two indexes (430 pages touched, 332 of
+  them index pages) the latches are now held 0.39 to 1.39 ms, against 0.70 to 3.23 ms for the
+  whole restore. `StoragePageLatchTests` checks the order: when the rollback waits for a reader's
+  latch, the record page is already restored.
 - **Creation order, so no rollback deadlocks another.** Latches are taken in the order they were
   created (`StoragePageLatch.Order`), not the order a transaction enlisted them, so two rollbacks
   that enlisted the same latches never each hold one while waiting for the other

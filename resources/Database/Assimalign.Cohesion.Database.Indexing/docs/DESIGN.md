@@ -452,7 +452,11 @@ torn read:
   live, so the entry is visible, and the SQL seek unpacked reference zero to page 0 and
   failed with `StorageIOException` "Page 0 is the file header";
 - a cleared leaf also hides the committed entries it held, so a seek of a committed key
-  returned no row, with no error;
+  returned no row, with no error. The heap page the same rollback restores hid committed
+  rows too, by another path that the tree latch does not reach: the row read found the
+  page cleared and skipped the row as reclaimed. The #1371 review found that half and the
+  storage now closes it (below, and `Database.Storage` DESIGN, "No reader sees a
+  rollback's restore half done");
 - the root, or any node, read while its header was cleared failed the node check as
   `IndexCorruptionException` (`COHDBI002`) on an undamaged tree. The message's "found
   format 2" is a second read of the header, made after the restore had written it back.
@@ -468,9 +472,12 @@ seeks against 177,000 rolled-back statements).
 the storage as `StoragePageLatch`, and `BTreeIndex` passes it with every page write
 (`Storage.OpenPageForWrite(transaction, page, latch)` and the matching
 `AllocatePageForWrite`). The storage requires the latch held exclusively for such a
-write, enlists it with the transaction, and `RollbackTransaction` takes every enlisted
-latch exclusively, in creation order, before it restores the first page, and releases
-them after the last, before it appends the rollback record. A cursor therefore sees the
+write, enlists it with the transaction and marks the page as latched, and
+`RollbackTransaction` restores the bracket's other pages first, outside every latch, then
+takes every enlisted latch exclusively, in creation order, restores the latched pages,
+and releases the latches before it appends the rollback record (the first version held
+the latches across the heap pages too, which the #1371 review measured as index readers
+held off for a large failed statement's whole restore). A cursor therefore sees the
 tree as the failed statement left it or as it was before the statement, and the
 pre-images form that earlier tree, because no other bracket can change the tree's pages
 while this one holds their page write locks. `BTreeRollbackLatchTests` pins both sides
@@ -492,8 +499,9 @@ latch: a cursor read 62 or 304 of 400 entries, or met `COHDBI002`).
   build that follows in the same bracket enlists the latch, so the rollback still holds
   it for the root.
 - **The cost is on the rollback path.** A page write adds a thread-ownership check of
-  the latch and a scan of the transaction's enlisted latches (one per tree it wrote);
-  the rollback takes one latch per tree and waits for readers already inside. Measured
+  the latch, a scan of the transaction's enlisted latches (one per tree it wrote) and an
+  insert of the page id into the transaction's set of latched pages; the rollback takes
+  one latch per tree and waits for readers already inside. Measured
   in one process on a shared machine (Release, four runs of seven interleaved rounds of
   two million calls), re-opening a page the transaction already holds cost 89.9–151.5 ns
   per call without a latch and 89.4–173.8 ns with one (round medians per run): inside the
@@ -521,9 +529,13 @@ through the tree (the `EraseAsync` the transaction rollback already uses, under 
 latch), and a bracket that commits its index pages while it rolls back its heap pages,
 which the storage cannot do: a bracket commits or rolls back whole. Both are larger
 than #1371, which closes the race inside the existing design; the question is recorded
-for the owner. The heap pages the same rollback restores are still read under a pin
-without a latch: the SQL and key-value reads confirm a record that does not decode by
-reading it again (#1362), which narrows that window and does not close it.
+for the owner. The heap pages the same rollback restores are read under a pin, without a
+latch, and the first version of this fix left them as they were: SQL range seeks beside
+failing inserts and committing updates missed committed rows 56 to 247 times a minute,
+each a row read that found its page half restored and skipped the row (#1371 review).
+The storage now restores every page in one copy that a row read confirms against and
+repeats when a restore overlapped it, so no row read sees a restore half done either
+(`Database.Storage` DESIGN, "No reader sees a rollback's restore half done").
 
 ### Measurements (2026-10-02)
 

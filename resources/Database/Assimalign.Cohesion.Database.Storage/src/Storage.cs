@@ -1412,7 +1412,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         var owner = ValidateTransaction(transaction);
         EnlistLatch(owner, latch);
-        return TouchPage(owner, pageId);
+        var handle = TouchPage(owner, pageId);
+        owner.MarkLatchedPage((long)pageId);
+        return handle;
     }
 
     /// <summary>
@@ -1446,7 +1448,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         var owner = ValidateTransaction(transaction);
         EnlistLatch(owner, latch);
-        return AllocateTouchedPage(owner, type);
+        var handle = AllocateTouchedPage(owner, type);
+        owner.MarkLatchedPage((long)handle.Id);
+        return handle;
     }
 
     /// <summary>
@@ -1762,14 +1766,34 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <returns>A copy of the record data.</returns>
+    /// <remarks>
+    /// The read is confirmed against the page's restore sequence, as
+    /// <see cref="TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>'s is: a read that
+    /// a failed bracket's rollback overlapped, and any failure it met, are repeated once the page
+    /// is whole, so the page's restore is never reported as a deleted slot or a malformed page (#1371).
+    /// </remarks>
     protected unsafe ReadOnlyMemory<byte> ReadRecord(PageId pageId, int slotIndex)
     {
         using var handle = _pageManager!.GetPage(pageId);
-        var slotted = new SlottedPage(handle.Page);
-        int length = slotted.GetSlotLength(slotIndex);
-        var buffer = new byte[length];
-        slotted.ReadSlot(slotIndex, buffer);
-        return buffer;
+        var entry = handle.Entry;
+        while (true)
+        {
+            int restore = entry.BeginRead();
+            try
+            {
+                var slotted = new SlottedPage(handle.Page);
+                int length = slotted.GetSlotLength(slotIndex);
+                var buffer = new byte[length];
+                slotted.ReadSlot(slotIndex, buffer);
+                if (entry.IsUnchangedSince(restore))
+                {
+                    return buffer;
+                }
+            }
+            catch (Exception exception) when (exception is StorageException or ArgumentOutOfRangeException && !entry.IsUnchangedSince(restore))
+            {
+            }
+        }
     }
 
     /// <summary>
@@ -1815,6 +1839,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// map no longer allocates is not read at all, and a page freed, or reallocated, after that
     /// check is pinned anyway and fails the type, owner or slot check.
     /// </para>
+    /// <para>
+    /// A page a failed bracket's rollback is restoring is not reclaimed either, though for the
+    /// moment of the restore it does not look like the page it was or the page it will be. The
+    /// read is confirmed against the page's restore and made again when a restore overlapped it,
+    /// so a committed record beside the failed bracket's changes is always found (#1371).
+    /// </para>
     /// </remarks>
     /// <param name="pageId">The page the reference names.</param>
     /// <param name="slotIndex">The slot the reference names.</param>
@@ -1842,21 +1872,49 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         using (handle)
         {
-            var page = handle.Page;
-
-            if (page.Type != PageType.Data || (ownerId is { } owner && page.OwnerId != owner))
+            // The pin is not a latch: a failed bracket's rollback can rewrite the page while it is
+            // read, and the read must not report a committed record that shares the page as
+            // reclaimed. It is confirmed against the page's restore sequence and read again when a
+            // restore overlapped it; a malformed read that a restore overlapped is the restore's
+            // half-written page, not damage (#1371).
+            var entry = handle.Entry;
+            while (true)
             {
-                return false;
-            }
+                int restore = entry.BeginRead();
+                try
+                {
+                    bool found = TryReadSlotOf(handle.Page, slotIndex, ownerId, out byte[] bytes);
+                    if (entry.IsUnchangedSince(restore))
+                    {
+                        if (found)
+                        {
+                            record = bytes;
+                        }
 
-            if (!new SlottedPage(page).TryReadSlot(slotIndex, out byte[] bytes))
-            {
-                return false;
+                        return found;
+                    }
+                }
+                catch (StorageCorruptionException) when (!entry.IsUnchangedSince(restore))
+                {
+                }
             }
-
-            record = bytes;
-            return true;
         }
+    }
+
+    /// <summary>
+    /// Copies the record in a slot of a pinned page when the page is a data page (of
+    /// <paramref name="ownerId"/>'s chain, when given) and the slot holds a record; one attempt of
+    /// <see cref="TryReadRecordAt"/>, which confirms it against the page's restore.
+    /// </summary>
+    private static bool TryReadSlotOf(Page page, int slotIndex, ulong? ownerId, out byte[] record)
+    {
+        if (page.Type != PageType.Data || (ownerId is { } owner && page.OwnerId != owner))
+        {
+            record = [];
+            return false;
+        }
+
+        return new SlottedPage(page).TryReadSlot(slotIndex, out record);
     }
 
     /// <summary>
@@ -2342,6 +2400,51 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Restores one page a rolling-back transaction touched to its pre-image, in the buffer pool,
+    /// so that a reader holding only a pin never sees it half restored (#1371).
+    /// </summary>
+    /// <remarks>
+    /// The restored page is built in <paramref name="image"/> first: the live page's bytes (for
+    /// the checksum field, which <see cref="LoadPreImage"/> keeps), then the pre-image over them,
+    /// which also reads a spilled pre-image back from the journal. Only then is the live page
+    /// changed, by one copy of the whole image inside the page's restore sequence
+    /// (<see cref="StorageBufferPool.BufferEntry.BeginRestore"/>). A byte the pre-image shares with
+    /// the page, such as every committed record beside the failed bracket's inserts, keeps its
+    /// value throughout; a read that overlaps the copy sees the sequence move and reads again.
+    /// Applying the pre-image to the live page directly, as before, cleared the page and then
+    /// rewrote it run by run: a committed record on the page read as reclaimed meanwhile, and the
+    /// models above skipped its row.
+    /// </remarks>
+    /// <param name="pageId">The page.</param>
+    /// <param name="preImage">Its pre-image.</param>
+    /// <param name="image">A scratch buffer of at least <see cref="Page.Size"/> bytes.</param>
+    private unsafe void RestorePage(long pageId, in StoragePreImage preImage, byte[] image)
+    {
+        using var handle = _pageManager!.GetPage((PageId)pageId);
+        var page = new Span<byte>(handle.Page.Pointer, Page.Size);
+        var restored = image.AsSpan(0, Page.Size);
+
+        // The content and the LSN of the page's last record together: the page as recovery
+        // rebuilds it, so the next transaction's delta names the right base.
+        page.CopyTo(restored);
+        LoadPreImage(preImage, restored);
+
+        var entry = handle.Entry;
+        entry.BeginRestore();
+        try
+        {
+            restored.CopyTo(page);
+        }
+        finally
+        {
+            entry.EndRestore();
+        }
+
+        handle.MarkDirty();
+        _consistency?.RolledBack(pageId, page);
+    }
+
+    /// <summary>
     /// Refuses to journal a page change whose page no longer carries the LSN its transaction found:
     /// only the transaction's own first touch stamps a page's LSN until it completes, so another
     /// LSN means the page was changed outside the storage transaction, and a delta naming either
@@ -2407,12 +2510,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// restoring the pages leaves the transaction active, so the caller can retry.
     /// </para>
     /// <para>
-    /// The pages are restored in place, each cleared and then rewritten from its pre-image, so
-    /// the restore holds every latch the transaction enlisted (<see cref="StoragePageLatch"/>)
-    /// exclusively from the first page to the last. A latched structure's reader then sees the
-    /// structure as the transaction left it or as it was before, never a cleared page or a
-    /// parent restored before its child (#1371). The latches are released before the rollback
-    /// record is appended.
+    /// The pages are restored in place, and no reader sees one half restored (#1371). Each page
+    /// is rebuilt from its pre-image in a scratch buffer and copied over the live page in one
+    /// pass (<see cref="RestorePage"/>), so the bytes the pre-image shares with the page never
+    /// change, and the copy is bracketed by the page's restore sequence, which a record read
+    /// confirms against. The pages of latched structures (<see cref="StoragePageLatch"/>), whose
+    /// readers must see the structure whole and not only each page whole, are restored last,
+    /// while every latch the transaction enlisted is held exclusively, so such a reader sees the
+    /// structure as the transaction left it or as it was before, never a parent restored before
+    /// its child. Every other page is restored first, with no latch held, so a large statement's
+    /// record pages, and the journal reads of their spilled pre-images, do not hold off the
+    /// readers of the indexes it changed. The latches are released before the rollback record is
+    /// appended.
     /// </para>
     /// </remarks>
     internal unsafe void RollbackTransaction(StorageTransaction transaction)
@@ -2427,24 +2536,46 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 "the journal, so recovery redoes its changes.");
         }
 
-        var latches = transaction.EnterLatchesForRestore();
+        byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
         try
         {
+            // Pages read under a pin first, with no latch held: their readers need no latch, and
+            // need not see them restored together with the latched structures' pages, because the
+            // failed bracket's index entries are invisible to every snapshot.
+            bool latchedPages = false;
             foreach (var (pageId, preImage) in transaction.PreImages)
             {
-                using var handle = _pageManager!.GetPage((PageId)pageId);
-                var page = new Span<byte>(handle.Page.Pointer, Page.Size);
+                if (transaction.IsLatchedPage(pageId))
+                {
+                    latchedPages = true;
+                    continue;
+                }
 
-                // The content and the LSN of the page's last record together: the page as recovery
-                // rebuilds it, so the next transaction's delta names the right base.
-                LoadPreImage(preImage, page);
-                handle.MarkDirty();
-                _consistency?.RolledBack(pageId, page);
+                RestorePage(pageId, preImage, image);
+            }
+
+            if (latchedPages)
+            {
+                var latches = transaction.EnterLatchesForRestore();
+                try
+                {
+                    foreach (var (pageId, preImage) in transaction.PreImages)
+                    {
+                        if (transaction.IsLatchedPage(pageId))
+                        {
+                            RestorePage(pageId, preImage, image);
+                        }
+                    }
+                }
+                finally
+                {
+                    StorageTransaction.ExitLatches(latches);
+                }
             }
         }
         finally
         {
-            StorageTransaction.ExitLatches(latches);
+            ArrayPool<byte>.Shared.Return(image);
         }
 
         // A commit that failed before its commit record may have journaled page records: recovery

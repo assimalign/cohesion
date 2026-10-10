@@ -11,14 +11,15 @@ using Assimalign.Cohesion.Database.Storage.Units;
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
-/// A rollback restores each page it changed in place, clearing it and writing its pre-image back.
-/// A structure whose readers take no page write lock (a B-tree) changes its pages under its
-/// <see cref="StoragePageLatch"/>, which the storage enlists with the transaction, and the rollback
-/// restores while it holds every enlisted latch exclusively (#1371). Each test here holds a latch
-/// shared on the test thread, as a reader does, and rolls back on another.
+/// A rollback restores each page it changed in place. A structure whose readers take no page write
+/// lock (a B-tree) changes its pages under its <see cref="StoragePageLatch"/>, which the storage
+/// enlists with the transaction, and the rollback restores those pages while it holds every
+/// enlisted latch exclusively, after the transaction's other pages (#1371). Each test here holds a
+/// latch shared on the test thread, as a reader does, and rolls back on another.
 /// </summary>
 public sealed class StoragePageLatchTests
 {
+    private const ulong RecordOwner = 7;
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Page latch: a rollback restores a latched page only once the latch's reader has left (#1371)")]
@@ -41,6 +42,46 @@ public sealed class StoragePageLatchTests
         heldByte.ShouldBe((byte)0x22);
         Body(storage, pageId)[0].ShouldBe((byte)0x11);
         transaction.IsActive.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Page latch: a rollback restores its record pages before it waits for a latched structure's readers (#1371)")]
+    public async Task Rollback_WhileAReaderHoldsTheLatch_ShouldRestoreRecordPagesBeforeWaiting()
+    {
+        // Arrange: a committed latched page holding 0x11s and a committed record; an open bracket
+        // changes the latched page to 0x22s and inserts a record beside the committed one.
+        using var storage = TornStorage.Create();
+        var latch = StoragePageLatch.Create();
+        var pageId = CommitLatchedPage(storage, latch, 0x11);
+        (PageId PageId, int SlotIndex) committed;
+        using (var setup = storage.BeginTransaction())
+        {
+            committed = storage.Insert(setup, RecordOwner, [0x33]);
+            setup.Commit();
+        }
+
+        var transaction = storage.BeginTransaction();
+        var inserted = storage.Insert(transaction, RecordOwner, [0x44]);
+        inserted.PageId.ShouldBe(committed.PageId);
+        Write(storage, transaction, latch, pageId, 0x22);
+
+        // Act: the reader holds the latch while the rollback starts; once the rollback waits for
+        // it, the record page is checked under the hold.
+        bool insertedLeft = false;
+        bool committedKept = false;
+        var (heldByte, waited, completedWhileHeld, rollback) = RollBackWhileReading(storage, latch, transaction, pageId, () =>
+        {
+            insertedLeft = !storage.TryReadRecord(inserted.PageId, inserted.SlotIndex, RecordOwner, out _);
+            committedKept = storage.TryReadRecord(committed.PageId, committed.SlotIndex, RecordOwner, out _);
+        });
+        await rollback.WaitAsync(Wait);
+
+        // Assert: the record page was restored before the rollback waited, the latched page after.
+        waited.ShouldBeTrue("the rollback waits for the latch");
+        completedWhileHeld.ShouldBeFalse();
+        insertedLeft.ShouldBeTrue("the record page is restored before the rollback waits for the latch");
+        committedKept.ShouldBeTrue();
+        heldByte.ShouldBe((byte)0x22);
+        Body(storage, pageId)[0].ShouldBe((byte)0x11);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Page latch: two rollbacks that enlisted the same latches in opposite orders take them in creation order (#1371)")]
@@ -149,13 +190,14 @@ public sealed class StoragePageLatchTests
     /// is taken and released on one thread.
     /// </summary>
     private static (byte HeldByte, bool Waited, bool CompletedWhileHeld, Task Rollback) RollBackWhileReading(
-        TornStorage storage, StoragePageLatch latch, StorageTransaction transaction, PageId pageId)
+        TornStorage storage, StoragePageLatch latch, StorageTransaction transaction, PageId pageId, Action? whileHeld = null)
     {
         latch.EnterRead();
         try
         {
             var rollback = Task.Run(transaction.Rollback);
             bool waited = SpinWait.SpinUntil(() => latch.WaitingWriters == 1 || rollback.IsCompleted, Wait) && !rollback.IsCompleted;
+            whileHeld?.Invoke();
             return (Body(storage, pageId)[0], waited, rollback.IsCompleted, rollback);
         }
         finally

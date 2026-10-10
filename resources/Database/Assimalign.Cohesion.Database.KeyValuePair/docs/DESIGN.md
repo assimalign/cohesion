@@ -653,8 +653,9 @@ resolution a Put or Delete starts with all fetch through the same read, so each 
 (#1362). `KeyValueRecordCodec.Decode` throws `DatabaseTypeException` for a record too short for its
 stamps, a malformed or truncated key or value component, and bytes past the value; it has no
 `false` result a caller could read as an absent key. The read holds a pin, not a latch, so it can
-copy a slot while a writer reclaims it (a failed command's bracket rollback restoring the page,
-the purge freeing and clearing it), and that copy is torn rather than damaged: a failed decode is
+copy a slot while a writer reclaims it (the purge freeing and clearing it; a failed command's
+bracket rollback restoring the page did too until #1371, when the storage read began confirming
+itself against the restore), and that copy is torn rather than damaged: a failed decode is
 confirmed by reading the slot again, with the same owner check, before it is reported. A slot
 reclaimed by then reads as absence, and a re-read that decodes is the entry. A re-read that still
 does not decode is corrupt when its bytes equal the read before it, because damage is stable;

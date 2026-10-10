@@ -10,14 +10,14 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A rollback rewrites each page it restores in place: it clears the page and writes the
-/// pre-image's runs back. A reader that reads one of those pages without excluding the rollback
-/// can see a cleared node, or a parent restored while its child is not yet. So a structure passes
-/// its latch to <see cref="Storage.OpenPageForWrite(StorageTransaction, PageId, StoragePageLatch)"/>
+/// A rollback rewrites each page it restores in place. A record read confirms itself against that
+/// rewrite page by page, but a structure's reader follows references from one page to the next,
+/// and without excluding the rollback it can see a parent restored while its child is not yet. So
+/// a structure passes its latch to <see cref="Storage.OpenPageForWrite(StorageTransaction, PageId, StoragePageLatch)"/>
 /// and <see cref="Storage.AllocatePageForWrite(StorageTransaction, PageType, StoragePageLatch)"/>,
 /// which require the latch held exclusively and enlist it with the transaction, and
-/// <see cref="StorageTransaction.Rollback"/> holds every latch its transaction enlisted from the
-/// first page it restores to the last (#1371).
+/// <see cref="StorageTransaction.Rollback"/> restores those pages while it holds every latch its
+/// transaction enlisted, after it has restored the transaction's other pages (#1371).
 /// </para>
 /// <para>
 /// A rollback takes the latches it enlisted in the order they were created, so two rollbacks never
