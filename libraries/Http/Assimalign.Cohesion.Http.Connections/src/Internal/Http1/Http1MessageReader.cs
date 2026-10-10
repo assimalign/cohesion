@@ -38,8 +38,9 @@ internal static class Http1MessageReader
     /// Thrown when the request head violates a configured limit (414 / 431).
     /// </exception>
     /// <exception cref="Http1BadRequestException">
-    /// Thrown when the request line holds an octet other than VCHAR and SP, or a header field line is
-    /// malformed: a name that is not a token, or a value with a control character other than HTAB (400).
+    /// Thrown when the request line holds an octet other than VCHAR and SP, a header field line is
+    /// malformed (a name that is not a token, or a value with a control character other than HTAB), or
+    /// a <c>Host</c> value holds an octet other than VCHAR (400).
     /// </exception>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when an interceptor rejects the request (4xx / 5xx).
@@ -156,6 +157,13 @@ internal static class Http1MessageReader
         // package's job and requires a separate transport <-> ProtocolUpgrade bridge
         // (tracked as follow-up).
         bool isConnectTunnel = method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority;
+
+        // RFC 9112 §3.2 — a Host field with an invalid value MUST be answered with 400. Host is
+        // uri-host [":" port] (RFC 9110 §7.2), every octet of which is a VCHAR, so anything else makes
+        // it invalid: an interior SP or HTAB, or obs-text. A no-break space would otherwise reach
+        // HttpHost, where a host allowlist reading "api.test\xA0" might match "api.test" while a front
+        // end that routes on the raw value sees another host (#1341).
+        EnsureHostFieldIsVisible(headers);
 
         // Host resolution depends on the request-target form (RFC 9112 §3.2.2 / §3.2.3):
         //   - absolute-form  → authority component of the target supersedes any Host header
@@ -428,6 +436,31 @@ internal static class Http1MessageReader
     }
 
     /// <summary>
+    /// Rejects a <c>Host</c> field whose value holds an octet other than a VCHAR (RFC 9112 §3.2,
+    /// RFC 9110 §7.2). Optional whitespace is already trimmed, so an empty value passes, as
+    /// RFC 9112 §3.2 allows for a target URI without an authority.
+    /// </summary>
+    /// <exception cref="Http1BadRequestException">A <c>Host</c> field line holds such an octet.</exception>
+    private static void EnsureHostFieldIsVisible(HttpHeaderCollection headers)
+    {
+        if (!headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue host))
+        {
+            return;
+        }
+
+        foreach (string? entry in host)
+        {
+            int invalid = entry is null ? -1 : entry.AsSpan().IndexOfAnyExceptInRange('!', '~');
+            if (invalid >= 0)
+            {
+                // The value is not quoted: it may hold obs-text, and the octet in hex says enough.
+                throw new Http1BadRequestException(
+                    $"RFC 9112 §3.2: the Host field holds the octet 0x{(int)entry![invalid]:X2} at offset {invalid}, which is not a VCHAR.");
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether the transport should automatically emit <c>100 Continue</c> before reading the body:
     /// the request declares <c>Expect: 100-continue</c> (RFC 9110 §10.1.1) and carries a framing that
     /// indicates a message body. Absent the expectation, or with no body to solicit, no interim
@@ -461,11 +494,15 @@ internal static class Http1MessageReader
                     continue;
                 }
 
-                foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                ReadOnlySpan<char> list = entry.AsSpan();
+                foreach (Range range in list.Split(','))
                 {
+                    // RFC 9110 §5.6.3 — trim SP and HTAB only, as the body reader does (#1341).
+                    ReadOnlySpan<char> segment = list[range].Trim(Http1FieldLine.OptionalWhitespace);
+
                     // Any non-"0" segment means a body is expected. A malformed value also lands here
                     // and is rejected by the body reader afterward; soliciting first is harmless.
-                    if (!string.Equals(segment, "0", StringComparison.Ordinal))
+                    if (!segment.IsEmpty && !segment.SequenceEqual("0"))
                     {
                         return true;
                     }
@@ -490,11 +527,13 @@ internal static class Http1MessageReader
                 continue;
             }
 
-            string[] segments = entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            foreach (string segment in segments)
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
             {
-                if (string.Equals(segment, expected, StringComparison.OrdinalIgnoreCase))
+                // RFC 9110 §5.6.1 / §5.6.3 — a list element loses SP and HTAB only, so
+                // "close\xA0" is not the close option (#1341).
+                ReadOnlySpan<char> segment = list[range].Trim(Http1FieldLine.OptionalWhitespace);
+                if (segment.Equals(expected, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }

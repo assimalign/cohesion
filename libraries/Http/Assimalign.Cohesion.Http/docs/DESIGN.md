@@ -226,7 +226,7 @@ quirks.
     and every non-ASCII character. HTTP/2 and HTTP/3 also require lowercase and
     check that themselves; pseudo-headers are not field names.
   - A **value** has no NUL, CR, or LF, and no SP or HTAB at either end
-    (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.2). This is the minimum a
+    (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.1.2, §10.3). This is the minimum a
     recipient must enforce and a sender must never break: CR and LF end an
     HTTP/1.1 field line, and a hop that strips boundary whitespace changes the
     value.
@@ -304,6 +304,14 @@ alongside allocating `Host` / `Port` convenience properties:
   is not a decimal 1–65535. `Host` falls back to the raw value in that case.
 - The split is structural, not semantic: host characters are not validated
   against the `reg-name` grammar and IPv6 contents are not parsed as addresses.
+- Only SP and HTAB are trimmed from the value before the split (RFC 9110
+  §5.6.3, `HttpFieldSyntax.TrimOws`). `string.Trim()` also stripped `U+0085`
+  and `U+00A0`, which an HTTP/1.1 transport decoding octets as Latin-1 can
+  deliver, so `api.test\xA0` matched an `api.test` allowlist entry while a front
+  end that routes on the raw value saw another host (#1341). HTTP/1.1 now
+  answers such a `Host` with `400` before it reaches `HttpHost`; the narrower
+  trim also covers the HTTP/2 and HTTP/3 `:authority`. The routing constraint's
+  matcher trims the same way.
 
 **Parity with routing.** Parity is now *shared code*, not two mirrored copies:
 the structural `host[:port]` split (`TrySplitHostPort`) and the port parse

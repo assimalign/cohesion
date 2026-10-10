@@ -31,6 +31,15 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal static class Http1FieldLine
 {
     /// <summary>
+    /// Optional whitespace, SP and HTAB (RFC 9110 §5.6.3): the only characters trimmed from a field
+    /// value or from a list element inside one. <c>string.Trim()</c> and
+    /// <see cref="StringSplitOptions.TrimEntries"/> also strip every Unicode white-space character, a
+    /// no-break space (<c>0xA0</c>) and a next-line octet (<c>0x85</c>) among them, which reach a
+    /// value as obs-text because lines are decoded as Latin-1.
+    /// </summary>
+    public const string OptionalWhitespace = " \t";
+
+    /// <summary>
     /// Splits <paramref name="line"/> at its first colon into a field name and a field value with the
     /// optional whitespace around it removed.
     /// </summary>
@@ -61,7 +70,7 @@ internal static class Http1FieldLine
 
         // RFC 9112 §5.1 / RFC 9110 §5.6.3 — OWS is SP and HTAB. string.Trim() would also strip a
         // vertical tab, a form feed, a bare CR, and a no-break space, all of which another parser keeps.
-        ReadOnlySpan<char> fieldValue = line.AsSpan(colon + 1).Trim(" \t");
+        ReadOnlySpan<char> fieldValue = line.AsSpan(colon + 1).Trim(OptionalWhitespace);
 
         int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(fieldValue);
         if (invalid >= 0)

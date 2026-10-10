@@ -20,8 +20,10 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// at CRLF, so a bare CR or LF reaches the value, and an intermediary that ends the line there reads a
 /// different message. Such a header is answered with 400 and such a trailer fails the body read, which
 /// is then answered with 400; either way the connection closes. Values are decoded as Latin-1, so an
-/// obs-text octet reaches the application intact. Each request below has a second one pipelined
-/// behind it, which must never be served after a rejection.
+/// obs-text octet reaches the application intact, and every reader of a value trims SP and HTAB
+/// only: a no-break space or a next-line octet stays in a framing field, a Host value, a connection
+/// option, and a chunk-size line, where a Unicode trim would strip it. Each request below has a
+/// second one pipelined behind it, which must never be served after a rejection.
 /// </summary>
 public class Http1FieldValueTests
 {
@@ -101,6 +103,114 @@ public class Http1FieldValueTests
         result.ReadFailures.ShouldAllBe(failure => failure == null);
         result.Headers[0].ShouldBe(expected);
         result.Trailers[0].ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Field Values: A framing field padded with obs-text whitespace should not frame the body, and no request should be served")]
+    [InlineData("Transfer-Encoding: chunked\u00A0")] // a trailing no-break space
+    [InlineData("Transfer-Encoding: \u0085chunked")] // a leading next-line octet
+    [InlineData("Transfer-Encoding: gzip, chunked\u00A0")] // the last coding of a list
+    [InlineData("Content-Length: 5\u00A0")]          // a trailing no-break space
+    [InlineData("Content-Length: \u00855")]          // a leading next-line octet
+    [InlineData("Content-Length: 5, 5\u00A0")]       // a repeated length in a list
+    public async Task ReceiveAsync_OnFramingFieldWithObsTextWhitespace_ShouldServeNoRequestAndClose(string framingLine)
+    {
+        // Arrange — the body matches both framings, so only a rejection keeps /upload from being served.
+        string body = framingLine.StartsWith("Transfer-Encoding", StringComparison.Ordinal)
+            ? "5\r\nhello\r\n0\r\n\r\n"
+            : "hello";
+        byte[] payload = Encoding.Latin1.GetBytes(
+            $"POST /upload HTTP/1.1\r\nHost: api.test\r\n{framingLine}\r\n\r\n{body}"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert — a Unicode trim read these as "chunked" and 5; an exact hop sees an unknown coding
+        // and an invalid length, so the request is rejected before dispatch.
+        result.Paths.ShouldBeEmpty();
+        result.Output.ShouldNotContain("HTTP/1.1 200");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Field Values: A Host value with an octet other than VCHAR should be answered with 400 and close the connection")]
+    [InlineData("api.test\u00A0")]  // a trailing no-break space, which a Unicode trim strips
+    [InlineData("\u0085api.test")]  // a leading next-line octet
+    [InlineData("api.t\u00E9st")]   // obs-text inside the name
+    [InlineData("api test")]        // an interior SP
+    [InlineData("api\ttest")]       // an interior HTAB
+    public async Task ReceiveAsync_OnHostValueWithNonVisibleOctet_ShouldAnswerBadRequestAndClose(string host)
+    {
+        // Arrange
+        byte[] payload = Encoding.Latin1.GetBytes(
+            $"GET /admin HTTP/1.1\r\nHost: {host}\r\n\r\n"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert — RFC 9112 §3.2: a Host field with an invalid value is answered with 400.
+        result.Paths.ShouldBeEmpty();
+        result.Output.ShouldStartWith("HTTP/1.1 400");
+        result.Output.ShouldContain("Connection: close");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Field Values: A Connection option padded with a no-break space should not be read as close")]
+    public async Task ReceiveAsync_OnConnectionCloseWithObsTextWhitespace_ShouldKeepTheConnectionOpen()
+    {
+        // Arrange — "close\xA0" is an unknown connection option, not close (RFC 9110 §7.6.1).
+        byte[] payload = Encoding.Latin1.GetBytes(
+            "GET /first HTTP/1.1\r\nHost: api.test\r\nConnection: close\u00A0\r\n\r\n"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert
+        result.Paths.ShouldBe(["/first", "/next"]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Field Values: A chunk-size line with a control character or a non-BWS pad should fail the body read, be answered with 400, and close the connection")]
+    [InlineData("5;\nxx")]       // a bare LF in the extension: a lenient hop reads the size line "5;"
+    [InlineData("5;x\r")]        // a bare CR in the extension
+    [InlineData("5;\u0000")]     // NUL in the extension
+    [InlineData("5\r;x")]        // a bare CR before the extension, which TrimEnd() stripped
+    [InlineData("5\u000B;x")]    // a vertical tab before the extension
+    [InlineData("5\u00A0;x")]    // a no-break space before the extension is not BWS
+    public async Task ReceiveAsync_OnMalformedChunkSizeLine_ShouldAnswerBadRequestAndClose(string sizeLine)
+    {
+        // Arrange — the chunk data matches the size, so only a rejection of the line fails the read.
+        byte[] payload = Encoding.Latin1.GetBytes(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + $"{sizeLine}\r\nhello\r\n0\r\n\r\n"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert
+        result.Paths.ShouldBe(["/upload"]);
+        result.ReadFailures.Single().ShouldBeOfType<InvalidDataException>();
+        result.Output.ShouldStartWith("HTTP/1.1 400");
+        result.Output.ShouldContain("Connection: close");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Field Values: A chunk-size line with SP or HTAB before its extension should still be read")]
+    [InlineData("5 ;x")]
+    [InlineData("5\t;x")]
+    [InlineData("5 \t ;name=\"a\tb\"")] // HTAB is allowed inside a quoted extension value
+    public async Task ReceiveAsync_OnChunkSizeLineWithBwsBeforeExtension_ShouldReadTheChunk(string sizeLine)
+    {
+        // Arrange
+        byte[] payload = Encoding.Latin1.GetBytes(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + $"{sizeLine}\r\nhello\r\n0\r\n\r\n"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert
+        result.Paths.ShouldBe(["/upload", "/next"]);
+        result.ReadFailures.ShouldAllBe(failure => failure == null);
     }
 
     /// <summary>

@@ -208,7 +208,7 @@ public class HttpFieldNormalizationTests
     [InlineData(" abc ", true)]             // a no-break space is obs-text, not whitespace
     [InlineData("café", true)]                   // obs-text (RFC 9110 §5.5)
     [InlineData("a\u000Bb", true)]                    // another CTL is IndexOfInvalidControlCharacter's rule
-    [InlineData(" abc", false)]                       // RFC 9113 §8.2.1 / RFC 9114 §4.2
+    [InlineData(" abc", false)]                       // RFC 9113 §8.2.1 / RFC 9114 §10.3
     [InlineData("abc ", false)]
     [InlineData("\tabc", false)]
     [InlineData("abc\t", false)]

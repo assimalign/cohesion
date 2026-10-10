@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 
+using Assimalign.Cohesion.Http.Internal;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -53,7 +55,7 @@ public readonly struct HttpHost : IEquatable<HttpHost>
 
     /// <summary>
     /// Gets the normalized host component: the value without its port, with the brackets of an
-    /// IPv6 literal removed and surrounding whitespace trimmed. When the value is not a
+    /// IPv6 literal removed and surrounding SP and HTAB trimmed. When the value is not a
     /// well-formed <c>host[:port]</c> (see <see cref="TryGetComponents"/>), the raw
     /// <see cref="Value"/> is returned unchanged.
     /// </summary>
@@ -89,7 +91,7 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     /// Splits the value into its host and port components without allocating.
     /// </summary>
     /// <param name="host">
-    /// The host component: surrounding whitespace trimmed, the brackets of a bracketed IPv6
+    /// The host component: surrounding SP and HTAB trimmed, the brackets of a bracketed IPv6
     /// literal removed. Empty when the value is empty; undefined when the method returns
     /// <see langword="false"/>.
     /// </param>
@@ -106,10 +108,20 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     /// integer in 1–65535.
     /// </returns>
     /// <remarks>
+    /// <para>
     /// The split is structural, not semantic: host characters are not validated against the
     /// URI <c>reg-name</c> grammar and IPv6 literal contents are not parsed as addresses.
     /// Consumers that compare hosts (routing constraints, allowlist matchers) operate on the
     /// normalized components and compare case-insensitively.
+    /// </para>
+    /// <para>
+    /// Only optional whitespace, SP and HTAB (RFC 9110 §5.6.3), is trimmed. Every other
+    /// character stays in the host component, a no-break space (<c>U+00A0</c>) and a next-line
+    /// character (<c>U+0085</c>) included: an HTTP/1.1 transport that decodes octets as Latin-1
+    /// can surface both, and a host allowlist that trimmed them would match
+    /// <c>api.test\xA0</c> to <c>api.test</c>, which a front end routing on the raw value reads
+    /// as another host.
+    /// </para>
     /// </remarks>
     public bool TryGetComponents(out ReadOnlySpan<char> host, out int? port)
     {
@@ -120,7 +132,7 @@ public readonly struct HttpHost : IEquatable<HttpHost>
         // rule on top: a component split that surfaces a "port" must have validated it, so a
         // present-but-invalid port makes the whole value malformed here — where the routing
         // constraint instead tolerates junk port text on a port-unconstrained route.
-        if (!TrySplitHostPort(Value.AsSpan().Trim(), out host, out ReadOnlySpan<char> portText, out bool hasPort))
+        if (!TrySplitHostPort(HttpFieldSyntax.TrimOws(Value.AsSpan()), out host, out ReadOnlySpan<char> portText, out bool hasPort))
         {
             host = default;
             return false;

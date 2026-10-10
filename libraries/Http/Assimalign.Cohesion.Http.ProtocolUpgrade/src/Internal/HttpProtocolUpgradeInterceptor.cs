@@ -44,6 +44,13 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// </remarks>
 internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
 {
+    // RFC 9110 §5.6.1 / §5.6.3 — a list element loses its optional whitespace, SP and HTAB, and
+    // nothing else. HTTP/1.1 decodes field values as Latin-1, so a no-break space (0xA0) or a
+    // next-line octet (0x85) can end a token; a Unicode trim would strip it and read
+    // "websocket\xA0" as websocket, while a hop that compares the token exactly sees another
+    // protocol and does not expect the connection to switch (#1341).
+    private const string OptionalWhitespace = " \t";
+
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
@@ -130,9 +137,10 @@ internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
                 continue;
             }
 
-            foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
             {
-                if (string.Equals(segment, "upgrade", StringComparison.OrdinalIgnoreCase))
+                if (list[range].Trim(OptionalWhitespace).Equals("upgrade", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -143,20 +151,15 @@ internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
     }
 
     /// <summary>
-    /// Returns the first comma-delimited token of an <c>Upgrade</c> header value, trimmed, or
-    /// <see langword="null"/> when the value is empty. RFC 9110 §7.8 lists protocols in
+    /// Returns the first comma-delimited token of an <c>Upgrade</c> header value, trimmed of SP and
+    /// HTAB, or <see langword="null"/> when that element is empty. RFC 9110 §7.8 lists protocols in
     /// preference order and a successful 101 names the single protocol the server switches to,
     /// so the first (most-preferred) token is what the upgrade surfaces.
     /// </summary>
     private static string? FirstToken(string value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
         int comma = value.IndexOf(',');
-        string token = (comma < 0 ? value : value[..comma]).Trim();
-        return token.Length == 0 ? null : token;
+        ReadOnlySpan<char> token = (comma < 0 ? value.AsSpan() : value.AsSpan(0, comma)).Trim(OptionalWhitespace);
+        return token.IsEmpty ? null : token.ToString();
     }
 }

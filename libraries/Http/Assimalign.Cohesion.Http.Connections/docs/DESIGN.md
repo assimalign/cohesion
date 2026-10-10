@@ -1300,9 +1300,11 @@ catch here. A trailer section uses the same parser (see `Http1RequestBodyStream`
 `ReadLineAsync` ends a line only at CRLF, so a bare CR or a bare LF stays inside
 the line it arrived in. An intermediary that ends the line at a bare LF (RFC 9112
 §2.2 lets it) reads `X-Trace: a<LF>Transfer-Encoding: chunked` as two fields
-where this server would read one. So each kind of line is checked once read, and
-a violation is a `400` through `Http1BadRequestException`, with the connection
-closed:
+where this server would read one. So each kind of line is checked once read,
+before any part of it is interpreted. A violation in the head is a `400` through
+`Http1BadRequestException`. One in the body, a chunk-size line or a trailer,
+fails the body read with an `InvalidDataException`, which the transport also
+answers with `400`. Either way the connection closes:
 
 - **The request line** is `method SP request-target SP HTTP-version`, so every
   octet is a VCHAR or SP (RFC 9112 §3). Any other octet is rejected before the
@@ -1324,13 +1326,47 @@ closed:
   HTTP/2 and HTTP/3 decoders (#1376) share. A trailer line goes through the
   same parser and fails the body read with an `InvalidDataException`. The
   transport then answers it with `400`, like any other malformed chunked body.
+- **A chunk-size line** is `chunk-size [chunk-ext]`, and a chunk extension is
+  BWS, tokens, and quoted strings (RFC 9112 §7.1.1), so it holds no control
+  character but HTAB either. `ReadChunkSizeAsync` applies
+  `IndexOfInvalidControlCharacter` to the whole line before it drops the
+  extension. Without that, `2;<LF>xx` was read here as the size 2 with an
+  ignored extension, while a hop that ends the line at the bare LF reads the
+  size line `2;` and then the data `xx`; `5<CR>` passed as 5 because
+  `TrimEnd()` stripped the bare CR. The BWS before `;` is trimmed as SP and HTAB
+  only, so `5\xA0;x` is not the size 5.
 - **Lines are decoded as Latin-1**, one character per octet, so obs-text
   (`%x80-FF`, RFC 9110 §5.5) reaches a field value intact: a no-break space is
   `U+00A0`, not `?`. The trailer reader already decoded this way.
+- **Every reader of a value trims SP and HTAB only**, not just `Http1FieldLine`.
+  The Latin-1 decode makes this load-bearing: `string.Trim()` and
+  `StringSplitOptions.TrimEntries` strip `U+0085` and `U+00A0` too, which the
+  ASCII decode used to turn into `?`. Each list parser splits at commas and
+  trims `Http1FieldLine.OptionalWhitespace` from each element: `Transfer-Encoding`
+  and `Content-Length` in `Http1MessageBodyReader`, and the `Connection` and
+  `Expect` options and the `100-continue` length check in `Http1MessageReader`.
+  So `Transfer-Encoding: chunked\xA0` names an unknown coding and
+  `Content-Length: \x855` is not a decimal, and both are rejected before
+  dispatch. A Unicode trim framed them as chunked and as 5, while a hop that
+  compares the value exactly saw an unknown coding and an invalid length.
+  `Http.ProtocolUpgrade` and `Http.WebSockets` parse their tokens the same way.
+- **A `Host` value holds VCHARs only.** It is `uri-host [":" port]` (RFC 9110
+  §7.2), and RFC 9112 §3.2 requires a `400` for a `Host` field with an invalid
+  value. So any other octet is answered with `400` through
+  `Http1BadRequestException`: an interior SP or HTAB, or obs-text.
+  `Host: api.test\xA0` would otherwise reach `HttpHost`, and a host allowlist
+  could read it as `api.test` while a front end that routes on the raw value
+  saw another host. `HttpHost` itself also trims SP and HTAB only, for the
+  HTTP/2 and HTTP/3 `:authority`.
 
-A rejection message never quotes the offending line or value. It names the
-field, which is a token, and gives the octet in hex: the raw text can hold CR,
-LF, or NUL, and a log that copied it would be open to injection.
+A rejection message never quotes text that can still hold a control character.
+A request-line, field-line, chunk-size-line, or `Host` rejection gives the
+offending octet in hex, and a field-line one names the field, which is a token:
+the raw text can hold CR, LF, or NUL, and a log that copied it would be open to
+injection. The chunk terminator
+check counts the octets it found before the CRLF instead of quoting them. A
+message that does quote a value, such as a bad transfer coding, length, or chunk
+size, quotes one these checks have already passed.
 
 ### The two-phase read timeout
 

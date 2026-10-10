@@ -173,7 +173,10 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
   `HttpHost.TryParsePort` (#890). This is the same primitive `HttpHostMatcher` (#781) validates
   against, so host **selection** here and host **allowlist validation** there cannot drift on what
   a given wire value means — the bracket rules, single-colon rule, and 1–65535 port range are one
-  copy of the logic.
+  copy of the logic. The request host is trimmed the way `HttpHost.TryGetComponents` trims it, SP
+  and HTAB only (RFC 9110 §5.6.3): a Unicode trim also stripped a no-break space or a next-line
+  character, so `api.test\xA0` selected an `api.test` route that the allowlist would refuse (#1341).
+  Patterns are configuration, not wire input, and are still trimmed of any whitespace.
 - **The port-unconstrained leniency (deliberate, pinned).** The shared helper is the *structural*
   split only; port digits are validated as a separate step. A route that constrains no port skips
   that step entirely, so an otherwise well-formed request host carrying a **junk or out-of-range

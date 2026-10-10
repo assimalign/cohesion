@@ -19,6 +19,15 @@ internal static class HttpWebSocketHandshake
     /// <summary>The <c>Upgrade</c> token and extended CONNECT <c>:protocol</c> of a WebSocket.</summary>
     public const string ProtocolToken = "websocket";
 
+    /// <summary>
+    /// Optional whitespace, SP and HTAB (RFC 9110 §5.6.3): the only characters trimmed from a
+    /// handshake field value or a list element. <c>string.Trim()</c> and
+    /// <see cref="StringSplitOptions.TrimEntries"/> also strip a no-break space (<c>0xA0</c>) and a
+    /// next-line octet (<c>0x85</c>), which HTTP/1.1 delivers as obs-text, so <c>13\xA0</c> would
+    /// read as version 13 here and as another version at a hop that compares exactly (#1341).
+    /// </summary>
+    public const string OptionalWhitespace = " \t";
+
     // RFC 6455 §1.3: the GUID concatenated with the key before hashing.
     private const string acceptGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -51,8 +60,8 @@ internal static class HttpWebSocketHandshake
     }
 
     /// <summary>
-    /// Reads the client's <c>Sec-WebSocket-Key</c>: one field line whose value, trimmed, is the
-    /// base64 encoding of exactly 16 bytes (RFC 6455 §4.2.1 item 5, §11.3.1).
+    /// Reads the client's <c>Sec-WebSocket-Key</c>: one field line whose value, trimmed of SP and
+    /// HTAB, is the base64 encoding of exactly 16 bytes (RFC 6455 §4.2.1 item 5, §11.3.1).
     /// </summary>
     /// <param name="headers">The request headers.</param>
     /// <param name="key">The trimmed key when it is valid; otherwise empty.</param>
@@ -67,22 +76,28 @@ internal static class HttpWebSocketHandshake
             return false;
         }
 
-        string? candidate = value[0]?.Trim();
+        string? raw = value[0];
+        if (raw is null)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> candidate = raw.AsSpan().Trim(OptionalWhitespace);
 
         // Exactly 24 characters rules out interior whitespace, which the base64 decoder would skip.
-        if (candidate is null || candidate.Length != keyLength)
+        if (candidate.Length != keyLength)
         {
             return false;
         }
 
         // Room for two bytes more than a nonce, so a key that decodes to 17 or 18 bytes is caught.
         Span<byte> nonce = stackalloc byte[nonceLength + 2];
-        if (!Convert.TryFromBase64String(candidate, nonce, out int written) || written != nonceLength)
+        if (!Convert.TryFromBase64Chars(candidate, nonce, out int written) || written != nonceLength)
         {
             return false;
         }
 
-        key = candidate;
+        key = candidate.Length == raw.Length ? raw : candidate.ToString();
         return true;
     }
 
@@ -106,9 +121,10 @@ internal static class HttpWebSocketHandshake
                 continue;
             }
 
-            foreach (string version in line.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            ReadOnlySpan<char> list = line.AsSpan();
+            foreach (Range range in list.Split(','))
             {
-                if (string.Equals(version, SupportedVersion, StringComparison.Ordinal))
+                if (list[range].Trim(OptionalWhitespace).SequenceEqual(SupportedVersion))
                 {
                     return true;
                 }
@@ -143,14 +159,21 @@ internal static class HttpWebSocketHandshake
                 continue;
             }
 
-            foreach (string protocol in line.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            ReadOnlySpan<char> list = line.AsSpan();
+            foreach (Range range in list.Split(','))
             {
+                ReadOnlySpan<char> protocol = list[range].Trim(OptionalWhitespace);
+                if (protocol.IsEmpty)
+                {
+                    continue;
+                }
+
                 if (!IsToken(protocol))
                 {
                     return false;
                 }
 
-                (offered ??= new List<string>()).Add(protocol);
+                (offered ??= new List<string>()).Add(protocol.ToString());
             }
         }
 

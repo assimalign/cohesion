@@ -29,8 +29,12 @@ seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
    CONNECT` (the transport's `HttpRequestTarget` parser already enforces CONNECT ⇒
    authority-form); an upgrade requires **both** a `Connection: upgrade` token and a non-empty
    `Upgrade` header (a bare `Upgrade` header is not actionable, per §7.8). CONNECT takes
-   precedence — §7.8 requires ignoring `Upgrade` on CONNECT. A matched transition also adds the
-   interceptor to that exchange's response phase
+   precedence — §7.8 requires ignoring `Upgrade` on CONNECT. Both headers are comma lists whose
+   elements lose SP and HTAB only (RFC 9110 §5.6.1, §5.6.3). The transport decodes field values as
+   Latin-1, so a no-break space (`0xA0`) or a next-line octet (`0x85`) can end a token, and a
+   Unicode trim read `Upgrade: websocket\xA0` as `websocket` and `Connection: upgrade\xA0` as the
+   upgrade option, while a hop comparing exactly sees neither (#1341). A matched transition also
+   adds the interceptor to that exchange's response phase
    (`HttpExchangeInterceptorRequestContext.AddResponseInterceptor`), which is what step 2 runs in.
 2. **Materialization** — an `IHttpExchangeInterceptor`. `BeforeResponse` runs at the setup of
    each exchange step 1 joined — after the head is parsed, before the application handler —

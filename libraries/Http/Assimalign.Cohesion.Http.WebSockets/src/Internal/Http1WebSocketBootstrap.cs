@@ -91,7 +91,8 @@ internal sealed class Http1WebSocketBootstrap : HttpWebSocketBootstrap
             return true;
         }
 
+        // SP and HTAB only: "0\xA0" is not a zero length, so it counts as content (#1341).
         return headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue length)
-            && !string.Equals(length.Value.Trim(), "0", StringComparison.Ordinal);
+            && !length.Value.AsSpan().Trim(HttpWebSocketHandshake.OptionalWhitespace).SequenceEqual("0");
     }
 }

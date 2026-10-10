@@ -437,7 +437,8 @@ internal sealed class Http1RequestBodyStream : Stream
             if (_chunkRemaining < 0)
             {
                 // RFC 9112 §7.1 — every chunk's data is terminated by CRLF before the next size line.
-                // The line may hold nothing else, so its cap is zero: the first other octet fails it.
+                // The line may hold nothing else, so its cap is zero: the first other octet fails it, and
+                // the rejection never quotes it, since it can be a bare CR, LF, or NUL.
                 if (_needChunkTerminator)
                 {
                     await ReadFramingLineAsync(0, FramingLine.ChunkTerminator, cancellationToken).ConfigureAwait(false);
@@ -493,12 +494,25 @@ internal sealed class Http1RequestBodyStream : Stream
         // and ChargeChunkFraming holds the lines of the whole body to a total.
         string sizeLine = await ReadFramingLineAsync(_maxFramingLineSize, FramingLine.ChunkSize, cancellationToken).ConfigureAwait(false);
 
-        // RFC 9112 §7.1.1 — split off the optional chunk extensions, which start at the first ';'. Only
-        // spaces and tabs (BWS) may stand between the size and the ';'.
+        // RFC 9112 §7.1.1 — a chunk-size line is chunk-size, then chunk-ext: BWS, token, and
+        // quoted-string, none of which carries a control character but HTAB. The framing line ends
+        // only at CRLF, so a bare CR or LF stays in it, and the extension is otherwise ignored: an
+        // intermediary that ends the line at a bare LF reads "2;<LF>xx" as the size "2;" and the data
+        // "xx", where this reader would read the size 2 with an extension. The whole line is checked
+        // before the extension is dropped (#1341). The octet is named in hex, never quoted.
+        int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(sizeLine);
+        if (invalid >= 0)
+        {
+            throw new InvalidDataException(
+                $"RFC 9112 §7.1.1: a chunk-size line holds the control character 0x{(int)sizeLine[invalid]:X2} at offset {invalid}.");
+        }
+
+        // RFC 9112 §7.1.1 — strip the optional ";<chunk-ext>". BWS before the ';' is SP and HTAB only
+        // (RFC 9110 §5.6.3): TrimEnd() would also strip a no-break space, and accept "5\xA0;x" as 5.
         int semicolon = sizeLine.IndexOf(';');
         ReadOnlySpan<char> sizeText = semicolon < 0
             ? sizeLine.AsSpan()
-            : sizeLine.AsSpan(0, semicolon).TrimEnd(" \t");
+            : sizeLine.AsSpan(0, semicolon).TrimEnd(Http1FieldLine.OptionalWhitespace);
 
         if (sizeText.IsEmpty)
         {

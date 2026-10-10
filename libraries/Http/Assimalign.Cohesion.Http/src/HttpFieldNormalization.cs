@@ -73,17 +73,18 @@ public static class HttpFieldNormalization
     /// <summary>
     /// Determines whether <paramref name="value"/> passes the field-value rule
     /// every version shares: no NUL, CR, or LF anywhere, and no leading or
-    /// trailing SP or HTAB (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.2). An
-    /// empty value is valid.
+    /// trailing SP or HTAB (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.1.2,
+    /// §10.3). An empty value is valid.
     /// </summary>
     /// <remarks>
     /// <para>
     /// This is the minimum a recipient MUST enforce and a sender MUST NOT
     /// violate. CR and LF end an HTTP/1.1 field line, so a value carrying either
     /// is read as two fields by a parser that honors them and as one by a parser
-    /// that does not; NUL ends a string in many implementations. RFC 9113 and
-    /// RFC 9114 make a value that starts or ends with whitespace malformed,
-    /// because an HTTP/1.1 hop would strip it as optional whitespace.
+    /// that does not; NUL ends a string in many implementations. RFC 9113 §8.2.1
+    /// makes a value that starts or ends with whitespace malformed, and
+    /// RFC 9114 §10.3 does the same through RFC 9110's field-content, because an
+    /// HTTP/1.1 hop would strip it as optional whitespace.
     /// </para>
     /// <para>
     /// RFC 9110 §5.5 also calls a value with any other control character

@@ -43,6 +43,8 @@ public class HttpWebSocketHandshakeTests
     [InlineData("AAAAAAAAAAAAAAAAAAAAAAA=")]
     [InlineData("AAAAAAAAAAAAAAAAAAAAAAAA")]
     [InlineData("dGhlIHNhbXBs ZSBub25jZQ=")]
+    [InlineData("dGhlIHNhbXBsZSBub25jZQ==\u00A0")]   // a no-break space is not trimmed (RFC 9110 §5.6.3)
+    [InlineData("\u0085dGhlIHNhbXBsZSBub25jZQ==")]  // nor is a next-line octet
     public void TryGetKey_MalformedKey_ReturnsFalse(string value)
     {
         // Arrange
@@ -78,6 +80,9 @@ public class HttpWebSocketHandshakeTests
     [InlineData("12", false)]
     [InlineData("130", false)]
     [InlineData("", false)]
+    [InlineData("13\u00A0", false)]       // a no-break space is not optional whitespace
+    [InlineData("\u008513", false)]     // nor is a next-line octet
+    [InlineData("8, 13\u00A0", false)]
     public void HasSupportedVersion_VersionList_ReportsWhetherVersion13IsListed(string value, bool expected)
     {
         // Arrange
@@ -125,6 +130,8 @@ public class HttpWebSocketHandshakeTests
     [InlineData("chat, \"quoted\"")]
     [InlineData("chat;v=1")]
     [InlineData("chat/1")]
+    [InlineData("chat\u00A0")]            // a no-break space stays in the element, which is then no token
+    [InlineData("superchat, \u0085chat")]
     public void TryGetRequestedProtocols_NonTokenElement_ReturnsFalse(string value)
     {
         // Arrange

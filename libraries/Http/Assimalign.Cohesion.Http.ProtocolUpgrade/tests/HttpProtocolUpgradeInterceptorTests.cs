@@ -77,6 +77,46 @@ public class HttpProtocolUpgradeInterceptorTests
         context.Upgrade.ShouldNotBeNull();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: A Connection option padded with obs-text whitespace is not the upgrade token")]
+    [InlineData("upgrade\u00A0")]          // a trailing no-break space, as HTTP/1.1 decodes 0xA0
+    [InlineData("\u0085upgrade")]          // a leading next-line octet
+    [InlineData("keep-alive, upgrade\u00A0")]
+    public void Interceptors_OnConnectionUpgradeTokenWithObsTextWhitespace_ShouldNotInstallFeature(string connection)
+    {
+        // Arrange — RFC 9110 §5.6.3: only SP and HTAB are optional whitespace.
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = connection;
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+
+        // Act
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
+
+        // Assert
+        context.Upgrade.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: The Upgrade protocol keeps obs-text whitespace and loses only SP and HTAB")]
+    [InlineData(" \twebsocket\t , h2c", "websocket")]
+    [InlineData("websocket\u00A0", "websocket\u00A0")]   // not websocket, so no WebSocket handshake takes it
+    [InlineData("\u0085websocket", "\u0085websocket")]
+    public void Interceptors_OnUpgradeProtocolWithWhitespace_ShouldTrimOnlySpaceAndTab(string upgradeValue, string expectedProtocol)
+    {
+        // Arrange
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = upgradeValue;
+        FakeHttpContext context = new();
+
+        // Act
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
+
+        // Assert
+        IHttpProtocolUpgrade? upgrade = context.Upgrade;
+        upgrade.ShouldNotBeNull();
+        upgrade!.Protocol.ShouldBe(expectedProtocol);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: HTTP/2 exchanges are never transitions, even with upgrade-shaped headers")]
     public void Interceptors_OnHttp2_ShouldNotInstallFeature()
     {

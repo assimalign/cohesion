@@ -106,6 +106,13 @@ The attempt is validated in this order, which gives the client the most useful r
 4. **`Sec-WebSocket-Protocol`, if present, is a list of tokens** (§4.1, §11.3.4), otherwise
    `Invalid`. The list may span several field lines, and empty elements are ignored (RFC 9110 §5.6.1).
 
+Each of these values, and each list element, loses SP and HTAB at either end and nothing else
+(RFC 9110 §5.6.3), as does the `Content-Length` of step 1. HTTP/1.1 decodes field values as
+Latin-1, so a no-break space (`0xA0`) or a next-line octet (`0x85`) can reach them; a Unicode trim
+read `Sec-WebSocket-Version: 13\xA0` as `13` and `chat\xA0` as the token `chat`, which a hop
+comparing exactly reads otherwise (#1341). Now the version is unsupported and the protocol list
+malformed.
+
 `RejectHandshake` stages the refusal: `400` for `Invalid`; for `UnsupportedVersion`, `426` with
 `Sec-WebSocket-Version: 13`, plus `Upgrade: websocket` and `Connection: Upgrade`, because RFC 9110
 §15.5.22 requires a `426` to name the protocol and §7.8 requires `Upgrade` to travel with the
