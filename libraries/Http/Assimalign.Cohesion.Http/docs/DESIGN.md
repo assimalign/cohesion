@@ -99,26 +99,35 @@ appends in amortized constant time:
 
 - **Exact arrays up to four values.** The common one-to-four-value field
   allocates exactly what it did before.
-- **Geometric growth past four.** The array grows to twice the value count, and
-  the value carries a private live count beside its array. Every accessor reads
-  only the live elements: the indexer, `Count`, `Value`, enumeration, `CopyTo`,
-  `ToArray`, equality, and the hash.
+- **Geometric growth past four.** The array grows to twice the value count. A
+  value past four keeps its array in a small private holder that records how many
+  of the array's elements belong to it. Every accessor reads only those
+  elements: the indexer, `Count`, `Value`, enumeration, `CopyTo`, `ToArray`,
+  equality, and the hash.
+- **The struct stays one reference wide.** `_values` is the only field: `null`,
+  a string, a caller's array, or the holder. The struct is 8 bytes on 64-bit, so
+  a header collection's dictionary entry stays 24 bytes. A count field beside the
+  reference would have padded the struct to 16 bytes and every entry to 32, on
+  every request, response and trailer collection, to serve fields repeated five
+  or more times. One field also cannot be read torn.
 - **Atomic slot claims.** The next append writes into the first spare slot,
-  claimed with a compare-and-exchange from `null`. The first append from a given
-  value takes the slot. Any other append from that value finds the slot taken and
-  copies, on any thread, so two values appended to one original never see each
-  other's. Appended values are never `null`, and a caller's array never has a
-  live count shorter than the array, so a caller's array is never written to.
-- **Accepted costs.** The struct is one `int` wider. A value can hold its array
-  alive at up to twice the size its values need.
+  claimed with a compare-and-exchange from `null`, and returns a new holder. The
+  first append from a given value takes the slot. Any other append from that
+  value finds the slot taken and copies, on any thread, so two values appended to
+  one original never see each other's. Appended values are never `null`, and only
+  a holder's array has spare slots, so a caller's array is never written to.
+- **Accepted costs.** Each append past four allocates one 32-byte holder (on
+  64-bit), so `n` repeats allocate about `32n` bytes of holders plus the arrays.
+  A value can hold its array alive at up to twice the size its values need.
 
 The alternative was to group repeats in every transport before building the
 collection. That fixes each caller separately, and any caller that misses it
 stays quadratic. Fixing Concat covers HTTP/1.1, HTTP/2, HTTP/3, the trailer
 readers, and `AppendValue` in one place. `Cookie` is the exception. Its crumbs
-join into one string with `"; "`, and an immutable string cannot grow in place.
-A transport that combines many cookie crumbs joins them once (HTTP/3 does,
-#1082).
+join into one string with `"; "`, and an immutable string cannot grow in place,
+so `HttpFieldNormalization.CombineFieldValue` copies the growing value for
+every crumb. The HTTP/2 and HTTP/3 transports collect a section's crumbs and
+join them once at the end of the section (#1082).
 
 `Set-Cookie` is the field that must **never** be folded: each cookie occupies
 its own field line (RFC 9110 §5.3, RFC 6265 §3), and HTTP/2 / HTTP/3 likewise

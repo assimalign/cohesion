@@ -14,9 +14,9 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// Appending one value with <see cref="Concat(in HttpHeaderValue, string)"/> costs amortized constant
 /// time: past four values the backing array grows geometrically, and a later append fills a spare slot
-/// instead of copying every value again. The value stays immutable. A spare slot belongs to the first
-/// value appended into it, and any other append from the same original copies, so two values appended
-/// to one original never see each other's.
+/// instead of copying every value again. The value stays immutable and one reference wide. A spare slot
+/// belongs to the first value appended into it, and any other append from the same original copies, so
+/// two values appended to one original never see each other's.
 /// </remarks>
 [DebuggerDisplay("{Value}")]
 public readonly partial struct HttpHeaderValue :
@@ -29,12 +29,10 @@ public readonly partial struct HttpHeaderValue :
     // Arrays with spare capacity start at five values; four and fewer keep an exact array.
     private const int maxExactAppendLength = 4;
 
+    // null, a string, a string[] whose every element belongs to the value, or a GrownValues: the values
+    // Concat appended past four, in an array with spare capacity. The one field keeps the struct the size
+    // of a reference, and a read of it is never torn.
     private readonly object? _values;
-
-    // The number of live elements when Concat grew _values into an array with spare capacity. Zero means
-    // the whole array is live, which is the case for every array a caller supplies. Read through
-    // GetLiveLength, never directly.
-    private readonly int _count;
 
     #region Constructors
 
@@ -56,11 +54,10 @@ public readonly partial struct HttpHeaderValue :
         _values = values;
     }
 
-    // An array Concat grew: only the first count elements belong to this value.
-    private HttpHeaderValue(string?[] values, int count)
+    // Values Concat grew: only the first Count elements of the holder's array belong to this value.
+    private HttpHeaderValue(GrownValues values)
     {
         _values = values;
-        _count = count;
     }
 
     #endregion
@@ -76,20 +73,19 @@ public readonly partial struct HttpHeaderValue :
     {
         get
         {
-            if (_values is null)
+            // Take local copy of _values so type checks remain valid even if the StringValues is overwritten in memory
+            object? value = _values;
+            if (value is null)
             {
                 return true;
             }
-            if (_values is string str && string.IsNullOrEmpty(str))
+            if (value is string str)
             {
-                return true;
-            }
-            if (_values is string[] strArr && GetLiveLength(strArr, _count) == 0)
-            {
-                return true;
+                return str.Length == 0;
             }
 
-            return false;
+            _ = GetValues(value, out int count);
+            return count == 0;
         }
     }
 
@@ -113,8 +109,9 @@ public readonly partial struct HttpHeaderValue :
             }
             else
             {
-                // Not string, not null, can only be string[]
-                return GetLiveLength(Unsafe.As<string?[]>(value), _count);
+                // Not string, not null: a string[] or the values Concat grew
+                _ = GetValues(value, out int count);
+                return count;
             }
         }
     }
@@ -154,11 +151,11 @@ public readonly partial struct HttpHeaderValue :
             }
             else if (value != null)
             {
-                // Not string, not null, can only be string[]. Past the live length, an array Concat grew
-                // holds values that belong to other values appended to the same original.
-                string?[] values = Unsafe.As<string?[]>(value);
+                // Not string, not null: a string[] or the values Concat grew. Past the count, an array
+                // Concat grew holds values that belong to other values appended to the same original.
+                string?[] values = GetValues(value, out int count);
 
-                if ((uint)index < (uint)GetLiveLength(values, _count))
+                if ((uint)index < (uint)count)
                 {
                     return values[index];
                 }
@@ -187,15 +184,25 @@ public readonly partial struct HttpHeaderValue :
     }
 
     /// <summary>
-    /// Gets how many elements of <paramref name="values"/> belong to the value: <paramref name="count"/>
-    /// when <see cref="Concat(in HttpHeaderValue, string)"/> grew the array with spare capacity, otherwise
-    /// the whole array. A count that does not fit the array, which only a torn read of a value overwritten
-    /// while it was read can produce, falls back to the array's length rather than reading past it.
+    /// Gets the array that holds the values of <paramref name="value"/>, a <c>_values</c> that is neither
+    /// <see langword="null"/> nor a <see cref="string"/>, and how many of its elements belong to the value:
+    /// the first <see cref="GrownValues.Count"/> of an array <see cref="Concat(in HttpHeaderValue, string)"/>
+    /// grew, otherwise the whole array.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int GetLiveLength(string?[] values, int count)
+    private static string?[] GetValues(object value, out int count)
     {
-        return (uint)(count - 1) < (uint)values.Length ? count : values.Length;
+        if (value is GrownValues grown)
+        {
+            count = grown.Count;
+            return grown.Items;
+        }
+
+        Debug.Assert(value is string[]);
+        // Not null, not string, not grown: can only be string[]
+        string?[] values = Unsafe.As<string?[]>(value);
+        count = values.Length;
+        return values;
     }
 
     private string? GetStringValue()
@@ -208,33 +215,31 @@ public readonly partial struct HttpHeaderValue :
         }
         else
         {
-            return GetStringValueFromArray(value, _count);
+            return GetStringValueFromArray(value);
         }
 
-        static string? GetStringValueFromArray(object? value, int count)
+        static string? GetStringValueFromArray(object? value)
         {
             if (value is null)
             {
                 return null;
             }
 
-            Debug.Assert(value is string[]);
-            // value is not null or string, array, can only be string[]
-            string?[] values = Unsafe.As<string?[]>(value);
-            int liveLength = GetLiveLength(values, count);
-            return liveLength switch
+            // value is not null or string: a string[] or the values Concat grew
+            string?[] values = GetValues(value, out int count);
+            return count switch
             {
                 0 => null,
                 1 => values[0],
-                _ => GetJoinedStringValueFromArray(values, liveLength),
+                _ => GetJoinedStringValueFromArray(values, count),
             };
         }
 
-        static string GetJoinedStringValueFromArray(string?[] values, int liveLength)
+        static string GetJoinedStringValueFromArray(string?[] values, int count)
         {
             // Calculate final length
             int length = 0;
-            for (int i = 0; i < liveLength; i++)
+            for (int i = 0; i < count; i++)
             {
                 string? value = values[i];
                 // Skip null and empty values
@@ -250,7 +255,7 @@ public readonly partial struct HttpHeaderValue :
                 }
             }
             // Create the new string
-            return string.Create(length, (values, liveLength), static (span, state) => {
+            return string.Create(length, (values, count), static (span, state) => {
                 (string?[] strings, int stringCount) = state;
                 int offset = 0;
                 // Skip null and empty values
@@ -289,20 +294,19 @@ public readonly partial struct HttpHeaderValue :
     {
         // Take local copy of _values so type checks remain valid even if the StringValues is overwritten in memory
         object? value = _values;
-        if (value is string[] values)
+        if (value is null)
         {
-            // Only the live elements: an array Concat grew carries spare slots past them.
-            int liveLength = GetLiveLength(values, _count);
-            return liveLength == 0 ? Array.Empty<string>() : values.AsSpan(0, liveLength).ToArray();
+            return Array.Empty<string>();
         }
 
-        if (value != null)
+        if (value is string str)
         {
-            // value not array, can only be string
-            return new[] { Unsafe.As<string>(value) };
+            return new[] { str };
         }
 
-        return Array.Empty<string>();
+        // Only the value's own elements: an array Concat grew carries spare slots past them.
+        string?[] values = GetValues(value, out int count);
+        return count == 0 ? Array.Empty<string>() : values.AsSpan(0, count).ToArray();
     }
 
     /// <summary>
@@ -319,25 +323,24 @@ public readonly partial struct HttpHeaderValue :
     {
         // Take local copy of _values so type checks remain valid even if the StringValues is overwritten in memory
         object? value = _values;
-        if (value is string[] values)
+        if (value is null)
         {
-            int liveLength = GetLiveLength(values, _count);
-            for (int i = 0; i < liveLength; i++)
-            {
-                if (string.Equals(values[i], item, StringComparison.Ordinal))
-                {
-                    return i;
-                }
-            }
             return -1;
         }
 
-        if (value != null)
+        if (value is string str)
         {
-            // value not array, can only be string
-            return string.Equals(Unsafe.As<string>(value), item, StringComparison.Ordinal) ? 0 : -1;
+            return string.Equals(str, item, StringComparison.Ordinal) ? 0 : -1;
         }
 
+        string?[] values = GetValues(value, out int count);
+        for (int i = 0; i < count; i++)
+        {
+            if (string.Equals(values[i], item, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
         return -1;
     }
 
@@ -366,9 +369,10 @@ public readonly partial struct HttpHeaderValue :
     {
         // Take local copy of _values so type checks remain valid even if the StringValues is overwritten in memory
         object? value = _values;
-        if (value is string[] values)
+        if (value is not null and not string)
         {
-            Array.Copy(values, 0, array, arrayIndex, GetLiveLength(values, _count));
+            string?[] values = GetValues(value, out int count);
+            Array.Copy(values, 0, array, arrayIndex, count);
             return;
         }
 
@@ -415,20 +419,19 @@ public readonly partial struct HttpHeaderValue :
         {
             return true;
         }
-        if (data is string[] values)
+        if (data is string str)
         {
-            return GetLiveLength(values, value._count) switch
-            {
-                0 => true,
-                1 => string.IsNullOrEmpty(values[0]),
-                _ => false,
-            };
+            return string.IsNullOrEmpty(str);
         }
-        else
+
+        // Not null, not string: a string[] or the values Concat grew
+        string?[] values = GetValues(data, out int count);
+        return count switch
         {
-            // Not array, can only be string
-            return string.IsNullOrEmpty(Unsafe.As<string>(data));
-        }
+            0 => true,
+            1 => string.IsNullOrEmpty(values[0]),
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -478,9 +481,11 @@ public readonly partial struct HttpHeaderValue :
     /// <remarks>
     /// Amortized constant time, so a field repeated <c>n</c> times combines in time and allocation linear
     /// in <c>n</c>. Up to four values the result is an exact array, as before. Past four the array grows
-    /// geometrically, and the next append writes the value into the first spare slot. The slot is claimed
-    /// atomically: the first append from a given value takes it, and any other append from that value
-    /// copies, on any thread. The values <paramref name="values"/> already holds are never changed.
+    /// geometrically, and the next append writes the value into the first spare slot; each such append
+    /// allocates one small holder that records how many of the array's elements belong to the result. The
+    /// slot is claimed atomically: the first append from a given value takes it, and any other append from
+    /// that value copies, on any thread. The values <paramref name="values"/> already holds are never
+    /// changed.
     /// </remarks>
     public static HttpHeaderValue Concat(in HttpHeaderValue values, string? value)
     {
@@ -502,34 +507,50 @@ public readonly partial struct HttpHeaderValue :
             return new HttpHeaderValue(new string?[] { first, value });
         }
 
-        // Not string, not null, can only be string[]
+        if (data is GrownValues grown)
+        {
+            // A slot past the count is free while it is still null, because an append writes a non-null
+            // value. Claiming it atomically gives each spare slot exactly one owner. Only a holder's array
+            // has spare slots, and this method created it, so a caller's array is never written to.
+            string?[] items = grown.Items;
+            int grownCount = grown.Count;
+
+            if (grownCount < items.Length && Interlocked.CompareExchange(ref items[grownCount], value, null) is null)
+            {
+                return new HttpHeaderValue(new GrownValues(items, grownCount + 1));
+            }
+
+            return Grow(items, grownCount, value);
+        }
+
+        // Not string, not null, not grown: can only be string[], and every element belongs to the value.
         string?[] existing = Unsafe.As<string?[]>(data);
-        int count = GetLiveLength(existing, values._count);
+        int count = existing.Length;
 
         if (count == 0)
         {
             return new HttpHeaderValue(value);
         }
 
-        // A slot past the live length is spare only in an array this method grew, and it is free while it is
-        // still null: an append writes a non-null value, and a caller's array never has a live length shorter
-        // than the array. Claiming it atomically gives each spare slot exactly one owner.
-        if (count < existing.Length && Interlocked.CompareExchange(ref existing[count], value, null) is null)
+        if (count < maxExactAppendLength)
         {
-            return new HttpHeaderValue(existing, count + 1);
+            string?[] exact = new string?[count + 1];
+            Array.Copy(existing, exact, count);
+            exact[count] = value;
+            return new HttpHeaderValue(exact);
         }
 
-        int capacity = count < maxExactAppendLength
-            ? count + 1
-            : Math.Max(count + 1, (int)Math.Min(2L * count, Array.MaxLength));
+        return Grow(existing, count, value);
 
-        string?[] grown = new string?[capacity];
-        Array.Copy(existing, grown, count);
-        grown[count] = value;
-
-        return capacity == count + 1
-            ? new HttpHeaderValue(grown)
-            : new HttpHeaderValue(grown, count + 1);
+        // Copies the count values into an array twice their number, with value after them.
+        static HttpHeaderValue Grow(string?[] existing, int count, string value)
+        {
+            int capacity = Math.Max(count + 1, (int)Math.Min(2L * count, Array.MaxLength));
+            string?[] items = new string?[capacity];
+            Array.Copy(existing, items, count);
+            items[count] = value;
+            return new HttpHeaderValue(new GrownValues(items, count + 1));
+        }
     }
 
     /// <summary>
@@ -641,7 +662,7 @@ public readonly partial struct HttpHeaderValue :
     /// <returns>An enumerator that can be used to iterate through the <see cref="HttpHeaderValue" />.</returns>
     public Enumerator GetEnumerator()
     {
-        return new Enumerator(_values, _count);
+        return new Enumerator(_values);
     }
 
     /// <inheritdoc cref="GetEnumerator()" />
@@ -870,15 +891,15 @@ public readonly partial struct HttpHeaderValue :
     public override int GetHashCode()
     {
         object? value = _values;
-        if (value is string[] values)
+        if (value is not null and not string)
         {
-            int liveLength = GetLiveLength(values, _count);
-            if (liveLength == 1)
+            string?[] values = GetValues(value, out int count);
+            if (count == 1)
             {
-                return Unsafe.As<string>(values[0])?.GetHashCode() ?? liveLength.GetHashCode();
+                return values[0]?.GetHashCode() ?? count.GetHashCode();
             }
             int hashCode = 0;
-            for (int i = 0; i < liveLength; i++)
+            for (int i = 0; i < count; i++)
             {
                 // RyuJIT optimizes this to use the ROL instruction
                 // Related GitHub pull request: https://github.com/dotnet/coreclr/pull/1830
@@ -905,12 +926,12 @@ public readonly partial struct HttpHeaderValue :
     public struct Enumerator : IEnumerator<string?>
     {
         private readonly string?[]? _values;
-        // The live length of _values: an array Concat grew carries spare slots past it.
+        // How many elements of _values belong to the value: an array Concat grew carries spare slots past them.
         private readonly int _length;
         private int _index;
         private string? _current;
 
-        internal Enumerator(object? value, int count)
+        internal Enumerator(object? value)
         {
             if (value is string str)
             {
@@ -918,11 +939,16 @@ public readonly partial struct HttpHeaderValue :
                 _length = 0;
                 _current = str;
             }
+            else if (value is null)
+            {
+                _values = null;
+                _length = 0;
+                _current = null;
+            }
             else
             {
                 _current = null;
-                _values = Unsafe.As<string?[]>(value);
-                _length = _values is null ? 0 : GetLiveLength(_values, count);
+                _values = GetValues(value, out _length);
             }
             _index = 0;
         }
@@ -931,7 +957,7 @@ public readonly partial struct HttpHeaderValue :
         /// Initializes an enumerator over the string values of <paramref name="values"/>.
         /// </summary>
         /// <param name="values">The value to enumerate.</param>
-        public Enumerator(ref HttpHeaderValue values) : this(values._values, values._count)
+        public Enumerator(ref HttpHeaderValue values) : this(values._values)
         { }
 
         public bool MoveNext()
@@ -972,6 +998,34 @@ public readonly partial struct HttpHeaderValue :
         public void Dispose()
         {
         }
+    }
+
+    /// <summary>
+    /// The values of a field <see cref="Concat(in HttpHeaderValue, string)"/> appended past four: the first
+    /// <see cref="Count"/> elements of <see cref="Items"/> belong to the value, and the slots past them are
+    /// spare. Every value appended from the same original shares <see cref="Items"/>; each has its own
+    /// holder, so the struct keeps a single reference field instead of carrying the count beside it.
+    /// </summary>
+    private sealed class GrownValues
+    {
+        public GrownValues(string?[] items, int count)
+        {
+            Debug.Assert(count > maxExactAppendLength && count <= items.Length);
+
+            Items = items;
+            Count = count;
+        }
+
+        /// <summary>
+        /// Gets the backing array, which has spare capacity past <see cref="Count"/>. No member hands it to
+        /// a caller: they copy out of it, and the enumerator only reads it.
+        /// </summary>
+        public string?[] Items { get; }
+
+        /// <summary>
+        /// Gets how many elements of <see cref="Items"/> belong to the value.
+        /// </summary>
+        public int Count { get; }
     }
 
     #endregion

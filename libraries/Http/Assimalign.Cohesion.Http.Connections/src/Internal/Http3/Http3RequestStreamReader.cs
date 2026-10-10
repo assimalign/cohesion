@@ -92,7 +92,11 @@ internal sealed class Http3RequestStreamReader
     /// section (RFC 9114 §4.1). Frames of unknown or reserved type ahead of it are skipped (§9); a
     /// DATA frame or a prohibited frame ahead of it is an invalid frame sequence.
     /// </summary>
-    /// <param name="maxFieldSectionSize">The largest HEADERS payload, in octets, the server buffers.</param>
+    /// <param name="maxHeadersFrameSize">
+    /// The largest encoded HEADERS payload, in octets, the server buffers
+    /// (<see cref="Http3ConnectionListenerOptions.Http3Limits.MaxRequestHeadersFrameSize"/>). The decoded size is
+    /// bounded separately, by <see cref="Http3QPackOptions.MaxFieldSectionSize"/>.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
     /// <returns>
     /// The encoded field section, or <see langword="null"/> when the stream ended cleanly before any
@@ -103,9 +107,9 @@ internal sealed class Http3RequestStreamReader
     /// (<c>H3_FRAME_ERROR</c>) when the stream ends inside a frame.
     /// </exception>
     /// <exception cref="Http3StreamException">
-    /// Thrown (<c>H3_FRAME_ERROR</c>) when the HEADERS frame is longer than <paramref name="maxFieldSectionSize"/>.
+    /// Thrown (<c>H3_FRAME_ERROR</c>) when the HEADERS frame is longer than <paramref name="maxHeadersFrameSize"/>.
     /// </exception>
-    public async ValueTask<byte[]?> ReadHeaderSectionAsync(int maxFieldSectionSize, CancellationToken cancellationToken)
+    public async ValueTask<byte[]?> ReadHeaderSectionAsync(int maxHeadersFrameSize, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -116,7 +120,7 @@ internal sealed class Http3RequestStreamReader
 
             if (frame.Type == (long)Http3FrameType.Headers)
             {
-                return await ReadFieldSectionAsync(frame, maxFieldSectionSize, cancellationToken).ConfigureAwait(false);
+                return await ReadFieldSectionAsync(frame, maxHeadersFrameSize, cancellationToken).ConfigureAwait(false);
             }
 
             if (frame.Type == (long)Http3FrameType.Data)
@@ -142,23 +146,27 @@ internal sealed class Http3RequestStreamReader
     /// section of the request head or of its trailer section.
     /// </summary>
     /// <param name="frame">The HEADERS frame header.</param>
-    /// <param name="maxFieldSectionSize">The largest HEADERS payload, in octets, the server buffers.</param>
+    /// <param name="maxHeadersFrameSize">
+    /// The largest encoded HEADERS payload, in octets, the server buffers
+    /// (<see cref="Http3ConnectionListenerOptions.Http3Limits.MaxRequestHeadersFrameSize"/>). The decoded size is
+    /// bounded separately, by <see cref="Http3QPackOptions.MaxFieldSectionSize"/>.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
     /// <returns>The encoded field section.</returns>
     /// <exception cref="Http3StreamException">
-    /// Thrown (<c>H3_FRAME_ERROR</c>) when the frame is longer than <paramref name="maxFieldSectionSize"/>;
+    /// Thrown (<c>H3_FRAME_ERROR</c>) when the frame is longer than <paramref name="maxHeadersFrameSize"/>;
     /// nothing of it has been buffered.
     /// </exception>
     /// <exception cref="Http3ConnectionException">
     /// Thrown (<c>H3_FRAME_ERROR</c>) when the stream ends before the payload is complete (RFC 9114 §7.1).
     /// </exception>
-    public ValueTask<byte[]> ReadFieldSectionAsync(Http3FrameHeader frame, int maxFieldSectionSize, CancellationToken cancellationToken)
+    public ValueTask<byte[]> ReadFieldSectionAsync(Http3FrameHeader frame, int maxHeadersFrameSize, CancellationToken cancellationToken)
     {
-        if (frame.Length > maxFieldSectionSize)
+        if (frame.Length > maxHeadersFrameSize)
         {
             throw new Http3StreamException(
                 Http3ErrorCode.FrameError,
-                $"An HTTP/3 HEADERS frame of {frame.Length} octets exceeds the {maxFieldSectionSize}-octet limit (MaxRequestHeadersFrameSize).");
+                $"An HTTP/3 HEADERS frame of {frame.Length} octets exceeds the {maxHeadersFrameSize}-octet limit (MaxRequestHeadersFrameSize).");
         }
 
         return ReadPayloadAsync((int)frame.Length, cancellationToken);

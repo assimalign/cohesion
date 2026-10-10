@@ -104,4 +104,20 @@ public sealed class Http3QPackOptions
     /// Gets whether the dynamic table is enabled (<see cref="MaxTableCapacity"/> &gt; 0).
     /// </summary>
     internal bool DynamicTableEnabled => _maxTableCapacity > 0;
+
+    /// <summary>
+    /// Copies the options. A connection takes a copy when it opens, so the SETTINGS it advertises and the
+    /// limits it enforces come from one set of values for its whole life, even if the listener's instance
+    /// changes afterwards.
+    /// </summary>
+    /// <returns>A copy of the options.</returns>
+    internal Http3QPackOptions Snapshot()
+    {
+        return new Http3QPackOptions
+        {
+            _maxTableCapacity = _maxTableCapacity,
+            _maxBlockedStreams = _maxBlockedStreams,
+            _maxFieldSectionSize = _maxFieldSectionSize,
+        };
+    }
 }

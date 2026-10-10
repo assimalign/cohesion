@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -1108,6 +1109,38 @@ public class Http2TransportTests
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Headers[HttpHeaderKey.Cookie].Value.ShouldBe("a=1; b=2");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Cookie crumbs should join in time linear in their count")]
+    public void DecodeRequestHeaders_OnManyCookieCrumbs_ShouldJoinLinearly()
+    {
+        // Arrange — RFC 9113 §8.2.3: what a raised SETTINGS_MAX_HEADER_LIST_SIZE lets through. Joining each
+        // crumb onto the value so far copies about 500 MB for this many; joining them once, well under one.
+        const int crumbs = 10_000;
+        byte[] frame = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            streamId: 1,
+            flags: 0x4 | 0x1,
+            [
+                (":method", "GET"),
+                (":scheme", "https"),
+                (":path", "/"),
+                (":authority", "api.test"),
+                ("x-before", "1"),
+                .. Enumerable.Repeat(("cookie", "a=1"), crumbs),
+                ("x-after", "2"),
+            ]);
+        byte[] headerBlock = frame[9..]; // The field block, past the 9-octet frame header.
+        HPackDecoder decoder = new();
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        HPackDecodedHeaders decoded = decoder.DecodeRequestHeaders(headerBlock);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert — the joined value, in the place the first crumb arrived.
+        decoded.Headers[HttpHeaderKey.Cookie].Value.ShouldBe(string.Join("; ", Enumerable.Repeat("a=1", crumbs)));
+        decoded.Headers.Select(static header => header.Key.Value).ShouldBe(["x-before", "cookie", "x-after"]);
+        allocated.ShouldBeLessThan(16L * 1024 * 1024);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: HPackHuffmanDecoder should decode RFC 7541 §C.4 example strings")]

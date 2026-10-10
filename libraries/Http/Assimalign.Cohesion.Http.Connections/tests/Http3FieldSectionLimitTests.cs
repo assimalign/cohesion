@@ -139,6 +139,34 @@ public class Http3FieldSectionLimitTests
         settings[0x06].ShouldBe(advertised);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Field Section Limit: A limit changed after the connection opened should neither be advertised nor enforced")]
+    public async Task ReceiveAsync_OnLimitChangedAfterOpen_ShouldKeepTheLimitTheConnectionOpenedWith()
+    {
+        // Arrange — the connection opens under a 64 KB limit, which admits the 41 KB head. The host then
+        // lowers the listener's limit to 1 KB, which would refuse it.
+        TestMultiplexedConnection connection = new(new TestConnection(CreateRequestWithStaticFields("/big", fieldCount: 1000)));
+        Http3QPackOptions? qpack = null;
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), http3 =>
+        {
+            http3.QPack.MaxFieldSectionSize = 64 * 1024;
+            qpack = http3.QPack;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        qpack!.MaxFieldSectionSize = 1024;
+
+        // Act
+        IHttpContext context = await ReadSingleContextAsync(connectionContext);
+
+        // Assert — the connection advertises the limit it opened with, and enforces that one.
+        (long _, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await connection.ControlStream!.ReadOutputAsync());
+        HttpProtocolPayloadFactory.DecodeHttp3Settings(frames[0].Payload)[0x06].ShouldBe(64L * 1024);
+        context.Request.Path.Value.ShouldBe("/big");
+    }
+
     // ------------------------------------------------------------ request heads
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Field Section Limit: A head over the limit should be answered 431 while other streams are served")]
@@ -167,6 +195,59 @@ public class Http3FieldSectionLimitTests
 
         oversized.IsAborted.ShouldBeFalse();
         connection.State.ShouldBe(ConnectionState.Open);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Field Section Limit: A head over the limit that references the dynamic table should be answered 431 and cancelled, not acknowledged")]
+    public async Task ReceiveAsync_OnDynamicHeadOverLimit_ShouldAnswer431AndCancelTheSection()
+    {
+        // Arrange — the encoder stream inserts one 1,000-octet entry, and the head references it twenty
+        // times: 20 * (5 + 1000 + 32) = 20,740 decoded octets, over the 16 KB default.
+        TestConnection control = new(
+            HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
+            ConnectionDirection.ReadOnly);
+        TestConnection encoder = new(
+            HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
+                HttpProtocolPayloadFactory.QPackSetCapacity(4096),
+                HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-big", new string('v', 1000))),
+            ConnectionDirection.ReadOnly);
+
+        // Encoded RIC 2 → RIC 1; Delta Base 0 → Base 1; each dynamic indexed rel 0 → absolute 0.
+        TestConnection oversized = new(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
+            encodedRequiredInsertCount: 2,
+            deltaBaseByte: 0x00,
+            literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/big"), (":authority", "a")],
+            [.. Enumerable.Repeat(0, 20)]));
+
+        TestMultiplexedConnection connection = new(control, encoder, oversized);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 =>
+        {
+            http3.QPack.MaxTableCapacity = 4096;
+            http3.QPack.MaxBlockedStreams = 16;
+        });
+
+        // Act
+        List<string> dispatched = await ReceiveAllPathsAsync(options);
+
+        // Assert — the transport answered the request itself.
+        dispatched.ShouldBeEmpty();
+
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await oversized.ReadOutputAsync().WaitAsync(_timeout));
+        frames.Count.ShouldBe(1);
+        HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload)[":status"].ShouldBe("431");
+
+        oversized.IsAborted.ShouldBeFalse();
+        connection.State.ShouldBe(ConnectionState.Open);
+
+        // RFC 9204 §4.4.2 — the section referenced the table and its decode was abandoned, so the decoder
+        // stream (OpenedStreams[1]) cancels stream 0. A Section Acknowledgment would claim a decode that did
+        // not happen, and a peer that tracks its references closes the connection with
+        // QPACK_DECODER_STREAM_ERROR.
+        byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync();
+        decoderOutput[0].ShouldBe((byte)0x03);
+        decoderOutput.AsSpan(1).IndexOf(QPackDecoderInstructionEncoder.StreamCancellation(0)).ShouldBeGreaterThanOrEqualTo(0);
+        decoderOutput.AsSpan(1).IndexOf(QPackDecoderInstructionEncoder.SectionAcknowledgment(0)).ShouldBe(-1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Field Section Limit: A raised limit should admit a head the default refuses")]
@@ -215,6 +296,35 @@ public class Http3FieldSectionLimitTests
 
         context.Request.Trailers.Count.ShouldBe(0);
         stream.IsAborted.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Field Section Limit: A trailer section over the limit that a request hook reads should be answered 431 without dispatch")]
+    public async Task ReceiveAsync_OnHookReadingTrailersOverLimit_ShouldAnswer431WithoutDispatch()
+    {
+        // Arrange — a request hook reads the whole body, trailers included, before the request becomes an
+        // exchange, so no exchange exists to answer it.
+        TestConnection stream = new(CreateRequestWithOversizedTrailers());
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.Interceptors.Add(new EagerBodyReadingInterceptor());
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static http3 => http3.QPack.MaxFieldSectionSize = 256);
+
+        // Act
+        List<string> dispatched = await ReceiveAllPathsAsync(options);
+
+        // Assert — the transport answered 431 with no content, and the connection serves on.
+        dispatched.ShouldBeEmpty();
+
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await stream.ReadOutputAsync().WaitAsync(_timeout));
+        frames.Count.ShouldBe(1);
+
+        Dictionary<string, string> headers = HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload);
+        headers[":status"].ShouldBe("431");
+        headers["content-length"].ShouldBe("0");
+
+        stream.IsAborted.ShouldBeFalse();
+        connection.State.ShouldBe(ConnectionState.Open);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Field Section Limit: A trailer section over the limit after the response started should reset with H3_MESSAGE_ERROR")]
@@ -331,11 +441,15 @@ public class Http3FieldSectionLimitTests
         ];
     }
 
-    private static async Task<List<string>> ReceiveAllPathsAsync(TestMultiplexedConnection connection)
+    private static Task<List<string>> ReceiveAllPathsAsync(TestMultiplexedConnection connection)
     {
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        return ReceiveAllPathsAsync(options);
+    }
 
+    private static async Task<List<string>> ReceiveAllPathsAsync(HttpConnectionListenerOptions options)
+    {
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
         List<string> paths = [];
@@ -366,5 +480,22 @@ public class Http3FieldSectionLimitTests
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;
+    }
+
+    /// <summary>
+    /// A body hook that reads the whole request body, trailer section included, before dispatch and
+    /// replays it, the way an eager Content-Digest verifier does.
+    /// </summary>
+    private sealed class EagerBodyReadingInterceptor : HttpExchangeInterceptor
+    {
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
+        {
+            MemoryStream copy = new();
+            body.CopyTo(copy);
+            copy.Position = 0;
+            return copy;
+        }
     }
 }

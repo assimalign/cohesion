@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -57,6 +58,38 @@ public class HttpHeaderValueTests
         value.Value.ShouldBe(string.Empty);
         implicitValue.ShouldBe(string.Empty);
         value.ToString().ShouldBe(string.Empty);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpHeaderValue: The value should stay one reference wide")]
+    public void SizeOf_OnHttpHeaderValue_ShouldBeOneReferenceWide()
+    {
+        // Arrange — every header collection is a dictionary of these, so a second field would widen every
+        // entry of every request, response and trailer collection on every protocol.
+        int referenceSize = IntPtr.Size;
+
+        // Act
+        int size = Unsafe.SizeOf<HttpHeaderValue>();
+
+        // Assert
+        size.ShouldBe(referenceSize);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpHeaderValue: An append into a spare slot should allocate only a small holder")]
+    public void Concat_OnAppendIntoSpareSlot_ShouldAllocateOnlyAHolder()
+    {
+        // Arrange — six values: their array has room for eight, so the seventh fills a spare slot. A warm-up
+        // append from another value runs the same path first, so the measurement counts only Concat.
+        HttpHeaderValue value = AppendAll("a", "b", "c", "d", "e", "f");
+        _ = HttpHeaderValue.Concat(AppendAll("a", "b", "c", "d", "e", "f"), "warm-up");
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        HttpHeaderValue appended = HttpHeaderValue.Concat(value, "g");
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert — one object of a reference and an int: 32 bytes on 64-bit, 16 on 32-bit.
+        appended.ToArray().ShouldBe(["a", "b", "c", "d", "e", "f", "g"]);
+        allocated.ShouldBeLessThanOrEqualTo(4L * IntPtr.Size);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - HttpHeaderValue: Appending a value many times should allocate in proportion to the count")]

@@ -115,12 +115,15 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
-        _qpackOptions = qpackOptions;
+        // A copy, not the listener's live instance: the SETTINGS written when the receive loop starts, the
+        // decoder state, and the static-only decode must all use the values this connection advertises,
+        // even if the host changes the listener's options after the connection opens.
+        _qpackOptions = qpackOptions.Snapshot();
 
         // The dynamic table (and its encoder/decoder instruction streams) is
         // opt-in: with QPACK_MAX_TABLE_CAPACITY = 0 the decoder state is never
         // created and the transport stays on the static-only path.
-        _decoderState = qpackOptions.DynamicTableEnabled ? new QPackDecoderState(qpackOptions) : null;
+        _decoderState = _qpackOptions.DynamicTableEnabled ? new QPackDecoderState(_qpackOptions) : null;
     }
 
     public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
@@ -1409,7 +1412,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 declaredContentLength: null,
                 isTunnel: false,
                 fallbackCap: null,
-                _limits.MaxRequestHeadersFrameSize,
+                maxHeadersFrameSize: _limits.MaxRequestHeadersFrameSize,
                 cancellationToken);
             await AnswerRejectedRequestAsync(streamConnection, remainder, requestStreamId, exception.StatusCode, cancellationToken).ConfigureAwait(false);
             return null;
@@ -1488,7 +1491,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             contentLength,
             isConnect,
             _limits.MaxRequestBodySize,
-            _limits.MaxRequestHeadersFrameSize,
+            maxHeadersFrameSize: _limits.MaxRequestHeadersFrameSize,
             headToken);
         requestHead = requestHead with { Body = body };
 

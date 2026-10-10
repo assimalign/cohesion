@@ -88,6 +88,13 @@ public static class HttpFieldNormalization
     /// one comma line for <c>Set-Cookie</c> — see
     /// <see cref="HttpFieldRules.ProhibitsCombining"/>).
     /// </summary>
+    /// <remarks>
+    /// A list field combines in amortized constant time (<see cref="HttpHeaderValue.Concat(HttpHeaderValue, HttpHeaderValue)"/>).
+    /// A <c>Cookie</c> crumb is joined onto the whole value so far, which a string cannot do in place, so
+    /// combining <c>n</c> crumbs one at a time copies quadratically. A caller that folds a whole field
+    /// section should collect a field's crumbs and join them with <c>"; "</c> once, as the HTTP/2 and
+    /// HTTP/3 transports do.
+    /// </remarks>
     /// <param name="key">The field name.</param>
     /// <param name="existing">The value already accumulated for the field.</param>
     /// <param name="incoming">The newly decoded value to combine.</param>

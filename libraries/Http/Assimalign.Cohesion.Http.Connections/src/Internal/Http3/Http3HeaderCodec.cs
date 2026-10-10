@@ -49,8 +49,7 @@ internal static class Http3HeaderCodec
         string? protocol = null;
         bool seenRegularField = false;
         // RFC 9114 §4.2.1 — the crumbs of a split cookie field, joined with "; " once the section is read.
-        // Joining them a pair at a time copies the growing value per crumb, quadratic in the crumb count.
-        List<string>? cookieCrumbs = null;
+        HttpCookieCrumbs cookieCrumbs = default;
 
         foreach ((string name, string value) in fields)
         {
@@ -128,14 +127,11 @@ internal static class Http3HeaderCodec
             if (headers.TryGetValue(key, out HttpHeaderValue existingValue))
             {
                 // RFC 9114 §4.2.1 — repeated-field combining (Cookie coalesces
-                // with "; ", other list fields combine) matches HTTP/2. Both run in
-                // time linear in the repeats: HttpHeaderValue.Concat appends in
-                // amortized constant time, and cookie crumbs are joined once below.
-                if (key == HttpHeaderKey.Cookie)
-                {
-                    (cookieCrumbs ??= [existingValue.Value]).Add(value);
-                }
-                else
+                // with "; ", other list fields combine) is HTTP/2's rule, through the
+                // same two helpers. Both run in time linear in the repeats:
+                // HttpHeaderValue.Concat appends in amortized constant time, and
+                // cookie crumbs are joined once below.
+                if (!cookieCrumbs.TryAdd(key, existingValue, value))
                 {
                     headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
                 }
@@ -146,12 +142,7 @@ internal static class Http3HeaderCodec
             }
         }
 
-        if (cookieCrumbs is not null)
-        {
-            // The first crumb already holds the field's place in the collection; replacing its value
-            // keeps the order the fields arrived in.
-            headers[HttpHeaderKey.Cookie] = string.Join("; ", cookieCrumbs);
-        }
+        cookieCrumbs.Join(headers);
 
         // RFC 9114 §4.3.1 — required request pseudo-headers. A CONNECT request
         // omits :scheme and :path; all other methods MUST include exactly one

@@ -1522,6 +1522,12 @@ they are reported differently:
   connection, for one. Decoding first also means a block that breaks a rule and then fails to
   decode is reported as the decoding failure.
 
+A repeated field folds as on HTTP/3: a list field appends through
+`HttpFieldNormalization.CombineFieldValue`, and the crumbs of a split `Cookie` (§8.2.3) collect
+in `HttpCookieCrumbs` and are joined with `"; "` once, when `DecodeRequestHeaders` completes the
+section. Joining crumb by crumb copied the growing cookie per crumb, quadratic in the crumb count
+under a raised `MaxRequestHeaderListSize` (#1082; see "Decoded field-section size" under QPACK).
+
 Whether the pseudo-header fields make a complete request is judged afterwards, by
 `Http2Stream.CreateContextAsync`, with the whole block decoded (#1321). In order:
 
@@ -3268,11 +3274,18 @@ listener, from an unauthenticated client.
 - **Enforced inside the decoder.** `QPackFieldSectionDecoder` adds each field's
   size as the field resolves and throws before the field joins the decoded list.
   The decode stops at the field that crosses the limit and never reads the rest.
-  The static-only path passes the option directly, and `QPackDecoderState` copies
-  it for the dynamic path, so request heads and trailer sections share one check
-  on both profiles. A decode only reads the dynamic table, so stopping one is
-  stream-scoped. A section that referenced the table gets the Stream Cancellation
-  any abandoned decode gets.
+  Request heads and trailer sections share one check on both profiles. A decode
+  only reads the dynamic table, so stopping one is stream-scoped. A section that
+  referenced the table gets the Stream Cancellation any abandoned decode gets, and
+  no Section Acknowledgment: acknowledging a section the decoder did not finish
+  would let a peer that tracks its references close the connection with
+  `QPACK_DECODER_STREAM_ERROR`.
+- **One value per connection.** `Http3ConnectionContext` copies its
+  `Http3QPackOptions` when the connection opens
+  (`Http3QPackOptions.Snapshot`). The SETTINGS written when the receive loop
+  starts, the static-only decode, and `QPackDecoderState` all read that copy, so a
+  connection enforces exactly what it advertised. A host that changes the
+  listener's options affects only connections opened afterwards.
 - **The response.** The decoder throws `Http3LimitExceededException` carrying
   `431 Request Header Fields Too Large`, which RFC 9114 §4.2.2 lets a server send
   and which HTTP/1.1 sends for the same condition. A request head over the limit
@@ -3287,15 +3300,24 @@ listener, from an unauthenticated client.
 
 The option lives on `Http3QPackOptions`, not `Http3Limits`, because it is a
 decoder setting advertised in the same SETTINGS frame as `QPACK_MAX_TABLE_CAPACITY`
-and enforced by the same decoder. The decoder state already receives those
-options, so the connection context changed only at the static-only call.
+and enforced by the same decoder.
+
+The limit is distinct from `MaxRequestHeadersFrameSize`, the encoded HEADERS
+payload cap. Inside the transport the encoded cap travels as
+`maxHeadersFrameSize` (`Http3RequestStreamReader`, `Http3RequestBodyStream`) and
+the decoded one as `maxFieldSectionSize` (`QPackFieldSectionDecoder`), so neither
+is wired where the other belongs.
 
 **Repeated fields combine in linear time.** The limit makes the quadratic
-combine cheap at 16 KB, but a host may raise it. Two changes keep the combine
-linear at any limit. `HttpHeaderValue.Concat` (core Http) now appends in
-amortized constant time. `Http3HeaderCodec` collects cookie crumbs and joins
-them with `"; "` once, instead of re-copying the growing cookie value for every
-crumb. The joined cookie keeps the position of its first crumb.
+combine cheap at 16 KB, but a host may raise it, as it may raise HTTP/2's
+`MaxRequestHeaderListSize`. Two changes keep the combine linear at any limit, on
+both versions. `HttpHeaderValue.Concat` (core Http) now appends in amortized
+constant time. `HttpFieldNormalization.CombineFieldValue` still joins a cookie
+crumb onto the whole value so far, so `Http3HeaderCodec` and HTTP/2's
+`HPackDecodedHeaders` both collect a section's crumbs in `HttpCookieCrumbs` and
+join them with `"; "` once, at the end of the section. The joined cookie keeps
+the position of its first crumb. Trailer sections need neither: `Cookie` is
+prohibited there (RFC 9110 §6.5.1).
 
 ### Field-section rules (RFC 9114 §4.2 / §4.3)
 

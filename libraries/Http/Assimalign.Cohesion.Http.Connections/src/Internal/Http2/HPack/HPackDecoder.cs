@@ -52,6 +52,7 @@ internal sealed class HPackDecoder
             decodedHeaders.Add(name, value);
         }
 
+        decodedHeaders.Complete();
         return decodedHeaders;
     }
 

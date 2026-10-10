@@ -70,7 +70,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private readonly long? _declaredContentLength;
     private readonly bool _isTunnel;
     private readonly long? _fallbackCap;
-    private readonly int _maxFieldSectionSize;
+    private readonly int _maxHeadersFrameSize;
     private readonly Lock _gate = new();
 
     private HttpExchangeInterceptorRequestContext? _interception;
@@ -116,7 +116,11 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// <param name="declaredContentLength">The request's Content-Length, or <see langword="null"/> when absent.</param>
     /// <param name="isTunnel">Whether the request is a CONNECT, whose DATA frames carry tunnel octets.</param>
     /// <param name="fallbackCap">The registration's body-size cap, used when no parse context is attached.</param>
-    /// <param name="maxFieldSectionSize">The largest trailer HEADERS payload, in octets, the server buffers.</param>
+    /// <param name="maxHeadersFrameSize">
+    /// The largest encoded trailer HEADERS payload, in octets, the server buffers
+    /// (<see cref="Http3ConnectionListenerOptions.Http3Limits.MaxRequestHeadersFrameSize"/>). The decoded size is
+    /// bounded separately, by <see cref="Http3QPackOptions.MaxFieldSectionSize"/>.
+    /// </param>
     /// <param name="requestAborted">
     /// The token that cancels reads before the exchange exists (connection teardown during the request
     /// head); replaced by the exchange's <see cref="HttpContext.RequestCancelled"/> once attached.
@@ -130,7 +134,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         long? declaredContentLength,
         bool isTunnel,
         long? fallbackCap,
-        int maxFieldSectionSize,
+        int maxHeadersFrameSize,
         CancellationToken requestAborted)
     {
         _connection = connection;
@@ -141,7 +145,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         _declaredContentLength = declaredContentLength;
         _isTunnel = isTunnel;
         _fallbackCap = fallbackCap;
-        _maxFieldSectionSize = maxFieldSectionSize;
+        _maxHeadersFrameSize = maxHeadersFrameSize;
         _requestAborted = requestAborted;
     }
 
@@ -573,7 +577,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         try
         {
-            byte[] fieldSection = await _reader.ReadFieldSectionAsync(frame, _maxFieldSectionSize, cancellationToken).ConfigureAwait(false);
+            byte[] fieldSection = await _reader.ReadFieldSectionAsync(frame, _maxHeadersFrameSize, cancellationToken).ConfigureAwait(false);
             fields = await _connection.DecodeFieldSectionAsync(fieldSection, _streamId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException exception)

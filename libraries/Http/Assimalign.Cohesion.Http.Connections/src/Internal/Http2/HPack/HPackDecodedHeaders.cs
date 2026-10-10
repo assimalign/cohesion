@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class HPackDecodedHeaders
 {
     private bool _sawRegularField;
+    // The crumbs of a split Cookie field, joined once the section is complete.
+    private HttpCookieCrumbs _cookieCrumbs;
 
     public HPackDecodedHeaders()
     {
@@ -95,14 +97,27 @@ internal sealed class HPackDecodedHeaders
         {
             // RFC 9113 §8.2.3 — repeated-field combining (Cookie coalesces with
             // "; "; other list fields combine as distinct values) is the same
-            // rule for HTTP/2 and HTTP/3, centralized in HttpFieldNormalization
-            // so both versions behave identically.
-            Headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
+            // rule for HTTP/2 and HTTP/3: cookie crumbs collect in HttpCookieCrumbs
+            // and join once in Complete, and other fields combine through
+            // HttpFieldNormalization. Both run in time linear in the repeats.
+            if (!_cookieCrumbs.TryAdd(key, existingValue, value))
+            {
+                Headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
+            }
         }
         else
         {
             Headers[key] = value;
         }
+    }
+
+    /// <summary>
+    /// Ends the field section: joins the crumbs of a split <c>Cookie</c> field into the one value
+    /// <see cref="Headers"/> carries (RFC 9113 §8.2.3). Called once, after the last <see cref="Add"/>.
+    /// </summary>
+    public void Complete()
+    {
+        _cookieCrumbs.Join(Headers);
     }
 
     private void AddPseudoHeader(string name, string value)
