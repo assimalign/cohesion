@@ -11,12 +11,22 @@ public static partial class DatabaseResourceCommandExtensions
     {
         /// <summary>Declares a database to create after the target is running.</summary>
         /// <param name="name">The database name without slash characters; an explicit engine prefixes its ownership conflict key.</param>
-        /// <param name="engine">An engine name, or null to select the target's sole engine.</param>
+        /// <param name="engine">
+        /// The engine's name as the target's <c>Program.cs</c> registers it (the model verb's first
+        /// argument, <c>builder.AddSql("orders-sql", …)</c>), or null to select the target's sole engine.
+        /// </param>
         /// <param name="optional">Whether rejection may allow dependents to start.</param>
         /// <returns>This descriptor for further declarations.</returns>
         /// <exception cref="ArgumentNullException">The descriptor or name is null.</exception>
         /// <exception cref="ArgumentException">The name or a supplied engine is blank, or the name contains a slash.</exception>
         /// <exception cref="InvalidOperationException">The descriptor is an immutable built snapshot.</exception>
+        /// <remarks>
+        /// The target creates an empty database on the running engine and owns it through this
+        /// declaration: deleting the declaration drops it. A database the target's engine builder
+        /// declares (<c>sql.AddDatabase("sales", …)</c>, with its schema) already exists when the
+        /// engine is built and belongs to that declaration, so the target rejects a command that
+        /// names it, as it rejects any database this declaration did not create.
+        /// </remarks>
         public IDatabaseResourceDescriptor AddDatabase(string name, string? engine = null, bool optional = false)
         {
             ArgumentNullException.ThrowIfNull(descriptor);

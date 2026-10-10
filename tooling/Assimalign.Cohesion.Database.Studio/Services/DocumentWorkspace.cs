@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// </summary>
 internal sealed class DocumentWorkspace : LanguageWorkspace
 {
+    private DocumentDatabaseSession? _session;
+
     public DocumentWorkspace(StudioEngines engines)
         : base(StudioModel.Documents, ConnectionMode.Embedded, engines, wireEndPoint: null)
     {
@@ -32,9 +34,25 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
 
     public override IReadOnlyList<SampleScript> Samples => DocumentSamples.All;
 
-    // The session runs its own collection operations (option B, concrete-types plan §6.6); the
-    // cast from the root-typed session goes with ModelWorkspace's retype (phase 7).
-    private DocumentDatabaseSession DocumentSession => (DocumentDatabaseSession)RequireSession();
+    public override DocumentDatabaseEngine Engine => Engines.Documents;
+
+    public override DocumentDatabaseSession? Session => _session;
+
+    // The session runs its own collection operations (option B, concrete-types plan §6.6).
+    private DocumentDatabaseSession DocumentSession => _session ?? throw new InvalidOperationException("Select a database first.");
+
+    protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
+    {
+        DocumentDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
+        _session = await opened.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override DatabaseSession? DetachSession()
+    {
+        DocumentDatabaseSession? session = _session;
+        _session = null;
+        return session;
+    }
 
     protected override QueryStatement ParseLocally(string statement) => new OqlQueryParser().Parse(statement);
 

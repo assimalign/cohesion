@@ -48,6 +48,7 @@ internal sealed record KeyValueScan(byte[]? Prefix, byte[]? Start, byte[]? End, 
 /// </summary>
 internal sealed class KeyValueWorkspace : ModelWorkspace
 {
+    private KeyValueDatabaseSession? _session;
     private KeyValueClient? _client;
     private KeyValueConnection? _connection;
     private string? _wireDatabase;
@@ -55,6 +56,30 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
     public KeyValueWorkspace(ConnectionMode mode, StudioEngines engines, EndPoint? wireEndPoint)
         : base(StudioModel.KeyValue, mode, engines, wireEndPoint)
     {
+    }
+
+    public override KeyValueDatabaseEngine Engine => Engines.KeyValue;
+
+    public override KeyValueDatabaseSession? Session => _session;
+
+    protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
+    {
+        KeyValueDatabase opened = await Engine.OpenDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
+        _session = await opened.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override DatabaseSession? DetachSession()
+    {
+        KeyValueDatabaseSession? session = _session;
+        _session = null;
+        return session;
+    }
+
+    /// <summary>Opens a short-lived session on the current database through the engine (loopback/embedded only).</summary>
+    private async Task<KeyValueDatabaseSession> OpenAdminSessionAsync(CancellationToken cancellationToken)
+    {
+        KeyValueDatabase database = await Engine.OpenDatabaseAsync(RequireAdminDatabase(), cancellationToken).ConfigureAwait(false);
+        return await database.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
     }
 
     protected override string ClientName => "KeyValuePair.Client KeyValueConnection";
@@ -233,7 +258,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
     public Task<TabularResult> KeySpacesAsync(CancellationToken cancellationToken = default)
         => RunExclusiveAsync(async token =>
         {
-            DatabaseSession? admin = null;
+            KeyValueDatabaseSession? admin = null;
             try
             {
                 DatabaseSession session = Mode == ConnectionMode.Embedded

@@ -8,6 +8,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Studio;
@@ -48,12 +50,20 @@ internal sealed class SmokeRunner
             engines = await runner.StepAsync("engines", "create", () => Task.FromResult(StudioEngines.Create(dataRoot))).ConfigureAwait(false);
             if (engines is not null)
             {
+                foreach ((StudioModel model, string failure) in engines.DeclarationFailures)
+                {
+                    // The model's declared-database steps fail below; this line says why.
+                    write($"      engines: {model.DisplayName} runs without its declared database: {failure}");
+                }
+
                 await runner.SqlAsync(engines).ConfigureAwait(false);
                 await runner.DocumentsAsync(engines).ConfigureAwait(false);
                 await runner.GraphAsync(engines).ConfigureAwait(false);
                 await runner.KeyValueAsync(engines).ConfigureAwait(false);
                 await runner.BlobAsync(engines).ConfigureAwait(false);
             }
+
+            await runner.DeclarationFallbackAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -98,6 +108,11 @@ internal sealed class SmokeRunner
         var embedded = new SqlWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            if (await DeclaredDatabaseAsync("sql/declared", embedded).ConfigureAwait(false))
+            {
+                await DeclaredSqlSchemaAsync("sql/declared", embedded).ConfigureAwait(false);
+            }
+
             const string scope = "sql/embedded";
             if (!await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -108,6 +123,8 @@ internal sealed class SmokeRunner
                 "CREATE TABLE smoke_t (id BIGINT PRIMARY KEY, name TEXT NOT NULL); INSERT INTO smoke_t (id, name) VALUES (1, 'alpha'), (2, 'beta'); SELECT id, name FROM smoke_t ORDER BY id;",
                 outcomes => Expect(outcomes[1].AffectedCount == 2, $"insert affected {outcomes[1].AffectedCount}")
                     ?? ExpectRows(outcomes[2], 2, row => row[1] == "beta")).ConfigureAwait(false);
+
+            await RegisteredFunctionsStepAsync(scope, embedded, "smoke_t", rows: 2, lastInitial: "B", product: "2").ConfigureAwait(false);
 
             await StepAsync(scope, "transaction-api-rollback", async () =>
             {
@@ -143,6 +160,9 @@ internal sealed class SmokeRunner
                     outcomes => Expect(outcomes[1].AffectedCount == 3, $"insert affected {outcomes[1].AffectedCount}")
                         ?? ExpectRows(outcomes[2], 2, row => row[1] == "three")).ConfigureAwait(false);
 
+                // The server runs statements on the same engine, so the registered functions answer over the wire too.
+                await RegisteredFunctionsStepAsync(scope, wire, "smoke_w", rows: 3, lastInitial: "T", product: "6").ConfigureAwait(false);
+
                 await ScriptStepAsync(scope, "begin-rollback-statements", wire,
                     "BEGIN; INSERT INTO smoke_w (id, name) VALUES (4, 'four'); ROLLBACK; SELECT COUNT(*) FROM smoke_w;",
                     outcomes => ExpectRows(outcomes[3], 1, row => row[0] == "3")).ConfigureAwait(false);
@@ -169,6 +189,8 @@ internal sealed class SmokeRunner
         var embedded = new DocumentWorkspace(engines);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("documents/declared", embedded).ConfigureAwait(false);
+
             const string scope = "documents/embedded";
             if (!await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -210,6 +232,8 @@ internal sealed class SmokeRunner
         var embedded = new GraphWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("graph/declared", embedded).ConfigureAwait(false);
+
             const string scope = "graph/embedded";
             if (!await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -265,6 +289,8 @@ internal sealed class SmokeRunner
         var embedded = new KeyValueWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("keyvalue/declared", embedded).ConfigureAwait(false);
+
             const string scope = "keyvalue/embedded";
             if (await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -347,6 +373,8 @@ internal sealed class SmokeRunner
         var embedded = new BlobWorkspace(ConnectionMode.Embedded, engines, null);
         await using (embedded.ConfigureAwait(false))
         {
+            await DeclaredDatabaseAsync("blob/declared", embedded).ConfigureAwait(false);
+
             const string scope = "blob/embedded";
             if (await PrepareDatabaseAsync(scope, embedded).ConfigureAwait(false))
             {
@@ -406,6 +434,144 @@ internal sealed class SmokeRunner
             return true;
         }).ConfigureAwait(false);
     }
+
+    // ---------------------------------------------------------------- declared databases and registered functions
+
+    /// <summary>
+    /// The database every engine's builder declares (<see cref="StudioEngines.DeclaredDatabase"/>)
+    /// exists once the engine is built, the engine refuses to drop it, and it opens like any other.
+    /// </summary>
+    private async Task<bool> DeclaredDatabaseAsync(string scope, ModelWorkspace workspace)
+    {
+        bool declared = await StepAsync(scope, "declared-database", async () =>
+        {
+            IReadOnlyList<string> names = await workspace.ListDatabasesAsync(discoverOnDisk: false).ConfigureAwait(false);
+            Require(names.Contains(StudioEngines.DeclaredDatabase, StringComparer.OrdinalIgnoreCase),
+                $"'{StudioEngines.DeclaredDatabase}' not listed after the engine's build ({string.Join(", ", names)})");
+            try
+            {
+                await workspace.DropDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
+            }
+            catch (DatabaseObjectLockedException)
+            {
+                // The declaration owns the database: the drop is refused, and the database stays.
+                return true;
+            }
+
+            throw new InvalidOperationException($"DROP of the declared database '{StudioEngines.DeclaredDatabase}' was not refused.");
+        }).ConfigureAwait(false);
+
+        return declared && await StepAsync(scope, "use-declared-database", async () =>
+        {
+            await workspace.UseDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
+            return true;
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The SQL engine provisioned the declared database's typed schema at its build, and the CHECK
+    /// that schema declares calls a registered function. Leaves the table empty, so a reused data
+    /// root runs it again.
+    /// </summary>
+    private async Task DeclaredSqlSchemaAsync(string scope, SqlWorkspace workspace)
+    {
+        string table = StudioSqlExtensions.NotesTable;
+        await ScriptStepAsync(scope, "provisioned-schema", workspace,
+            $"DELETE FROM {table}; INSERT INTO {table} (Id, Title) VALUES (1, 'Ada Lovelace'); SELECT Id, {StudioSqlExtensions.InitialsFunction}(Title) FROM {table}; DELETE FROM {table};",
+            outcomes => Expect(outcomes[1].AffectedCount == 1, $"insert affected {outcomes[1].AffectedCount}")
+                ?? ExpectRows(outcomes[2], 1, row => row[1] == "AL")).ConfigureAwait(false);
+
+        await ScriptStepAsync(scope, "check-calls-registered-function", workspace,
+            $"INSERT INTO {table} (Id, Title) VALUES (2, '   ');",
+            outcomes => Expect(outcomes[0].Failed && NamesCheck(outcomes[0]),
+                $"a title with no word was not refused by {StudioSqlExtensions.NotesCheck}: {Describe(outcomes[0])}"),
+            allowFailures: true).ConfigureAwait(false);
+
+        static bool NamesCheck(StatementOutcome outcome)
+            => (outcome.Error ?? string.Empty).Contains(StudioSqlExtensions.NotesCheck, StringComparison.OrdinalIgnoreCase)
+                || outcome.Diagnostics.Any(diagnostic => diagnostic.Message.Contains(StudioSqlExtensions.NotesCheck, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The functions <see cref="StudioSqlExtensions"/> registers resolve like built-ins: a scalar per
+    /// row, an aggregate over the table, and both listed in <c>COHESION_SCHEMA.FUNCTIONS</c>.
+    /// </summary>
+    private Task RegisteredFunctionsStepAsync(string scope, SqlWorkspace workspace, string table, int rows, string lastInitial, string product)
+        => ScriptStepAsync(scope, "registered-functions", workspace,
+            $"SELECT id, {StudioSqlExtensions.InitialsFunction}(name) FROM {table} ORDER BY id; " +
+            $"SELECT {StudioSqlExtensions.ProductFunction}(id) FROM {table}; " +
+            "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME;",
+            outcomes => ExpectRows(outcomes[0], rows, row => row[1] == lastInitial)
+                ?? ExpectRows(outcomes[1], 1, row => row[0] == product)
+                ?? ExpectRows(outcomes[2], 2, row => row[0] == StudioSqlExtensions.ProductFunction));
+
+    /// <summary>
+    /// A declared database that fails its engine's build takes down only its own model. On a scratch
+    /// root whose SQL <c>studio</c> database already holds a <c>notes</c> table the declaration did not
+    /// create (a root written before P7), the SQL engine runs without the declaration and the other
+    /// four models still declare theirs. Always runs on its own temporary root, which it deletes.
+    /// </summary>
+    private Task DeclarationFallbackAsync()
+        => StepAsync("engines", "declaration-fallback", async () =>
+        {
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "cohesion-studio-smoke", Guid.NewGuid().ToString("N")[..8] + "-fallback");
+            try
+            {
+                SqlDatabaseEngineBuilder builder = SqlDatabaseEngine.CreateBuilder("studio-sql-undeclared");
+                builder.Options.RootPath = System.IO.Path.Combine(root, StudioModel.Sql.FolderName);
+                SqlDatabaseEngine undeclared = builder.Build();
+                await using (undeclared.ConfigureAwait(false))
+                {
+                    SqlDatabase database = await undeclared.CreateDatabaseAsync(StudioEngines.DeclaredDatabase).ConfigureAwait(false);
+                    SqlDatabaseSession session = await database.CreateSessionAsync().ConfigureAwait(false);
+                    await using (session.ConfigureAwait(false))
+                    {
+                        var outcome = new StatementOutcome { Statement = $"CREATE TABLE {StudioSqlExtensions.NotesTable} (Id BIGINT PRIMARY KEY, Title TEXT NOT NULL);" };
+                        QueryResult result = await session.ExecuteAsync(outcome.Statement, null).ConfigureAwait(false);
+                        await QueryResultReader.FillAsync(outcome, result, CancellationToken.None).ConfigureAwait(false);
+                        Require(!outcome.Failed, $"the conflicting table was not created: {Describe(outcome)}");
+                    }
+                }
+
+                StudioEngines engines = StudioEngines.Create(root);
+                await using (engines.ConfigureAwait(false))
+                {
+                    string failure = engines.DeclarationFailures.Count == 1 && engines.DeclarationFailures.TryGetValue(StudioModel.Sql, out string? sqlFailure)
+                        ? sqlFailure
+                        : throw new InvalidOperationException(
+                            $"expected only SQL's declaration to fail, got [{string.Join("; ", engines.DeclarationFailures.Select(entry => $"{entry.Key}: {entry.Value}"))}]");
+
+                    (StudioModel Model, DatabaseEngine Engine)[] declaring =
+                        [(StudioModel.Documents, engines.Documents), (StudioModel.Graph, engines.Graph), (StudioModel.KeyValue, engines.KeyValue), (StudioModel.Blob, engines.Blob)];
+                    foreach ((StudioModel model, DatabaseEngine engine) in declaring)
+                    {
+                        bool listed = false;
+                        await foreach (DatabaseInstance instance in engine.GetDatabasesAsync().ConfigureAwait(false))
+                        {
+                            listed |= string.Equals(instance.Name.ToString(), StudioEngines.DeclaredDatabase, StringComparison.OrdinalIgnoreCase);
+                        }
+
+                        Require(listed, $"{model.DisplayName} did not declare '{StudioEngines.DeclaredDatabase}' next to the failed SQL declaration");
+                    }
+
+                    return failure.Length > 120 ? failure[..120] + "..." : failure;
+                }
+            }
+            finally
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup of the scratch root.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        });
 
     // ---------------------------------------------------------------- shared steps
 

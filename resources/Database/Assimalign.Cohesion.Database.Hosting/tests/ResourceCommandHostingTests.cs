@@ -135,4 +135,39 @@ public sealed class ResourceCommandHostingTests
             await ((IHost)application).StopAsync(CancellationToken.None);
         }
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Commands: add-database cannot claim a database the engine's builder declares")]
+    public async Task ExecuteCommandAsync_WithDeclaredDatabaseName_ShouldRejectAndLeaveTheDeclarationOwner()
+    {
+        // Arrange: the model verb's engine declares 'sales', so its build created it before any
+        // command can arrive (engine extensibility design §5.6; owner decision 56).
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceCommandHostingTests).Assembly);
+        builder.AddSql("commands", sql => sql.AddDatabase("sales"));
+        await using DatabaseApplication application = builder.Build();
+        IResourceControlPlane plane = builder.ControlPlane.ShouldNotBeNull();
+        DatabaseEngine engine = application.Context.Engines.ShouldHaveSingleItem();
+        engine.TryGetDatabase("sales", out _).ShouldBeTrue();
+        var declared = new RuntimeCommand("claim-sales", "database.add-database", "appa", "commands/SALES",
+            Encoding.UTF8.GetBytes("""{"database":"SALES","engine":"commands"}"""));
+        var undeclared = new RuntimeCommand("create-orders", "database.add-database", "appa", "orders",
+            Encoding.UTF8.GetBytes("""{"database":"orders"}"""));
+
+        // Act
+        ResourceCommandRejectedException refusal = await Should.ThrowAsync<ResourceCommandRejectedException>(
+            () => plane.ExecuteCommandAsync(declared, CancellationToken.None).AsTask());
+        await plane.ExecuteCommandAsync(undeclared, CancellationToken.None);
+        bool created = engine.TryGetDatabase("orders", out _);
+        await plane.DeleteCommandAsync(undeclared, CancellationToken.None);
+
+        // Assert: the names compare ignoring case, the refused command is not recorded, the sole
+        // engine still serves an undeclared name, and the declaration still refuses the drop.
+        refusal.Detail.ShouldBe(
+            "database.add-database cannot claim existing database 'SALES' on engine 'commands'; it was not created by this declaration.");
+        created.ShouldBeTrue();
+        plane.Commands.ShouldBeEmpty();
+        engine.TryGetDatabase("orders", out _).ShouldBeFalse();
+        engine.TryGetDatabase("sales", out _).ShouldBeTrue();
+        await Should.ThrowAsync<DatabaseObjectLockedException>(() => engine.DropDatabaseAsync("sales").AsTask());
+    }
 }

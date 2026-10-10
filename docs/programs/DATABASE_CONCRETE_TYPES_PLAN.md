@@ -43,7 +43,7 @@ this tree on 2026-10-04 or in a cited reference source. **[Likely]** means a str
 
 ### Owner decisions of 2026-10-06
 
-The owner accepted every open recommendation on 2026-10-06, and decisions 35-42 on 2026-10-07, 43-48 on 2026-10-08 and 49-73 on 2026-10-09. P7 (#1263) is on hold while the owner reworks the Hosting builder, schema provisioning and engine extensibility (2026-10-08); decision 72 (2026-10-09) re-scopes it to follow the redesign's B3. They settle the questions this file
+The owner accepted every open recommendation on 2026-10-06, and decisions 35-42 on 2026-10-07, 43-48 on 2026-10-08 and 49-73 on 2026-10-09. P7 (#1263) was on hold while the owner reworked the Hosting builder, schema provisioning and engine extensibility (2026-10-08); decision 72 (2026-10-09) re-scoped it to follow the redesign's B3, and it landed after B3 on `feat/database-p7-appmodel-studio` (2026-10-10; §7, "P7, as landed"). They settle the questions this file
 records as open or "pending owner confirmation" elsewhere; where an older paragraph says
 otherwise, this list wins.
 
@@ -390,7 +390,7 @@ interface is deleted in P6.
 | 102 | `ISqlClient` | Sql.Client `:19` | client | sealed | `public sealed class SqlClient`. It absorbs the static class (`SqlClient.cs:11`). **At P5 (re-verified):** landed as planned, with the internal `DefaultSqlClient` folded in behind a private constructor. The Sdk.ApplicationModel `EnabledWeb` fixture, Studio's SQL workspace, and Sql.Tests' and Database.Testing's wire tests were retyped. | P5 |
 | 103 | `ISqlClientObserver` | Sql.Client `:16` | client | abstract | `public abstract class SqlClientObserver`, with a protected constructor and `protected internal virtual` hooks with empty bodies. **At P5 (re-verified):** landed as planned, on row 79's terms. | P5 |
 | 104 | `ISqlConnection` | Sql.Client `:18` | client | sealed | `public sealed class SqlConnection`, with an internal constructor. **At P5 (re-verified):** landed as planned; the internal implementation moved out of `Internal/`. **P5 review:** it keeps its own disposed flag (row 80), and `AbortAsync` after dispose does nothing. | P5 |
-| 105 | `IDatabaseResourceDescriptor` | ApplicationModel `:6` | applicationmodel | keep | Unchanged. It extends the library-owned `IResourceCommandDescriptor`, following the 17-area pattern. | — |
+| 105 | `IDatabaseResourceDescriptor` | ApplicationModel `:6` | applicationmodel | keep | Unchanged. It extends the library-owned `IResourceCommandDescriptor`, following the 17-area pattern. **At P7 (verified):** unchanged after the program and the builder redesign; the package's built closure holds no other Database assembly (§7, "P7, as landed"). | — |
 | 106 | `IDatabaseApplicationTestFactory` | Testing `:20` | other | keep | Unchanged. It matches Web.Testing's `IWebApplicationTestFactory`. | — |
 
 **Tally after corrections: delete 28, sealed 52, abstract 21 (16 public, 5 internal), keep 5.**
@@ -4165,6 +4165,71 @@ builder, the application context, the build context and the provider.
 *Gate:* the template tests, the Studio `--smoke` build, and the cohesion-examples smoke against
 fresh packs.
 
+**P7, as landed (2026-10-10, `feat/database-p7-appmodel-studio`, from `19b1a495`).** Decision 72
+moved the casts and cohesion-examples work above into B1 of the engine extensibility design, which
+landed them; this phase is the ApplicationModel verification and Studio's typed fields, after B3.
+
+- *ApplicationModel, verified.* [Certain] COHAM001 passes, and the package's built `deps.json`
+  lists exactly `Core`, `ApplicationModel`, `Hosting`, `Hosting.Health`, `Hosting.Resources` and
+  `System.Security.Cryptography.ProtectedData`: no root, model or engine assembly. `rg "public
+  interface" resources/Database --glob '**/src/**'` lists the five kept interfaces, the descriptor
+  among them (row 105). The redesign left no stale code: the descriptor verbs record names only, and
+  the default control plane's two kinds match `Sdk.Database.props`. The docs were stale in two
+  places. DESIGN and OVERVIEW said generated gateway verbs supply the manifest, but `Sdk.Gateway`
+  generates none: the gateway's `Program.cs` calls the hand-written verb over `Manifests.<Name>`.
+  And nothing said what `engine` names now that the model verb names its engine once, or what a
+  command does with a database the engine's builder declares. A new DESIGN section, "Engine-declared
+  and command-declared databases", and `AddDatabase(name, engine)`'s XML docs say both.
+- *The control plane against declared names.* [Certain] The extensibility design's §5.6 keeps the
+  handler as it is: `database.add-database` for a database the engine already holds is rejected
+  ("cannot claim existing database"), and a builder-declared database exists from the engine's
+  build. No test covered that case. Hosting's
+  `ExecuteCommandAsync_WithDeclaredDatabaseName_ShouldRejectAndLeaveTheDeclarationOwner` composes
+  `AddSql("commands", sql => sql.AddDatabase("sales"))` and pins four things: the refusal, with
+  names compared ignoring case (`SALES` is refused); the refused command is not recorded; the sole
+  engine still creates and drops an undeclared name; and the engine still refuses to drop `sales`
+  (`DatabaseObjectLockedException`). Hosting 77 → 78.
+- *Studio, typed fields.* `StudioEngines` holds the five engines in typed fields, which removes
+  its five downcasts from a `Dictionary<StudioModel, DatabaseEngine>` and the root-typed
+  `Get(model)`. `ModelWorkspace.Engine` and `Session` are abstract, and each model's workspace
+  overrides them covariantly with its typed engine and session. The base opens the embedded session
+  through the workspace's `OpenSessionAsync` (the typed `OpenDatabaseAsync`, then
+  `CreateSessionAsync`), so `BlobWorkspace`'s two session casts and `DocumentWorkspace`'s one are
+  gone. The base's root-typed `OpenAdminSessionAsync` became `RequireAdminDatabase`, and Key-Value
+  and Blob open their own typed admin sessions. Studio now has no engine, database or session cast.
+  The `QueryResult` shape tests left (`is QueryResultSet`, `is GraphPathsQueryResult`) are P8's
+  result types.
+- *Studio, declared databases and a registered function.* Every engine builder declares `studio`.
+  The SQL builder also takes the Studio's own extension, `StudioSqlExtensions`: extension members on
+  `SqlDatabaseEngineBuilder`, the shape of the design's §3.8. It registers `studio_initials(TEXT)`
+  (an immutable scalar) and `studio_product(BIGINT)` (an aggregate) through `sql.Functions`, and
+  declares `studio` with a typed schema whose CHECK calls `studio_initials`. The SQL catalog explorer
+  lists the registered functions from `COHESION_SCHEMA.FUNCTIONS`, and a new "Registered functions"
+  sample calls them.
+- *A failed declaration stays in its model.* A declared database is opened or provisioned inside
+  the engine's build, so stored files can now fail `StudioEngines.Create`: an older catalog format
+  after a format bump, or a `studio` SQL database written before P7 whose `notes` table the
+  declaration did not create (`COHSQLP005`). Studio used to fail one database only when it was
+  selected, and `StudioState` keeps one failing model from taking down the others. So a model
+  whose declaration fails its build is built again without it, and the log and the model's status
+  say so; the other four start as before.
+- *Smoke.* 83 → 99 passed, 0 failed, 1 skipped. The 16 new steps: per model, the declared database
+  is listed after the build, its drop is refused and it opens (10); SQL's provisioned schema, and
+  its CHECK refusing a title with no word (2); the registered functions embedded and over loopback
+  TCP (2); the new sample (1); and, on a scratch root holding a pre-P7 `studio` SQL database, SQL
+  alone running without its declaration while the other four declare theirs (1). Two runs over
+  one persistent data root give the same; the second takes the engines' open path, where the
+  stored CHECK binds the registered function again.
+- *Gate, as run.* ApplicationModel 15 and Hosting 78, in Debug and Release. Studio builds with no
+  warning to output folders under `%TEMP%` in Debug and Release, and both `--smoke` runs give 99,
+  0 and 1. The dependency graph check passes. Not run: the `Sdk.Gateway` CommandGateway test
+  project the P7 row names, which needs refreshed canonical packs. The ApplicationModel's public
+  surface did not change (its one source edit is XML documentation). The template and
+  cohesion-examples gates moved to B1 with their work.
+- *Owner review.* `database-area.md`'s opening paragraph says the file loads for Studio because
+  Studio binds "Studio's engine casts", and Studio has none now (the proposed wording is in the
+  phase's report).
+
 **P8, #1264: per-row result types and docs sweep.**
 
 - **Result types.** §5.3's P8 rows: `QueryRow`, `QueryResultSet`, `QueryResult` (§6.8),
@@ -4327,8 +4392,9 @@ That is roughly 570 files in this repository and 119 in the two companions.
 - [Likely] Net: about 53 to 58 fewer public types.
 
 **Effort.** [Guessing] 14 PRs in this repository: P0, P1, P2 (five commits), P3, P4.0, five model
-PRs, P5, P6, P7 and P8. P7 adds one cohesion-examples PR in the same window. Roughly 15,000 to
-25,000 changed lines, most of them mechanical renames in tests. The real design work is in P3
+PRs, P5, P6, P7 and P8. B1 of the engine extensibility design carried the one cohesion-examples
+PR (decision 72). Roughly 15,000 to 25,000 changed lines, most of them mechanical renames in
+tests. The real design work is in P3
 (NVI bases and the consolidated state machine), §6.6 and §6.7. The moves out of `Internal/` (C12)
 are counted in P2, P4 and P5: [Likely] about 35 files, including the four storage
 sub-components, each changing namespace, plus the `using …Internal` lines in their tests.
@@ -4350,7 +4416,7 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
 | R11 | [Guessing] Public sealed `SqlConnection` and `SqlClient` clash with Microsoft.Data.SqlClient's types when both namespaces are imported. | Users alias one of them. Renaming is out of scope unless a consumer reports the clash. |
 | R12 | [Certain] Deleting `ExternalEngineBuilder` removes the builder-validation coverage it carried. | Direct tests against the sealed builder (row 83). |
 | R13 | [Certain] Studio is MAUI and Windows-only, outside most CI legs, so it can rot between phases. | It is built in P4, P5 and P7. |
-| R14 | [Certain] cohesion-examples drifts. | The identity cast keeps it compiling until P7. P7 updates it in the same window. |
+| R14 | [Certain] cohesion-examples drifts. | The identity cast kept it compiling until B1, which updated it in the same window (decision 72). |
 | R15 | [Certain] A source break for preview.1 consumers. | One release-notes line (D11). |
 | R16 | [Certain] The coordinator carries three internal test hooks in production code (§6.9). | They are internal, `null` unless a test sets them, and called once per checkpoint, sequence reservation or rollback, never per row. Only Transactions.Tests reaches them, and each test asserts its hook fired. |
 

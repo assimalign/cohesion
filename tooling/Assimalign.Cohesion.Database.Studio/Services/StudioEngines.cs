@@ -17,12 +17,24 @@ namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>
 /// Owns one in-process engine per model (each on its own sub-folder of the data root) and the
-/// optional loopback servers the Studio starts for wire mode.
+/// optional loopback servers the Studio starts for wire mode. Each engine is held as the typed
+/// engine its model's builder returns, so nothing downcasts from <see cref="DatabaseEngine"/>.
 /// </summary>
 internal sealed class StudioEngines : IAsyncDisposable
 {
-    private readonly Dictionary<StudioModel, DatabaseEngine> _engines = [];
+    /// <summary>
+    /// The database every engine's builder declares: the engine creates it on its first build over a
+    /// data root and opens it on later ones, and refuses to drop it while the declaration stands.
+    /// </summary>
+    public const string DeclaredDatabase = "studio";
+
     private readonly Dictionary<StudioModel, (DatabaseServer Server, TcpConnectionListener Listener)> _servers = [];
+    private readonly Dictionary<StudioModel, string> _declarationFailures = [];
+    private SqlDatabaseEngine? _sql;
+    private DocumentDatabaseEngine? _documents;
+    private GraphDatabaseEngine? _graph;
+    private KeyValueDatabaseEngine? _keyValue;
+    private BlobDatabaseEngine? _blob;
 
     private StudioEngines(string dataRoot)
     {
@@ -31,23 +43,30 @@ internal sealed class StudioEngines : IAsyncDisposable
 
     public string DataRoot { get; }
 
-    public SqlDatabaseEngine Sql => (SqlDatabaseEngine)_engines[StudioModel.Sql];
+    public SqlDatabaseEngine Sql => _sql ?? throw Disposed();
 
-    public DocumentDatabaseEngine Documents => (DocumentDatabaseEngine)_engines[StudioModel.Documents];
+    public DocumentDatabaseEngine Documents => _documents ?? throw Disposed();
 
-    public GraphDatabaseEngine Graph => (GraphDatabaseEngine)_engines[StudioModel.Graph];
+    public GraphDatabaseEngine Graph => _graph ?? throw Disposed();
 
-    public KeyValueDatabaseEngine KeyValue => (KeyValueDatabaseEngine)_engines[StudioModel.KeyValue];
+    public KeyValueDatabaseEngine KeyValue => _keyValue ?? throw Disposed();
 
-    public BlobDatabaseEngine Blob => (BlobDatabaseEngine)_engines[StudioModel.Blob];
+    public BlobDatabaseEngine Blob => _blob ?? throw Disposed();
 
-    public DatabaseEngine Get(StudioModel model) => _engines[model];
+    /// <summary>
+    /// The models whose <see cref="DeclaredDatabase"/> could not be opened or provisioned while the
+    /// engine was built, each with the build's error. That engine runs without the declaration.
+    /// </summary>
+    public IReadOnlyDictionary<StudioModel, string> DeclarationFailures => _declarationFailures;
 
     public string GetModelRoot(StudioModel model) => System.IO.Path.Combine(DataRoot, model.FolderName);
 
     /// <summary>
     /// Creates all five engines on file storage under <paramref name="dataRoot"/>, each composed
-    /// through its model's engine builder: named once, with its options on the builder.
+    /// through its model's engine builder: named once, with its options on the builder, declaring
+    /// <see cref="DeclaredDatabase"/>, and (SQL) with the Studio's registered functions and the
+    /// declared database's schema. A model whose declared database fails its build runs without the
+    /// declaration (<see cref="DeclarationFailures"/>), so the other models still start.
     /// </summary>
     public static StudioEngines Create(string dataRoot)
     {
@@ -62,25 +81,66 @@ internal sealed class StudioEngines : IAsyncDisposable
                 Directory.CreateDirectory(engines.GetModelRoot(model));
             }
 
-            SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("studio-sql");
-            sql.Options.RootPath = engines.GetModelRoot(StudioModel.Sql);
-            engines._engines[StudioModel.Sql] = sql.Build();
+            engines._sql = engines.BuildDeclaring(StudioModel.Sql, declare =>
+            {
+                SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("studio-sql");
+                sql.Options.RootPath = engines.GetModelRoot(StudioModel.Sql);
+                sql.AddStudioFunctions();
+                if (declare)
+                {
+                    sql.AddStudioDatabase(DeclaredDatabase);
+                }
 
-            DocumentDatabaseEngineBuilder documents = DocumentDatabaseEngine.CreateBuilder("studio-documents");
-            documents.Options.RootPath = engines.GetModelRoot(StudioModel.Documents);
-            engines._engines[StudioModel.Documents] = documents.Build();
+                return sql.Build();
+            });
 
-            GraphDatabaseEngineBuilder graph = GraphDatabaseEngine.CreateBuilder("studio-graph");
-            graph.Options.RootPath = engines.GetModelRoot(StudioModel.Graph);
-            engines._engines[StudioModel.Graph] = graph.Build();
+            engines._documents = engines.BuildDeclaring(StudioModel.Documents, declare =>
+            {
+                DocumentDatabaseEngineBuilder documents = DocumentDatabaseEngine.CreateBuilder("studio-documents");
+                documents.Options.RootPath = engines.GetModelRoot(StudioModel.Documents);
+                if (declare)
+                {
+                    documents.AddDatabase(DeclaredDatabase);
+                }
 
-            KeyValueDatabaseEngineBuilder keyValue = KeyValueDatabaseEngine.CreateBuilder("studio-keyvalue");
-            keyValue.Options.RootPath = engines.GetModelRoot(StudioModel.KeyValue);
-            engines._engines[StudioModel.KeyValue] = keyValue.Build();
+                return documents.Build();
+            });
 
-            BlobDatabaseEngineBuilder blob = BlobDatabaseEngine.CreateBuilder("studio-blob");
-            blob.Options.RootPath = engines.GetModelRoot(StudioModel.Blob);
-            engines._engines[StudioModel.Blob] = blob.Build();
+            engines._graph = engines.BuildDeclaring(StudioModel.Graph, declare =>
+            {
+                GraphDatabaseEngineBuilder graph = GraphDatabaseEngine.CreateBuilder("studio-graph");
+                graph.Options.RootPath = engines.GetModelRoot(StudioModel.Graph);
+                if (declare)
+                {
+                    graph.AddDatabase(DeclaredDatabase);
+                }
+
+                return graph.Build();
+            });
+
+            engines._keyValue = engines.BuildDeclaring(StudioModel.KeyValue, declare =>
+            {
+                KeyValueDatabaseEngineBuilder keyValue = KeyValueDatabaseEngine.CreateBuilder("studio-keyvalue");
+                keyValue.Options.RootPath = engines.GetModelRoot(StudioModel.KeyValue);
+                if (declare)
+                {
+                    keyValue.AddDatabase(DeclaredDatabase);
+                }
+
+                return keyValue.Build();
+            });
+
+            engines._blob = engines.BuildDeclaring(StudioModel.Blob, declare =>
+            {
+                BlobDatabaseEngineBuilder blob = BlobDatabaseEngine.CreateBuilder("studio-blob");
+                blob.Options.RootPath = engines.GetModelRoot(StudioModel.Blob);
+                if (declare)
+                {
+                    blob.AddDatabase(DeclaredDatabase);
+                }
+
+                return blob.Build();
+            });
         }
         catch
         {
@@ -89,6 +149,33 @@ internal sealed class StudioEngines : IAsyncDisposable
         }
 
         return engines;
+    }
+
+    /// <summary>
+    /// Builds a model's engine with <see cref="DeclaredDatabase"/> declared, and builds it again
+    /// without the declaration when that build fails.
+    /// </summary>
+    /// <remarks>
+    /// A declared database is opened or provisioned inside the build, so its stored files can fail
+    /// the build: an older catalog format after a format bump, or a <c>studio</c> SQL database whose
+    /// <c>notes</c> table the declaration did not create. A failed build disposes what it created.
+    /// One model's data must not keep the other four from starting, so the error is kept in
+    /// <see cref="DeclarationFailures"/> and the engine runs without the declaration, as every model
+    /// ran before P7; its other databases fail only when they are selected. A failure of the second
+    /// build is not the declaration's and propagates.
+    /// </remarks>
+    private TEngine BuildDeclaring<TEngine>(StudioModel model, Func<bool, TEngine> build)
+        where TEngine : DatabaseEngine
+    {
+        try
+        {
+            return build(true);
+        }
+        catch (Exception exception)
+        {
+            _declarationFailures[model] = ErrorText.Describe(exception).ReplaceLineEndings(" | ");
+            return build(false);
+        }
     }
 
     public IPEndPoint? GetServerEndPoint(StudioModel model)
@@ -169,8 +256,22 @@ internal sealed class StudioEngines : IAsyncDisposable
             await StopServerAsync(model).ConfigureAwait(false);
         }
 
-        foreach (DatabaseEngine engine in _engines.Values)
+        // Typed fields upcast to the root for a uniform best-effort dispose; a field is null when
+        // Create failed before its engine was built.
+        DatabaseEngine?[] engines = [_sql, _documents, _graph, _keyValue, _blob];
+        _sql = null;
+        _documents = null;
+        _graph = null;
+        _keyValue = null;
+        _blob = null;
+
+        foreach (DatabaseEngine? engine in engines)
         {
+            if (engine is null)
+            {
+                continue;
+            }
+
             try
             {
                 await engine.DisposeAsync().ConfigureAwait(false);
@@ -179,7 +280,7 @@ internal sealed class StudioEngines : IAsyncDisposable
             {
             }
         }
-
-        _engines.Clear();
     }
+
+    private static ObjectDisposedException Disposed() => new(nameof(StudioEngines));
 }

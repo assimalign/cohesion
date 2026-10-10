@@ -71,6 +71,11 @@ internal sealed class StudioState : IAsyncDisposable
         foreach (StudioModel model in Enum.GetValues<StudioModel>())
         {
             ModelSettings modelSettings = settings.Models[model];
+            if (Engines.DeclarationFailures.TryGetValue(model, out string? declarationFailure))
+            {
+                Log($"{model.DisplayName}: declared database '{StudioEngines.DeclaredDatabase}' failed the build, so the engine runs without it: {declarationFailure}");
+            }
+
             try
             {
                 EndPoint? endPoint = modelSettings.Mode switch
@@ -82,7 +87,9 @@ internal sealed class StudioState : IAsyncDisposable
 
                 ModelWorkspace workspace = CreateWorkspace(model, modelSettings.Mode, Engines, endPoint);
                 _workspaces[model] = workspace;
-                _status[model] = workspace.Description;
+                _status[model] = declarationFailure is null
+                    ? workspace.Description
+                    : $"{workspace.Description}; no declared '{StudioEngines.DeclaredDatabase}' (see the log)";
                 Log($"{model.DisplayName}: {workspace.Description}");
             }
             catch (Exception exception)
