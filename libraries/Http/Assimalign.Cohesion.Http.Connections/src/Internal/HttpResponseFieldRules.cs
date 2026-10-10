@@ -16,8 +16,17 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// field holding CR, LF, or NUL malformed. The other control characters are refused as well: a sender
 /// MUST NOT generate a field value outside the <c>field-content</c> grammar (RFC 9110 §2.2), and the
 /// tolerance §5.5 grants is a recipient's. The HTTP/1.1 reader rejects the same characters (#1341). A
-/// value is not judged for SP or HTAB at its ends, which split nothing and which an HTTP/1.1 recipient
-/// strips, nor for a character above <c>U+00FF</c>, which every encoder writes as <c>?</c>.
+/// value is not refused for a character above <c>U+00FF</c>, which every encoder writes as <c>?</c>.
+/// </para>
+/// <para>
+/// <b>Whitespace at a value's ends</b> is not refused either: it splits nothing, and it is not part of
+/// the value (RFC 9110 §5.5), so an HTTP/1.1 recipient strips it as optional whitespace and the HTTP/1.1
+/// writer sends it as it is. HTTP/2 and HTTP/3 have no optional whitespace around a value: one that
+/// starts or ends with SP or HTAB makes the whole message malformed (RFC 9113 §8.2.1; RFC 9114 §10.3
+/// through the <c>field-content</c> rule), and a strict client resets the stream. Their encoders therefore
+/// send the value with that whitespace removed (<see cref="TrimEdgeWhitespace"/>), the value an HTTP/1.1
+/// recipient would have read, and the inbound side refuses what the outbound side no longer sends
+/// (<see cref="HttpReceivedFieldRules"/>).
 /// </para>
 /// <para>
 /// The check runs at encode time, in each writer, because a check in the header collection alone can be
@@ -92,6 +101,18 @@ internal static class HttpResponseFieldRules
             throw new HttpInvalidResponseFieldException(
                 $"RFC 9110 §5.5: the value of the response field '{key.Value}' holds the control character 0x{(int)value[invalid]:X2} at index {invalid}; a field value holds no control character but HTAB. The response head was not sent.");
         }
+    }
+
+    /// <summary>
+    /// Removes SP and HTAB from both ends of a value an HTTP/2 or HTTP/3 encoder is about to write: RFC 9113
+    /// §8.2.1 and RFC 9114 §10.3 make a value with whitespace at either end malformed, and RFC 9110 §5.5
+    /// excludes that whitespace from the value, so removing it changes nothing a recipient reads.
+    /// </summary>
+    /// <param name="value">The value, already checked by <see cref="EnsureValidValue"/>.</param>
+    /// <returns><paramref name="value"/> itself when neither end holds SP or HTAB; otherwise the trimmed value.</returns>
+    public static string TrimEdgeWhitespace(string value)
+    {
+        return value.Trim(' ', '\t');
     }
 
     private static string DescribeInvalidName(string name)

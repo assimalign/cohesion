@@ -249,6 +249,29 @@ public class HttpResponseFieldSyntaxTests
         await ShouldAnswerHttp2ReplacementAsync(peer, context);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/2 value with whitespace at its ends should be sent without it")]
+    [InlineData("header")]
+    [InlineData("set-cookie")]
+    [InlineData("trailer")]
+    public async Task Http2SendAsync_OnValueWithEdgeWhitespace_ShouldSendItTrimmed(string section)
+    {
+        // Arrange — RFC 9113 §8.2.1 makes the value malformed as written; RFC 9110 §5.5 reads it as "a\tb=1".
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/echo"));
+        IHttpContext context = await peer.ReceiveContextAsync();
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("hello"));
+        string name = StageValueWithEdgeWhitespace(context, section);
+
+        // Act
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+        await peer.SyncAsync();
+
+        // Assert — the trailer section is the last HEADERS frame, the head the first.
+        IReadOnlyList<Http2WireFrame> frames = peer.Output.ForStream(1);
+        Http2WireFrame fields = section == "trailer" ? frames.Last(frame => frame.IsHeaders) : frames[0];
+        HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(fields.Payload)[name].ShouldBe("a\tb=1");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/2 connection-specific field it cannot carry should be refused although it is never sent")]
     public async Task Http2SendAsync_OnInvalidConnectionSpecificField_ShouldRefuse()
     {
@@ -465,6 +488,29 @@ public class HttpResponseFieldSyntaxTests
         await ShouldAnswerHttp3ReplacementAsync(stream, connection, context);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/3 value with whitespace at its ends should be sent without it")]
+    [InlineData("header")]
+    [InlineData("set-cookie")]
+    [InlineData("trailer")]
+    public async Task Http3SendAsync_OnValueWithEdgeWhitespace_ShouldSendItTrimmed(string section)
+    {
+        // Arrange — RFC 9114 §10.3 makes the value malformed as written; RFC 9110 §5.5 reads it as "a\tb=1".
+        TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/echo", "https", "a"));
+        (IHttpConnectionContext connection, IHttpContext context) = await ReceiveHttp3Async(stream);
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("hello"));
+        string name = StageValueWithEdgeWhitespace(context, section);
+
+        // Act
+        await connection.SendAsync(context).AsTask().WaitAsync(_timeout);
+
+        // Assert — the trailer section is the last HEADERS frame, the head the first.
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp3Frames(await stream.ReadOutputAsync());
+        byte[] fields = section == "trailer"
+            ? frames.Last(frame => frame.FrameType == (long)Http3FrameType.Headers).Payload
+            : frames[0].Payload;
+        HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(fields)[name].ShouldBe("a\tb=1");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/3 buffered trailer value it cannot carry should be refused before a frame is written")]
     public async Task Http3SendAsync_OnInvalidTrailerValue_ShouldRefuseBeforeWriting()
     {
@@ -626,6 +672,25 @@ public class HttpResponseFieldSyntaxTests
         string?[] values = ["abc123"];
         context.Response.Trailers[new HttpHeaderKey("x-checksum")] = new HttpHeaderValue(values);
         values[0] = "abc123\r\nx-injected: 1";
+    }
+
+    // A value with SP and HTAB at its ends, which HTTP/2 and HTTP/3 cannot carry, staged in one section.
+    private static string StageValueWithEdgeWhitespace(IHttpContext context, string section)
+    {
+        const string value = " a\tb=1 \t";
+
+        switch (section)
+        {
+            case "set-cookie":
+                context.Response.Headers[HttpHeaderKey.SetCookie] = value;
+                return "set-cookie";
+            case "trailer":
+                context.Response.Trailers[new HttpHeaderKey("x-checksum")] = value;
+                return "x-checksum";
+            default:
+                context.Response.Headers[_field] = value;
+                return _field.Value;
+        }
     }
 
     // A response the transport refuses for one field: a reflected Location in the head, or a trailer.

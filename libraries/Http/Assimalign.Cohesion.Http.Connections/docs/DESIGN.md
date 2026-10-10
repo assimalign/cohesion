@@ -2676,10 +2676,20 @@ make malformed, and that a downgrading intermediary may split. The `Http.Protoco
   value outside `field-content` (RFC 9110 §2.2, §5.5); the latitude §5.5 gives is a
   recipient's, and the HTTP/1.1 reader rejects the same characters (#1341), so a
   Cohesion-to-Cohesion hop would answer the value with `400` anyway.
-- **Not judged:** SP or HTAB at a value's ends, which split nothing and which an HTTP/1.1
-  recipient strips; obs-text (`%x80-FF`); and a character above `U+00FF`, which every
-  encoder already writes as `?`. HTTP/2 and HTTP/3 field names are lowercased by the
+- **Not refused:** SP or HTAB at a value's ends, which split nothing and are not part of
+  the value (RFC 9110 §5.5); obs-text (`%x80-FF`); and a character above `U+00FF`, which
+  every encoder already writes as `?`. HTTP/2 and HTTP/3 field names are lowercased by the
   encoders, so uppercase is not refused.
+- **Trimmed on HTTP/2 and HTTP/3:** those versions have no optional whitespace around a
+  value, and a value that starts or ends with SP or HTAB makes the whole response
+  malformed (RFC 9113 §8.2.1; RFC 9114 §10.3 through `field-content`), so a strict client
+  resets the stream. The HPACK and QPACK encoders send every value of a head, interim, or
+  trailer section without it (`HttpResponseFieldRules.TrimEdgeWhitespace`): the value an
+  HTTP/1.1 recipient reads once it strips the same whitespace, so all three versions
+  deliver one value, and the server no longer sends what its own decoders refuse (#1376).
+  HTTP/1.1 writes the value as given; its recipient does the stripping. Refusing the value
+  instead would turn a handler that reflects `"v "` into a `500` on HTTP/2 and HTTP/3
+  alone.
 
 **Where.** At encode time, in each writer, never only in the header collection:
 `IHttpHeaderCollection` is an interface anyone can implement, and an `HttpHeaderValue`

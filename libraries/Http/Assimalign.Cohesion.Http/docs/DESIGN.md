@@ -255,8 +255,10 @@ quirks.
   response, extended CONNECT, protocol upgrade, and response streaming features)
   documents what the refusal leaves behind. A sender may not generate a value
   outside `field-content`, so the writers refuse every control character but
-  HTAB, not only NUL, CR, and LF; they leave SP and HTAB at a value's ends
-  alone, since those split nothing. Since #1376 the HTTP/2 and HTTP/3 decoders
+  HTAB, not only NUL, CR, and LF. They do not refuse SP and HTAB at a value's
+  ends, which split nothing and are not part of the value; the HTTP/2 and
+  HTTP/3 encoders, whose versions make such a value malformed, send it without
+  them. Since #1376 the HTTP/2 and HTTP/3 decoders
   apply the same rule to every received field line, heads and trailer sections
   alike (`HttpReceivedFieldRules` in the transport): a lowercase token name, and
   a value that passes `IsValidFieldValue` and holds no other control character

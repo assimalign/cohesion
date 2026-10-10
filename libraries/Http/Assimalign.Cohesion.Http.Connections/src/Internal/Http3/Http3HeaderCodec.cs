@@ -285,7 +285,7 @@ internal static class Http3HeaderCodec
 
                         if (sendable)
                         {
-                            fields.Add((header.Key.Value.ToLowerInvariant(), value));
+                            fields.Add((header.Key.Value.ToLowerInvariant(), HttpResponseFieldRules.TrimEdgeWhitespace(value)));
                         }
                     }
                 }
@@ -314,7 +314,7 @@ internal static class Http3HeaderCodec
             string fieldValue = field.Value.Value;
             HttpResponseFieldRules.EnsureValidName(field.Key);
             HttpResponseFieldRules.EnsureValidValue(field.Key, fieldValue);
-            fields.Add((field.Key.Value, fieldValue));
+            fields.Add((field.Key.Value, HttpResponseFieldRules.TrimEdgeWhitespace(fieldValue)));
         }
 
         return QPackFieldSectionEncoder.Encode(fields);
@@ -372,7 +372,10 @@ internal static class Http3HeaderCodec
     /// Every field is checked against the field syntax before the section is returned
     /// (<see cref="HttpResponseFieldRules.EnsureValidName"/>, <see cref="HttpResponseFieldRules.EnsureValidValue"/>),
     /// the connection-specific ones included, so a field that would split an HTTP/1.1 head is refused on
-    /// every version alike. The encoder is static-only, so a refusal leaves no QPACK state behind.
+    /// every version alike. The encoder is static-only, so a refusal leaves no QPACK state behind. A value
+    /// goes out without the SP or HTAB at its ends, which RFC 9114 §10.3 forbids through the
+    /// <c>field-content</c> rule (<see cref="HttpResponseFieldRules.TrimEdgeWhitespace"/>); the interim and
+    /// trailer sections do the same.
     /// </remarks>
     /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeResponseHeaders(Http3Context context)
@@ -398,7 +401,7 @@ internal static class Http3HeaderCodec
                     if (!string.IsNullOrEmpty(value))
                     {
                         HttpResponseFieldRules.EnsureValidValue(header.Key, value);
-                        fields.Add(("set-cookie", value));
+                        fields.Add(("set-cookie", HttpResponseFieldRules.TrimEdgeWhitespace(value)));
                     }
                 }
 
@@ -411,7 +414,7 @@ internal static class Http3HeaderCodec
             // RFC 9114 §4.2 — a connection-specific field would make the response malformed.
             if (HttpResponseFieldRules.IsSendable(header.Key, header.Value))
             {
-                fields.Add((header.Key.Value, fieldValue));
+                fields.Add((header.Key.Value, HttpResponseFieldRules.TrimEdgeWhitespace(fieldValue)));
             }
         }
 

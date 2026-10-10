@@ -60,7 +60,9 @@ internal static partial class HPackEncoder
     /// (<see cref="HttpResponseFieldRules.EnsureValidName"/>, <see cref="HttpResponseFieldRules.EnsureValidValue"/>),
     /// the connection-specific ones included, so a field that would split an HTTP/1.1 head is refused
     /// on every version alike. The section is built in memory and the encoder never indexes, so a refusal
-    /// leaves nothing on the wire and no HPACK state behind.
+    /// leaves nothing on the wire and no HPACK state behind. A value goes out without the SP or HTAB at its
+    /// ends, which RFC 9113 §8.2.1 forbids (<see cref="HttpResponseFieldRules.TrimEdgeWhitespace"/>); every
+    /// section this encoder writes does the same.
     /// </remarks>
     /// <param name="statusCode">The response status code.</param>
     /// <param name="headers">The response headers to emit.</param>
@@ -441,6 +443,11 @@ internal static partial class HPackEncoder
 
     private static void WriteHeader(Stream stream, string name, string value)
     {
+        // RFC 9113 §8.2.1 — a value with SP or HTAB at either end makes the response malformed. Every field
+        // line of a head, interim, or trailer section goes through here, so none of them can carry it; the
+        // whitespace is not part of the value (RFC 9110 §5.5), so nothing a recipient reads changes.
+        value = HttpResponseFieldRules.TrimEdgeWhitespace(value);
+
         byte[] buffer = new byte[128];
 
         while (!TryEncodeHeader(name, value, buffer, out int bytesWritten))
