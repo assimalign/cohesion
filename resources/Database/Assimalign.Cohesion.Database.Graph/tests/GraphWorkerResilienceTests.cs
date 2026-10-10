@@ -40,7 +40,7 @@ public sealed class GraphWorkerResilienceTests
     {
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -204,7 +204,7 @@ public sealed class GraphWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var stalled = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -263,7 +263,7 @@ public sealed class GraphWorkerResilienceTests
     {
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = GraphDatabaseEngine.Create(Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
@@ -320,7 +320,7 @@ public sealed class GraphWorkerResilienceTests
         var options = Options(strategy);
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
@@ -369,7 +369,7 @@ public sealed class GraphWorkerResilienceTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         await InsertAsync(failing, 0, 10);
@@ -445,7 +445,7 @@ public sealed class GraphWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; one writer holds the database writer lock in
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
@@ -529,7 +529,7 @@ public sealed class GraphWorkerResilienceTests
         using var deadline = new CancellationTokenSource(Timeout);
         CancellationToken token = deadline.Token;
         var interval = TimeSpan.FromMilliseconds(20);
-        await using var engine = GraphDatabaseEngine.Create(new()
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
         {
             CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
         });
@@ -592,7 +592,7 @@ public sealed class GraphWorkerResilienceTests
         string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-reopen-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await using var engine = GraphDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            await using var engine = GraphDatabaseEngine.Create("graph-engine", onDisk ? new() { RootPath = root } : new());
             var database = await engine.CreateDatabaseAsync(Failing);
             await InsertAsync(database, 0, 20);
             var session = await database.CreateSessionAsync();
@@ -653,7 +653,7 @@ public sealed class GraphWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms and records a failure for a database whose
         // page writes fail.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -706,7 +706,7 @@ public sealed class GraphWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -777,7 +777,7 @@ public sealed class GraphWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -842,7 +842,7 @@ public sealed class GraphWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = 0;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var database = await engine.CreateDatabaseAsync(Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -889,7 +889,7 @@ public sealed class GraphWorkerResilienceTests
         var options = Options(strategy, writeBack: TimeSpan.FromMilliseconds(50));
         options.WorkerFailureWindow = TimeSpan.FromTicks(1);
         options.WorkerFailureMinimumPasses = 3;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var original = await engine.CreateDatabaseAsync(Failing);
         await InsertAsync(original, 0, 10);
         await original.DisposeAsync();
@@ -933,7 +933,7 @@ public sealed class GraphWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -982,7 +982,7 @@ public sealed class GraphWorkerResilienceTests
         var clock = new ManualTimeProvider();
         var options = Options(new FaultInjectingJournalStorageStrategy());
         options.TimeProvider = clock;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         await engine.CreateDatabaseAsync(Failing);
         await engine.CreateDatabaseAsync(Healthy);
         var worker = (GraphVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -1046,7 +1046,7 @@ public sealed class GraphWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = (GraphVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -1091,13 +1091,13 @@ public sealed class GraphWorkerResilienceTests
         // Arrange
         var defaults = new GraphDatabaseEngineOptions();
         var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
-        builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
-        builder.WorkerFailureMinimumPasses = 4;
-        builder.JournalSizeLimit = 512L * 1024 * 1024;
+        builder.Options.WorkerFailureWindow = TimeSpan.FromSeconds(30);
+        builder.Options.WorkerFailureMinimumPasses = 4;
+        builder.Options.JournalSizeLimit = 512L * 1024 * 1024;
 
         // Act
-        await using var engine = GraphDatabaseEngine.Create(new());
-        await using var timeOnly = GraphDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        await using var timeOnly = GraphDatabaseEngine.Create("graph-engine", new() { CheckpointJournalSize = 0 });
         await using var built = builder.Build();
 
         // Assert: a hundred seconds across at least three failed passes (owner decision 42), and
@@ -1114,15 +1114,15 @@ public sealed class GraphWorkerResilienceTests
         built.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(30));
         built.WorkerFailureMinimumPasses.ShouldBe(4);
         built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { WorkerFailureWindow = TimeSpan.Zero }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { WorkerFailureWindow = TimeSpan.Zero }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { WorkerFailureMinimumPasses = 0 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { WorkerFailureMinimumPasses = 0 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.WorkerFailureMinimumPasses));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { JournalSizeLimit = -1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { JournalSizeLimit = -1 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.JournalSizeLimit));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.JournalSizeLimit));
     }
 
@@ -1161,7 +1161,7 @@ public sealed class GraphWorkerResilienceTests
             var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
             var options = Options(strategy);
             options.CheckpointJournalSize = PaceJournalSize;
-            await using var engine = GraphDatabaseEngine.Create(options);
+            await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
             var failing = await engine.CreateDatabaseAsync(Failing);
             var healthy = await engine.CreateDatabaseAsync(Healthy);
             var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);

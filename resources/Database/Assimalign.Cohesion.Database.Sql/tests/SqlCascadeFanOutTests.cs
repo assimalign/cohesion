@@ -85,7 +85,7 @@ public sealed class SqlCascadeFanOutTests
     {
         // Arrange: per round four small parents and one large parent, the first round a warm-up,
         // plus a bystander parent whose children must survive every cascade.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cascade-fan-out" });
+        await using var engine = SqlDatabaseEngine.Create("cascade-fan-out", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");

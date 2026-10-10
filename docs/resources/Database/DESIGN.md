@@ -256,7 +256,15 @@ HTTP surface without becoming part of the Database reference API.
 Composition is **builder-first**. The root's `IDatabaseApplicationBuilder` is the seam model
 packages register deferred engines on, each by the name it reserves — `Database.Sql` ships
 `AddSql(name, sql => ...)`, with servers nested under `sql.AddServer(...)` and the databases the
-engine owns under `sql.AddDatabase(...)`. Composition roots register ordered lifecycle services through the
+engine owns under `sql.AddDatabase(...)`. The other four models have the same engine level since
+B3 of `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`: `AddKeyValue`, `AddGraph`,
+`AddDocuments` and `AddBlob` take `(name, builder => ...)`, and each builder offers `Options`
+(values only, copied when the engine is built), `AddDatabase(name)` (opened, or created, before
+the build returns, and never dropped while declared), `AddServer(options => ...)` beside
+`AddServer(engine => ...)` where the model has a server (KeyValue, Graph and Blob; Documents has
+none), `AddWorker` and `Build`/`BuildAsync`. The engine name is written once: no options type
+carries one, and a standalone engine is `XDatabaseEngine.Create(name, options)`, which copies its
+options too. Composition roots register ordered lifecycle services through the
 concrete `DatabaseApplicationBuilder.AddService` verb in `Database.Hosting`; the root
 contract references no hosting library (O34). `Database.Hosting` implements the builder and exposes
 `DatabaseApplication.CreateBuilder(args)`. The `args` overload checks the calling assembly's

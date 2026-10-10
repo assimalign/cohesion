@@ -77,7 +77,7 @@ public sealed class GraphDatabaseEventSourceTests
         long currentWhileOpen;
 
         // Act
-        await using (var harness = await GraphServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName))
+        await using (var harness = await GraphServerHarness.StartAsync(engineName: engineName))
         {
             await using var client = await harness.DialAsync();
             await client.HandshakeAsync();
@@ -119,7 +119,7 @@ public sealed class GraphDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
         long rejectedBefore = GraphDatabaseEventSource.Log.TotalRejectedSessions;
-        await using var harness = await GraphServerHarness.StartAsync(options => options.MaxSessions = 1, options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(options => options.MaxSessions = 1, engineName: engineName);
         await using var first = await harness.DialAsync();
         await first.HandshakeAsync();
 
@@ -152,7 +152,7 @@ public sealed class GraphDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
         await using var harness = await GraphServerHarness.StartAsync(
             options => options.Authenticator = refusal == "AuthenticationFailed" ? new RejectingAuthenticator() : null,
-            options => options.EngineName = engineName);
+            engineName: engineName);
         if (refusal == "DatabaseOffline")
         {
             var open = await harness.Engine.OpenDatabaseAsync(GraphServerHarness.DatabaseName);
@@ -204,7 +204,7 @@ public sealed class GraphDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await GraphServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act: send nothing.
@@ -234,7 +234,7 @@ public sealed class GraphDatabaseEventSourceTests
                 options.Authenticator = new StallingAuthenticator();
                 options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -259,7 +259,7 @@ public sealed class GraphDatabaseEventSourceTests
         // the 256-character payload bound.
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await GraphServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -281,7 +281,7 @@ public sealed class GraphDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await GraphServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -305,7 +305,7 @@ public sealed class GraphDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await GraphServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -342,7 +342,7 @@ public sealed class GraphDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await GraphServerHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -378,7 +378,7 @@ public sealed class GraphDatabaseEventSourceTests
                 options.Authenticator = authenticator;
                 options.ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, GraphServerHarness.DatabaseName, "ada").Encode());
         await client.ExpectAsync(ProtocolMessageType.Authenticate);
@@ -421,7 +421,7 @@ public sealed class GraphDatabaseEventSourceTests
     {
         // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
         // disable below is redundant but harmless.
-        await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = UniqueEngineName() });
+        await using var engine = GraphDatabaseEngine.Create(UniqueEngineName(), new GraphDatabaseEngineOptions());
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
         using (var listener = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose))
@@ -450,9 +450,8 @@ public sealed class GraphDatabaseEventSourceTests
         // the database went offline under it, so its close writes nothing and the reopen recovers it.
         var token = TestTimeout.Token(60);
         string name = "recovery" + Guid.NewGuid().ToString("N");
-        await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions
+        await using var engine = GraphDatabaseEngine.Create(UniqueEngineName(), new GraphDatabaseEngineOptions
         {
-            EngineName = UniqueEngineName(),
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
@@ -518,7 +517,7 @@ public sealed class GraphDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
         using var root = new RootEventRecorder();
-        await using var harness = await GraphServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
@@ -554,7 +553,7 @@ public sealed class GraphDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
         using var root = new RootEventRecorder();
-        await using var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = engineName });
+        await using var engine = GraphDatabaseEngine.Create(engineName, new GraphDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("graph", TestTimeout.Token(30));
         await using var session = await database.CreateSessionAsync(TestTimeout.Token(30));
 
@@ -600,7 +599,7 @@ public sealed class GraphDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
         TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
-        await using var harness = await GraphServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        await using var harness = await GraphServerHarness.StartAsync(options => options.Listener = listener, engineName: engineName);
 
         // Act: the peer completes its handshake, then resets the connection: while the session idles
         // in its ready loop, or while the server's pong writes fill the socket buffers the peer

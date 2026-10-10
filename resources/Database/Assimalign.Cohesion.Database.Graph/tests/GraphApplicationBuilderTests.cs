@@ -26,7 +26,7 @@ public sealed class GraphApplicationBuilderTests
         {
             configured++;
             options.Name.ShouldBe("registered");
-            options.Durability = StorageCommitDurability.Grouped;
+            options.Options.Durability = StorageCommitDurability.Grouped;
         }).ShouldBeSameAs(builder);
 
         configured.ShouldBe(0);
@@ -70,7 +70,7 @@ public sealed class GraphApplicationBuilderTests
             engine.Workers.ShouldContain(worker);
             engine.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
             server.ShouldNotBeNull().Starts.ShouldBe(0);
-            Should.Throw<InvalidOperationException>(() => builder.EngineName = "late");
+            Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
             Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => worker));
             Should.Throw<InvalidOperationException>(() => builder.Build());
         }
@@ -99,7 +99,7 @@ public sealed class GraphApplicationBuilderTests
         worker.ShouldNotBeNull().Disposals.ShouldBe(1);
         server.ShouldNotBeNull().Stops.ShouldBe(1);
         Should.Throw<InvalidOperationException>(() => builder.Build());
-        Should.Throw<InvalidOperationException>(() => builder.RootPath = null);
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
     }
 
     [Theory]
@@ -125,7 +125,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public void ServerForAnotherEngine_ShouldBeRejectedAndDisposedWithoutOwningThatEngine()
     {
-        using var other = GraphDatabaseEngine.Create(new());
+        using var other = GraphDatabaseEngine.Create("graph-engine", new());
         var server = new RecordingServer(other);
         var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         builder.AddServer(_ => server);
@@ -145,9 +145,9 @@ public sealed class GraphApplicationBuilderTests
             using var strategy = new RecordingStorageStrategy(directory);
             strategy.CreateStorage(new DatabaseName("existing"), StorageCommitDurability.Synchronous).Dispose();
             var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
-            builder.StorageStrategy = strategy;
-            builder.RootPath = FileSystemPath.Parse(ignoredRoot);
-            builder.Durability = StorageCommitDurability.Synchronous;
+            builder.Options.StorageStrategy = strategy;
+            builder.Options.RootPath = FileSystemPath.Parse(ignoredRoot);
+            builder.Options.Durability = StorageCommitDurability.Synchronous;
 
             await using (var engine = builder.Build())
             {
@@ -174,7 +174,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public async Task EmptyDatabaseName_ShouldBeRejectedAtEveryEngineEntryPoint()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default));
         await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(default));
         await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync(default));

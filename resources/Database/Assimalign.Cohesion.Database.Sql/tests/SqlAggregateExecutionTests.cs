@@ -623,7 +623,7 @@ public sealed class SqlAggregateExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "aggregate-tests" });
+        => SqlDatabaseEngine.Create("aggregate-tests", new SqlDatabaseEngineOptions());
 
     private static async Task SeedAsync(SqlDatabaseSession session)
     {

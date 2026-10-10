@@ -23,7 +23,7 @@ public sealed class SqlIndexDuplicateKeyTests
 {
     private static async Task<(SqlDatabaseEngine Engine, SqlDatabaseSession Session)> CreateAsync(string name)
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name });
+        var engine = SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync(name + "-db");
         var session = await database.CreateSessionAsync();
         return (engine, session);
@@ -220,9 +220,8 @@ public sealed class SqlIndexDuplicateKeyTests
         // indexes every stored version with its stamps, so each key's run mixes
         // dead versions with live ones. The version purge is held off so the dead
         // versions are still stored when the indexes are built.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create($"dup-build-history-{seed}", new SqlDatabaseEngineOptions
         {
-            EngineName = $"dup-build-history-{seed}",
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync($"dup-build-history-{seed}-db");

@@ -14,7 +14,7 @@ public sealed class BlobReadCommittedTests
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - ReadCommitted: Should pin a stream snapshot across an earlier writer commit and purge")]
     public async Task ReadCommittedStream_ShouldPinItsStatementSnapshot()
     {
-        await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new BlobDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("statement-pin");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         byte[] original = new byte[40_000];
@@ -55,7 +55,7 @@ public sealed class BlobReadCommittedTests
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: Should reject overlapping streams without aborting the first upload")]
     public async Task Session_ShouldRejectOverlappingStreamsAndPermitSequentialUploads()
     {
-        await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new BlobDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("stream-guard");
         await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();

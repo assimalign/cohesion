@@ -37,7 +37,7 @@ public sealed class BlobWorkerResilienceTests
     {
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = BlobDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -201,7 +201,7 @@ public sealed class BlobWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var stalled = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -260,7 +260,7 @@ public sealed class BlobWorkerResilienceTests
     {
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = BlobDatabaseEngine.Create(Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
@@ -317,7 +317,7 @@ public sealed class BlobWorkerResilienceTests
         var options = Options(strategy);
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
@@ -367,7 +367,7 @@ public sealed class BlobWorkerResilienceTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = BlobDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         await UploadAsync(failing, 0, 10);
@@ -449,7 +449,7 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; one writer holds the database writer lock in
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = BlobDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
@@ -511,7 +511,7 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: one writer holds the database writer lock in an explicit transaction; the other
         // session has looked its container up, and every journal write fails from now on.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = BlobDatabaseEngine.Create(Options(strategy));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy));
         var failing = await CreateAsync(engine, Failing);
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
@@ -620,7 +620,7 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms and records a failure for a database whose
         // page writes fail.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = BlobDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -674,7 +674,7 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -745,7 +745,7 @@ public sealed class BlobWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -810,7 +810,7 @@ public sealed class BlobWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = 0;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var database = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -857,7 +857,7 @@ public sealed class BlobWorkerResilienceTests
         var options = Options(strategy, writeBack: TimeSpan.FromMilliseconds(50));
         options.WorkerFailureWindow = TimeSpan.FromTicks(1);
         options.WorkerFailureMinimumPasses = 3;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var original = await CreateAsync(engine, Failing);
         await UploadAsync(original, 0, 10);
         await original.DisposeAsync();
@@ -901,7 +901,7 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -950,7 +950,7 @@ public sealed class BlobWorkerResilienceTests
         var clock = new ManualTimeProvider();
         var options = Options(new FaultInjectingJournalStorageStrategy());
         options.TimeProvider = clock;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         await engine.CreateDatabaseAsync(Failing);
         await engine.CreateDatabaseAsync(Healthy);
         var worker = (BlobVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -1014,7 +1014,7 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = (BlobVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -1059,13 +1059,13 @@ public sealed class BlobWorkerResilienceTests
         // Arrange
         var defaults = new BlobDatabaseEngineOptions();
         var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
-        builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
-        builder.WorkerFailureMinimumPasses = 4;
-        builder.JournalSizeLimit = 512L * 1024 * 1024;
+        builder.Options.WorkerFailureWindow = TimeSpan.FromSeconds(30);
+        builder.Options.WorkerFailureMinimumPasses = 4;
+        builder.Options.JournalSizeLimit = 512L * 1024 * 1024;
 
         // Act
-        await using var engine = BlobDatabaseEngine.Create(new());
-        await using var timeOnly = BlobDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
+        await using var timeOnly = BlobDatabaseEngine.Create("blob-engine", new() { CheckpointJournalSize = 0 });
         await using var built = builder.Build();
 
         // Assert: a hundred seconds across at least three failed passes (owner decision 42), and
@@ -1082,15 +1082,15 @@ public sealed class BlobWorkerResilienceTests
         built.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(30));
         built.WorkerFailureMinimumPasses.ShouldBe(4);
         built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { WorkerFailureWindow = TimeSpan.Zero }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { WorkerFailureWindow = TimeSpan.Zero }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { WorkerFailureMinimumPasses = 0 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { WorkerFailureMinimumPasses = 0 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.WorkerFailureMinimumPasses));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { JournalSizeLimit = -1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { JournalSizeLimit = -1 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.JournalSizeLimit));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.JournalSizeLimit));
     }
 
@@ -1137,7 +1137,7 @@ public sealed class BlobWorkerResilienceTests
             var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
             var options = Options(strategy);
             options.CheckpointJournalSize = PaceJournalSize;
-            await using var engine = BlobDatabaseEngine.Create(options);
+            await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
             var failing = await CreateAsync(engine, Failing);
             var healthy = await CreateAsync(engine, Healthy);
             var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);

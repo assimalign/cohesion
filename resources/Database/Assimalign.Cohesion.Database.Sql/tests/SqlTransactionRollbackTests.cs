@@ -28,7 +28,7 @@ public sealed class SqlTransactionRollbackTests
     public async Task RollbackAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionAndItsWritesIntact()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "rollback-canceled" });
+        await using var engine = SqlDatabaseEngine.Create("rollback-canceled", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("canceled-db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -63,7 +63,7 @@ public sealed class SqlTransactionRollbackTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
+        var engine = SqlDatabaseEngine.Create("rollback-journal", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("journal-db");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
@@ -104,7 +104,7 @@ public sealed class SqlTransactionRollbackTests
         await other.DisposeAsync();
         await session.DisposeAsync();
         await engine.DisposeAsync();
-        await using var reopened = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
+        await using var reopened = SqlDatabaseEngine.Create("rollback-journal", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("journal-db");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -131,7 +131,7 @@ public sealed class SqlTransactionRollbackTests
     public async Task RollbackAsync_UndoDeferred_ShouldHoldLocksUntilThePurgePassAndKeepCheckpointsRunning()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-undo-journal", new FaultInjectingJournalSqlStorageStrategy()));
+        await using var engine = SqlDatabaseEngine.Create("rollback-undo-journal", QuietOptions(new FaultInjectingJournalSqlStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("undo-db");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -175,7 +175,7 @@ public sealed class SqlTransactionRollbackTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-close", strategy));
+        var engine = SqlDatabaseEngine.Create("rollback-close", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("close-db");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -197,7 +197,7 @@ public sealed class SqlTransactionRollbackTests
         // Act: the close retries the undo, which fails the same way.
         var closeFailure = await Should.ThrowAsync<AggregateException>(async () => await engine.DisposeAsync());
 
-        await using var reopened = SqlDatabaseEngine.Create(QuietOptions("rollback-close", strategy));
+        await using var reopened = SqlDatabaseEngine.Create("rollback-close", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("close-db");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -209,9 +209,8 @@ public sealed class SqlTransactionRollbackTests
 
     // The engine's own maintenance workers stay out of the way, the deferred-undo retry included:
     // these tests drive the purge pass and the checkpoint themselves.
-    private static SqlDatabaseEngineOptions QuietOptions(string name, FaultInjectingJournalSqlStorageStrategy strategy) => new()
+    private static SqlDatabaseEngineOptions QuietOptions(FaultInjectingJournalSqlStorageStrategy strategy) => new()
     {
-        EngineName = name,
         StorageStrategy = strategy,
         MaintenanceInterval = TimeSpan.FromHours(1),
         CheckpointInterval = TimeSpan.FromHours(1),

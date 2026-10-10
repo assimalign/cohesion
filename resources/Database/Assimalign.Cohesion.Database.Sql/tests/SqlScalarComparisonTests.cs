@@ -231,7 +231,7 @@ public sealed class SqlScalarComparisonTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "comparison-tests" });
+        => SqlDatabaseEngine.Create("comparison-tests", new SqlDatabaseEngineOptions());
 
     private static byte[] BinaryValue(byte finalByte)
     {

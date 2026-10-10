@@ -5,8 +5,8 @@ The in-process consumption facade for Cohesion database engines: other resources
 ```csharp
 await using var embedded = EmbeddedDatabase.Create(options =>
 {
-    options.Engines.Add(KeyValueDatabaseEngine.Create(new() { RootPath = dataPath }));
-    options.Engines.Add(DocumentDatabaseEngine.Create(new() { RootPath = dataPath }));
+    options.Engines.Add(KeyValueDatabaseEngine.Create("settings-kv", new() { RootPath = dataPath }));
+    options.Engines.Add(DocumentDatabaseEngine.Create("settings-documents", new() { RootPath = dataPath }));
 });
 
 embedded.TryGetEngine(EngineModel.Document, out var engine);

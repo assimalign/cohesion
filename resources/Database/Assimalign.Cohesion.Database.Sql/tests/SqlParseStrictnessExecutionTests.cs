@@ -80,7 +80,7 @@ public sealed class SqlParseStrictnessExecutionTests
         foreach (bool withRows in new[] { false, true })
         {
             // Arrange
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-strictness" });
+            await using var engine = SqlDatabaseEngine.Create("sql-strictness", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("strictness");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             await ExecuteAsync(session, Schema);

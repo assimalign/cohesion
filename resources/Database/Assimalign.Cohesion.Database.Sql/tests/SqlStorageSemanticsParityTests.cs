@@ -49,9 +49,8 @@ public sealed class SqlStorageSemanticsParityTests
     {
         // The same SQL and transaction boundaries exercise the production
         // physical and memory strategies. Durability is deliberately unset.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("storage-parity", new SqlDatabaseEngineOptions
         {
-            EngineName = "storage-parity",
             RootPath = directory is null ? (FileSystemPath?)null : FileSystemPath.Parse(directory),
         });
         var database = await engine.CreateDatabaseAsync("db");

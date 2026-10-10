@@ -54,7 +54,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_TenThousandNameChain_ShouldSelectExactRowsAsync(string gql, string separator, string expected)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         gql = string.Format(CultureInfo.InvariantCulture, gql, Chain(labels, separator), Chain(types, separator));
 
@@ -69,7 +69,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_TenThousandTypeDisjunction_ShouldMatchEveryEdgeAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
 
         // Act
@@ -87,7 +87,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_TenThousandLabeledPredicates_ShouldFilterAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         string every = string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n:" + labels[i % labels.Length]));
         string comparisons = string.Join(" AND ", Enumerable.Range(0, chainLength).Select(_ => "n.name <> 'x'"));
@@ -111,7 +111,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_ChainOverManyDistinctLabels_ShouldMatchAsync()
     {
         // Arrange: ten nodes, each carrying 50 of D0..D499.
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("distinct", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string[] names = Enumerable.Range(0, 500).Select(i => "D" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
@@ -141,7 +141,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_TenThousandNameInsertConjunction_ShouldCreateOneNodeAsync(string separator)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         int before = (await RowsAsync(session, "MATCH (n) RETURN n")).Count;
 
@@ -161,7 +161,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_TenThousandNameInsertDisjunction_ShouldFailWithoutWritingAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         int before = (await RowsAsync(session, "MATCH (n) RETURN n")).Count;
 
@@ -196,7 +196,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_MixedPrecedence_ShouldSelectExactRowsAsync(string expression, string expected)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("precedence", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("INSERT (:A {name: 'a'}), (:B {name: 'b'}), (:C {name: 'c'}), (:A:B {name: 'ab'}), " +
@@ -220,7 +220,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_NestingPastFormerLimit_ShouldRunAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         const int depth = 300;
         string negations = string.Concat(Enumerable.Repeat("!(", depth)) + "X" + new string(')', depth);
@@ -255,7 +255,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_NestingPastTheStack_ShouldFailWithCohdbg008Async(string template, string open, string leaf)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         const int depth = 100_000;
         string gql = string.Format(CultureInfo.InvariantCulture, template,
@@ -287,7 +287,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_TypedRequestOutOfStack_ShouldFailWithCohdbg008Async()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         string gql = "MATCH (n:" + new string('(', 100_000) + "X" + new string(')', 100_000) + ") RETURN n.name";
         GqlQueryStatement? statement = null;
@@ -322,7 +322,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_HandBuiltTreePastTheStack_ShouldFailWithCohdbg008Async()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         const int depth = 1_000_000;
         var always = new GqlLiteralExpression(true);
@@ -370,7 +370,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_OversizedRecord_ShouldFailWithCohdbg009Async(string gql)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         int labelCount = (await RowsAsync(session, "SHOW LABELS")).Count;
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);
@@ -417,7 +417,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Execute_OversizedIndexedValue_ShouldFailToWriteAndMatchNothingAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("keys", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string longName = new('n', 600);
@@ -453,7 +453,7 @@ public sealed class GqlLabelChainExecutionTests
     public async Task Plan_ManyLabelsEqualitiesAndIndexes_ShouldChooseAnchorInLinearTimeAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("anchor-cost", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string[] hundred = labels.Take(100).ToArray();
@@ -506,7 +506,7 @@ public sealed class GqlLabelChainExecutionTests
         // Arrange: the quoted name puts a high surrogate at index 255.
         string emoji = string.Concat(Enumerable.Repeat("\U0001F600", 200));
         var expression = new GqlLabelDisjunction([new GqlLabelName(emoji), new GqlLabelName("X")]);
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("surrogates", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var strict = new UTF8Encoding(false, true);

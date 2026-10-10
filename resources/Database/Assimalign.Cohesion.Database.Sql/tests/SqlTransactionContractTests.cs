@@ -325,9 +325,8 @@ public sealed class SqlTransactionContractTests
     {
         // Arrange: a commit's fsync fails and takes the database offline under an open transaction.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("offline-order", new SqlDatabaseEngineOptions
         {
-            EngineName = "offline-order",
             StorageStrategy = strategy,
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),
@@ -376,9 +375,8 @@ public sealed class SqlTransactionContractTests
     private const string DatabaseName = "contract";
 
     // Quiet workers: only the statements a test runs write anything.
-    private static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+    private static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create("contract-engine", new SqlDatabaseEngineOptions
     {
-        EngineName = "contract-engine",
         CheckpointInterval = TimeSpan.FromHours(1),
         PageWriteBackInterval = TimeSpan.FromHours(1),
         MaintenanceInterval = TimeSpan.FromHours(1),

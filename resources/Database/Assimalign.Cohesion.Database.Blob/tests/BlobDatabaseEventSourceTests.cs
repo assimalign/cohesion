@@ -76,7 +76,7 @@ public sealed class BlobDatabaseEventSourceTests
         long currentWhileOpen;
 
         // Act
-        await using (var harness = await BlobServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName))
+        await using (var harness = await BlobServerHarness.StartAsync(engineName: engineName))
         {
             await using var client = await harness.DialAsync();
             await client.HandshakeAsync();
@@ -118,7 +118,7 @@ public sealed class BlobDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
         long rejectedBefore = BlobDatabaseEventSource.Log.TotalRejectedSessions;
-        await using var harness = await BlobServerHarness.StartAsync(options => options.MaxSessions = 1, options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(options => options.MaxSessions = 1, engineName: engineName);
         await using var first = await harness.DialAsync();
         await first.HandshakeAsync();
 
@@ -151,7 +151,7 @@ public sealed class BlobDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
         await using var harness = await BlobServerHarness.StartAsync(
             options => options.Authenticator = refusal == "AuthenticationFailed" ? new RejectingAuthenticator() : null,
-            options => options.EngineName = engineName);
+            engineName: engineName);
         if (refusal == "DatabaseOffline")
         {
             var open = await harness.Engine.OpenDatabaseAsync(BlobServerHarness.DatabaseName);
@@ -203,7 +203,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await BlobServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act: send nothing.
@@ -233,7 +233,7 @@ public sealed class BlobDatabaseEventSourceTests
                 options.Authenticator = new StallingAuthenticator();
                 options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -258,7 +258,7 @@ public sealed class BlobDatabaseEventSourceTests
         // the 256-character payload bound.
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await BlobServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -280,7 +280,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await BlobServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -304,7 +304,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await BlobServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -342,7 +342,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await BlobServerHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -378,7 +378,7 @@ public sealed class BlobDatabaseEventSourceTests
                 options.Authenticator = authenticator;
                 options.ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, BlobServerHarness.DatabaseName, "ada").Encode());
         await client.ExpectAsync(ProtocolMessageType.Authenticate);
@@ -421,7 +421,7 @@ public sealed class BlobDatabaseEventSourceTests
     {
         // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
         // disable below is redundant but harmless.
-        await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { EngineName = UniqueEngineName() });
+        await using var engine = BlobDatabaseEngine.Create(UniqueEngineName(), new BlobDatabaseEngineOptions());
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
         using (var listener = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose))
@@ -451,7 +451,7 @@ public sealed class BlobDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
         DatabaseFailingWorker? registered = null;
         var builder = BlobDatabaseEngine.CreateBuilder(engineName);
-        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.Options.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         var engine = builder.Build();
         var worker = registered.ShouldNotBeNull();
@@ -506,7 +506,7 @@ public sealed class BlobDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
         long rejectedBefore = BlobDatabaseEventSource.Log.TotalRejectedSessions;
-        await using var harness = await BlobServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(engineName: engineName);
         await using var accepted = await harness.DialAsync();
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
         await harness.Engine.DisposeAsync();
@@ -542,7 +542,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await BlobServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -617,7 +617,7 @@ public sealed class BlobDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(BlobDatabaseEventSource.Log, EventLevel.Verbose);
         TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
-        await using var harness = await BlobServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        await using var harness = await BlobServerHarness.StartAsync(options => options.Listener = listener, engineName: engineName);
 
         // Act: the peer completes its handshake, then resets the connection: while the session idles
         // in its ready loop, or while the server's pong writes fill the socket buffers the peer

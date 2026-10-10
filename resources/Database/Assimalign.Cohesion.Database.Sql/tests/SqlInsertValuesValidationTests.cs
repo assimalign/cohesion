@@ -332,7 +332,7 @@ public sealed class SqlInsertValuesValidationTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "insert-values" });
+        => SqlDatabaseEngine.Create("insert-values", new SqlDatabaseEngineOptions());
 
     private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {

@@ -21,7 +21,7 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Cyclic_traversal_visits_each_node_once_excludes_start_and_honors_depth_and_direction()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var a = await db.CreateNodeAsync(session, ["Person"]);
@@ -47,7 +47,7 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Typed_delete_cascades_and_rollback_restores_node_relationships_and_index()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var a = await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "a" });
@@ -69,7 +69,7 @@ public sealed class GraphEngineTests
     [InlineData(IsolationLevel.ReadCommitted, true)]
     public async Task Transactions_enforce_the_requested_visibility(IsolationLevel isolation, bool seesNew)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var db = await engine.CreateDatabaseAsync("graph");
         await using var reader = await db.CreateSessionAsync();
         await using var writer = await db.CreateSessionAsync();
@@ -82,7 +82,7 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Definitions_are_discoverable_and_schema_owned_changes_name_object_schema_and_operation()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var schema = GraphSchema.Open(db, session);
@@ -104,7 +104,7 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Required_property_and_type_mismatch_reject_the_complete_write()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var schema = GraphSchema.Open(db, session);
@@ -124,7 +124,7 @@ public sealed class GraphEngineTests
         try
         {
             GraphNodeId id;
-            await using (var engine = GraphDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
             {
                 engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(4);
                 engine.State.ShouldBe(EngineState.Running);
@@ -134,7 +134,7 @@ public sealed class GraphEngineTests
                 engine.TryGetDatabase("PERSISTED", out var found).ShouldBeTrue(); found.ShouldBeSameAs(db);
                 await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("persisted"));
             }
-            var reopened = GraphDatabaseEngine.Create(new() { RootPath = root });
+            var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
             var names = new List<string>();
             await foreach (var db in reopened.GetDatabasesAsync()) { names.Add(db.Name.ToString()); }
             names.ShouldBe(["persisted"]);
@@ -156,7 +156,7 @@ public sealed class GraphEngineTests
         {
             // Arrange: a closed database with a property index, its index pages rewritten
             // into the layout engines before #1194 wrote (entries ordered by key alone).
-            await using (var engine = GraphDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
             {
                 var db = await engine.CreateDatabaseAsync("legacy");
                 await using var session = await db.CreateSessionAsync();
@@ -168,7 +168,7 @@ public sealed class GraphEngineTests
             var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
             // Act
-            await using var reopened = GraphDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
 
             // Assert: the coded refusal, with the index manager's as its cause; the
@@ -194,7 +194,7 @@ public sealed class GraphEngineTests
         try
         {
             // Arrange: a closed database whose page 0 names storage format 2, the format before #1253.
-            await using (var engine = GraphDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
             {
                 var db = await engine.CreateDatabaseAsync("legacy");
                 await using var session = await db.CreateSessionAsync();
@@ -205,7 +205,7 @@ public sealed class GraphEngineTests
             var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
             // Act
-            await using var reopened = GraphDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
 
             // Assert: the storage's coded refusal, named for the database; nothing written.
@@ -232,7 +232,7 @@ public sealed class GraphEngineTests
     public async Task TryGetDatabase_OutVarAndBaseTypedOut_ShouldBindTheTypedAndTheBaseLookups()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
 
         // Act
@@ -259,7 +259,7 @@ public sealed class GraphEngineTests
     public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
     {
         // Arrange
-        var engine = GraphDatabaseEngine.Create(new());
+        var engine = GraphDatabaseEngine.Create("graph-engine", new());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
         var canceledOpen = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("graph", canceled.Token));
@@ -325,9 +325,8 @@ public sealed class GraphEngineTests
 
         static async Task<GraphDatabaseEngine> CreateWithWritesAsync(string name, int databases)
         {
-            var engine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions
+            var engine = GraphDatabaseEngine.Create(name, new GraphDatabaseEngineOptions
             {
-                EngineName = name,
                 StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
                 CheckpointInterval = TimeSpan.FromHours(1),
                 PageWriteBackInterval = TimeSpan.FromHours(1),

@@ -164,7 +164,7 @@ public sealed class SqlStorageOperationsTests
         const string name = "data-fails";
         const string control = "control";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         var controlDatabase = await engine.CreateDatabaseAsync(control);
         await using var session = await database.CreateSessionAsync();
@@ -218,7 +218,7 @@ public sealed class SqlStorageOperationsTests
         // Arrange: dirty data pages, and a transaction with a pending write.
         const string name = "catalog-fails";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -283,7 +283,7 @@ public sealed class SqlStorageOperationsTests
             // Arrange: a fresh database for each fsync to fail.
             const string name = "ddl";
             var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-            await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+            await using var engine = SqlDatabaseEngine.Create("sql-engine", QuietOptions(strategy));
             var database = await engine.CreateDatabaseAsync(name);
             await using (var setup = await database.CreateSessionAsync())
             {
@@ -341,7 +341,7 @@ public sealed class SqlStorageOperationsTests
         // Arrange: an open writer holds the table, and the drop waits for its exclusive lock.
         const string name = "ddl";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         await using (var setup = await database.CreateSessionAsync())
         {
@@ -392,7 +392,7 @@ public sealed class SqlStorageOperationsTests
         // Arrange: a table to drop, and a second database whose failed fsync supplies the offline error.
         const string name = "ddl";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         await using (var setup = await database.CreateSessionAsync())
         {
@@ -462,7 +462,7 @@ public sealed class SqlStorageOperationsTests
         // failed fsync supplies the offline error.
         const string name = "ddl";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         await using (var setup = await database.CreateSessionAsync())
         {
@@ -541,7 +541,7 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
@@ -628,7 +628,7 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             StorageStrategy = strategy,
             MaintenanceInterval = TimeSpan.FromSeconds(1),
@@ -670,7 +670,7 @@ public sealed class SqlStorageOperationsTests
     public async Task BufferPoolCapacity_Default_ShouldSizeTheDataFileSetAndKeepTheCatalogSmall()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
@@ -687,13 +687,13 @@ public sealed class SqlStorageOperationsTests
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
         var options = new SqlDatabaseEngineOptions { StorageStrategy = strategy, BufferPoolCapacity = 2 * 1024 * 1024 };
-        var engine = SqlDatabaseEngine.Create(options);
+        var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var created = await engine.CreateDatabaseAsync("sized");
         int createdPages = created.DataStorage.BufferPoolCapacity;
         await engine.DisposeAsync();
 
         // Act
-        await using var reopenedEngine = SqlDatabaseEngine.Create(options);
+        await using var reopenedEngine = SqlDatabaseEngine.Create("sql-engine", options);
         var reopened = await reopenedEngine.OpenDatabaseAsync("sized");
 
         // Assert
@@ -737,7 +737,7 @@ public sealed class SqlStorageOperationsTests
         };
 
         // Act
-        var error = Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(options));
+        var error = Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", options));
 
         // Assert
         error.ParamName.ShouldBe(checkpointJournalSize < 0 ? nameof(SqlDatabaseEngineOptions.CheckpointJournalSize) : nameof(SqlDatabaseEngineOptions.BufferPoolCapacity));
@@ -767,7 +767,7 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
@@ -823,7 +823,7 @@ public sealed class SqlStorageOperationsTests
             StorageStrategy = new FaultInjectingJournalSqlStorageStrategy(),
             MaintenanceInterval = maintenance,
         };
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var database = await engine.CreateDatabaseAsync("undo-retry");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();

@@ -30,7 +30,7 @@ public sealed class SqlMvccBindingTests
     public async Task BeginTransactionAsync_Explicit_ShouldRunOnManagerContext()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-pairing" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-pairing", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "pairing-db");
         await using var _ = session;
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -55,7 +55,7 @@ public sealed class SqlMvccBindingTests
     public async Task ExecuteAsync_AutoCommit_ShouldRideManagerTransaction()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-autocommit" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-autocommit", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "autocommit-db");
         await using var _ = session;
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -76,7 +76,7 @@ public sealed class SqlMvccBindingTests
     public async Task RollbackAsync_AfterWrites_ShouldUndoThroughManager()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-rollback" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-rollback", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "rollback-db");
         await using var _ = session;
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -105,7 +105,7 @@ public sealed class SqlMvccBindingTests
         // carrying a context begun on database B's manager — the manager rejects
         // the foreign context with the kernel's TransactionAbortedException, which
         // must cross the model boundary wrapped in the area root's typed abort.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-abort" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-abort", new SqlDatabaseEngineOptions());
         var (databaseA, sessionA) = await CreateSessionAsync(engine, "abort-a");
         var (databaseB, sessionB) = await CreateSessionAsync(engine, "abort-b");
         await using var _ = sessionA;
@@ -127,7 +127,7 @@ public sealed class SqlMvccBindingTests
     public async Task DisposeAsync_WithActiveTransaction_ShouldAbortCleanly()
     {
         // Arrange
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-dispose" });
+        var engine = SqlDatabaseEngine.Create("mvcc-dispose", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "dispose-db");
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
         await session.BeginTransactionAsync();

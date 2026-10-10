@@ -38,7 +38,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
     }
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "lifecycle", RootPath = _rootPath });
+        => SqlDatabaseEngine.Create("lifecycle", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Creation: The engine is operational from Create — no start ceremony")]
     public async Task Create_ShouldReturnOperationalEngine()
@@ -87,7 +87,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
     {
         // Arrange
         var asyncDisposed = CreateEngine();
-        var syncDisposed = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sync-dispose" });
+        var syncDisposed = SqlDatabaseEngine.Create("sync-dispose", new SqlDatabaseEngineOptions());
 
         // Act / Assert: DisposeAsync twice, Dispose twice, and mixed — all no-throw.
         await asyncDisposed.DisposeAsync();

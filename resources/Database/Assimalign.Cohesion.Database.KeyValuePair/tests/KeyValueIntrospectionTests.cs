@@ -70,7 +70,7 @@ public sealed class KeyValueIntrospectionTests
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Introspection scope: Discovery is bound to the session database")]
     public async Task KeySpaces_ShouldRemainDatabaseScoped()
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "scope" });
+        await using var engine = KeyValueDatabaseEngine.Create("scope", new KeyValueDatabaseEngineOptions());
         var first = await engine.CreateDatabaseAsync("first");
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();

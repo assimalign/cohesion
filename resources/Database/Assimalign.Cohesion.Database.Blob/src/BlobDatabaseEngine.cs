@@ -35,6 +35,13 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <see cref="EngineState.Running"/> and its server keeps serving its other databases.
 /// </para>
 /// <para>
+/// <b>Declared databases</b> (B3 of the engine extensibility design). An engine built through
+/// <see cref="CreateBuilder(string)"/> has opened, or created, every database its builder declared
+/// (<see cref="BlobDatabaseEngineBuilder.AddDatabase(string)"/>) before the build returns. The
+/// declaration owns each of them, so <see cref="DatabaseEngine.DropDatabaseAsync"/> refuses it with
+/// <see cref="DatabaseObjectLockedException"/> (owner decision 56 of 2026-10-09).
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
 /// <see cref="DatabaseEngine"/>: the base owns the name, the model, the worker pumps, the state
 /// fold, the composition attach and freeze, the argument and disposed checks of every public
@@ -49,8 +56,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class BlobDatabaseEngine : DatabaseEngine
 {
-    // The engine name used when the options name none.
-    private const string defaultName = "blob-engine";
+    // How the model's messages start: "Blob engine '{name}' …".
+    internal const string ModelName = "Blob";
 
     private readonly BlobDatabaseEngineOptions _options;
     private readonly Dictionary<string, BlobDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
@@ -68,8 +75,11 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     private readonly DatabaseMemoryFiles? _memory;
     private BlobDatabase[] _instances = [];
 
-    private BlobDatabaseEngine(BlobDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.Blob, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
+    // The databases the builder declared (owner decision 56): set once, before they are opened.
+    private DatabaseName[] _declaredDatabases = [];
+
+    private BlobDatabaseEngine(string name, BlobDatabaseEngineOptions options)
+        : base(name, EngineModel.Blob, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
@@ -166,27 +176,41 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     public static BlobDatabaseEngineBuilder CreateBuilder(string name) => new(name);
 
     /// <summary>
-    /// Creates an operational engine using memory or files under the configured root. Its workers
-    /// are running when this method returns, and its composition is complete: it takes no further
-    /// worker or server.
+    /// Creates an operational engine of that name using memory or files under the configured root.
+    /// Its workers are running when this method returns, and its composition is complete: it takes
+    /// no further worker or server, and it declares no database.
     /// </summary>
-    /// <param name="options">The engine configuration.</param>
+    /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
+    /// <param name="options">
+    /// The engine configuration. The engine keeps a copy, so a later change to
+    /// <paramref name="options"/> does not reach it.
+    /// </param>
     /// <returns>The running engine.</returns>
-    /// <exception cref="ArgumentNullException">The options are null.</exception>
-    /// <exception cref="ArgumentException">
-    /// <see cref="BlobDatabaseEngineOptions.EngineName"/> is empty or white space.
-    /// </exception>
+    /// <remarks>
+    /// The path for embedded code and tests that need no declared database and no factory-built
+    /// product. <see cref="CreateBuilder(string)"/> composes workers and servers and opens or creates
+    /// the databases it declares before its build returns. Every option refusal names the engine and
+    /// the option (<c>Blob engine '{name}': …</c>).
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// A worker interval or batch size is not positive, the buffer pool capacity is not a whole
-    /// number of 8 KiB pages of at least 1 MiB, the checkpoint journal size is negative, the worker
-    /// failure window is not positive or is longer than
-    /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>, the worker failure minimum of passes
-    /// is less than one, or the journal size limit is negative or set and below the checkpoint
-    /// journal size.
+    /// A worker interval or batch size is not positive, the grouped-commit window is not positive or
+    /// is longer than <see cref="Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow"/>,
+    /// the buffer pool capacity is not a whole number of 8 KiB pages of at least 1 MiB, the
+    /// checkpoint journal size is negative, the worker failure window is not positive or is longer
+    /// than <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>, the worker failure minimum of
+    /// passes is less than one, or the journal size limit is negative or set and below the
+    /// checkpoint journal size.
     /// </exception>
-    public static BlobDatabaseEngine Create(BlobDatabaseEngineOptions options)
+    public static BlobDatabaseEngine Create(string name, BlobDatabaseEngineOptions options)
     {
-        var engine = CreateUncomposed(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+
+        // The engine keeps a copy (B3 of the engine extensibility design): its write-back worker
+        // reads the batch size on every pass, so a caller's later change used to reach it.
+        var engine = CreateUncomposed(name, options.Snapshot());
         engine.CompleteComposition();
         return engine;
     }
@@ -195,31 +219,61 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// Creates an operational engine whose composition is still open, for the builder, which
     /// attaches the products of its factories through <see cref="Compose"/>.
     /// </summary>
-    /// <param name="options">The engine configuration.</param>
+    /// <param name="name">The engine name.</param>
+    /// <param name="options">
+    /// The engine configuration, already a copy the caller does not change again
+    /// (<see cref="BlobDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
+    /// </param>
     /// <returns>The running engine.</returns>
-    internal static BlobDatabaseEngine CreateUncomposed(BlobDatabaseEngineOptions options)
+    internal static BlobDatabaseEngine CreateUncomposed(string name, BlobDatabaseEngineOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        // Checked before the constructor spawns the worker threads. A blank name is refused here
-        // with the option's name; the base refuses it too, after the leaf's fields were created.
-        if (options.EngineName is { } name)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(options.EngineName));
-        }
-
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.PageWriteBackInterval, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(options.GroupCommitWindow, Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.PageWriteBackBatchSize);
-        Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
-        ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
-        DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
-            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit));
-        return new BlobDatabaseEngine(options);
+        ValidateOptions(name, options);
+        return new BlobDatabaseEngine(name, options);
     }
+
+    /// <summary>
+    /// Checks the name and options an engine is created from, before anything is created: the
+    /// checks of <see cref="Create"/>, which the builder also makes first. Each option refusal names
+    /// the engine.
+    /// </summary>
+    /// <param name="name">The engine name.</param>
+    /// <param name="options">The options.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">See <see cref="Create"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">See <see cref="Create"/>.</exception>
+    internal static void ValidateOptions(string name, BlobDatabaseEngineOptions options)
+    {
+        // Checked before the constructor spawns the worker threads; the base refuses a blank name
+        // too, after the leaf's fields were created.
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+        string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
+
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackInterval, engine, nameof(options.PageWriteBackInterval));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));
+        DatabaseEngineOptionChecks.ThrowIfInvalidGroupCommitWindow(options.GroupCommitWindow, engine, nameof(options.GroupCommitWindow));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackBatchSize, engine, nameof(options.PageWriteBackBatchSize));
+        DatabaseEngineOptionChecks.GetBufferPoolPageCount(options.BufferPoolCapacity, engine, nameof(options.BufferPoolCapacity));
+        DatabaseEngineOptionChecks.ThrowIfNegative(options.CheckpointJournalSize, engine, nameof(options.CheckpointJournalSize));
+        DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
+            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit), engine);
+    }
+
+    /// <summary>
+    /// Gets the databases the engine's builder declared, in declaration order; empty for an engine
+    /// <see cref="Create"/> made.
+    /// </summary>
+    internal IReadOnlyList<DatabaseName> DeclaredDatabases => Volatile.Read(ref _declaredDatabases);
+
+    /// <summary>
+    /// Records the databases the builder declared, before it opens them: from then on
+    /// <see cref="DatabaseEngine.DropDatabaseAsync"/> refuses each of them (owner decision 56 of
+    /// 2026-10-09).
+    /// </summary>
+    /// <param name="declarations">The declared databases, in declaration order.</param>
+    /// <exception cref="InvalidOperationException">The engine already declares its databases.</exception>
+    internal void Declare(DatabaseName[] declarations) => DatabaseDeclarations.Declare(ref _declaredDatabases, declarations, Name);
 
     /// <summary>
     /// Attaches the products of the builder's factories, workers first and then servers, and
@@ -343,9 +397,18 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         => GetDatabase(name, create: false);
 
     /// <inheritdoc />
+    /// <exception cref="DatabaseObjectLockedException">
+    /// The engine's builder declared the database (owner decision 56 of 2026-10-09): the declaration
+    /// owns it, so it leaves only when the declaration does.
+    /// </exception>
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         ValidateName(name);
+        if (DatabaseDeclarations.TryFind(DeclaredDatabases, name, out var declared))
+        {
+            throw DatabaseDeclarations.RefuseDrop(ModelName, Name, declared, nameof(BlobDatabaseEngineBuilder));
+        }
+
         lock (_sync)
         {
             ThrowIfDisposed();

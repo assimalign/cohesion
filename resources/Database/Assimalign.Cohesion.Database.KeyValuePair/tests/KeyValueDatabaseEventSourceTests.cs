@@ -75,7 +75,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         long currentWhileOpen;
 
         // Act
-        await using (var harness = await KeyValueServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName))
+        await using (var harness = await KeyValueServerHarness.StartAsync(engineName: engineName))
         {
             await using var client = await harness.DialAsync();
             await client.HandshakeAsync();
@@ -117,7 +117,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
         long rejectedBefore = KeyValueDatabaseEventSource.Log.TotalRejectedSessions;
-        await using var harness = await KeyValueServerHarness.StartAsync(options => options.MaxSessions = 1, options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.MaxSessions = 1, engineName: engineName);
         await using var first = await harness.DialAsync();
         await first.HandshakeAsync();
 
@@ -150,7 +150,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
         await using var harness = await KeyValueServerHarness.StartAsync(
             options => options.Authenticator = refusal == "AuthenticationFailed" ? new RejectingAuthenticator() : null,
-            options => options.EngineName = engineName);
+            engineName: engineName);
         if (refusal == "DatabaseOffline")
         {
             var open = await harness.Engine.OpenDatabaseAsync(KeyValueServerHarness.DatabaseName);
@@ -202,7 +202,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await KeyValueServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act: send nothing.
@@ -232,7 +232,7 @@ public sealed class KeyValueDatabaseEventSourceTests
                 options.Authenticator = new StallingAuthenticator();
                 options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -257,7 +257,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         // the 256-character payload bound.
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await KeyValueServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -279,7 +279,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await KeyValueServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -303,7 +303,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await KeyValueServerHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -340,7 +340,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -376,7 +376,7 @@ public sealed class KeyValueDatabaseEventSourceTests
                 options.Authenticator = authenticator;
                 options.ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, KeyValueServerHarness.DatabaseName, "ada").Encode());
         await client.ExpectAsync(ProtocolMessageType.Authenticate);
@@ -419,7 +419,7 @@ public sealed class KeyValueDatabaseEventSourceTests
     {
         // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
         // disable below is redundant but harmless.
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = UniqueEngineName() });
+        await using var engine = KeyValueDatabaseEngine.Create(UniqueEngineName(), new KeyValueDatabaseEngineOptions());
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
         using (var listener = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose))
@@ -465,7 +465,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
         TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
-        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Listener = listener, engineName: engineName);
 
         // Act: the peer completes its handshake, then resets the connection: while the session idles
         // in its ready loop, or while the server's pong writes fill the socket buffers the peer
@@ -509,7 +509,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Verbose);
         await using var inner = new Assimalign.Cohesion.Connections.InMemory.InMemoryConnectionListener();
         var listener = new DisposeFailingConnectionListener(inner);
-        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Listener = listener, engineName: engineName);
         long currentBefore = KeyValueDatabaseEventSource.Log.CurrentServerSessions;
 
         // Act: a session that terminates cleanly, whose cleanup then meets the failing disposal.

@@ -95,11 +95,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </summary>
     internal const int CatalogBufferPoolPages = 128;
 
-    // The engine name used when the options name none.
-    private const string defaultName = "sql-engine";
+    // How the model's messages start: "SQL engine '{name}' …".
+    internal const string ModelName = "SQL";
 
-    private SqlDatabaseEngine(SqlDatabaseEngineOptions options, SqlFunctionCatalog functions)
-        : base(options.EngineName ?? defaultName, EngineModel.Sql, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
+    private SqlDatabaseEngine(string name, SqlDatabaseEngineOptions options, SqlFunctionCatalog functions)
+        : base(name, EngineModel.Sql, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
         Functions = functions;
@@ -219,24 +219,29 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     internal bool IsOpen(SqlDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
-    /// Creates a new SQL database engine from options. The engine is operational —
+    /// Creates a new SQL database engine of that name from options. The engine is operational —
     /// background workers running — when this method returns, and its composition is
     /// complete: it takes no further worker or server, and it declares no database.
     /// </summary>
+    /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
     /// <param name="options">
     /// Engine creation options. The engine keeps a copy, so a later change to
     /// <paramref name="options"/> does not reach it.
     /// </param>
+    /// <example>
+    /// <code>
+    /// await using SqlDatabaseEngine engine = SqlDatabaseEngine.Create("local", new SqlDatabaseEngineOptions { RootPath = "data" });
+    /// </code>
+    /// </example>
     /// <returns>A new engine instance.</returns>
     /// <remarks>
     /// The standard-library path for embedded code and tests that need no declared database and no
     /// factory-built product. <see cref="CreateBuilder(string)"/> composes workers and servers and
-    /// provisions the databases it declares before its build returns.
+    /// provisions the databases it declares before its build returns. Every option refusal names the
+    /// engine and the option (<c>SQL engine '{name}': …</c>).
     /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    /// <exception cref="ArgumentException">
-    /// <see cref="SqlDatabaseEngineOptions.EngineName"/> is empty or white space.
-    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/> is outside
     /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>;
@@ -244,19 +249,22 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// least 1 MiB; <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/> is negative;
     /// <see cref="SqlDatabaseEngineOptions.CheckpointInterval"/> or
     /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/> is not positive;
+    /// <see cref="SqlDatabaseEngineOptions.GroupCommitWindow"/> is not positive or is longer than
+    /// <see cref="Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow"/>;
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureWindow"/> is not positive or is longer than
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>;
     /// <see cref="SqlDatabaseEngineOptions.WorkerFailureMinimumPasses"/> is less than one; or
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
-    public static SqlDatabaseEngine Create(SqlDatabaseEngineOptions options)
+    public static SqlDatabaseEngine Create(string name, SqlDatabaseEngineOptions options)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(options);
 
         // The engine keeps a copy (B1 of the engine extensibility design): its write-back worker
         // reads the batch size on every pass, so a caller's later change used to reach it.
-        var engine = CreateUncomposed(options.Snapshot());
+        var engine = CreateUncomposed(name, options.Snapshot());
         engine.CompleteComposition();
         return engine;
     }
@@ -275,58 +283,56 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Creates an operational engine whose composition is still open, for the builder, which
     /// attaches the products of its factories through <see cref="Compose"/>.
     /// </summary>
+    /// <param name="name">The engine name.</param>
     /// <param name="options">
     /// Engine creation options, already a copy the caller does not change again
     /// (<see cref="SqlDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
     /// <param name="functions">The functions the engine executes, frozen; the standard library alone when null.</param>
     /// <returns>A new engine instance.</returns>
-    internal static SqlDatabaseEngine CreateUncomposed(SqlDatabaseEngineOptions options, SqlFunctionCatalog? functions = null)
+    internal static SqlDatabaseEngine CreateUncomposed(string name, SqlDatabaseEngineOptions options, SqlFunctionCatalog? functions = null)
     {
-        ValidateOptions(options);
-        return new SqlDatabaseEngine(options, functions ?? SqlFunctionCatalog.Standard);
+        ValidateOptions(name, options);
+        return new SqlDatabaseEngine(name, options, functions ?? SqlFunctionCatalog.Standard);
     }
 
     /// <summary>
-    /// Checks the options an engine is created from, before anything is created: the checks of
-    /// <see cref="Create"/>, which the builder also makes first, before it compiles its declared
-    /// databases (phase 1 of its build).
+    /// Checks the name and options an engine is created from, before anything is created: the
+    /// checks of <see cref="Create"/>, which the builder also makes first, before it compiles its
+    /// declared databases (phase 1 of its build). Each option refusal names the engine.
     /// </summary>
+    /// <param name="name">The engine name.</param>
     /// <param name="options">The options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">See <see cref="Create"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="Create"/>.</exception>
-    internal static void ValidateOptions(SqlDatabaseEngineOptions options)
+    internal static void ValidateOptions(string name, SqlDatabaseEngineOptions options)
     {
+        // Checked before the constructor spawns the worker threads; the base refuses a blank name
+        // too, after the leaf's fields were created.
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(options);
-
-        // Checked before the constructor spawns the worker threads. A blank name is refused here
-        // with the option's name; the base refuses it too, after the leaf's fields were created.
-        if (options.EngineName is { } name)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(options.EngineName));
-        }
+        string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
 
         if (options.ExpressionNestingLimit is < SqlQueryParserOptions.MinimumExpressionNestingLimit
             or > SqlQueryParserOptions.MaximumExpressionNestingLimit)
         {
-            throw new ArgumentOutOfRangeException(nameof(options), options.ExpressionNestingLimit,
-                $"{nameof(SqlDatabaseEngineOptions.ExpressionNestingLimit)} must be between " +
-                $"{SqlQueryParserOptions.MinimumExpressionNestingLimit} and {SqlQueryParserOptions.MaximumExpressionNestingLimit} levels.");
+            throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.ExpressionNestingLimit), options.ExpressionNestingLimit,
+                $"must be between {SqlQueryParserOptions.MinimumExpressionNestingLimit} and " +
+                $"{SqlQueryParserOptions.MaximumExpressionNestingLimit} levels.");
         }
 
-        Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
-        ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
+        DatabaseEngineOptionChecks.GetBufferPoolPageCount(options.BufferPoolCapacity, engine, nameof(options.BufferPoolCapacity));
+        DatabaseEngineOptionChecks.ThrowIfNegative(options.CheckpointJournalSize, engine, nameof(options.CheckpointJournalSize));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));
         DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
-            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit));
+            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit), engine);
 
         // Checked here, before any file is touched, rather than by the storage setter at database
         // create or open (owner decision 26 of 2026-10-06): the window is also the flush worker's
         // wake cadence, so it must be positive, and a monitor wait takes no longer timeout.
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero, nameof(options.GroupCommitWindow));
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(options.GroupCommitWindow, Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow, nameof(options.GroupCommitWindow));
+        DatabaseEngineOptionChecks.ThrowIfInvalidGroupCommitWindow(options.GroupCommitWindow, engine, nameof(options.GroupCommitWindow));
     }
 
     /// <summary>
@@ -690,12 +696,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     {
         if (FindDeclaration(name) is { } declared)
         {
-            throw new DatabaseObjectLockedException(
-                declared.Name,
-                declared.Name,
-                "DROP DATABASE",
-                $"SQL engine '{Name}' declares database '{declared.Name}' (SqlDatabaseEngineBuilder.AddDatabase), so " +
-                "DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.");
+            throw DatabaseDeclarations.RefuseDrop(ModelName, Name, declared.Name, nameof(SqlDatabaseEngineBuilder));
         }
 
         lock (_syncRoot)

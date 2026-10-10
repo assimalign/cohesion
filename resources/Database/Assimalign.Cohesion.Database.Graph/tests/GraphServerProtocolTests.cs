@@ -209,7 +209,7 @@ public sealed class GraphServerProtocolTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await engine.CreateDatabaseAsync("graph", token);
         var listener = new InMemoryConnectionListener();
         await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });

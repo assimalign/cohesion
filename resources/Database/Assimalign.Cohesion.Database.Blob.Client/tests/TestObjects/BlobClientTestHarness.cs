@@ -40,7 +40,7 @@ internal sealed class BlobClientTestHarness : IAsyncDisposable
 
     internal static async Task<BlobClientTestHarness> StartAsync(CancellationToken token)
     {
-        var engine = BlobDatabaseEngine.Create(new());
+        var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("app", token);
         var session = await database.CreateSessionAsync(token);
         var container = await session.CreateContainerAsync("files", token);

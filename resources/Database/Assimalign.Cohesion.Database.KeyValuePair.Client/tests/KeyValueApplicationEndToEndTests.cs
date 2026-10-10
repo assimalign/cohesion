@@ -101,7 +101,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         TcpConnectionListener? listener = null;
         builder.AddKeyValue("kv", options =>
         {
-            options.RootPath = _rootPath;
+            options.Options.RootPath = _rootPath;
             options.AddServer(engine =>
             {
                 listener = new TcpConnectionListener(new TcpConnectionListenerOptions

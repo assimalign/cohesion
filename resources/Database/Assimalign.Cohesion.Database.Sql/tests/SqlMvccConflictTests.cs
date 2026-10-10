@@ -54,7 +54,7 @@ public sealed class SqlMvccConflictTests
     {
         // Arrange: two tiny rows — they share the same data page, the exact case
         // the page-grain engine failed with StorageTransactionException.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-disjoint" });
+        await using var engine = SqlDatabaseEngine.Create("conf-disjoint", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "disjoint-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();
@@ -83,7 +83,7 @@ public sealed class SqlMvccConflictTests
     public async Task Insert_Concurrently_ShouldBothCommit()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-inserts" });
+        await using var engine = SqlDatabaseEngine.Create("conf-inserts", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "inserts-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();
@@ -108,7 +108,7 @@ public sealed class SqlMvccConflictTests
     public async Task Update_SameRowAfterConcurrentCommit_ShouldConflictAndBeRetryable()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-samerow" });
+        await using var engine = SqlDatabaseEngine.Create("conf-samerow", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "samerow-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();
@@ -141,7 +141,7 @@ public sealed class SqlMvccConflictTests
     public async Task Update_SameRowWhileLocked_ShouldWaitThenProceedAfterHolderRollback()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-wait" });
+        await using var engine = SqlDatabaseEngine.Create("conf-wait", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "wait-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();
@@ -173,7 +173,7 @@ public sealed class SqlMvccConflictTests
     public async Task Update_LockCycle_ShouldAbortVictimAndLetSurvivorComplete()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-deadlock" });
+        await using var engine = SqlDatabaseEngine.Create("conf-deadlock", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "deadlock-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();
@@ -231,7 +231,7 @@ public sealed class SqlMvccConflictTests
     public async Task DropTable_WithActiveRowWriter_ShouldWaitForWriterToFinish()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-ddl" });
+        await using var engine = SqlDatabaseEngine.Create("conf-ddl", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "ddl-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();
@@ -262,7 +262,7 @@ public sealed class SqlMvccConflictTests
     public async Task Update_LockWaitCancelled_ShouldThrowOperationCanceled()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "conf-cancel" });
+        await using var engine = SqlDatabaseEngine.Create("conf-cancel", new SqlDatabaseEngineOptions());
         var (database, sessionA) = await CreateSessionAsync(engine, "cancel-db");
         await using var _ = sessionA;
         await using var sessionB = await database.CreateSessionAsync();

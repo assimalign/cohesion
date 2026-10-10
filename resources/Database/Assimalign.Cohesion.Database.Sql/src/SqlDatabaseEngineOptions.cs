@@ -8,24 +8,17 @@ using Assimalign.Cohesion.Database.Storage;
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
-/// Configures a SQL database engine instance.
+/// Configures a SQL database engine instance: values only, which the engine copies when it is
+/// created or built.
 /// </summary>
+/// <remarks>
+/// The options carry no engine name (B3 of the engine extensibility design): the engine is named
+/// once, by the first argument of <c>AddSql(name, …)</c>, <see cref="SqlDatabaseEngine.CreateBuilder(string)"/>
+/// or <see cref="SqlDatabaseEngine.Create(string, SqlDatabaseEngineOptions)"/> (owner decision 52 of
+/// 2026-10-09).
+/// </remarks>
 public sealed class SqlDatabaseEngineOptions
 {
-    /// <summary>
-    /// Gets or sets the logical engine name.
-    /// </summary>
-    /// <remarks>
-    /// Read by <see cref="SqlDatabaseEngine.Create(SqlDatabaseEngineOptions)"/>, which names the
-    /// engine <c>sql-engine</c> when it is null. On an engine builder's
-    /// <see cref="SqlDatabaseEngineBuilder.Options"/> it starts as the builder's
-    /// <see cref="SqlDatabaseEngineBuilder.Name"/>, and the build refuses any other value, null
-    /// included: name the engine with <c>AddSql(name, …)</c> or
-    /// <see cref="SqlDatabaseEngine.CreateBuilder(string)"/> instead (owner decision 52 of
-    /// 2026-10-09). The engine extensibility design's B3 removes this property.
-    /// </remarks>
-    public string? EngineName { get; set; }
-
     /// <summary>
     /// Gets or sets how commits reach stable storage across every database this
     /// engine opens. When unset, each storage file set selects
@@ -225,7 +218,6 @@ public sealed class SqlDatabaseEngineOptions
     /// </remarks>
     internal SqlDatabaseEngineOptions Snapshot() => new()
     {
-        EngineName = EngineName,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,

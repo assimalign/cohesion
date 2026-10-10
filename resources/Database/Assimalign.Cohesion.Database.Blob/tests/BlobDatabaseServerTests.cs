@@ -25,8 +25,8 @@ public sealed class BlobDatabaseServerTests
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         CancellationToken token = deadline.Token;
-        await using var engine = BlobDatabaseEngine.Create(new());
-        await using var otherEngine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
+        await using var otherEngine = BlobDatabaseEngine.Create("blob-engine", new());
         var own = await engine.CreateDatabaseAsync("own", token);
         var other = await engine.CreateDatabaseAsync("other", token);
         var remote = await otherEngine.CreateDatabaseAsync("own", token);
@@ -74,7 +74,7 @@ public sealed class BlobDatabaseServerTests
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         await engine.CreateDatabaseAsync("objects", token);
         var listener = new InMemoryConnectionListener();
         var authenticator = new RejectAuthenticator();
@@ -98,7 +98,7 @@ public sealed class BlobDatabaseServerTests
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         await engine.CreateDatabaseAsync("objects", token);
         var listener = new InMemoryConnectionListener();
         await using var server = BlobDatabaseServer.Create(engine, new()
@@ -125,7 +125,7 @@ public sealed class BlobDatabaseServerTests
     public async Task Handshake_Timeout_ShouldCloseConnection()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var listener = new InMemoryConnectionListener();
         await using var server = BlobDatabaseServer.Create(engine, new()
         {
@@ -146,7 +146,7 @@ public sealed class BlobDatabaseServerTests
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("objects", token);
         var container = await AutocommitContainer.CreateAsync(database, "files", token);
         await WriteBlobAsync(container, "item", "previous"u8.ToArray(), token);
@@ -180,7 +180,7 @@ public sealed class BlobDatabaseServerTests
     public async Task Start_DisposedEngine_ShouldReject()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var engine = BlobDatabaseEngine.Create(new());
+        var engine = BlobDatabaseEngine.Create("blob-engine", new());
         await engine.DisposeAsync();
         var listener = new InMemoryConnectionListener();
         await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
@@ -251,7 +251,7 @@ public sealed class BlobDatabaseServerTests
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
         var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
-        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.Options.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         await using var engine = builder.Build();
         var worker = registered.ShouldNotBeNull();
@@ -336,7 +336,7 @@ public sealed class BlobDatabaseServerTests
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
         var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
-        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.Options.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         await using var engine = builder.Build();
         var worker = registered.ShouldNotBeNull();
@@ -388,7 +388,7 @@ public sealed class BlobDatabaseServerTests
         CancellationToken token = deadline.Token;
         DatabaseFailingWorker? registered = null;
         var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
-        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.Options.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
         await using var engine = builder.Build();
         var worker = registered.ShouldNotBeNull();
@@ -481,7 +481,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         CancellationToken token = deadline.Token;
         var interval = TimeSpan.FromMilliseconds(20);
-        await using var engine = BlobDatabaseEngine.Create(new()
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
             CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
         });
@@ -530,7 +530,7 @@ public sealed class BlobDatabaseServerTests
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         await engine.CreateDatabaseAsync("objects", token);
         var inner = new InMemoryConnectionListener();
         var listener = new BlockingRejectionListener(inner);
@@ -555,7 +555,7 @@ public sealed class BlobDatabaseServerTests
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("objects", token);
         var container = await AutocommitContainer.CreateAsync(database, "files", token);
         var inner = new InMemoryConnectionListener();

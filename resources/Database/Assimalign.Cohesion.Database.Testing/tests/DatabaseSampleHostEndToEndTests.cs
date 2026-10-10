@@ -427,9 +427,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
             .ShouldHaveSingleItem();
         string rootPath = Path.GetDirectoryName(Path.GetDirectoryName(dataFile)!)!;
 
-        await using SqlDatabaseEngine engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using SqlDatabaseEngine engine = SqlDatabaseEngine.Create("sample-sql", new SqlDatabaseEngineOptions
         {
-            EngineName = "sample-sql",
             RootPath = rootPath,
         });
         SqlDatabase sample = await engine.OpenDatabaseAsync("sample", cancellationToken);

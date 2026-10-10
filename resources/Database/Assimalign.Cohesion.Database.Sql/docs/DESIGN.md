@@ -328,7 +328,7 @@ flowchart LR
   and any call once the build began. Parameter types
   compare by storage type, as PostgreSQL ignores type modifiers in a signature. Build
   phase 2 freezes the collection into `SqlDatabaseEngine.Functions`, a case-insensitive
-  `FrozenDictionary<string, SqlFunction[]>`; `SqlDatabaseEngine.Create(options)` runs the
+  `FrozenDictionary<string, SqlFunction[]>`; `SqlDatabaseEngine.Create(name, options)` runs the
   standard library alone. The catalog is engine-wide: every database of the engine sees
   it (decision 61), through the `SqlFunctionEnvironment` (catalog and database name) each
   open database's `SqlBoundTableCache` holds and every statement plans with.
@@ -828,8 +828,8 @@ stateDiagram-v2
 
 1. **Options.** `Options` are checked (the checks of `Create`) and copied, so a later change cannot
    reach the engine; `Create(options)` copies too, which fixed the write-back worker reading the
-   caller's `PageWriteBackBatchSize` on every pass. Until the options lose `EngineName` (B3), options
-   that name another engine than the builder fail the build.
+   caller's `PageWriteBackBatchSize` on every pass. The options carry no engine name (B3): the
+   engine is `Name`, and each option refusal names it (`SQL engine '{name}': …`).
 2. **Function catalog.** `Functions`, the standard library and the application's registrations,
    is frozen into the engine's `SqlFunctionCatalog`; registration closed when the build began
    ([Functions (E2)](#functions-e2)). `Types` lists the built-in types; domains and casts join it in E3.
@@ -2840,8 +2840,9 @@ callback receives no application context: it runs during application Build, so a
 registered with the hosting builder's own `AddEngine(name, context => ...)`. No model registration
 uses DI, configuration binding, Hosting, or a container. The model builder exposes the engine name
 once (`Name`) and the settings as one options object (`Options`, replacing fourteen mirrored
-properties), which its build copies. Direct `SqlDatabaseEngine.Create(options)` stays
-supported for standalone use, and copies its options too.
+properties), which its build copies; since B3 no options type carries an engine name. Direct
+`SqlDatabaseEngine.Create(name, options)` stays supported for standalone use, and copies its
+options too.
 
 Workers and servers are nested deferred factories on the sealed builder, typed over
 the SQL engine: `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and
@@ -3280,7 +3281,8 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   databases failed to close.". The engine's guards check the name, then disposal, then the token
   (disposal used to come first, `TryGetDatabase` did not check the name, and open and drop
   observed no token), `GetDatabasesAsync` checks disposal when it is called, and a blank
-  `EngineName` is refused by `Create` and `Build`. A worker's blank name is refused by its own
+  engine name is refused by `Create` and `CreateBuilder` (parameter `name`; it was the options'
+  `EngineName` until B3). A worker's blank name is refused by its own
   constructor inside its factory ("A worker must have a diagnostic name." is gone), and the
   engine releases every worker last attached first (it used to dispose the checkpointer, then
   its factory workers).

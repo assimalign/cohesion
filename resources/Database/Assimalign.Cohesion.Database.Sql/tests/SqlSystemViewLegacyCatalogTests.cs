@@ -21,7 +21,7 @@ public sealed class SqlSystemViewLegacyCatalogTests
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - System views: Should report legacy primary keys without inventing indexes or duplicate names")]
     public async Task LegacyPrimaryKey_ShouldReportConstraintAndReferenceWithoutInventingAnIndex()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "system-legacy" });
+        await using var engine = SqlDatabaseEngine.Create("system-legacy", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app", cancellationToken: CancellationToken.None);
         await database.Catalog.CreateTableAsync("dbo", "legacy",
         [

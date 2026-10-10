@@ -23,7 +23,7 @@ public class KeyValueApplicationBuilderTests
         var builder = new RecordingApplicationBuilder();
 
         // Act
-        builder.AddKeyValue("kv-verb", options => options.RootPath = null);
+        builder.AddKeyValue("kv-verb", options => options.Options.RootPath = null);
         builder.Factories.ShouldHaveSingleItem();
         builder.Names.ShouldBe(["kv-verb"]);
         await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();

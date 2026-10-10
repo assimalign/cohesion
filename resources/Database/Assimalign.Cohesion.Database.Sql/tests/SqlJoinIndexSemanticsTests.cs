@@ -70,7 +70,7 @@ public sealed class SqlJoinIndexSemanticsTests
     {
         // Arrange: 1.5 rounds during ordinary storage coercion, and the two
         // large keys overflow Int32. None can equal a stored integer.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-decimal-probes" });
+        await using var engine = SqlDatabaseEngine.Create("join-decimal-probes", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("join-decimal-probes");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE outer_rows (id INT, key_value DECIMAL)");
@@ -97,7 +97,7 @@ public sealed class SqlJoinIndexSemanticsTests
     public async Task Join_IntegerProbesIntoDecimalIndex_ShouldMatchNormalizedKeys()
     {
         // Arrange.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-integer-probes" });
+        await using var engine = SqlDatabaseEngine.Create("join-integer-probes", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("join-integer-probes");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE outer_rows (id INT, key_value INT)");
@@ -124,7 +124,7 @@ public sealed class SqlJoinIndexSemanticsTests
     {
         // Arrange: row 20 matches only the OR alternative; row 40 matches the
         // key equality but fails the AND query's residual predicate.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-boolean-paths" });
+        await using var engine = SqlDatabaseEngine.Create("join-boolean-paths", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("join-boolean-paths");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE outer_rows (id INT, key_value INT, marker INT)");
@@ -148,7 +148,7 @@ public sealed class SqlJoinIndexSemanticsTests
     private static async Task AssertUnsafeEqualityScansAsync(string type, object left, object right, bool equal = true)
     {
         (SqlExpressionEvaluator.Compare(left, right) == 0).ShouldBe(equal);
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-equality-fallback" });
+        await using var engine = SqlDatabaseEngine.Create("join-equality-fallback", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("join-equality-fallback");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, $"CREATE TABLE outer_rows (id INT, key_value {type})");
@@ -169,7 +169,7 @@ public sealed class SqlJoinIndexSemanticsTests
         SqlExpressionEvaluator.Compare(outer, first).ShouldBe(0);
         SqlExpressionEvaluator.Compare(outer, second).ShouldBe(0);
         SqlExpressionEvaluator.Compare(outer, other).ShouldNotBe(0);
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-temporal-seek" });
+        await using var engine = SqlDatabaseEngine.Create("join-temporal-seek", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("join-temporal-seek");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, $"CREATE TABLE outer_rows (id INT, key_value {type})");

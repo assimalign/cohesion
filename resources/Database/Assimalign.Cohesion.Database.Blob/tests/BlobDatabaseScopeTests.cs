@@ -16,7 +16,7 @@ public sealed class BlobDatabaseScopeTests
     [InlineData("SHOW DATABASES")]
     public async Task Session_commands_cannot_reach_another_database_or_server(string command)
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         var ownContainer = await AutocommitContainer.CreateAsync(own, "files");

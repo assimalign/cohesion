@@ -28,7 +28,7 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability? durability)
     {
         var options = new KeyValueDatabaseEngineOptions { Durability = durability };
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var database = await engine.CreateDatabaseAsync("memory-default");
         await using var session = await database.CreateSessionAsync();
 
@@ -57,7 +57,7 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
     public async Task PhysicalBacking_ShouldDeriveOrHonorDurablePolicy(
         StorageCommitDurability? configured, StorageCommitDurability expected)
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions
         {
             RootPath = _rootPath,
             Durability = configured,
@@ -83,7 +83,7 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability durability, bool openExisting)
     {
         var strategy = new NonDurableStorageStrategy();
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions
         {
             StorageStrategy = strategy,
             Durability = durability,

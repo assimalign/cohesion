@@ -17,7 +17,7 @@ public sealed class DocumentDatabaseScopeTests
     [InlineData("SELECT * FROM other/items")]
     public async Task Session_commands_and_collection_handles_cannot_address_another_database(string command)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         await using var session = await own.CreateSessionAsync();
@@ -53,7 +53,7 @@ public sealed class DocumentDatabaseScopeTests
     public async Task GetAsync_NullForeignOrSiblingSession_ShouldRefuseByArgumentOrBinding()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         await using var session = await own.CreateSessionAsync();

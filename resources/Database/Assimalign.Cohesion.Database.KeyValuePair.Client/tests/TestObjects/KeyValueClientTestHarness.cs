@@ -37,7 +37,7 @@ internal sealed class KeyValueClientTestHarness : IAsyncDisposable
         KeyValueClientObserver? observer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null)
     {
-        var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-typed-client-e2e" });
+        var engine = KeyValueDatabaseEngine.Create("kv-typed-client-e2e", new KeyValueDatabaseEngineOptions());
         await engine.CreateDatabaseAsync(DatabaseName);
 
         var listener = new InMemoryConnectionListener();

@@ -9,10 +9,19 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// The build state every model's engine builder shares: the worker and server factories composed
-/// for one engine, the freeze after the one build attempt, and the rollback of a build that fails.
+/// for one engine, the databases it declares, the freeze after the one build attempt, and the
+/// rollback of a build that fails.
 /// </summary>
 /// <typeparam name="TEngine">The model's engine, which every factory receives.</typeparam>
 /// <remarks>
+/// <para>
+/// <b>Declared databases (B3 of the engine extensibility design).</b> A builder declares a database
+/// by name (<see cref="AddDatabase"/>); after composition, <see cref="ProvisionDatabasesAsync"/>
+/// hands the names to the engine, which refuses to drop any of them from then on, and opens each
+/// in declaration order, creating it when it does not exist. The SQL builder declares richer
+/// databases (a collation, a schema and a provisioning mode) and keeps its own list, but its
+/// messages are the ones <see cref="DatabaseDeclarations"/> words for every model.
+/// </para>
 /// <para>
 /// <b>Typed over the engine (concrete-types plan, step P4.0, #1260; collapsed in phase 6, #1262).</b>
 /// A factory receives the model's own engine, so each model's sealed builder offers typed
@@ -59,7 +68,9 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
 {
     private readonly List<Func<TEngine, DatabaseEngineWorker>> _workers = [];
     private readonly List<Func<TEngine, DatabaseServer>> _servers = [];
+    private readonly List<DatabaseName> _databases = [];
     private readonly string _name;
+    private readonly string _model;
     private int _buildAttempted;
     private TEngine? _completedEngine;
 
@@ -69,12 +80,17 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     /// 2026-10-09).
     /// </summary>
     /// <param name="name">The engine name.</param>
+    /// <param name="model">
+    /// The model's name as its messages start (<c>SQL</c>, <c>Key-value</c>, <c>Graph</c>,
+    /// <c>Document</c>, <c>Blob</c>): a message reads "<c>{model} engine '{name}' …</c>".
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
-    public DatabaseEngineBuilderState(string name)
+    public DatabaseEngineBuilderState(string name, string model)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         _name = name;
+        _model = model;
     }
 
     /// <summary>
@@ -83,20 +99,82 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     public string Name => _name;
 
     /// <summary>
-    /// Refuses a build whose options name another engine. Until the model's options lose
-    /// <c>EngineName</c>, the builder seeds it with <see cref="Name"/>, and a value that differs
-    /// (ordinal, a null one included) fails the build instead of naming the engine twice.
+    /// Gets the databases the builder declared through <see cref="AddDatabase"/>, in declaration
+    /// order.
     /// </summary>
-    /// <param name="engineName">The options' engine name.</param>
-    /// <exception cref="InvalidOperationException"><paramref name="engineName"/> is not <see cref="Name"/>.</exception>
-    public void ThrowIfRenamed(string? engineName)
+    public IReadOnlyList<DatabaseName> Databases => _databases;
+
+    /// <summary>
+    /// Declares a database the engine owns: the build opens it, or creates it when it does not
+    /// exist (<see cref="ProvisionDatabasesAsync"/>), and the built engine refuses to drop it.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <exception cref="InvalidOperationException">
+    /// A build was attempted, or the builder already declares a database of that name (ignoring
+    /// case, as database names compare).
+    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    public void AddDatabase(string name)
     {
-        if (!string.Equals(engineName, _name, StringComparison.Ordinal))
+        EnsureMutable();
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var databaseName = new DatabaseName(name);
+        foreach (var declared in _databases)
         {
-            throw new InvalidOperationException(
-                $"The engine builder for '{_name}' has its options' EngineName set to " +
-                $"{(engineName is null ? "null" : $"'{engineName}'")}. The engine is named once, by the builder; " +
-                "leave EngineName as the builder set it.");
+            if (declared == databaseName)
+            {
+                throw DatabaseDeclarations.AlreadyDeclared(_model, _name, declared);
+            }
+        }
+
+        _databases.Add(databaseName);
+    }
+
+    /// <summary>
+    /// Hands the declared databases to the engine a completed composition returned, then opens each
+    /// in declaration order, creating it when it does not exist. When anything fails, the engine is
+    /// disposed with everything it owns before the failure is rethrown.
+    /// </summary>
+    /// <param name="engine">The engine <see cref="Complete"/> returned.</param>
+    /// <param name="declare">
+    /// The leaf's internal record of its declared databases, which makes the engine refuse to drop
+    /// them (<see cref="DatabaseDeclarations.RefuseDrop"/>).
+    /// </param>
+    /// <param name="cancellationToken">Observed before each database.</param>
+    /// <returns>A task that completes once every declared database is open.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; the engine was disposed.</exception>
+    /// <exception cref="AggregateException">The failure, together with a failure to dispose the engine.</exception>
+    public async ValueTask ProvisionDatabasesAsync(TEngine engine, Action<DatabaseName[]> declare, CancellationToken cancellationToken)
+    {
+        try
+        {
+            declare([.. _databases]);
+            foreach (var name in _databases)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Typed over the root base: open, or create on the first launch, as the SQL
+                // builder's declared databases are (the design's §5.3, step 1).
+                if (engine.TryGetDatabase(name, out _))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await engine.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
+                }
+                catch (DatabaseNotFoundException)
+                {
+                    await engine.CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            await AbortAsync(failure).ConfigureAwait(false);
+            throw;
         }
     }
 
@@ -246,7 +324,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
 
     /// <summary>
     /// Disposes the engine a completed composition returned, when a later step of the same build
-    /// failed (a SQL engine's provisioning of its declared databases): the asynchronous form of
+    /// failed (the opening or provisioning of its declared databases): the asynchronous form of
     /// <see cref="Abort"/>, which awaits the disposal instead of blocking on it.
     /// </summary>
     /// <param name="failure">The failure that abandoned the engine.</param>

@@ -332,7 +332,7 @@ public sealed class KeyValueTransactionFailureTests
         await other.DisposeAsync();
         await session.DisposeAsync();
         await engine.DisposeAsync();
-        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
+        await using var reopened = KeyValueDatabaseEngine.Create("kv-tests", new KeyValueDatabaseEngineOptions { StorageStrategy = strategy });
         var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -377,7 +377,7 @@ public sealed class KeyValueTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
         await session.DisposeAsync();
         await engine.DisposeAsync();
-        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
+        await using var reopened = KeyValueDatabaseEngine.Create("kv-tests", new KeyValueDatabaseEngineOptions { StorageStrategy = strategy });
         var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -418,7 +418,7 @@ public sealed class KeyValueTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
         await session.DisposeAsync();
         await engine.DisposeAsync();
-        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
+        await using var reopened = KeyValueDatabaseEngine.Create("kv-tests", new KeyValueDatabaseEngineOptions { StorageStrategy = strategy });
         var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
         await using var observer = await recovered.CreateSessionAsync();
 

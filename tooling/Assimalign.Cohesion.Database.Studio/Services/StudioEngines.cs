@@ -45,7 +45,10 @@ internal sealed class StudioEngines : IAsyncDisposable
 
     public string GetModelRoot(StudioModel model) => System.IO.Path.Combine(DataRoot, model.FolderName);
 
-    /// <summary>Creates all five engines on file storage under <paramref name="dataRoot"/>.</summary>
+    /// <summary>
+    /// Creates all five engines on file storage under <paramref name="dataRoot"/>, each composed
+    /// through its model's engine builder: named once, with its options on the builder.
+    /// </summary>
     public static StudioEngines Create(string dataRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
@@ -59,31 +62,25 @@ internal sealed class StudioEngines : IAsyncDisposable
                 Directory.CreateDirectory(engines.GetModelRoot(model));
             }
 
-            engines._engines[StudioModel.Sql] = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
-            {
-                EngineName = "studio-sql",
-                RootPath = engines.GetModelRoot(StudioModel.Sql),
-            });
-            engines._engines[StudioModel.Documents] = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions
-            {
-                EngineName = "studio-documents",
-                RootPath = engines.GetModelRoot(StudioModel.Documents),
-            });
-            engines._engines[StudioModel.Graph] = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions
-            {
-                EngineName = "studio-graph",
-                RootPath = engines.GetModelRoot(StudioModel.Graph),
-            });
-            engines._engines[StudioModel.KeyValue] = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
-            {
-                EngineName = "studio-keyvalue",
-                RootPath = engines.GetModelRoot(StudioModel.KeyValue),
-            });
-            engines._engines[StudioModel.Blob] = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions
-            {
-                EngineName = "studio-blob",
-                RootPath = engines.GetModelRoot(StudioModel.Blob),
-            });
+            SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("studio-sql");
+            sql.Options.RootPath = engines.GetModelRoot(StudioModel.Sql);
+            engines._engines[StudioModel.Sql] = sql.Build();
+
+            DocumentDatabaseEngineBuilder documents = DocumentDatabaseEngine.CreateBuilder("studio-documents");
+            documents.Options.RootPath = engines.GetModelRoot(StudioModel.Documents);
+            engines._engines[StudioModel.Documents] = documents.Build();
+
+            GraphDatabaseEngineBuilder graph = GraphDatabaseEngine.CreateBuilder("studio-graph");
+            graph.Options.RootPath = engines.GetModelRoot(StudioModel.Graph);
+            engines._engines[StudioModel.Graph] = graph.Build();
+
+            KeyValueDatabaseEngineBuilder keyValue = KeyValueDatabaseEngine.CreateBuilder("studio-keyvalue");
+            keyValue.Options.RootPath = engines.GetModelRoot(StudioModel.KeyValue);
+            engines._engines[StudioModel.KeyValue] = keyValue.Build();
+
+            BlobDatabaseEngineBuilder blob = BlobDatabaseEngine.CreateBuilder("studio-blob");
+            blob.Options.RootPath = engines.GetModelRoot(StudioModel.Blob);
+            engines._engines[StudioModel.Blob] = blob.Build();
         }
         catch
         {

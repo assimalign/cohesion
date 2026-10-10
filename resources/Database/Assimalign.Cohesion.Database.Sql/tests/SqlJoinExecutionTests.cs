@@ -369,7 +369,7 @@ public sealed class SqlJoinExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-tests" });
+        => SqlDatabaseEngine.Create("join-tests", new SqlDatabaseEngineOptions());
 
     private static async Task SeedUsersAsync(SqlDatabaseSession session)
     {

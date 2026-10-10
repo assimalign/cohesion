@@ -261,7 +261,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // with committed rows, an uncommitted writer whose records a later commit
         // made durable, then a crash.
         var strategy = new CrashCaptureSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "format-crash", StorageStrategy = strategy });
+        var engine = SqlDatabaseEngine.Create("format-crash", new SqlDatabaseEngineOptions { StorageStrategy = strategy });
         var database = await engine.CreateDatabaseAsync(TestDatabase);
         var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE events (id INT PRIMARY KEY, at TIMESTAMPTZ)");
@@ -280,7 +280,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Act: open twice with an engine that refuses format 3.
         string message;
-        await using (var refusingEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "format-crash-refuse", StorageStrategy = crashed }))
+        await using (var refusingEngine = SqlDatabaseEngine.Create("format-crash-refuse", new SqlDatabaseEngineOptions { StorageStrategy = crashed }))
         {
             message = (await Should.ThrowAsync<DatabaseException>(async () => await refusingEngine.OpenDatabaseAsync(TestDatabase))).Message;
             (await Should.ThrowAsync<DatabaseException>(async () => await refusingEngine.OpenDatabaseAsync(TestDatabase)))
@@ -311,7 +311,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
             catalogStorage.Dispose();
         }
 
-        await using (var recoveringEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "format-crash-recover", StorageStrategy = refused.CaptureDurableImages() }))
+        await using (var recoveringEngine = SqlDatabaseEngine.Create("format-crash-recover", new SqlDatabaseEngineOptions { StorageStrategy = refused.CaptureDurableImages() }))
         {
             var recovered = await recoveringEngine.OpenDatabaseAsync(TestDatabase);
             await using var verify = await recovered.CreateSessionAsync();
@@ -333,9 +333,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         var before = Snapshot();
 
         // Act
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using (var engine = SqlDatabaseEngine.Create("format-reopening", new SqlDatabaseEngineOptions
         {
-            EngineName = "format-reopening",
             StorageStrategy = new ReopeningStorageStrategy(new FileSystemSqlStorageStrategy(_rootPath)),
         }))
         {
@@ -380,7 +379,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     // ── Helpers ────────────────────────────────────────────────────────
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "format", RootPath = _rootPath });
+        => SqlDatabaseEngine.Create("format", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
     /// <summary>
     /// Creates and closes a file-backed database holding a temporal index; when

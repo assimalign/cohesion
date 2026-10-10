@@ -52,7 +52,7 @@ internal static class SqlReadCommittedProbe
     /// <returns>The counts.</returns>
     internal static async Task<SqlReadCommittedProbeCounts> RunAsync(TimeSpan duration, int readers = 4, int writers = 2)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "rc-statement-probe" });
+        await using var engine = SqlDatabaseEngine.Create("rc-statement-probe", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("probe");
         await using (var setup = await database.CreateSessionAsync())
         {

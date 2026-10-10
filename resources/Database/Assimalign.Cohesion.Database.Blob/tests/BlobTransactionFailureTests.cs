@@ -42,7 +42,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operation_FailureThenWriteThenRollback_ShouldLeaveBlobsUnchanged(string failure, IsolationLevel isolation)
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -91,7 +91,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operations_OnFaultedTransaction_ShouldBeRefusedUntilRollback()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -140,7 +140,7 @@ public sealed class BlobTransactionFailureTests
     public async Task CommitAsync_AfterFailedOperation_ShouldThrowAndCommitNothing()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -175,7 +175,7 @@ public sealed class BlobTransactionFailureTests
     public async Task DisposeAsync_FaultedTransaction_ShouldEndTransactionAndReturnSessionToAutocommit()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -204,7 +204,7 @@ public sealed class BlobTransactionFailureTests
     public async Task OpenWriteAsync_UploadFailsAfterChunks_ShouldUndoTheWholeTransaction()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -234,7 +234,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operation_FaultedTransaction_ShouldNotBlockOtherWriters()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var failed = await database.CreateSessionAsync();
@@ -257,7 +257,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operation_AutocommitFailure_ShouldLeaveSessionUsable()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -279,7 +279,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operation_CanceledWhileWaitingInsideTransaction_ShouldAbortTransaction()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var blocker = await database.CreateSessionAsync();
@@ -314,7 +314,7 @@ public sealed class BlobTransactionFailureTests
     public async Task DisposeAsync_SessionWithFaultedTransaction_ShouldEndTransaction()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         var session = await database.CreateSessionAsync();
@@ -341,7 +341,7 @@ public sealed class BlobTransactionFailureTests
     public async Task ReadAsync_FailsInsideTransaction_ShouldAbortTransaction()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", new string('k', 100_000));
@@ -378,7 +378,7 @@ public sealed class BlobTransactionFailureTests
     public async Task ReadAsync_FailsInAutocommit_ShouldLeaveSessionUsable()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -415,7 +415,7 @@ public sealed class BlobTransactionFailureTests
     public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         var session = await database.CreateSessionAsync();
@@ -454,7 +454,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Validation_BeforeOperationStarts_ShouldLeaveTransactionActive()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -492,7 +492,7 @@ public sealed class BlobTransactionFailureTests
     public async Task RollbackAsync_AfterEnd_ShouldBeNoOpUnlessCommitted()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -522,7 +522,7 @@ public sealed class BlobTransactionFailureTests
     public async Task EndAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionActive()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -553,7 +553,7 @@ public sealed class BlobTransactionFailureTests
     public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -583,7 +583,7 @@ public sealed class BlobTransactionFailureTests
     public async Task DisposeAsync_SessionWithOpenStream_ShouldAbortItAndReportItsCause()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -618,7 +618,7 @@ public sealed class BlobTransactionFailureTests
     public async Task CommitAsync_WhileOperationRuns_ShouldBeRefusedAndLeaveTheTransactionActive()
     {
         // Arrange: another transaction holds the writer lock, so the operation waits.
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "doomed", "doomed");
@@ -657,7 +657,7 @@ public sealed class BlobTransactionFailureTests
     public async Task BeginTransactionAsync_WhileActiveOrClosed_ShouldRefuseBeforeTheIsolationLevel()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -686,7 +686,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operations_OnClosedSession_ShouldRefuseWithOneMessage()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -737,7 +737,7 @@ public sealed class BlobTransactionFailureTests
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -780,7 +780,7 @@ public sealed class BlobTransactionFailureTests
     public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await AutocommitContainer.CreateAsync(database, "files");
         var session = await database.CreateSessionAsync();
@@ -818,7 +818,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Operations_WhileAStreamIsOpen_ShouldBeRefusedAndLeaveItRunning()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -863,7 +863,7 @@ public sealed class BlobTransactionFailureTests
     public async Task Database_OfASession_ShouldBeTheUnboundDatabase()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -918,7 +918,7 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -950,7 +950,7 @@ public sealed class BlobTransactionFailureTests
         await other.DisposeAsync();
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
 
         // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
@@ -975,7 +975,7 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -996,7 +996,7 @@ public sealed class BlobTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
 
         // Assert
@@ -1011,7 +1011,7 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         await AutocommitContainer.CreateAsync(database, "files");
         await using (var session = await database.CreateSessionAsync())
@@ -1034,7 +1034,7 @@ public sealed class BlobTransactionFailureTests
         // Act: the close retries the undo, which fails the same way.
         var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
 
-        await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
         var files = await AutocommitContainer.GetAsync(recovered, "files");
 
@@ -1054,7 +1054,7 @@ public sealed class BlobTransactionFailureTests
     public async Task RollbackAsync_UndoDeferred_ShouldHoldWriterLockUntilThePurgePassAndLeaveNothing()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -1102,7 +1102,7 @@ public sealed class BlobTransactionFailureTests
     public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
@@ -1145,7 +1145,7 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         await AutocommitContainer.CreateAsync(database, "files");
         var session = await database.CreateSessionAsync();
@@ -1165,7 +1165,7 @@ public sealed class BlobTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
 
         // Assert

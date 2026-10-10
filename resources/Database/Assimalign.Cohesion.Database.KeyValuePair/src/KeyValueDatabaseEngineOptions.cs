@@ -7,15 +7,17 @@ using Assimalign.Cohesion.Database.Storage;
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
-/// Configures a key-value database engine instance.
+/// Configures a key-value database engine instance: values only, which the engine copies when it
+/// is created or built.
 /// </summary>
+/// <remarks>
+/// The options carry no engine name (B3 of the engine extensibility design): the engine is named
+/// once, by the first argument of <c>AddKeyValue(name, …)</c>, <see cref="KeyValueDatabaseEngine.CreateBuilder(string)"/>
+/// or <see cref="KeyValueDatabaseEngine.Create(string, KeyValueDatabaseEngineOptions)"/> (owner decision 52 of
+/// 2026-10-09).
+/// </remarks>
 public sealed class KeyValueDatabaseEngineOptions
 {
-    /// <summary>
-    /// Gets or sets the logical engine name.
-    /// </summary>
-    public string? EngineName { get; set; }
-
     /// <summary>
     /// Gets or sets how commits reach stable storage across every database this
     /// engine opens. When unset, each storage file set selects
@@ -177,4 +179,33 @@ public sealed class KeyValueDatabaseEngineOptions
     /// fault-injecting doubles here through the test-only grant.
     /// </remarks>
     internal KeyValueStorageStrategy? StorageStrategy { get; set; }
+
+    /// <summary>
+    /// Copies every option, the internal ones included, into a new object: what an engine keeps, so
+    /// a later change to the caller's options cannot reach the running engine
+    /// (<see cref="KeyValueDatabaseEngine.Create"/> and <see cref="KeyValueDatabaseEngineBuilder.BuildAsync"/>).
+    /// </summary>
+    /// <returns>The copy.</returns>
+    /// <remarks>
+    /// A new option is added here too: <c>KeyValueEngineDeclarationTests</c> sets every option to a
+    /// value other than its default, checks that the engine kept each one, and counts the public ones.
+    /// </remarks>
+    internal KeyValueDatabaseEngineOptions Snapshot() => new()
+    {
+        Durability = Durability,
+        GroupCommitWindow = GroupCommitWindow,
+        CheckpointInterval = CheckpointInterval,
+        CheckpointJournalSize = CheckpointJournalSize,
+        WorkerFailureWindow = WorkerFailureWindow,
+        WorkerFailureMinimumPasses = WorkerFailureMinimumPasses,
+        JournalSizeLimit = JournalSizeLimit,
+        BufferPoolCapacity = BufferPoolCapacity,
+        PageWriteBackInterval = PageWriteBackInterval,
+        PageWriteBackBatchSize = PageWriteBackBatchSize,
+        MaintenanceInterval = MaintenanceInterval,
+        DeferredUndoRetryDelay = DeferredUndoRetryDelay,
+        TimeProvider = TimeProvider,
+        RootPath = RootPath,
+        StorageStrategy = StorageStrategy,
+    };
 }

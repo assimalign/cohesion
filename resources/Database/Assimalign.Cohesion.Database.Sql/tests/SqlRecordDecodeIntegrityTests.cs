@@ -320,7 +320,7 @@ public sealed class SqlRecordDecodeIntegrityTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        => SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),

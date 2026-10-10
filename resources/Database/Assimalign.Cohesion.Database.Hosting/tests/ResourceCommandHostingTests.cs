@@ -41,8 +41,8 @@ public sealed class ResourceCommandHostingTests
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
             mounts: null, settings: null, references: null,
             bootstrapCredential: Encoding.UTF8.GetBytes(token), applicationTrustKey: identity.PublicKey, ambientValues: null));
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "commands" });
-        await using var analytics = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "analytics" });
+        await using var engine = SqlDatabaseEngine.Create("commands", new SqlDatabaseEngineOptions());
+        await using var analytics = SqlDatabaseEngine.Create("analytics", new SqlDatabaseEngineOptions());
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceCommandHostingTests).Assembly);
         builder.AddEngine(engine);
         builder.AddEngine(analytics);

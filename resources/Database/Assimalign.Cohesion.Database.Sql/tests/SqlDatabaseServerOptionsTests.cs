@@ -27,7 +27,7 @@ public class SqlDatabaseServerOptionsTests
     public async System.Threading.Tasks.Task Create_WithInvalidOptions_ShouldThrow()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "opt-validate" });
+        await using var engine = SqlDatabaseEngine.Create("opt-validate", new SqlDatabaseEngineOptions());
 
         // Act / Assert: no listener.
         Should.Throw<ArgumentException>(() => SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions()));

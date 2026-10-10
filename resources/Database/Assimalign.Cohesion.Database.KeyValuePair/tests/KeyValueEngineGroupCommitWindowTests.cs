@@ -32,7 +32,7 @@ public sealed class KeyValueEngineGroupCommitWindowTests
         };
 
         // Act / Assert
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(options))
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", options))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.GroupCommitWindow));
         Directory.Exists(root).ShouldBeFalse();
     }
@@ -44,12 +44,12 @@ public sealed class KeyValueEngineGroupCommitWindowTests
         var longest = Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow;
 
         // Act / Assert
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions
         {
             GroupCommitWindow = longest + TimeSpan.FromTicks(1),
         })).ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.GroupCommitWindow));
 
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { GroupCommitWindow = longest });
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { GroupCommitWindow = longest });
         engine.EngineOptions.GroupCommitWindow.ShouldBe(longest);
     }
 }

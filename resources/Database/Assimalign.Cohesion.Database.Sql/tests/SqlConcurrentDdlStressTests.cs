@@ -108,7 +108,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         int positiveCommits = 0;
         var duration = StressDuration;
 
-        await using (var engine = SqlDatabaseEngine.Create(NewOptions(fileBacked)))
+        await using (var engine = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked)))
         {
             var database = await engine.CreateDatabaseAsync("db");
             await using (var setup = await database.CreateSessionAsync())
@@ -249,7 +249,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
         if (fileBacked)
         {
-            await using var reopened = SqlDatabaseEngine.Create(NewOptions(fileBacked: true));
+            await using var reopened = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked: true));
             var database = await reopened.OpenDatabaseAsync("db");
             await using var check = await database.CreateSessionAsync();
             await AssertRowsAsync(check, committed, attempted, ddl);
@@ -263,7 +263,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     {
         // Arrange: no concurrency — each cycle grows the table's catalog record, relocates
         // it, and shrinks it again, which filled the catalog page within ~50 cycles.
-        await using (var engine = SqlDatabaseEngine.Create(NewOptions(fileBacked)))
+        await using (var engine = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked)))
         {
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
@@ -286,7 +286,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
         if (fileBacked)
         {
-            await using var reopened = SqlDatabaseEngine.Create(NewOptions(fileBacked: true));
+            await using var reopened = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked: true));
             var database = await reopened.OpenDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
             (await RowsAsync(session, "SELECT * FROM t ORDER BY id"))
@@ -300,7 +300,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     public async Task AlterTable_RepeatedAddDropConstraint_ShouldKeepTheCatalogIntact(bool fileBacked)
     {
         // Arrange
-        await using (var engine = SqlDatabaseEngine.Create(NewOptions(fileBacked)))
+        await using (var engine = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked)))
         {
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
@@ -325,7 +325,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
         if (fileBacked)
         {
-            await using var reopened = SqlDatabaseEngine.Create(NewOptions(fileBacked: true));
+            await using var reopened = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked: true));
             var database = await reopened.OpenDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
             await Should.ThrowAsync<SqlConstraintViolationException>(async () =>
@@ -346,7 +346,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         int added = 0;
         DatabaseException? failure = null;
 
-        await using (var engine = SqlDatabaseEngine.Create(NewOptions(fileBacked)))
+        await using (var engine = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked)))
         {
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
@@ -379,7 +379,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
         if (fileBacked)
         {
-            await using var reopened = SqlDatabaseEngine.Create(NewOptions(fileBacked: true));
+            await using var reopened = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked: true));
             var database = await reopened.OpenDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
             (await RowsAsync(session, "SELECT * FROM t ORDER BY id")).Select(row => row.Length).ShouldBe([2 + added, 2 + added]);
@@ -395,7 +395,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         // Arrange
         string literal = new('k', SlottedPage.MaxRecordSize + 1024);
 
-        await using (var engine = SqlDatabaseEngine.Create(NewOptions(fileBacked)))
+        await using (var engine = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked)))
         {
             var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
@@ -418,7 +418,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
 
         if (fileBacked)
         {
-            await using var reopened = SqlDatabaseEngine.Create(NewOptions(fileBacked: true));
+            await using var reopened = SqlDatabaseEngine.Create("ddl-stress", NewOptions(fileBacked: true));
             var database = await reopened.OpenDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync();
             await session.ExecuteAsync("INSERT INTO t (id, qty) VALUES (4, -1)");
@@ -444,7 +444,6 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         // Fast background workers put paced write-back and checkpoints in the race too.
         var options = new SqlDatabaseEngineOptions
         {
-            EngineName = "ddl-stress",
             PageWriteBackInterval = TimeSpan.FromMilliseconds(5),
             CheckpointInterval = TimeSpan.FromMilliseconds(50),
         };

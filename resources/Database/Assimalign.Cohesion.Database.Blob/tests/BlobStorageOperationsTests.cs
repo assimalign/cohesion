@@ -53,7 +53,7 @@ public sealed class BlobStorageOperationsTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var token = timeout.Token;
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = !recordSurvives };
-        await using var engine = BlobDatabaseEngine.Create(new()
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
             StorageStrategy = strategy,
             CheckpointInterval = TimeSpan.FromHours(1),
@@ -186,20 +186,20 @@ public sealed class BlobStorageOperationsTests
     public async Task BufferPoolCapacity_DefaultAndInvalidOptions_ShouldSizeThePoolAndRefuseBadValues()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
         database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
         database.DataStorage.CheckpointJournalSize.ShouldBe(256L * 1024 * 1024);
         new BlobDatabaseEngineOptions().CheckpointInterval.ShouldBe(TimeSpan.FromMinutes(5));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { BufferPoolCapacity = 512 * 1024 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { BufferPoolCapacity = 512 * 1024 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.BufferPoolCapacity));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { BufferPoolCapacity = 1024 * 1024 + 1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { BufferPoolCapacity = 1024 * 1024 + 1 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.BufferPoolCapacity));
-        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { CheckpointJournalSize = -1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { CheckpointJournalSize = -1 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.CheckpointJournalSize));
-        await using var sized = BlobDatabaseEngine.Create(new() { BufferPoolCapacity = 2 * 1024 * 1024 });
+        await using var sized = BlobDatabaseEngine.Create("blob-engine", new() { BufferPoolCapacity = 2 * 1024 * 1024 });
         (await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
     }
 
@@ -208,10 +208,10 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange
         var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
-        long defaultPool = builder.BufferPoolCapacity;
-        long defaultSize = builder.CheckpointJournalSize;
-        builder.BufferPoolCapacity = 2 * 1024 * 1024;
-        builder.CheckpointJournalSize = 8 * 1024 * 1024;
+        long defaultPool = builder.Options.BufferPoolCapacity;
+        long defaultSize = builder.Options.CheckpointJournalSize;
+        builder.Options.BufferPoolCapacity = 2 * 1024 * 1024;
+        builder.Options.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
         await using var engine = builder.Build();
@@ -254,7 +254,7 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
-        await using var engine = BlobDatabaseEngine.Create(new()
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
@@ -308,7 +308,7 @@ public sealed class BlobStorageOperationsTests
             StorageStrategy = new FaultInjectingJournalStorageStrategy(),
             MaintenanceInterval = maintenance,
         };
-        await using var engine = BlobDatabaseEngine.Create(options);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
         var database = await engine.CreateDatabaseAsync("blobs");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
@@ -361,7 +361,7 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange
         const int uploads = 600;
-        await using var engine = BlobDatabaseEngine.Create(new()
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
             StorageStrategy = new FaultInjectingJournalStorageStrategy(),
             CheckpointInterval = TimeSpan.FromHours(1),

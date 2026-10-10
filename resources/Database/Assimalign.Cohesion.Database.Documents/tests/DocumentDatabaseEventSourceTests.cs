@@ -65,9 +65,8 @@ public sealed class DocumentDatabaseEventSourceTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var token = timeout.Token;
         string name = "recovery" + Guid.NewGuid().ToString("N");
-        await using var engine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions
+        await using var engine = DocumentDatabaseEngine.Create("documents-events-" + Guid.NewGuid().ToString("N"), new DocumentDatabaseEngineOptions
         {
-            EngineName = "documents-events-" + Guid.NewGuid().ToString("N"),
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
@@ -130,7 +129,7 @@ public sealed class DocumentDatabaseEventSourceTests
     {
         // Arrange
         using var recorder = new EventSourceRecorder(DocumentDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var engine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "documents-events-" + Guid.NewGuid().ToString("N") });
+        await using var engine = DocumentDatabaseEngine.Create("documents-events-" + Guid.NewGuid().ToString("N"), new DocumentDatabaseEngineOptions());
         string name = "created" + Guid.NewGuid().ToString("N");
 
         // Act

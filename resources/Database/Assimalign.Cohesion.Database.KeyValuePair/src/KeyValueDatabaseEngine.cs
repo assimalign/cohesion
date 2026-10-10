@@ -42,6 +42,13 @@ using Assimalign.Cohesion.Database.Storage;
 /// <see cref="EngineState.Running"/> and its server keeps serving its other databases.
 /// </para>
 /// <para>
+/// <b>Declared databases</b> (B3 of the engine extensibility design). An engine built through
+/// <see cref="CreateBuilder(string)"/> has opened, or created, every database its builder declared
+/// (<see cref="KeyValueDatabaseEngineBuilder.AddDatabase(string)"/>) before the build returns. The
+/// declaration owns each of them, so <see cref="DatabaseEngine.DropDatabaseAsync"/> refuses it with
+/// <see cref="DatabaseObjectLockedException"/> (owner decision 56 of 2026-10-09).
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
 /// <see cref="DatabaseEngine"/>: the base owns the name, the model, the worker pumps, the
 /// state fold, the composition attach and freeze, the argument and disposed checks of every
@@ -71,6 +78,9 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     private KeyValueStorage[] _storageSnapshot = [];
     private KeyValueDatabase[] _instanceSnapshot = [];
 
+    // The databases the builder declared (owner decision 56): set once, before they are opened.
+    private DatabaseName[] _declaredDatabases = [];
+
     /// <summary>
     /// The storage-name suffix of the dedicated catalog file set each database owns.
     /// </summary>
@@ -83,11 +93,11 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// </summary>
     internal const int CatalogBufferPoolPages = 128;
 
-    // The engine name used when the options name none.
-    private const string defaultName = "keyvalue-engine";
+    // How the model's messages start: "Key-value engine '{name}' …".
+    internal const string ModelName = "Key-value";
 
-    private KeyValueDatabaseEngine(KeyValueDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.KeyValueStore, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
+    private KeyValueDatabaseEngine(string name, KeyValueDatabaseEngineOptions options)
+        : base(name, EngineModel.KeyValueStore, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
         _signalCommitPending = _commitPendingSignal.Set;
@@ -188,35 +198,53 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     internal bool IsOpen(KeyValueDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
-    /// Creates a new key-value database engine from options. The engine is
+    /// Creates a new key-value database engine of that name from options. The engine is
     /// operational — background workers running — when this method returns, and its
-    /// composition is complete: it takes no further worker or server.
+    /// composition is complete: it takes no further worker or server, and it declares no database.
     /// </summary>
-    /// <param name="options">Engine creation options.</param>
+    /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
+    /// <param name="options">
+    /// Engine creation options. The engine keeps a copy, so a later change to
+    /// <paramref name="options"/> does not reach it.
+    /// </param>
     /// <returns>A new engine instance.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    /// <exception cref="ArgumentException">
-    /// <see cref="KeyValueDatabaseEngineOptions.EngineName"/> is empty or white space.
-    /// </exception>
+    /// <remarks>
+    /// The path for embedded code and tests that need no declared database and no factory-built
+    /// product. <see cref="CreateBuilder(string)"/> composes workers and servers and opens or creates
+    /// the databases it declares before its build returns. Every option refusal names the engine and
+    /// the option (<c>Key-value engine '{name}': …</c>).
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="KeyValueDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB
     /// pages of at least 1 MiB; <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/> is
     /// negative; <see cref="KeyValueDatabaseEngineOptions.CheckpointInterval"/> or
     /// <see cref="KeyValueDatabaseEngineOptions.MaintenanceInterval"/> is not positive;
+    /// <see cref="KeyValueDatabaseEngineOptions.GroupCommitWindow"/> is not positive or is longer than
+    /// <see cref="Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow"/>;
     /// <see cref="KeyValueDatabaseEngineOptions.WorkerFailureWindow"/> is not positive or is longer
     /// than <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>;
     /// <see cref="KeyValueDatabaseEngineOptions.WorkerFailureMinimumPasses"/> is less than one; or
     /// <see cref="KeyValueDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
-    public static KeyValueDatabaseEngine Create(KeyValueDatabaseEngineOptions options)
+    public static KeyValueDatabaseEngine Create(string name, KeyValueDatabaseEngineOptions options)
     {
-        var engine = CreateUncomposed(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(options);
+
+        // The engine keeps a copy (B3 of the engine extensibility design): its write-back worker
+        // reads the batch size on every pass, so a caller's later change used to reach it.
+        var engine = CreateUncomposed(name, options.Snapshot());
         engine.CompleteComposition();
         return engine;
     }
 
-    /// <summary>Creates a dependency-free builder for key-value options and nested worker/server factories.</summary>
+    /// <summary>
+    /// Creates a dependency-free builder for the key-value engine of that name: its options, the
+    /// databases it declares, and its nested worker and server factories.
+    /// </summary>
     /// <param name="name">The engine name, written once (owner decision 52 of 2026-10-09).</param>
     /// <returns>A fresh builder supporting one engine construction attempt.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
@@ -227,33 +255,63 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// Creates an operational engine whose composition is still open, for the builder, which
     /// attaches the products of its factories through <see cref="Compose"/>.
     /// </summary>
-    /// <param name="options">Engine creation options.</param>
+    /// <param name="name">The engine name.</param>
+    /// <param name="options">
+    /// Engine creation options, already a copy the caller does not change again
+    /// (<see cref="KeyValueDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
+    /// </param>
     /// <returns>A new engine instance.</returns>
-    internal static KeyValueDatabaseEngine CreateUncomposed(KeyValueDatabaseEngineOptions options)
+    internal static KeyValueDatabaseEngine CreateUncomposed(string name, KeyValueDatabaseEngineOptions options)
     {
+        ValidateOptions(name, options);
+        return new KeyValueDatabaseEngine(name, options);
+    }
+
+    /// <summary>
+    /// Checks the name and options an engine is created from, before anything is created: the
+    /// checks of <see cref="Create"/>, which the builder also makes first. Each option refusal names
+    /// the engine.
+    /// </summary>
+    /// <param name="name">The engine name.</param>
+    /// <param name="options">The options.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">See <see cref="Create"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">See <see cref="Create"/>.</exception>
+    internal static void ValidateOptions(string name, KeyValueDatabaseEngineOptions options)
+    {
+        // Checked before the constructor spawns the worker threads; the base refuses a blank name
+        // too, after the leaf's fields were created.
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(options);
+        string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
 
-        // Checked before the constructor spawns the worker threads. A blank name is refused here
-        // with the option's name; the base refuses it too, after the leaf's fields were created.
-        if (options.EngineName is { } name)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(options.EngineName));
-        }
-
-        Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
-        ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
+        DatabaseEngineOptionChecks.GetBufferPoolPageCount(options.BufferPoolCapacity, engine, nameof(options.BufferPoolCapacity));
+        DatabaseEngineOptionChecks.ThrowIfNegative(options.CheckpointJournalSize, engine, nameof(options.CheckpointJournalSize));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));
         DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
-            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit));
+            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit), engine);
 
         // Checked here, before any file is touched, rather than by the storage setter at database
         // create or open (owner decision 26 of 2026-10-06): the window is also the flush worker's
         // wake cadence, so it must be positive, and a monitor wait takes no longer timeout.
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero, nameof(options.GroupCommitWindow));
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(options.GroupCommitWindow, Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow, nameof(options.GroupCommitWindow));
-        return new KeyValueDatabaseEngine(options);
+        DatabaseEngineOptionChecks.ThrowIfInvalidGroupCommitWindow(options.GroupCommitWindow, engine, nameof(options.GroupCommitWindow));
     }
+
+    /// <summary>
+    /// Gets the databases the engine's builder declared, in declaration order; empty for an engine
+    /// <see cref="Create"/> made.
+    /// </summary>
+    internal IReadOnlyList<DatabaseName> DeclaredDatabases => Volatile.Read(ref _declaredDatabases);
+
+    /// <summary>
+    /// Records the databases the builder declared, before it opens them: from then on
+    /// <see cref="DatabaseEngine.DropDatabaseAsync"/> refuses each of them (owner decision 56 of
+    /// 2026-10-09).
+    /// </summary>
+    /// <param name="declarations">The declared databases, in declaration order.</param>
+    /// <exception cref="InvalidOperationException">The engine already declares its databases.</exception>
+    internal void Declare(DatabaseName[] declarations) => DatabaseDeclarations.Declare(ref _declaredDatabases, declarations, Name);
 
     /// <summary>
     /// Attaches the products of the builder's factories, workers first and then servers, and
@@ -510,8 +568,17 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
     /// <inheritdoc />
+    /// <exception cref="DatabaseObjectLockedException">
+    /// The engine's builder declared the database (owner decision 56 of 2026-10-09): the declaration
+    /// owns it, so it leaves only when the declaration does.
+    /// </exception>
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
+        if (DatabaseDeclarations.TryFind(DeclaredDatabases, name, out var declared))
+        {
+            throw DatabaseDeclarations.RefuseDrop(ModelName, Name, declared, nameof(KeyValueDatabaseEngineBuilder));
+        }
+
         lock (_syncRoot)
         {
             ThrowIfDisposed();

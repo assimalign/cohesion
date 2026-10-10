@@ -17,7 +17,7 @@ public sealed class SqlAddColumnDefaultTypeTests
     public async Task AddColumn_NumericDefaults_ShouldBackfillAndDefaultInsertsWithCorrectTypes()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-numeric-types" });
+        await using var engine = SqlDatabaseEngine.Create("add-numeric-types", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("numeric-types");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT, label TEXT);");
@@ -45,7 +45,7 @@ public sealed class SqlAddColumnDefaultTypeTests
     public async Task AddColumn_InvalidDefaultOnEmptyTable_ShouldLeaveSchemaUnchanged()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-empty-conversion" });
+        await using var engine = SqlDatabaseEngine.Create("add-empty-conversion", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("empty-conversion");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT);");
@@ -72,7 +72,7 @@ public sealed class SqlAddColumnDefaultTypeTests
     public async Task AddColumn_FloatingDefaultUnderflow_ShouldPreservePopulatedTable(string type)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-underflow" });
+        await using var engine = SqlDatabaseEngine.Create("add-underflow", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("underflow");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT, label TEXT);");
@@ -96,7 +96,7 @@ public sealed class SqlAddColumnDefaultTypeTests
     public async Task AddColumn_ReferenceDefault_ShouldRejectMissingParentThenBackfillValidParent()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-reference-default" });
+        await using var engine = SqlDatabaseEngine.Create("add-reference-default", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("reference-default");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE parent (id INT PRIMARY KEY);");

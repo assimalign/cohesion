@@ -141,7 +141,7 @@ public sealed class DatabaseWorkerHealthTests
         var listener = new InMemoryConnectionListener();
         ReportingWorker? registered = null;
         var builder = BlobDatabaseEngine.CreateBuilder("blob");
-        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.Options.WorkerFailureMinimumPasses = int.MaxValue;
         builder.AddWorker(_ => registered = new ReportingWorker("blob/probe", DatabaseEngineWorkerKind.Checkpoint, "failing"));
         builder.AddServer(built => BlobDatabaseServer.Create(built, new() { Listener = listener }));
         await using var engine = builder.Build();

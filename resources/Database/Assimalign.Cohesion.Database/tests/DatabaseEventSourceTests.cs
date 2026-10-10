@@ -203,7 +203,7 @@ public sealed class DatabaseEventSourceTests
 
         // Act: create, close, reopen, open again while open, a missing open, a duplicate create, a
         // drop, and the engine's disposal.
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName }))
+        await using (var engine = SqlDatabaseEngine.Create(engineName, new SqlDatabaseEngineOptions()))
         {
             var created = await engine.CreateDatabaseAsync("lifecycle");
             await created.DisposeAsync();
@@ -292,7 +292,7 @@ public sealed class DatabaseEventSourceTests
         // Arrange: a 0 ms threshold makes every statement slow (plan D7).
         string engineName = "event-source-sql-" + Guid.NewGuid().ToString("N");
         using var recorder = new DatabaseEventRecorder(EventLevel.Verbose, slowStatementThreshold: "0");
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName });
+        await using var engine = SqlDatabaseEngine.Create(engineName, new SqlDatabaseEngineOptions());
         DatabaseInstance database = await engine.CreateDatabaseAsync("statements");
         var session = await database.CreateSessionAsync();
         long sessionNumber = session.SessionNumber;
@@ -479,7 +479,7 @@ public sealed class DatabaseEventSourceTests
     {
         // Arrange: the Sql parser quotes the token it stopped at, a string literal included.
         const string secret = "hunter2-secret-ssn-123-45-6789";
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "event-source-sql-" + Guid.NewGuid().ToString("N") });
+        await using var engine = SqlDatabaseEngine.Create("event-source-sql-" + Guid.NewGuid().ToString("N"), new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("hygiene");
         await using var session = await database.CreateSessionAsync();
         using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
@@ -702,10 +702,10 @@ public sealed class DatabaseEventSourceTests
         // Arrange: Graph and Documents parse a text statement and run the typed request through the
         // root's typed overload again on the same session (the plan's §4.1, "Re-entry").
         using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
-        await using var graphEngine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = "event-source-graph-" + Guid.NewGuid().ToString("N") });
+        await using var graphEngine = GraphDatabaseEngine.Create("event-source-graph-" + Guid.NewGuid().ToString("N"), new GraphDatabaseEngineOptions());
         var graph = await graphEngine.CreateDatabaseAsync("graph");
         await using var graphSession = await graph.CreateSessionAsync();
-        await using var documentEngine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "event-source-documents-" + Guid.NewGuid().ToString("N") });
+        await using var documentEngine = DocumentDatabaseEngine.Create("event-source-documents-" + Guid.NewGuid().ToString("N"), new DocumentDatabaseEngineOptions());
         var documents = await documentEngine.CreateDatabaseAsync("documents");
         await using (var setup = await documents.CreateSessionAsync())
         {

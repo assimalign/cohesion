@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
-await using var engine = GraphDatabaseEngine.Create(new()
+await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
 {
     RootPath = args[1], CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromHours(1),
     PageWriteBackBatchSize = 1024, MaintenanceInterval = TimeSpan.FromHours(1)

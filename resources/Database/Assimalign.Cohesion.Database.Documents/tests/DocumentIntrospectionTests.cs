@@ -15,7 +15,7 @@ public sealed class DocumentIntrospectionTests
     [Fact]
     public async Task Index_definitions_are_queryable_documents_and_follow_catalog_ddl()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         await session.CreateCollectionAsync("items");
@@ -47,7 +47,7 @@ public sealed class DocumentIntrospectionTests
     [Fact]
     public async Task Ownership_reports_the_collection_authority_without_inventing_index_ownership()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         await session.CreateCollectionAsync("adhoc");
@@ -83,7 +83,7 @@ public sealed class DocumentIntrospectionTests
     [Fact]
     public async Task Introspection_uses_the_statement_snapshot_and_sees_own_uncommitted_definitions()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var reader = await database.CreateSessionAsync();
         await reader.CreateCollectionAsync("items");
@@ -110,7 +110,7 @@ public sealed class DocumentIntrospectionTests
     [InlineData("COHESION_SCHEMA.OBJECT_OWNERSHIP")]
     public async Task System_collections_refuse_every_supported_mutation_with_a_stable_diagnostic(string name)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         string expected = $"System collection '{name}' is read-only.";
@@ -131,7 +131,7 @@ public sealed class DocumentIntrospectionTests
     [InlineData("DELETE FROM COHESION_SCHEMA.INDEXES")]
     public async Task Unsupported_document_data_mutations_keep_the_language_capability_diagnostic(string query)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         (await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(query))).Message.ShouldContain("COHDBL001");
@@ -140,7 +140,7 @@ public sealed class DocumentIntrospectionTests
     [Fact]
     public async Task System_collections_are_database_scoped_even_when_collection_and_index_names_match()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         await using var ownSession = await own.CreateSessionAsync();

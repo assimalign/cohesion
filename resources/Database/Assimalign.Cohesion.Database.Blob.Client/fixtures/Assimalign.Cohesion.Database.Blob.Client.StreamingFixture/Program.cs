@@ -30,10 +30,9 @@ internal static class Program
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(8));
             CancellationToken token = timeout.Token;
-            await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions
+            await using var engine = BlobDatabaseEngine.Create("bounded-heap-blob-wire", new BlobDatabaseEngineOptions
             {
                 RootPath = args[0],
-                EngineName = "bounded-heap-blob-wire",
                 CheckpointInterval = TimeSpan.FromHours(1),
                 PageWriteBackInterval = TimeSpan.FromHours(1),
                 MaintenanceInterval = TimeSpan.FromHours(1),

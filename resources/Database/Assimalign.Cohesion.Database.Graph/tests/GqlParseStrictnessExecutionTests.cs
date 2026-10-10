@@ -37,7 +37,7 @@ public sealed class GqlParseStrictnessExecutionTests
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string gql, string code)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);

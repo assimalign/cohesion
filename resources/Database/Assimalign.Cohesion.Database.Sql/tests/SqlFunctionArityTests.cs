@@ -101,7 +101,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         foreach (bool withRows in new[] { false, true })
         {
             // Arrange
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity" });
+            await using var engine = SqlDatabaseEngine.Create("sql-function-arity", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("arity");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             await SeedAsync(session, withRows);
@@ -138,7 +138,7 @@ public sealed class SqlFunctionArityTests : IDisposable
     public async Task ExecuteAsync_WrongArity_ShouldNameTheFunctionAndItsSignature(string sql, string message)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-message" });
+        await using var engine = SqlDatabaseEngine.Create("sql-function-arity-message", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("arity");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -158,7 +158,7 @@ public sealed class SqlFunctionArityTests : IDisposable
     public async Task CreateTable_WrongArityCheck_ShouldBeRefusedAndAValidOneEnforced()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-check" });
+        await using var engine = SqlDatabaseEngine.Create("sql-function-arity-check", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("arity");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
 
@@ -183,7 +183,7 @@ public sealed class SqlFunctionArityTests : IDisposable
     public async Task ExecuteAsync_CallsWithinTheirSignatures_ShouldExecute()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-valid" });
+        await using var engine = SqlDatabaseEngine.Create("sql-function-arity-valid", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("arity");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -280,7 +280,7 @@ public sealed class SqlFunctionArityTests : IDisposable
     public async Task Signatures_EveryAggregate_ShouldAccumulate()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-aggregates" });
+        await using var engine = SqlDatabaseEngine.Create("sql-function-arity-aggregates", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("arity");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -342,7 +342,7 @@ public sealed class SqlFunctionArityTests : IDisposable
     }
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-open", RootPath = _rootPath });
+        => SqlDatabaseEngine.Create("sql-function-arity-open", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
     private static SqlExpression ParseProjection(string expression)
     {

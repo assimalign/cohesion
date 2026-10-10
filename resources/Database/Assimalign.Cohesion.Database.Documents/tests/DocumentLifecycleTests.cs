@@ -20,7 +20,7 @@ public sealed class DocumentLifecycleTests
     public async Task Ended_waiter_releases_its_late_writer_grant(bool disposeSession, IsolationLevel isolation)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
         await using var first = await database.CreateSessionAsync(timeout.Token);
         var collection = await first.CreateCollectionAsync("items", timeout.Token);
@@ -82,7 +82,7 @@ public sealed class DocumentLifecycleTests
         {
             bool deleteParked;
             Exception deleteError;
-            await using (var engine = DocumentDatabaseEngine.Create(options))
+            await using (var engine = DocumentDatabaseEngine.Create("document-engine", options))
             {
                 var database = await engine.CreateDatabaseAsync("db", timeout.Token);
                 await using (var seed = await database.CreateSessionAsync(timeout.Token))
@@ -126,7 +126,7 @@ public sealed class DocumentLifecycleTests
                 database.Coordinator.Checkpoint();
             }
 
-            await using var reopened = DocumentDatabaseEngine.Create(options);
+            await using var reopened = DocumentDatabaseEngine.Create("document-engine", options);
             var loaded = await reopened.OpenDatabaseAsync("db", timeout.Token);
             loaded.Coordinator.RunVersionPurgePass(timeout.Token);
             await using var observer = await loaded.CreateSessionAsync(timeout.Token);

@@ -21,7 +21,7 @@ public sealed class DocumentProtocolTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("documents", token);
         await using var session = await database.CreateSessionAsync(token);
         var collection = await session.CreateCollectionAsync("items", cancellationToken: token);

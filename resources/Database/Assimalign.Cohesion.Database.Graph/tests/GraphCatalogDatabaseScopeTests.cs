@@ -11,7 +11,7 @@ public sealed class GraphCatalogDatabaseScopeTests
     [Fact]
     public async Task EveryCatalogSubjectIsBoundToTheSessionDatabase()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         await using var session = await own.CreateSessionAsync();

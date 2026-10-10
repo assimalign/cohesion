@@ -55,4 +55,20 @@ public sealed class BlobDatabaseServerOptions
     /// before remaining sessions are aborted.
     /// </summary>
     public TimeSpan ShutdownDrainTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Copies every option, so a server keeps settings its caller can no longer change: a later
+    /// change to the caller's object (one an <c>AddServer(configure)</c> callback captured, say)
+    /// never reaches a running server or bypasses the checks it was created with.
+    /// </summary>
+    /// <returns>A copy of these options; the listener and the authenticator are the same instances.</returns>
+    internal BlobDatabaseServerOptions Snapshot() => new()
+    {
+        Listener = Listener,
+        Authenticator = Authenticator,
+        MaxSessions = MaxSessions,
+        AuthenticationTimeout = AuthenticationTimeout,
+        IdleTimeout = IdleTimeout,
+        ShutdownDrainTimeout = ShutdownDrainTimeout,
+    };
 }

@@ -49,7 +49,7 @@ public sealed class GraphStorageOperationsTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var token = timeout.Token;
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = !recordSurvives };
-        await using var engine = GraphDatabaseEngine.Create(new()
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
         {
             StorageStrategy = strategy,
             CheckpointInterval = TimeSpan.FromHours(1),
@@ -169,20 +169,20 @@ public sealed class GraphStorageOperationsTests
     public async Task BufferPoolCapacity_DefaultAndInvalidOptions_ShouldSizeThePoolAndRefuseBadValues()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
         database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
         database.DataStorage.CheckpointJournalSize.ShouldBe(256L * 1024 * 1024);
         new GraphDatabaseEngineOptions().CheckpointInterval.ShouldBe(TimeSpan.FromMinutes(5));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { BufferPoolCapacity = 512 * 1024 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { BufferPoolCapacity = 512 * 1024 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.BufferPoolCapacity));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { BufferPoolCapacity = 1024 * 1024 + 1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { BufferPoolCapacity = 1024 * 1024 + 1 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.BufferPoolCapacity));
-        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { CheckpointJournalSize = -1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create("graph-engine", new() { CheckpointJournalSize = -1 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.CheckpointJournalSize));
-        await using var sized = GraphDatabaseEngine.Create(new() { BufferPoolCapacity = 2 * 1024 * 1024 });
+        await using var sized = GraphDatabaseEngine.Create("graph-engine", new() { BufferPoolCapacity = 2 * 1024 * 1024 });
         (await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
     }
 
@@ -191,10 +191,10 @@ public sealed class GraphStorageOperationsTests
     {
         // Arrange
         var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
-        long defaultPool = builder.BufferPoolCapacity;
-        long defaultSize = builder.CheckpointJournalSize;
-        builder.BufferPoolCapacity = 2 * 1024 * 1024;
-        builder.CheckpointJournalSize = 8 * 1024 * 1024;
+        long defaultPool = builder.Options.BufferPoolCapacity;
+        long defaultSize = builder.Options.CheckpointJournalSize;
+        builder.Options.BufferPoolCapacity = 2 * 1024 * 1024;
+        builder.Options.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
         await using var engine = builder.Build();
@@ -230,7 +230,7 @@ public sealed class GraphStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
-        await using var engine = GraphDatabaseEngine.Create(new()
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new()
         {
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
@@ -284,7 +284,7 @@ public sealed class GraphStorageOperationsTests
             StorageStrategy = new FaultInjectingJournalStorageStrategy(),
             MaintenanceInterval = maintenance,
         };
-        await using var engine = GraphDatabaseEngine.Create(options);
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", options);
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();

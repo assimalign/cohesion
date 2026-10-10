@@ -12,7 +12,7 @@ public sealed class SqlCheckNullSemanticsTests
     [Fact]
     public async Task CheckAndWhere_ShouldApplyThreeValuedInPredicates()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "check-null" });
+        await using var engine = SqlDatabaseEngine.Create("check-null", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT CHECK (id IN (1, NULL)))");

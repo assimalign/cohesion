@@ -32,7 +32,7 @@ public sealed class BlobLifecycleTests
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
         var container = await AutocommitContainer.CreateAsync(database, "files", timeout.Token);
         await using var first = await database.CreateSessionAsync(timeout.Token);
@@ -99,7 +99,7 @@ public sealed class BlobLifecycleTests
         {
             bool deleteParked;
             Exception deleteError;
-            await using (var engine = BlobDatabaseEngine.Create(options))
+            await using (var engine = BlobDatabaseEngine.Create("blob-engine", options))
             {
                 var database = await engine.CreateDatabaseAsync("db", timeout.Token);
                 var container = await AutocommitContainer.CreateAsync(database, "files", timeout.Token);
@@ -143,7 +143,7 @@ public sealed class BlobLifecycleTests
                 database.Coordinator.Checkpoint();
             }
 
-            await using var reopened = BlobDatabaseEngine.Create(options);
+            await using var reopened = BlobDatabaseEngine.Create("blob-engine", options);
             var loaded = await reopened.OpenDatabaseAsync("db", timeout.Token);
             loaded.Coordinator.RunVersionPurgePass(timeout.Token);
             var loadedFiles = await AutocommitContainer.GetAsync(loaded, "files", timeout.Token);

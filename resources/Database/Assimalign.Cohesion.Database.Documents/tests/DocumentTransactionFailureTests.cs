@@ -42,7 +42,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Statement_FailureThenWriteThenRollback_ShouldLeaveDocumentsUnchanged(string failure, IsolationLevel isolation)
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -77,7 +77,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Operations_OnFaultedTransaction_ShouldBeRefusedUntilRollback()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -124,7 +124,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task CommitAsync_AfterFailedStatement_ShouldThrowAndCommitNothing()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -155,7 +155,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task DisposeAsync_FaultedTransaction_ShouldEndTransactionAndReturnSessionToAutocommit()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -179,7 +179,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task PutAsync_PartiallyAppliedStatementFails_ShouldUndoTheWholeTransaction()
     {
         // Arrange: the indexed value outgrows the index key only after the new content chunks are written.
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -209,7 +209,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Statement_FaultedTransaction_ShouldNotBlockOtherWriters()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var failed = await database.CreateSessionAsync();
         var collection = await failed.CreateCollectionAsync("items");
@@ -233,7 +233,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Statement_AutocommitFailure_ShouldLeaveSessionUsable()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -255,7 +255,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Statement_RepeatedRefusals_ShouldKeepOriginalCause()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -277,7 +277,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Statement_CanceledInsideTransaction_ShouldAbortTransaction()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var blocker = await database.CreateSessionAsync();
         var collection = await blocker.CreateCollectionAsync("items");
@@ -312,7 +312,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task DisposeAsync_SessionWithFaultedTransaction_ShouldEndTransaction()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -346,7 +346,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -385,7 +385,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Validation_BeforeStatementStarts_ShouldLeaveTransactionActive()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var otherDatabase = await engine.CreateDatabaseAsync("other");
         await using var session = await database.CreateSessionAsync();
@@ -420,7 +420,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task RollbackAsync_AfterEnd_ShouldBeNoOpUnlessCommitted()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -449,7 +449,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task EndAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionActive()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -479,7 +479,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -506,7 +506,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task DisposeAsync_SessionWithRunningStatement_ShouldAbortItAndReportItsCause()
     {
         // Arrange: another transaction holds the writer lock, so the session's statement waits.
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var blocker = await database.CreateSessionAsync();
         var collection = await blocker.CreateCollectionAsync("items");
@@ -543,7 +543,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task CommitAsync_WhileStatementRuns_ShouldBeRefusedAndLeaveTheTransactionActive()
     {
         // Arrange: another transaction holds the writer lock, so the statement waits.
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var blocker = await database.CreateSessionAsync();
         var collection = await blocker.CreateCollectionAsync("items");
@@ -578,7 +578,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task BeginTransactionAsync_WhileActiveOrClosed_ShouldRefuseBeforeTheIsolationLevel()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -607,7 +607,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task ExecuteAsync_OnClosedSession_ShouldRefuseWithOneMessage()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -649,7 +649,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -691,7 +691,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -727,7 +727,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task ExecuteAsync_WhileAnotherStatementRuns_ShouldBeRefusedAndLeaveItRunning()
     {
         // Arrange: another transaction holds the writer lock, so the session's statement waits.
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var blocker = await database.CreateSessionAsync();
         var collection = await blocker.CreateCollectionAsync("items");
@@ -775,7 +775,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task Database_OfASession_ShouldBeTheUnboundDatabase()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -827,7 +827,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -859,7 +859,7 @@ public sealed class DocumentTransactionFailureTests
         await other.DisposeAsync();
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -885,7 +885,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -905,7 +905,7 @@ public sealed class DocumentTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -929,7 +929,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -948,7 +948,7 @@ public sealed class DocumentTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -966,7 +966,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange: a rollback whose undo cannot touch the pages another storage bracket holds,
         // and a waiting writer.
-        await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -1008,7 +1008,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -1030,7 +1030,7 @@ public sealed class DocumentTransactionFailureTests
         // Act: the close retries the undo, which fails the same way.
         var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
 
-        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
         var observerItems = await observer.GetCollectionAsync("items");
@@ -1056,7 +1056,7 @@ public sealed class DocumentTransactionFailureTests
         // Arrange: a rolled-back transaction whose undo could not touch the pages another storage
         // bracket held, so it is deferred.
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -1086,7 +1086,7 @@ public sealed class DocumentTransactionFailureTests
         bool offline = database.IsOffline;
         engine.Dispose();
 
-        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -1106,7 +1106,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
@@ -1135,7 +1135,7 @@ public sealed class DocumentTransactionFailureTests
     public async Task RollbackAsync_DeferredUndoUnderARunningStatement_ShouldRefuseLaterStatementsAndUndoEverything()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");

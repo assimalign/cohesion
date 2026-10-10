@@ -60,7 +60,7 @@ public sealed class SqlDropColumnTests : IDisposable
         var storage = new CrashCaptureSqlStorageStrategy();
         var model = new Dictionary<int, ModelRow>();
         CrashCaptureSqlStorageStrategy.CrashPointRecorder recorder;
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-crash", StorageStrategy = storage }))
+        await using (var engine = SqlDatabaseEngine.Create("drop-column-crash", new SqlDatabaseEngineOptions { StorageStrategy = storage }))
         {
             var database = await engine.CreateDatabaseAsync("crash-db");
             await using var session = await database.CreateSessionAsync();
@@ -91,9 +91,8 @@ public sealed class SqlDropColumnTests : IDisposable
         var mismatches = new List<string>();
         for (int point = 0; point < recorder.Count; point++)
         {
-            await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+            await using var reopened = SqlDatabaseEngine.Create($"drop-column-crash-{point}", new SqlDatabaseEngineOptions
             {
-                EngineName = $"drop-column-crash-{point}",
                 StorageStrategy = recorder.Open(point),
             });
             var database = await reopened.OpenDatabaseAsync("crash-db");
@@ -126,7 +125,7 @@ public sealed class SqlDropColumnTests : IDisposable
     public async Task DropColumn_ConcurrentSelects_ShouldReadEveryValueInItsColumn()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-readers" });
+        await using var engine = SqlDatabaseEngine.Create("drop-column-readers", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("readers-db");
         await using var setup = await database.CreateSessionAsync();
 
@@ -220,8 +219,8 @@ public sealed class SqlDropColumnTests : IDisposable
         // Arrange: a primary key, two non-unique secondary indexes and a UNIQUE index; full
         // pages of versions written before a long DEFAULT existed (the workload that made
         // the former in-place rewrite move versions away from their index entries, #1237).
-        var options = new SqlDatabaseEngineOptions { EngineName = "drop-column-pages", RootPath = _rootPath };
-        var engine = SqlDatabaseEngine.Create(options);
+        var options = new SqlDatabaseEngineOptions { RootPath = _rootPath };
+        var engine = SqlDatabaseEngine.Create("drop-column-pages", options);
         var database = await engine.CreateDatabaseAsync("pages-db");
         var writer = await database.CreateSessionAsync();
         var reader = await database.CreateSessionAsync();
@@ -304,7 +303,7 @@ public sealed class SqlDropColumnTests : IDisposable
         await engine.DisposeAsync();
 
         // Assert: the dropped layout and every index survive reopen.
-        await using var reopenedEngine = SqlDatabaseEngine.Create(options);
+        await using var reopenedEngine = SqlDatabaseEngine.Create("drop-column-pages", options);
         var reopened = await reopenedEngine.OpenDatabaseAsync("pages-db");
         reopened.Catalog.TryGetTable("dbo", "t", out var persisted).ShouldBeTrue();
         persisted.DroppedColumnOrdinals.ShouldBe([3]);
@@ -319,7 +318,7 @@ public sealed class SqlDropColumnTests : IDisposable
     {
         // Arrange: the dropped column comes first, so its component directly follows the
         // object id; one version gets a component tag no type uses.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-malformed" });
+        await using var engine = SqlDatabaseEngine.Create("drop-column-malformed", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("malformed-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -365,9 +364,9 @@ public sealed class SqlDropColumnTests : IDisposable
     public async Task DropColumn_ThenAddSameName_ShouldNeverReadTheDroppedValues()
     {
         // Arrange: versions that store each generation of the column.
-        var options = new SqlDatabaseEngineOptions { EngineName = "drop-column-readd", RootPath = _rootPath };
+        var options = new SqlDatabaseEngineOptions { RootPath = _rootPath };
         var expected = new Dictionary<int, (string Label, object? Extra, string Tail)>();
-        await using (var engine = SqlDatabaseEngine.Create(options))
+        await using (var engine = SqlDatabaseEngine.Create("drop-column-readd", options))
         {
             var database = await engine.CreateDatabaseAsync("readd-db");
             await using var session = await database.CreateSessionAsync();
@@ -414,7 +413,7 @@ public sealed class SqlDropColumnTests : IDisposable
         }
 
         // Assert: the layout, the defaults and the values survive reopen.
-        await using var reopened = SqlDatabaseEngine.Create(options);
+        await using var reopened = SqlDatabaseEngine.Create("drop-column-readd", options);
         var restored = await reopened.OpenDatabaseAsync("readd-db");
         await using var restoredSession = await restored.CreateSessionAsync();
         await AssertReAddedAsync(restoredSession, expected, "after reopen");
@@ -431,7 +430,7 @@ public sealed class SqlDropColumnTests : IDisposable
     public async Task DropColumn_RepeatedTrailingDrops_ShouldNotGrowLaterVersions()
     {
         // Arrange: one row a few dozen bytes under the largest record a page holds.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-row-size" });
+        await using var engine = SqlDatabaseEngine.Create("drop-column-row-size", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("row-size-db");
         await using var session = await database.CreateSessionAsync();
         var instance = database;
@@ -465,9 +464,9 @@ public sealed class SqlDropColumnTests : IDisposable
     {
         // Arrange: b sits between two indexed, CHECKed columns; the child references the
         // parent's d through its UNIQUE index, and its own key sits after a dropped column.
-        var options = new SqlDatabaseEngineOptions { EngineName = "drop-column-neighbours", RootPath = _rootPath };
+        var options = new SqlDatabaseEngineOptions { RootPath = _rootPath };
         var model = new Dictionary<int, ModelRow>();
-        await using (var engine = SqlDatabaseEngine.Create(options))
+        await using (var engine = SqlDatabaseEngine.Create("drop-column-neighbours", options))
         {
             var database = await engine.CreateDatabaseAsync("neighbours-db");
             await using var session = await database.CreateSessionAsync();
@@ -506,7 +505,7 @@ public sealed class SqlDropColumnTests : IDisposable
         }
 
         // Assert: after reopen the persisted CHECKs, keys and indexes still bind by name.
-        await using var reopened = SqlDatabaseEngine.Create(options);
+        await using var reopened = SqlDatabaseEngine.Create("drop-column-neighbours", options);
         var restored = await reopened.OpenDatabaseAsync("neighbours-db");
         await using var restoredSession = await restored.CreateSessionAsync();
         (await CheckTableAsync(restoredSession, "p", model, seeks: true)).ShouldBeEmpty();
@@ -523,7 +522,7 @@ public sealed class SqlDropColumnTests : IDisposable
     public async Task DropColumn_RefusedByTheCatalog_ShouldFailWithItsMessageAndChangeNothing(string tableName, string column, string message)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-refused" });
+        await using var engine = SqlDatabaseEngine.Create("drop-column-refused", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("refused-db");
         await using var session = await database.CreateSessionAsync();
 

@@ -26,7 +26,7 @@ public class KeyValueDatabaseServerOptionsTests
     public async System.Threading.Tasks.Task Create_WithInvalidOptions_ShouldThrow()
     {
         // Arrange
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-opt-validate" });
+        await using var engine = KeyValueDatabaseEngine.Create("kv-opt-validate", new KeyValueDatabaseEngineOptions());
 
         // Act / Assert: no listener.
         Should.Throw<ArgumentException>(() => KeyValueDatabaseServer.Create(engine, new KeyValueDatabaseServerOptions()));

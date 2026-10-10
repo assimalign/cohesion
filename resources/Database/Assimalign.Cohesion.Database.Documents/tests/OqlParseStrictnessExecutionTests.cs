@@ -36,7 +36,7 @@ public sealed class OqlParseStrictnessExecutionTests
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string oql, string code)
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var collection = await session.CreateCollectionAsync("items", CancellationToken.None);

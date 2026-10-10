@@ -6,7 +6,7 @@ node, relationship and traversal operations of `GraphDatabase`. A session execut
 subset described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
 ```csharp
-await using var engine = GraphDatabaseEngine.Create(new() { RootPath = "graphs" });
+await using var engine = GraphDatabaseEngine.Create("people-graph", new() { RootPath = "graphs" });
 var graph = await engine.CreateDatabaseAsync("people");
 await using var session = await graph.CreateSessionAsync();
 await session.ExecuteAsync("INSERT (a:Person {name:'Ada'})-[r:KNOWS]->(b:Person {name:'Grace'})");
