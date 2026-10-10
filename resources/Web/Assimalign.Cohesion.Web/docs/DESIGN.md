@@ -72,7 +72,12 @@ reader compiles unchanged. The `Web.Routing` types take `Assimalign.Cohesion.Web
 project pins its `RootNamespace`"). A call site of `Map(path)`, `MapWhen`, `GetPathBase`,
 `GetEffectivePath`, `WebApplicationTerminal`, `IWebEndpointFeature` or `IWebPathBaseFeature` adds
 `using Assimalign.Cohesion.Web.Routing;`, which most applications already have for `UseRouting`.
-`UseWhen` and `Run` stay here, in `WebApplicationExtensions`, so their call sites do not change.
+`UseWhen` and `Run` stay in this assembly and namespace, but moved from
+`WebApplicationBranchingExtensions` into `WebApplicationExtensions` (that class name now belongs to
+`Web.Routing`'s branching type, which declares neither member). Extension-form calls
+(`app.UseWhen(...)`, `app.Run(...)`) compile unchanged; a static-form call
+(`WebApplicationBranchingExtensions.UseWhen(app, ...)`) must name `WebApplicationExtensions`, and a
+binary compiled against the old class must be rebuilt.
 
 ## The pipeline model (middleware-first)
 

@@ -882,8 +882,13 @@ namespace for `UseRouting`.
 The source break: code that names `IWebEndpointFeature`, `IWebPathBaseFeature` or
 `WebApplicationTerminal`, or calls `Map(path, branch)`, `MapWhen`, `GetPathBase()` or
 `GetEffectivePath()`, adds `using Assimalign.Cohesion.Web.Routing;`. A library that does so adds a
-reference to this package (Web.Rewrite did). `UseWhen` and `Run` keep the root namespace. The types
-also changed assembly, so a binary compiled against the root's copies must be rebuilt.
+reference to this package (Web.Rewrite did). `UseWhen` and `Run` keep the root assembly and namespace
+but moved from the root's `WebApplicationBranchingExtensions` into its `WebApplicationExtensions`; the
+`WebApplicationBranchingExtensions` name now belongs to this package's type, which declares neither.
+Extension-form calls (`app.UseWhen(...)`, `app.Run(...)`) are unchanged, a static-form call
+(`WebApplicationBranchingExtensions.UseWhen(app, ...)`) must name `WebApplicationExtensions`, and a
+binary that called either must be rebuilt. The moved types also changed assembly, so a binary
+compiled against the root's copies must be rebuilt.
 
 ## Parameter policies (constraints)
 

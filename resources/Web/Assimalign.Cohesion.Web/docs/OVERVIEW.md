@@ -22,6 +22,12 @@ What used to live here and where it went (#1379):
 | `IWebEndpointFeature`, `WebApplicationTerminal` | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Web.Routing` |
 | `IWebPathBaseFeature`, `Map(path, branch)`, `MapWhen`, `GetPathBase()`, `GetEffectivePath()` | `Assimalign.Cohesion.Web.Routing` | `Assimalign.Cohesion.Web.Routing` |
 | `IWebRequestIdFeature`, `IWebResponseCompletionFeature`, `IWebServerDrainFeature` | `Assimalign.Cohesion.Web.Server` | `Assimalign.Cohesion.Web` (unchanged) |
+| `UseWhen`, `Run` (class `WebApplicationBranchingExtensions`) | this package, class `WebApplicationExtensions` | `Assimalign.Cohesion.Web` (unchanged) |
+
+Extension-form calls (`app.UseWhen(...)`, `app.Run(...)`) compile unchanged. A static-form call
+(`WebApplicationBranchingExtensions.UseWhen(app, ...)`) must name `WebApplicationExtensions`, because
+`WebApplicationBranchingExtensions` is now `Web.Routing`'s branching type, and every binary that
+used a moved member must be rebuilt.
 
 Feature libraries (`Assimalign.Cohesion.Web.<Feature>`) reference this root and ship
 their own `Add<Feature>`/`Use<Feature>` verbs against these seams; the runtime module
