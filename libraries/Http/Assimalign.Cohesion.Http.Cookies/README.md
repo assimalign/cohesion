@@ -123,10 +123,11 @@ transports' response serializers (`Http1MessageWriter`, `HPackEncoder`
 via `Http2ConnectionContext`, `Http3HeaderCodec.EncodeResponseHeaders`)
 emit each value as a separate `Set-Cookie` field line (RFC 6265 §3
 forbids comma-folding for `Set-Cookie`). They take no dependency on this
-package. The HTTP/1.1 upgrade writer (`Http1ProtocolUpgrade`) is the one
-serializer that reads `IHttpResponseCookieFeature` directly. When no
-cookie is appended, the response simply has no `Set-Cookie` headers
-&mdash; no allocations, no enumeration cost.
+package, and neither does the HTTP/1.1 upgrade writer (`Http1ProtocolUpgrade`),
+which writes the `101` head's `Set-Cookie` header the same way. No
+serializer reads `IHttpResponseCookieFeature`. When no cookie is appended,
+the response simply has no `Set-Cookie` headers &mdash; no allocations, no
+enumeration cost.
 
 ## Implementing a custom feature
 

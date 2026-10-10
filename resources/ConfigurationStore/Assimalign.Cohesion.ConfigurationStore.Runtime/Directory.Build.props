@@ -39,7 +39,6 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Cookies" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />

@@ -8,6 +8,5 @@
     </PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 	</ItemGroup>
 </Project>

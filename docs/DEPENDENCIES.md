@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 253 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 719 |
+| Declared project references | 718 |
 | Declared shared-source links | 14 |
 
 ## Ambiguous project names
@@ -432,7 +432,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Http.Forms` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.Forwarded` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.InterimResponses` | `Assimalign.Cohesion.Http` | — | — | — |
-| `Assimalign.Cohesion.Http.ProtocolUpgrade` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies` | — | — | — |
+| `Assimalign.Cohesion.Http.ProtocolUpgrade` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.RequestLimits` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Http.ServerSentEvents` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Streaming` | — | — | — |
 | `Assimalign.Cohesion.Http.Sessions` | `Assimalign.Cohesion.Http` | — | — | — |

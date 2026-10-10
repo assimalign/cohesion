@@ -341,6 +341,70 @@ public class HttpProtocolUpgradeInterceptorTests
         takeover.TakenOver.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: Each Set-Cookie value rides the 101 on a field line of its own")]
+    public async Task AcceptAsync_OnTwoSetCookieValues_ShouldWriteOneFieldLinePerValue()
+    {
+        // Arrange — RFC 6265 §3: Set-Cookie is never comma-folded (#1154).
+        MemoryStream wire = new();
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(wire), out HttpHeaderCollection responseHeaders);
+        responseHeaders[HttpHeaderKey.SetCookie] = new HttpHeaderValue(new[] { "a=1; Path=/", "b=2; Path=/; HttpOnly" });
+
+        // Act
+        await context.Upgrade!.AcceptAsync();
+
+        // Assert
+        ReadSetCookieLines(wire).ShouldBe(new[] { "a=1; Path=/", "b=2; Path=/; HttpOnly" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: Cookies appended through the cookie feature ride the 101 exactly once")]
+    public async Task AcceptAsync_OnCookiesAppendedThroughTheCookieFeature_ShouldWriteEachOnce()
+    {
+        // Arrange — the default feature's collection writes each cookie through to Set-Cookie, so the
+        // header already holds both; reading the feature as well sent each one twice (#1154).
+        MemoryStream wire = new();
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(wire), out HttpHeaderCollection responseHeaders);
+        HttpCookieCollection cookies = new(responseHeaders, HttpHeaderKey.SetCookie);
+        context.Features.Set<IHttpResponseCookieFeature>(new TestResponseCookieFeature(cookies));
+        cookies.Add(new HttpCookie("session", "abc", new HttpCookieOptions { HttpOnly = true }));
+        cookies.Add(new HttpCookie("theme", "dark"));
+
+        // Act
+        await context.Upgrade!.AcceptAsync();
+
+        // Assert
+        ReadSetCookieLines(wire).ShouldBe(new[] { "session=abc; Path=/; HttpOnly", "theme=dark; Path=/" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: The Set-Cookie header is the one source, not a cookie feature that disagrees with it")]
+    public async Task AcceptAsync_OnCookieFeatureOutOfSyncWithTheHeader_ShouldWriteTheHeaderOnly()
+    {
+        // Arrange — a replacement feature whose collection is not bound to the response headers.
+        MemoryStream wire = new();
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(wire), out HttpHeaderCollection responseHeaders);
+        responseHeaders[HttpHeaderKey.SetCookie] = "a=1; Path=/; Secure";
+        HttpCookieCollection detached = new();
+        detached.Add(new HttpCookie("ghost", "1"));
+        context.Features.Set<IHttpResponseCookieFeature>(new TestResponseCookieFeature(detached));
+
+        // Act
+        await context.Upgrade!.AcceptAsync();
+
+        // Assert
+        ReadSetCookieLines(wire).ShouldBe(new[] { "a=1; Path=/; Secure" });
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: A response field with HTAB inside its value rides the 101")]
     public async Task AcceptAsync_OnValueWithInnerTab_ShouldEmitIt()
     {
@@ -479,6 +543,27 @@ public class HttpProtocolUpgradeInterceptorTests
         {
             participant.BeforeResponse(responseContext);
         }
+    }
+
+    /// <summary>
+    /// Returns the value of every <c>Set-Cookie</c> field line of the transition head on
+    /// <paramref name="wire"/>, in order.
+    /// </summary>
+    private static string[] ReadSetCookieLines(MemoryStream wire)
+    {
+        const string prefix = "Set-Cookie: ";
+        string head = Encoding.ASCII.GetString(wire.ToArray());
+        List<string> values = new();
+
+        foreach (string line in head.Split("\r\n"))
+        {
+            if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                values.Add(line[prefix.Length..]);
+            }
+        }
+
+        return values.ToArray();
     }
 
     private static HttpExchangeInterceptorRequestContext CreateHeadContext(

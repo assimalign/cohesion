@@ -98,11 +98,15 @@ value per cookie, so the transports only:
 2. **Honour the RFC 6265 §3 rule** that each `Set-Cookie` value MUST
    be on its own line; no comma folding.
 
-The one serializer that reads `IHttpResponseCookieFeature` directly is
-the HTTP/1.1 upgrade writer in `Assimalign.Cohesion.Http.ProtocolUpgrade`.
-A replacement feature therefore has to keep the header in sync, which it
-does by queuing into a header-synchronized collection, as
-`Web.CookiePolicy` does.
+No serializer reads `IHttpResponseCookieFeature`. The HTTP/1.1 upgrade
+writer in `Assimalign.Cohesion.Http.ProtocolUpgrade` was the last one: it
+wrote the header's values comma-folded on one line and then each cookie of
+the feature again, so a `101` sent every cookie twice. Since #1154 it
+writes the header the way `Http1MessageWriter` does and takes no
+dependency on this package. A replacement feature therefore has to keep
+the header in sync, which it does by queuing into a header-synchronized
+collection, as `Web.CookiePolicy` does; whatever the header holds is what
+every response, the `101` included, sends.
 
 The wire-level `Cookie` header remains on `request.Headers` whether
 or not the cookies package is referenced. A consumer that never reads
@@ -134,7 +138,7 @@ real consumers prove the looser shape is a footgun.
 |---------|------|---------------|
 | `Assimalign.Cohesion.Http.Cookies` | Typed cookie model + request/response features + extensions | `Assimalign.Cohesion.Http` |
 | `Assimalign.Cohesion.Http.Connections` | Wire-level HTTP/1.1, HTTP/2, HTTP/3 readers + writers | None on this package: it serializes the `Set-Cookie` header the response collection maintains |
-| `Assimalign.Cohesion.Http.ProtocolUpgrade` | HTTP/1.1 upgrade writer | This package (reads `IHttpResponseCookieFeature` for the `101` head) |
+| `Assimalign.Cohesion.Http.ProtocolUpgrade` | HTTP/1.1 upgrade writer | None on this package: the `101` head serializes the same `Set-Cookie` header, one line per value (#1154) |
 | `Assimalign.Cohesion.Web.Authentication.Cookie` | Cookie-scheme auth handler | This package + Web.Authentication |
 | `Assimalign.Cohesion.Web.CookiePolicy` | Cookie-policy enforcement; replaces the response feature | This package |
 | Future: `&hellip;Http.Cookies.Signing` | Signed-cookie middleware | This package |

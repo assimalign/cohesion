@@ -7,6 +7,9 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- Test-only: the 101 head must send what the response cookie collection wrote to Set-Cookie, and
+		     nothing a cookie feature holds besides (#1154). The library itself takes no cookie reference. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

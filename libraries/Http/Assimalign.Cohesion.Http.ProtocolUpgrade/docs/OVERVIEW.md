@@ -49,7 +49,10 @@ upgrade.
 
 - `Assimalign.Cohesion.Http` — the protocol core (`IHttpContext`, the interceptor seams, and the
   generic `IHttpExchangeControl` per-exchange control surface).
-- `Assimalign.Cohesion.Http.Cookies` — to drain response cookies onto the transition response.
+
+Cookies appended through `context.Response.Cookies` before accepting ride the transition response
+through the `Set-Cookie` header they are written to, one field line per cookie; the package does not
+reference `Assimalign.Cohesion.Http.Cookies`.
 
 The server transport (`Assimalign.Cohesion.Http.Connections`) surfaces its exchange control
 (`HttpExchangeInterceptorResponseContext.Control`) on the response-interceptor seam; this package's

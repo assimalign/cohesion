@@ -370,3 +370,6 @@ parser (`TestObjects/SetCookieField.cs`), not by the model under test.
 - `CookiePolicyCookieAuthenticationTests` covers the ticket without consent behind a TLS proxy, a
   sign-in round trip, a `Strict` floor, sign-out without consent, a `__Host-` ticket name, and a ticket
   the application marks non-essential.
+- `CookiePolicyProtocolUpgradeTests` covers a `101 Switching Protocols`: the upgrade writer sends the
+  cookies the policy rewrote, each once on its own field line, because it reads the `Set-Cookie` header
+  the policy's collection keeps and not the cookie feature (#1154).

@@ -115,7 +115,7 @@ internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
             return;
         }
 
-        Http1ProtocolUpgrade upgrade = new(control, context.Headers, context.Features, candidate.Kind, candidate.Protocol);
+        Http1ProtocolUpgrade upgrade = new(control, context.Headers, candidate.Kind, candidate.Protocol);
         context.Features.Set(new HttpProtocolUpgradeFeature(upgrade));
     }
 

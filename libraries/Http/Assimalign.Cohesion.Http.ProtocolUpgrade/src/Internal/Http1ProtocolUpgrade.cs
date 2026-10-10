@@ -15,8 +15,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <remarks>
 /// <para>
 /// Constructed by <see cref="HttpProtocolUpgradeInterceptor"/>'s response hook from
-/// interceptor-seam materials only: the exchange control, the exchange's live response header
-/// collection, and its feature collection (for response cookies). <see cref="AcceptAsync"/> may
+/// interceptor-seam materials only: the exchange control and the exchange's live response header
+/// collection. <see cref="AcceptAsync"/> may
 /// be invoked at most once per exchange — a second call surfaces as
 /// <see cref="InvalidOperationException"/> before any byte is written, so it can never produce a
 /// second response on the wire.
@@ -36,6 +36,12 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// headers and cookies the application set before accepting are emitted with the transition
 /// response (for example <c>Sec-WebSocket-Accept</c> on a WebSocket handshake).
 /// </para>
+/// <para>
+/// Cookies ride the transition response through the <c>Set-Cookie</c> header alone, one field line
+/// per value (RFC 6265 §3), as on every other response (#1154): the response cookie collection writes
+/// each cookie through to that header, so the writer takes no dependency on the cookie package and never
+/// reads its feature.
+/// </para>
 /// </remarks>
 internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 {
@@ -47,7 +53,6 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 
     private readonly IHttpExchangeControl _control;
     private readonly HttpHeaderCollection _responseHeaders;
-    private readonly IHttpFeatureCollection _features;
     private int _accepted;
 
     /// <summary>
@@ -55,19 +60,16 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
     /// </summary>
     /// <param name="control">The transport's exchange control, whose takeover surrenders the connection.</param>
     /// <param name="responseHeaders">The exchange's live response header collection.</param>
-    /// <param name="features">The exchange's feature collection (drained for response cookies on accept).</param>
     /// <param name="kind">The detected transition kind (Upgrade or Connect).</param>
     /// <param name="protocol">The requested <c>Upgrade</c> protocol token, or <see langword="null"/> for CONNECT.</param>
     public Http1ProtocolUpgrade(
         IHttpExchangeControl control,
         HttpHeaderCollection responseHeaders,
-        IHttpFeatureCollection features,
         HttpProtocolUpgradeKind kind,
         string? protocol)
     {
         _control = control;
         _responseHeaders = responseHeaders;
-        _features = features;
         Kind = kind;
         Protocol = protocol;
     }
@@ -154,9 +156,9 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 
     /// <summary>
     /// Encodes the transition head — the status line, the application's response fields under the
-    /// rules <see cref="ApplyTransitionFields"/> applies, the response cookies, and the blank line —
-    /// without changing the live headers. Each field line is checked against the field syntax before
-    /// it is encoded (RFC 9110 §5.1, §5.5).
+    /// rules <see cref="ApplyTransitionFields"/> applies (each <c>Set-Cookie</c> value on a line of its
+    /// own), and the blank line — without changing the live headers. Each field line is checked against
+    /// the field syntax before it is encoded (RFC 9110 §5.1, §5.5).
     /// </summary>
     /// <exception cref="HttpException">
     /// <see cref="HttpErrorCode.InvalidResponseField"/>: a field name is not a token, or a value holds
@@ -183,6 +185,23 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
                 continue;
             }
 
+            // RFC 6265 §3 — Set-Cookie is never folded: each value goes on a field line of its own, as
+            // Http1MessageWriter writes it (#1154). The response cookie collection writes every cookie
+            // through to this header, so the header is the one source; reading the cookie feature as
+            // well would send each cookie twice, and a replacement feature could disagree with it.
+            if (header.Key == HttpHeaderKey.SetCookie)
+            {
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        AppendFieldLine(builder, header.Key, value);
+                    }
+                }
+
+                continue;
+            }
+
             AppendFieldLine(builder, header.Key, header.Value.ToString());
         }
 
@@ -193,18 +212,6 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
             if (replacesUpgrade)
             {
                 AppendFieldLine(builder, HttpHeaderKey.Upgrade, Protocol!);
-            }
-        }
-
-        // RFC 6265 §3 — each Set-Cookie value MUST be emitted on its own line. The cookie
-        // feature is attached only when the response cookies extension has been used; otherwise
-        // there are no cookies to drain.
-        IHttpResponseCookieFeature? cookieFeature = _features.Get<IHttpResponseCookieFeature>();
-        if (cookieFeature is not null)
-        {
-            foreach (HttpCookie cookie in cookieFeature.Cookies)
-            {
-                AppendFieldLine(builder, HttpHeaderKey.SetCookie, cookie.ToString());
             }
         }
 

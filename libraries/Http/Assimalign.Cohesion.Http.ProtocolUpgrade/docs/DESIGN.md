@@ -121,7 +121,13 @@ second call **before any byte is written**, so a second response can never reach
    `Content-Length` and `Transfer-Encoding` — RFC 9112 §6.3, RFC 9110 §15.2.2 (a 101 carries no body framing) and
    RFC 9110 §9.3.6 (a successful CONNECT response must not include them) — then
    `Connection: Upgrade` + `Upgrade: <protocol>` for an upgrade, or no `Connection` header for a
-   CONNECT (the tunnel persists — `close` applies to HTTP framing, not the tunnel). The status is
+   CONNECT (the tunnel persists — `close` applies to HTTP framing, not the tunnel). Cookies come
+   from the `Set-Cookie` header alone, one field line per value (RFC 6265 §3), as
+   `Http1MessageWriter` writes every other response (#1154). The response cookie collection writes
+   each cookie through to that header, so the header is the one source. Until #1154 the writer
+   comma-folded the header's values onto one line and then wrote each cookie of
+   `IHttpResponseCookieFeature` again, so every cookie went out twice and a replacement feature could
+   disagree with the header. The package no longer references Http.Cookies. The status is
    always the RFC-standard one (the interceptor materials do not expose the application's status
    code, and 101/200 are what §7.8 / §9.3.6 prescribe). Each field line is checked against the core
    field rule as it is encoded (`HttpFieldNormalization`): a name that is not a token, or a value

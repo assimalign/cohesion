@@ -32,7 +32,6 @@ flowchart LR
     Antiforgery --> Cookies
     Antiforgery --> Forms
     Upgrade --> Root
-    Upgrade --> Cookies
     Ext --> Root
     WebSockets --> Root
     WebSockets --> Upgrade

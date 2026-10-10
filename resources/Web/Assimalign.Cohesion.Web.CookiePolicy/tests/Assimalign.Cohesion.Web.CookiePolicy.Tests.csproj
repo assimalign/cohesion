@@ -23,6 +23,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<!-- Test-only: a 101 sends the cookies the policy rewrote (#1154). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
 	</ItemGroup>
 </Project>
