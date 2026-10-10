@@ -649,7 +649,10 @@ the invariant lower case of its name:
   `<name>.catalog`, so a database named `sales.catalog` was the catalog of `sales`;
   now it is `catalog.*` inside the database's own directory, and a drop deletes the
   directory, both sets at once. An open whose data set exists without a catalog set
-  still creates the catalog set, as before.
+  still creates the catalog set, as before. A directory without the data set, which an
+  interrupted create or drop leaves, is no database: an open does not find it, a
+  create refuses it with a message that names the remedy (a stale catalog set must
+  never meet a new data set), and a drop deletes it.
 - **The reported name.** A created database reports the name its create used; an
   opened one reports the spelling its data set's storage header kept from the create
   (`DatabaseFileNames.GetOpenedName`), whatever spelling opened or declared it. The

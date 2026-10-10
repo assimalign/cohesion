@@ -151,6 +151,49 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         listed.ShouldBe(["SALES"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Names: a directory without a data file is no database: an open does not find it, a create refuses it, a drop clears it (#1392)")]
+    public async Task OpenDatabaseAsync_DirectoryWithoutADataFile_ShouldNotFindIt()
+    {
+        // Arrange: the directory 'sales' maps to, empty, as an interrupted create or drop leaves it.
+        await using var engine = CreateEngine(onDisk: true);
+        Directory.CreateDirectory(Path.Combine(_rootPath, "sales"));
+
+        // Act
+        var open = await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("SALES", Token()));
+        var listed = await ListAsync(engine);
+        var create = await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("sales", Token()));
+        await engine.DropDatabaseAsync("Sales", Token());
+        var afterDrop = Directory.EnumerateDirectories(_rootPath).ToArray();
+        var created = await engine.CreateDatabaseAsync("Sales", Token());
+
+        // Assert: not found rather than a missing file, refused with the remedy, then cleared.
+        open.Message.ShouldBe("Database 'SALES' does not exist.");
+        listed.ShouldBeEmpty();
+        create.ShouldNotBeOfType<DatabaseNotFoundException>();
+        create.Message.ShouldContain("without a database in it", Case.Sensitive);
+        afterDrop.ShouldBeEmpty();
+        created.Name.ToString().ShouldBe("Sales");
+        AssertDirectories(onDisk: true, "sales");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Names: a lookup of a name that breaks the rule finds nothing instead of throwing (#1392)")]
+    [InlineData("CON")]
+    [InlineData("a:b")]
+    [InlineData("salés")]
+    [InlineData("../victim")]
+    public async Task TryGetDatabase_NameThatBreaksTheRule_ShouldFindNothing(string name)
+    {
+        // Arrange
+        await using var engine = CreateEngine(onDisk: false);
+
+        // Act
+        bool found = engine.TryGetDatabase(name, out var database);
+
+        // Assert: no such database is ever open, so the lookup is a miss, not a refusal.
+        found.ShouldBeFalse();
+        database.ShouldBeNull();
+    }
+
     private DocumentDatabaseEngine CreateEngine(bool onDisk)
         => DocumentDatabaseEngine.Create("names", onDisk ? new DocumentDatabaseEngineOptions { RootPath = _rootPath } : new DocumentDatabaseEngineOptions());
 

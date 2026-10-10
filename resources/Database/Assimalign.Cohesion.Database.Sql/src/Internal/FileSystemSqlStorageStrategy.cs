@@ -33,11 +33,14 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     {
         var directory = DatabaseFileNames.GetDirectory(_rootPath, databaseName);
 
-        // The data set comes first and claims the database: its directory already there is the
-        // database in another spelling, or one whose creation was interrupted.
+        // The data set comes first and claims the database's directory. One already there is the
+        // database, or, without the data file, what an interrupted create or drop left, which a
+        // drop deletes; a create takes over neither, so a stale catalog set never meets new data.
         if (!catalog && Directory.Exists(directory))
         {
-            throw new DatabaseException($"Storage for database '{databaseName}' already exists.");
+            throw new DatabaseException(File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data)
+                ? $"Storage for database '{databaseName}' already exists."
+                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory));
         }
 
         Directory.CreateDirectory(directory);

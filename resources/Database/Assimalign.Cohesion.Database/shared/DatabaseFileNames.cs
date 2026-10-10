@@ -19,12 +19,15 @@ namespace Assimalign.Cohesion.Database;
 /// characters are a fixed set, not the platform's invalid file-name characters: on Linux and macOS
 /// <see cref="Path.GetInvalidFileNameChars"/> holds only NUL and <c>/</c>, so a name such as
 /// <c>a:b</c> was accepted there and refused on Windows. Now a name valid on one operating system is
-/// valid on every one, and every valid name is a legal directory name on each. The character set
+/// valid on every one, and every valid name is a legal directory name on each. The extra characters
 /// and the length follow RavenDB (<c>src/Raven.Client/Util/ResourceNameValidator.cs:12-14</c> and
 /// <c>:55</c>, <c>MaxDatabaseNameLength</c> at <c>src/Raven.Client/Constants.cs:443</c>), and so
-/// does the dot placement (<c>ResourceNameValidator.cs:25</c>). The device names extend RavenDB's
-/// list (<c>Constants.cs:278-302</c>) with COM0 and LPT0, which Windows reserves too, and apply to
-/// the part before the first dot, where RavenDB compares the whole name
+/// does the dot placement (<c>ResourceNameValidator.cs:25</c>). The letters and digits narrow
+/// RavenDB's, which are any Unicode letter or digit (<c>char.IsLetterOrDigit</c>,
+/// <c>ResourceNameValidator.cs:118</c>), to ASCII, so that lower-casing a name is the same
+/// relation as <see cref="DatabaseName"/>'s ordinal ignore-case equality (below). The device names
+/// extend RavenDB's list (<c>Constants.cs:278-302</c>) with COM0 and LPT0, which Windows reserves
+/// too, and apply to the part before the first dot, where RavenDB compares the whole name
 /// (<c>ResourceNameValidator.cs:65</c>). The 128 limit is also the name capacity of a storage
 /// header, so the header keeps every valid name whole (<see cref="GetOpenedName"/>).
 /// </para>
@@ -35,8 +38,11 @@ namespace Assimalign.Cohesion.Database;
 /// equality are the same relation, so two names <see cref="DatabaseName"/> calls equal map to one
 /// directory and two unequal names never share one, on case-sensitive file systems (Linux, the
 /// container target) as on case-insensitive ones. The mapping is a pure function of the name.
-/// Nothing enumerates the root to find a directory, so a case-variant directory made outside the
-/// engine is never taken for a database. Neo4j folds database names the same way
+/// Nothing enumerates the root to find a directory, and listing accepts only lower-case valid names
+/// (<see cref="IsStorageName"/>). A case-variant directory made outside the engine, <c>Sales</c>
+/// for <c>sales</c>, is outside the contract and behaves as its file system makes it: Linux ignores
+/// it, while on Windows and macOS the file system resolves the lower-case path to it, so an open
+/// finds it and a create refuses it. Neo4j folds database names the same way
 /// (<c>community/common/src/main/java/org/neo4j/kernel/database/NormalizedDatabaseName.java:27-29</c>);
 /// PostgreSQL keeps names out of the file system altogether (a database's directory is its OID,
 /// <c>src/common/relpath.c:110-121</c>).
@@ -173,8 +179,8 @@ internal static class DatabaseFileNames
 
     /// <summary>
     /// Reports whether a directory name under an engine's root path is the storage name of a
-    /// database: a name that follows the rule and is already lower case. Any other directory, a
-    /// case-variant one made outside the engine included, is not one of the engine's databases.
+    /// database: a name that follows the rule and is already lower case. Listing skips any other
+    /// directory, a case-variant one made outside the engine included.
     /// </summary>
     /// <param name="directoryName">The directory's name, without its path.</param>
     /// <returns>True when a database's name maps to that directory.</returns>
@@ -214,6 +220,19 @@ internal static class DatabaseFileNames
     /// <returns>The data, journal and backup files' paths.</returns>
     internal static FileSetPaths GetFiles(string directory, string fileSet)
         => new(Path.Combine(directory, fileSet + ".dat"), Path.Combine(directory, fileSet + ".log"), Path.Combine(directory, fileSet + ".bak"));
+
+    /// <summary>
+    /// Words the refusal of a create whose database's directory is already there without its data
+    /// set's data file. An interrupted create or drop leaves such a directory. It is no database:
+    /// an open does not find it and listing skips it. But a create claims the directory, so it
+    /// does not take one over; a drop deletes it.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <param name="directory">The database's directory (<see cref="GetDirectory"/>).</param>
+    /// <returns>The message.</returns>
+    internal static string GetLeftoverRefusal(string name, string directory)
+        => $"Database '{name}' cannot be created: its directory '{directory}' is already there without a database in it, " +
+            "left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.";
 
     /// <summary>
     /// Gets how a SQL or key-value database's catalog file set is named in messages and in its

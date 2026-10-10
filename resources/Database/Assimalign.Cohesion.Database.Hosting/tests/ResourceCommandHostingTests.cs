@@ -93,6 +93,19 @@ public sealed class ResourceCommandHostingTests
                 ambiguousKey.Id, ambiguousKey.Kind, ambiguousKey.Owner, ambiguousKey.Key, ambiguousKey.Payload), cancellation.Token);
             keyObservation.Status.ShouldBe("Rejected");
             keyObservation.Detail.ShouldBe(keyRefusal.Detail);
+            // A name the engines' name rule refuses (#1392) is rejected with the rule as its detail,
+            // not answered with a bare BadRequest.
+            var invalidName = new RuntimeCommand("invalid-name", "database.add-database", "appa", "commands/CON",
+                Encoding.UTF8.GetBytes("""{"database":"CON","engine":"commands"}"""));
+            ResourceCommandRejectedException nameRefusal = await Should.ThrowAsync<ResourceCommandRejectedException>(
+                () => plane.ExecuteCommandAsync(invalidName, cancellation.Token).AsTask());
+            nameRefusal.Detail.ShouldContain("A database name must be 1 to 128 ASCII letters", Case.Sensitive);
+            nameRefusal.Detail.ShouldContain("'CON' is a Windows device name.", Case.Sensitive);
+            ResourceCommandObservation nameObservation = await client.SendCommandAsync(new ClientCommand(
+                invalidName.Id, invalidName.Kind, invalidName.Owner, invalidName.Key, invalidName.Payload), cancellation.Token);
+            nameObservation.Status.ShouldBe("Rejected");
+            nameObservation.Detail.ShouldBe(nameRefusal.Detail);
+            engine.TryGetDatabase("CON", out _).ShouldBeFalse();
             var runtime = new RuntimeCommand(command.Id, command.Kind, "appb", command.Key, payload);
             ResourceCommandRejectedException direct = await Should.ThrowAsync<ResourceCommandRejectedException>(
                 () => plane.ExecuteCommandAsync(runtime, cancellation.Token).AsTask());

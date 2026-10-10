@@ -166,8 +166,12 @@ existed on a case-sensitive file system; now the directory is a pure function of
 follows the area's one rule, with the same verdict on every OS: 1 to 128 ASCII letters, digits,
 `_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name before the first
 dot. Database enumeration includes persisted databases and opens them through recovery: it takes
-each directory that is a lower-case valid name holding `blob.dat`, so a case-variant directory made
-outside the engine is not a database. A database reports the spelling its storage header kept from
+each directory that is a lower-case valid name holding `blob.dat`, so it skips a case-variant
+directory made outside the engine (outside the contract: on Windows and macOS the file system
+resolves an open's lower-case path to it). An open needs `blob.dat` too, so a directory without it,
+left by an interrupted create or drop, is not found; a create refuses it with a message that names
+the leftover, and a drop removes it. `TryGetDatabase` is a lookup, so a name that breaks the rule is
+not found rather than refused. A database reports the spelling its storage header kept from
 its create, whatever spelling opened or listed it. In memory the engine's `DatabaseMemoryFiles`
 keys the file set by the same storage name. `BlobDatabaseNameTests` pins each case in memory and on
 disk, asserting the exact directory names it leaves with ordinal comparison.

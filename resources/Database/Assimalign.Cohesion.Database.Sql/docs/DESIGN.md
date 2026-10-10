@@ -1759,7 +1759,10 @@ the invariant lower case of its name:
   database names, so a database named `sales.catalog` was the catalog of `sales`. A
   drop deletes the database's directory, both sets at once. A database whose data set
   exists without its catalog set (an interrupted create) is refused with
-  `SqlDataStorageFormatException`, as before.
+  `SqlDataStorageFormatException`, as before. A directory without the data set, which
+  an interrupted create or drop leaves, is no database: an open does not find it, a
+  create refuses it with a message that names the remedy (a stale catalog set must
+  never meet a new data set), and a drop deletes it.
 - **The reported name.** A created database reports the name its create used; an
   opened one reports the spelling its data set's storage header kept from the create
   (`DatabaseFileNames.GetOpenedName`), whatever spelling opened it. The catalog set's

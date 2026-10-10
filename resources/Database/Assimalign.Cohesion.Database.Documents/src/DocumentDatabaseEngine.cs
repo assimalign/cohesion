@@ -454,7 +454,8 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// <inheritdoc />
     protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
-        ValidateName(name);
+        // A lookup, not a check of the name rule: a name that breaks it is never open, so it is not
+        // found, as in SQL and key-value (#1392).
         lock (_sync)
         {
             ThrowIfDisposed();
@@ -582,15 +583,18 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 existing.Dispose();
             }
             // Every spelling of the name maps to the one directory, so a case-variant of an existing
-            // database is that database on a case-sensitive file system too (#1392).
+            // database is that database on a case-sensitive file system too (#1392). A create claims
+            // the directory, so one already there refuses it; an open needs the data file, as
+            // listing does, so a directory an interrupted create or drop left is not found.
             var directory = GetDirectory(name);
-            bool exists = StorageExists(name, directory);
-            if (create && exists)
+            if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException($"Database '{name}' already exists.");
+                throw new DatabaseException(_options.StorageStrategy is null && directory is not null && !HasDataFile(directory)
+                    ? DatabaseFileNames.GetLeftoverRefusal(name, directory)
+                    : $"Database '{name}' already exists.");
             }
 
-            if (!create && !exists)
+            if (!create && !HasDatabase(name, directory))
             {
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
@@ -673,11 +677,22 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }
 
-    // Whether a database's storage exists: the strategy's answer, its directory under the root,
-    // or the engine's in-memory files.
+    // Whether a database's storage exists, for a create, which claims it, and a drop, which removes
+    // it: the strategy's answer, its directory under the root, or the engine's in-memory files. A
+    // directory without a data file counts, so a create refuses it and a drop clears it, as the SQL
+    // and key-value strategies do.
     private bool StorageExists(string name, string? directory)
         => _options.StorageStrategy?.StorageExists(name)
             ?? (directory is not null ? Directory.Exists(directory) : _memory?.Exists(name, DataFileSet) ?? false);
+
+    // Whether a database is there to open: as StorageExists, except that its directory must hold
+    // the data file, the test listing applies, so an open of a directory an interrupted create or
+    // drop left is not found instead of failing on the missing file.
+    private bool HasDatabase(string name, string? directory)
+        => _options.StorageStrategy is null && directory is not null ? HasDataFile(directory) : StorageExists(name, directory);
+
+    // Whether a database's directory holds its data file.
+    private static bool HasDataFile(string directory) => File.Exists(DatabaseFileNames.GetFiles(directory, DataFileSet).Data);
 
     // The databases as one typed sequence, which GetDatabasesAsync hands out without a per-item
     // cast: the sequence is covariant, so it is the base's sequence too. Each name found in
@@ -699,20 +714,20 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     }
 
     // The storage names of the databases under the root: each directory a database's name maps to
-    // (lower case, following the name rule) that holds a data file. Any other directory, a
-    // case-variant one made outside the engine included, is not one of its databases (#1392).
+    // (lower case, following the name rule) that holds a data file. Listing skips any other
+    // directory, a case-variant one made outside the engine included (#1392).
     private static IEnumerable<string> FindStoredNames(string rootPath) => Directory.EnumerateDirectories(rootPath)
         .Select(path => Path.GetFileName(path))
-        .Where(name => DatabaseFileNames.IsStorageName(name) && File.Exists(DatabaseFileNames.GetFiles(Path.Combine(rootPath, name), DataFileSet).Data));
+        .Where(name => DatabaseFileNames.IsStorageName(name) && HasDataFile(Path.Combine(rootPath, name)));
 
     // A database's directory under the root, named for the lower case of its name, whatever
     // spelling the caller used (#1392); null for an engine whose databases are not in a directory.
     private string? GetDirectory(string name) => _rootPath is null ? null : DatabaseFileNames.GetDirectory(_rootPath, name);
 
-    // The area's one name rule, in the cores, after the base's checks of an empty name, disposal
-    // and the token: a database's files live in a directory named for it, and a name one operating
-    // system accepts must be one every other accepts. The rule is shared with every model
-    // (DatabaseFileNames, #1392), and the builder checks it when a database is declared.
+    // The area's one name rule, in the create, open and drop cores, after the base's checks of an
+    // empty name, disposal and the token: a database's files live in a directory named for it, and a
+    // name one operating system accepts must be one every other accepts. The rule is shared with
+    // every model (DatabaseFileNames, #1392), and the builder checks it when a database is declared.
     private static void ValidateName(string name) => DatabaseFileNames.ThrowIfInvalid(name);
 
     // Under the engine lock: removes a database whose close ended, when the registry still holds

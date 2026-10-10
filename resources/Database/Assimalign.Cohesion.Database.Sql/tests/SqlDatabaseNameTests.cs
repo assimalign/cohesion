@@ -196,6 +196,53 @@ public sealed class SqlDatabaseNameTests : IDisposable
         await engine.DisposeAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Names: a directory without a data file is no database: an open does not find it, a create refuses it, a drop clears it (#1392)")]
+    public async Task OpenDatabaseAsync_DirectoryWithoutADataFile_ShouldNotFindIt()
+    {
+        // Arrange: the directory 'sales' maps to, holding only a catalog set, as an interrupted
+        // drop can leave it.
+        await using var engine = CreateEngine(onDisk: true);
+        string directory = Path.Combine(_rootPath, "sales");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllBytesAsync(Path.Combine(directory, "catalog.dat"), [], TestTimeout.Token());
+
+        // Act
+        var open = await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("SALES", TestTimeout.Token()));
+        var create = await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("sales", TestTimeout.Token()));
+        var afterCreate = Directory.EnumerateFiles(directory).Select(Path.GetFileName).ToArray();
+        await engine.DropDatabaseAsync("Sales", TestTimeout.Token());
+        var afterDrop = Directory.EnumerateDirectories(_rootPath).ToArray();
+        var created = await engine.CreateDatabaseAsync("Sales", TestTimeout.Token());
+
+        // Assert: not found, refused with the remedy and without touching the stale catalog set,
+        // then cleared by the drop.
+        open.Message.ShouldBe("Database 'SALES' does not exist.");
+        create.ShouldNotBeOfType<DatabaseNotFoundException>();
+        create.Message.ShouldContain("without a database in it", Case.Sensitive);
+        afterCreate.ShouldBe(["catalog.dat"]);
+        afterDrop.ShouldBeEmpty();
+        created.Name.ToString().ShouldBe("Sales");
+        AssertDirectories(onDisk: true, "sales");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Names: a lookup of a name that breaks the rule finds nothing instead of throwing (#1392)")]
+    [InlineData("CON")]
+    [InlineData("a:b")]
+    [InlineData("salés")]
+    [InlineData("../victim")]
+    public async Task TryGetDatabase_NameThatBreaksTheRule_ShouldFindNothing(string name)
+    {
+        // Arrange
+        await using var engine = CreateEngine(onDisk: false);
+
+        // Act
+        bool found = engine.TryGetDatabase(name, out var database);
+
+        // Assert: no such database is ever open, so the lookup is a miss, not a refusal.
+        found.ShouldBeFalse();
+        database.ShouldBeNull();
+    }
+
     private SqlDatabaseEngine CreateEngine(bool onDisk)
         => SqlDatabaseEngine.Create("names", onDisk ? new SqlDatabaseEngineOptions { RootPath = _rootPath } : new SqlDatabaseEngineOptions());
 

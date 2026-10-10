@@ -65,8 +65,11 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             await engine.CreateDatabaseAsync(database, cancellationToken).ConfigureAwait(false);
             _createdDatabases[command.Key] = engine;
         }
-        catch (DatabaseException exception)
+        catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
+            // An ArgumentException is the engine's refusal of a name that breaks the area's name
+            // rule (#1392); its message states the rule, so it reaches the gateway as a rejection
+            // with that detail, not as a bare BadRequest.
             throw new ResourceCommandRejectedException($"database.add-database '{database}' on engine '{engine.Name}' was refused: {exception.Message}");
         }
         return ReadOnlyMemory<byte>.Empty;
@@ -89,7 +92,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             }
             _createdDatabases.Remove(command.Key);
         }
-        catch (DatabaseException exception)
+        catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
             throw new ResourceCommandRejectedException($"database.add-database deletion of '{database}' on engine '{engine.Name}' was refused: {exception.Message}");
         }

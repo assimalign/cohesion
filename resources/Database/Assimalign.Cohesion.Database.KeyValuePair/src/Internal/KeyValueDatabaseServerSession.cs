@@ -445,7 +445,9 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
     /// </summary>
     private async ValueTask<KeyValueDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(name))
+        // A name that breaks the area's name rule names no database the engine can hold, so it is
+        // not found, instead of the open's ArgumentException faulting the session (#1392).
+        if (string.IsNullOrWhiteSpace(name) || DatabaseFileNames.GetRefusal(name) is not null)
         {
             return null;
         }

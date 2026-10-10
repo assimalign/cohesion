@@ -123,7 +123,14 @@ of `SALES` after `sales` is refused as existing, and a drop of `SALES` drops `sa
   trailing or doubled dot; no Windows device name before the first dot. The rule used to be the
   platform's invalid file-name characters, so `a:b` was valid on Linux and refused on Windows.
 - **Enumeration** takes each directory under the root that is a lower-case valid name holding
-  `graph.dat`, so a case-variant directory made outside the engine is not a database.
+  `graph.dat`, so it skips a case-variant directory made outside the engine. Such a directory is
+  outside the contract: on Windows and macOS the file system resolves an open's lower-case path to
+  it.
+- **A database is its data file.** An open needs `graph.dat` too, so a directory without it, left
+  by an interrupted create or drop, is not found (`DatabaseNotFoundException`). A create claims
+  the directory, so it refuses that one with a message that names the leftover, and a drop
+  removes it. `TryGetDatabase` is a lookup, so a name that breaks the rule is not found rather
+  than refused.
 - **The reported name** is the spelling the storage header kept from the database's create,
   whatever spelling opened or listed it.
 - **In memory** the engine's `DatabaseMemoryFiles` keys the `graph` file set by the same storage

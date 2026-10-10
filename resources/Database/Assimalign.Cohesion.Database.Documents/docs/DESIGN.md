@@ -531,7 +531,11 @@ function of the name (`DatabaseFileNames`, shared with every model; the area des
 reasoning). A name follows the area's one rule, with the same verdict on every OS: 1 to 128 ASCII
 letters, digits, `_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name
 before the first dot. Enumeration takes each directory that is a lower-case valid name holding
-`document.dat`, so a case-variant directory made outside the engine is not a database, and a
+`document.dat`, so it skips a case-variant directory made outside the engine (outside the
+contract: on Windows and macOS the file system resolves an open's lower-case path to it). An open
+needs `document.dat` too, so a directory without it, left by an interrupted create or drop, is not
+found; a create refuses it with a message that names the leftover, and a drop removes it.
+`TryGetDatabase` is a lookup, so a name that breaks the rule is not found rather than refused. A
 database reports the spelling its storage header kept from its create, whatever spelling opened or
 listed it. In memory the engine's `DatabaseMemoryFiles` keys the file set by the same storage name.
 `DocumentDatabaseNameTests` pins each case in memory and on disk, asserting the exact directory
