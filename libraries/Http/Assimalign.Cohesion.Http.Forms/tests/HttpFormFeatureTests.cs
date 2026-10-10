@@ -430,6 +430,38 @@ public class HttpFormFeatureTests
         first!.FileName.ShouldBe("one.png");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Files: an empty optional file input is read as a value, not a file")]
+    public async Task ReadFormAsync_FilePartWithEmptyFileName_ShouldReadAsValue()
+    {
+        // Arrange — the part a browser sends for an <input type="file"> left empty.
+        const string boundary = "B";
+        string body =
+            $"--{boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"title\"\r\n" +
+            "\r\n" +
+            "holiday" +
+            $"\r\n--{boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"avatar\"; filename=\"\"\r\n" +
+            "Content-Type: application/octet-stream\r\n" +
+            "\r\n" +
+            $"\r\n--{boundary}--\r\n";
+
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = $"multipart/form-data; boundary={boundary}",
+            Body = BodyOf(body),
+        };
+
+        // Act
+        IHttpFormCollection form = await new HttpFormFeature(request).ReadFormAsync();
+
+        // Assert — before, the empty file name failed the whole parse with an ArgumentException.
+        form.Files.Count.ShouldBe(0);
+        form["title"].Value.ShouldBe("holiday");
+        form.TryGetValue("avatar", out HttpQueryValue avatar).ShouldBeTrue();
+        avatar.Value.ShouldBe(string.Empty);
+    }
+
     private static MemoryStream BodyOf(string content) => new(Encoding.UTF8.GetBytes(content));
 
     /// <summary>Non-seekable stream that just yields zero bytes up to a configured length.</summary>

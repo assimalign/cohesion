@@ -47,34 +47,32 @@ internal sealed class FormsMiddleware : IWebApplicationMiddleware
             features.Set<IHttpFormFeature>(feature);
         }
 
-        if (await ReadAsync(context, feature).ConfigureAwait(false) is { } rejection)
-        {
-            // Answer the request here; the rest of the pipeline does not run.
-            await RejectAsync(context, rejection).ConfigureAwait(false);
-            return;
-        }
+        // Parse and cache the form. The read stays inline rather than in a helper so a parse that
+        // suspends on the body allocates one state machine per request, not two.
+        HttpStatusCode? rejection = null;
 
-        await next.Invoke(context).ConfigureAwait(false);
-    }
-
-    // Parses and caches the form: null when the request may proceed, otherwise the status it is
-    // rejected with.
-    private static async Task<HttpStatusCode?> ReadAsync(IHttpContext context, IHttpFormFeature feature)
-    {
         try
         {
             await feature.ReadFormAsync(context.RequestCancelled).ConfigureAwait(false);
-            return null;
         }
         catch (InvalidDataException exception) when (exception.InnerException is HttpFormLimitExceededException)
         {
             // The client must send less: RFC 9110 §15.5.14.
-            return HttpStatusCode.RequestEntityTooLarge;
+            rejection = HttpStatusCode.RequestEntityTooLarge;
         }
         catch (InvalidDataException)
         {
-            return HttpStatusCode.BadRequest;
+            rejection = HttpStatusCode.BadRequest;
         }
+
+        if (rejection is { } status)
+        {
+            // Answer the request here; the rest of the pipeline does not run.
+            await RejectAsync(context, status).ConfigureAwait(false);
+            return;
+        }
+
+        await next.Invoke(context).ConfigureAwait(false);
     }
 
     private static async Task RejectAsync(IHttpContext context, HttpStatusCode status)

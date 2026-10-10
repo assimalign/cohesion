@@ -150,6 +150,32 @@ public class UseFormsMiddlewareTests
         errors[0].GetString().ShouldBe("The request form could not be read.");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Forms] - UseForms: an empty optional file input should reach downstream with no file")]
+    public async Task UseForms_EmptyOptionalFileInput_ShouldReachDownstreamWithoutFile()
+    {
+        // Arrange — what every browser sends for an <input type="file"> left empty: filename="" and no content.
+        TestHttpContext context = new(
+            "multipart/form-data; boundary=B",
+            BodyOf(
+                "--B\r\n" +
+                "Content-Disposition: form-data; name=\"avatar\"; filename=\"\"\r\n" +
+                "Content-Type: application/octet-stream\r\n" +
+                "\r\n" +
+                "\r\n--B--\r\n"));
+
+        int downstream = 0;
+        IWebApplicationPipeline pipeline = BuildPipeline(() => downstream++);
+
+        // Act — before, the parse threw an ArgumentException that reached the exception boundary as a 500.
+        await pipeline.ExecuteAsync(context);
+
+        // Assert — an ordinary submission, not a client error.
+        downstream.ShouldBe(1);
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        context.ResponseBody.Length.ShouldBe(0);
+        context.Request.Form.Files.Count.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Forms] - UseForms: a rejection after the head was committed should abort the exchange")]
     public async Task UseForms_RejectionAfterResponseStarted_ShouldAbortExchange()
     {

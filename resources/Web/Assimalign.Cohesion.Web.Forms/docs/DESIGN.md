@@ -62,6 +62,12 @@ answers it and the rest of the pipeline does not run:
   decompressed body (`Web.Compression`), an `IOException` from a broken
   connection and a cancelled request belong to their owners, exactly as they do
   for a form-bound endpoint.
+- **An empty file input is not an error.** A browser sends an optional
+  `<input type="file">` left empty as a part with `filename=""` and no content.
+  Http.Forms reads it as an empty value rather than a file, so the request
+  reaches the next middleware with nothing in `Form.Files`. That rule lives in
+  the parse (Http.Forms DESIGN), so a form-bound endpoint and `UseAntiforgery`
+  read the same form the same way.
 
 The failed parse stays cached on the feature, so nothing downstream could read
 the form anyway: answering here is the only place the request can still get a

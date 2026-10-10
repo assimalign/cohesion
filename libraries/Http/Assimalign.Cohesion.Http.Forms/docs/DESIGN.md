@@ -71,7 +71,12 @@ never buffered in memory just to parse it.
   `Microsoft.AspNetCore.WebUtilities.MultipartReader`) over a
   `BufferedReadStream`, yielding one section at a time with its own header
   block and body stream. Value parts are read as text; file parts flow
-  through `ReadFileSectionAsync`.
+  through `ReadFileSectionAsync`. A part is a file part only when its
+  `filename` is non-empty, ASP.NET Core's `IsFileDisposition` rule: a browser
+  sends an optional `<input type="file">` left empty as `filename=""` with no
+  content, and that part is read as an empty value. Before the #1210 review it
+  reached the `HttpFormFile` constructor, whose `ArgumentException` no caller
+  catches, so the ordinary submission failed as a `500`.
 
 ### Multiple files under one name
 
