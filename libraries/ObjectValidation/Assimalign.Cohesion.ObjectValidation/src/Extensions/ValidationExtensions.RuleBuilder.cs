@@ -91,6 +91,10 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the member must be in the format of an email address.
     /// </summary>
+    /// <remarks>
+    /// The check runs in time linear in the value's length. An address longer than 254 UTF-8 octets, or with a
+    /// local part longer than 64, fails (RFC 5321 §4.5.3.1).
+    /// </remarks>
     /// <param name="builder">The current instance of the validation builder.</param>
     /// <returns><see cref="IValidationRuleBuilder{TValue}"/></returns>
     /// <exception cref="ValidationException">Is thrown when <see cref="IValidationRuleBuilder{TValue}.ValidationItem"/> is not of type <see cref="IValidationRule{TValue}"/>.</exception>
@@ -109,6 +113,10 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the member must be in the format of an email address.
     /// </summary>
+    /// <remarks>
+    /// The check runs in time linear in the value's length. An address longer than 254 UTF-8 octets, or with a
+    /// local part longer than 64, fails (RFC 5321 §4.5.3.1).
+    /// </remarks>
     /// <param name="builder">The current instance of the validation builder.</param>
     /// <param name="configure"></param>
     /// <returns><see cref="IValidationRuleBuilder{TValue}"/></returns>
@@ -1288,9 +1296,14 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared. Each match may run for one second, and a match that runs
+    /// out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <returns></returns>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -1316,11 +1329,16 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared. Each match may run for one second, and a match that runs
+    /// out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <param name="configure">A delegate to configure a custom validation error.</param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException"></exception>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern, Action<IValidationError> configure)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -1357,10 +1375,15 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared, with <paramref name="options"/>. Each match may run for one
+    /// second, and a match that runs out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <param name="options"></param>
     /// <returns></returns>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression, or <paramref name="options"/> is not a valid combination.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern, RegexOptions options)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -1385,12 +1408,17 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared, with <paramref name="options"/>. Each match may run for one
+    /// second, and a match that runs out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <param name="options"></param>
     /// <param name="configure">A delegate to configure a custom validation error.</param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException"></exception>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression, or <paramref name="options"/> is not a valid combination.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern, RegexOptions options, Action<IValidationError> configure)
     {
         if (string.IsNullOrEmpty(pattern))

@@ -21,6 +21,10 @@ Implements a fluent validation engine built from validators, profiles, rules, an
   defaults, every failing member is reported, each with the errors of its first failing rule:
   `ValidationMode.Stop` stops at the first failing member, and `ContinueThroughValidationChain` runs every
   rule of a member (see [DESIGN.md](DESIGN.md), "Which Failures Are Reported").
+- The pattern rules are safe on request bodies. `EmailAddress` runs in linear time and fails an address over
+  the RFC 5321 sizes. `Matches` gives each match of the caller's pattern one second, fails the rule when a match
+  runs out, and throws for an invalid pattern where the profile declares it (see [DESIGN.md](DESIGN.md),
+  "Pattern Rules on Untrusted Input").
 
 ## Key Types
 
