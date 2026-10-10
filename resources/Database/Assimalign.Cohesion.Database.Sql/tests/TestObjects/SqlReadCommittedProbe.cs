@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -33,8 +34,19 @@ internal static class SqlReadCommittedProbe
     /// <summary>The statement kinds the readers run, in turn.</summary>
     internal static readonly string[] Kinds = ["scan", "seek", "index-join", "nested-loop-join"];
 
-    /// <summary>Runs the probe for the given duration and returns what it counted.</summary>
-    /// <param name="duration">How long the readers, writers and purge loop run.</param>
+    /// <summary>The longest a run waits past its duration for the work it needs.</summary>
+    internal static readonly TimeSpan Ceiling = TimeSpan.FromSeconds(60);
+
+    /// <summary>The writer commits a run needs before it may stop.</summary>
+    internal const int MinimumWriterCommits = 20;
+
+    /// <summary>Runs the probe and returns what it counted.</summary>
+    /// <param name="duration">
+    /// The shortest time the readers, writers and purge loop run. The run then continues until the
+    /// purge has reclaimed a version and the writers have committed <see cref="MinimumWriterCommits"/>
+    /// times, at most <see cref="Ceiling"/> longer, so a slow machine cannot pass without the race
+    /// having been exercised (macOS CI once ran 2 s with 6 commits and no purge pass).
+    /// </param>
     /// <param name="readers">The number of reader sessions.</param>
     /// <param name="writers">The number of writer sessions.</param>
     /// <returns>The counts.</returns>
@@ -57,7 +69,7 @@ internal static class SqlReadCommittedProbe
         }
 
         var counts = new SqlReadCommittedProbeCounts();
-        using var stop = new CancellationTokenSource(duration);
+        using var stop = new CancellationTokenSource();
         var actors = new List<Task>();
 
         for (int i = 0; i < writers; i++)
@@ -72,10 +84,25 @@ internal static class SqlReadCommittedProbe
             actors.Add(Task.Run(() => ReadAsync(database, counts, first, stop.Token)));
         }
 
-        actors.Add(Task.Run(() => PurgeAsync(database, counts, stop.Token)));
+        // The purge loop has a thread of its own: on a small runner the readers and writers hold
+        // the pool's few threads, and a pooled purge loop could wait out the whole run.
+        var purge = new Thread(() => Purge(database, counts, stop.Token)) { IsBackground = true, Name = "rc-probe-purge" };
+        purge.Start();
+
+        var elapsed = Stopwatch.StartNew();
+        while (elapsed.Elapsed < duration || (!HasExercisedTheRace(counts) && elapsed.Elapsed < duration + Ceiling))
+        {
+            await Task.Delay(50);
+        }
+
+        stop.Cancel();
         await Task.WhenAll(actors);
+        purge.Join();
         return counts;
     }
+
+    private static bool HasExercisedTheRace(SqlReadCommittedProbeCounts counts)
+        => Interlocked.Read(ref counts.Reclaimed) > 0 && Interlocked.Read(ref counts.WriterCommits) >= MinimumWriterCommits;
 
     private static async Task WriteAsync(SqlDatabase database, SqlReadCommittedProbeCounts counts, int seed, CancellationToken stop)
     {
@@ -162,7 +189,7 @@ internal static class SqlReadCommittedProbe
         }
     }
 
-    private static async Task PurgeAsync(SqlDatabase database, SqlReadCommittedProbeCounts counts, CancellationToken stop)
+    private static void Purge(SqlDatabase database, SqlReadCommittedProbeCounts counts, CancellationToken stop)
     {
         while (!stop.IsCancellationRequested)
         {
@@ -176,7 +203,7 @@ internal static class SqlReadCommittedProbe
                 counts.PurgeErrors.AddOrUpdate(exception.GetType().Name + ": " + exception.Message, 1, (_, value) => value + 1);
             }
 
-            await Task.Yield();
+            Thread.Yield();
         }
     }
 
