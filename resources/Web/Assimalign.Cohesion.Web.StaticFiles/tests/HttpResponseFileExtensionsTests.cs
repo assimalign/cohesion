@@ -125,6 +125,36 @@ public class HttpResponseFileExtensionsTests
         context.ReadResponseBody().ShouldBe("mystery");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a file with no extension should be sent as application/octet-stream, whatever its name")]
+    [InlineData("html")]
+    [InlineData(".json")]
+    public async Task SendFileAsync_FileWithoutExtension_ShouldServeOctetStream(string name)
+    {
+        // Arrange — a name that happens to spell a type is not that type's extension.
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/" + name, "<script>alert(1)</script>"));
+
+        // Act
+        TestHttpContext context = await RunAsync(HttpMethod.Get, response => response.SendFileAsync(GetFile(site, "uploads/" + name)));
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        Header(context, HttpHeaderKey.ContentType).ShouldBe("application/octet-stream");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a mount path to a file with no extension should be sent as application/octet-stream")]
+    public async Task SendFileAsync_PathToFileWithoutExtension_ShouldServeOctetStream()
+    {
+        // Arrange
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/html", "<script>alert(1)</script>"));
+
+        // Act
+        TestHttpContext context = await RunAsync(HttpMethod.Get, response => response.SendFileAsync(site, "uploads/html"));
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        Header(context, HttpHeaderKey.ContentType).ShouldBe("application/octet-stream");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a current If-None-Match should respond 304 without content")]
     public async Task SendFileAsync_IfNoneMatchCurrent_ShouldRespond304WithoutContent()
     {

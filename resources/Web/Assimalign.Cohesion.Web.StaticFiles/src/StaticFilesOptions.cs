@@ -38,23 +38,26 @@ public sealed class StaticFilesOptions
 
     /// <summary>
     /// Gets the extension-to-content-type overrides overlaid onto
-    /// <see cref="HttpContentTypes.Default"/> when the middleware is composed. Keys may be given
-    /// with or without a leading dot and are case-insensitive; a key matching a default extension
-    /// replaces the default value.
+    /// <see cref="HttpContentTypes.Default"/> when the middleware is composed. Keys are extensions;
+    /// they may be given with or without a leading dot and are case-insensitive, and a key matching
+    /// a default extension replaces the default value. A key maps an extension only: the key
+    /// <c>gltf</c> maps <c>model.gltf</c>, never a file named <c>gltf</c>.
     /// </summary>
     public IDictionary<string, string> ContentTypeMappings { get; }
         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Gets or sets a value indicating whether files whose extension has no content-type mapping
-    /// are served with <see cref="FallbackContentType"/>. When <see langword="false"/> (the
-    /// default) such requests pass through to the next middleware — unknown types are blocked
-    /// rather than guessed, so the application decides what owns them.
+    /// Gets or sets a value indicating whether files with no mapped extension are served with
+    /// <see cref="FallbackContentType"/>. That covers an unmapped extension and a name with no
+    /// extension at all: a name with no dot (<c>html</c>, <c>README</c>) or a dotfile
+    /// (<c>.json</c>). When <see langword="false"/> (the default) such requests pass through to
+    /// the next middleware — unknown types are blocked rather than guessed, so the application
+    /// decides what owns them.
     /// </summary>
     public bool ServeUnknownContentTypes { get; set; }
 
     /// <summary>
-    /// Gets or sets the content type used for unmapped extensions when
+    /// Gets or sets the content type used for files with no mapped extension when
     /// <see cref="ServeUnknownContentTypes"/> is enabled. The default is
     /// <c>application/octet-stream</c>.
     /// </summary>

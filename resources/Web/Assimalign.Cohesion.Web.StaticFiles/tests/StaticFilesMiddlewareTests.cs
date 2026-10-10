@@ -365,6 +365,61 @@ public class StaticFilesMiddlewareTests
         context.ReadResponseBody().ShouldBe("mystery");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: a file with no extension should pass through by default, whatever its name")]
+    [InlineData("html")]
+    [InlineData("js")]
+    [InlineData("json")]
+    [InlineData("css")]
+    [InlineData(".html")]
+    [InlineData(".json")]
+    public async Task Invoke_FileWithoutExtension_ShouldPassThroughByDefault(string name)
+    {
+        // Arrange — an upload named "html" is not an HTML file; serving it as text/html would turn
+        // a user-controlled name into stored XSS.
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/" + name, "<script>alert(1)</script>"));
+        bool[] passedThrough = [false];
+
+        // Act
+        TestHttpContext context = await RunAsync(site, "/uploads/" + name, HttpMethod.Get, passedThrough: passedThrough);
+
+        // Assert
+        passedThrough[0].ShouldBeTrue();
+        context.Response.Headers.ContainsKey(HttpHeaderKey.ContentType).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: ServeUnknownContentTypes should serve a file with no extension as the fallback type")]
+    public async Task Invoke_FileWithoutExtensionWithFallback_ShouldServeFallbackType()
+    {
+        // Arrange
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/html", "<script>alert(1)</script>"));
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site, "/uploads/html", HttpMethod.Get,
+            options => options.ServeUnknownContentTypes = true);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        Header(context, HttpHeaderKey.ContentType).ShouldBe("application/octet-stream");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: a content-type key without its dot should not map a file of that bare name")]
+    public async Task Invoke_ContentTypeKeyWithoutDot_ShouldNotMapBareFileName()
+    {
+        // Arrange — the key "gltf" maps the extension ".gltf", not a file named "gltf".
+        using InMemoryFileSystem site = StaticSite.Create(("gltf", "{}"));
+        bool[] passedThrough = [false];
+
+        // Act
+        await RunAsync(
+            site, "/gltf", HttpMethod.Get,
+            options => options.ContentTypeMappings["gltf"] = "model/gltf+json",
+            passedThrough: passedThrough);
+
+        // Assert
+        passedThrough[0].ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: content-type overlays should override the default map")]
     public async Task Invoke_ContentTypeOverlay_ShouldOverrideDefaultMap()
     {

@@ -168,8 +168,10 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 
         // Content-type gate before any validator work: a file this middleware will not claim
         // should never emit validators or 304s. The logical (unencoded) name decides the type —
-        // a precompressed sibling only changes the coding, never the media type.
-        if (!HttpContentTypes.TryGetContentType(_contentTypes, logicalName, out string contentType))
+        // a precompressed sibling only changes the coding, never the media type. A name with no
+        // extension ("html", ".json") has no type, so an upload named "html" is never served as
+        // text/html: it passes through like any unmapped name.
+        if (!HttpContentTypes.TryGetFromFileName(_contentTypes, logicalName, out string contentType))
         {
             if (!_serveUnknownContentTypes)
             {

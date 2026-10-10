@@ -61,9 +61,10 @@ public static class HttpResponseFileExtensions
         /// </para>
         /// <para>
         /// When <paramref name="contentType"/> is <see langword="null"/>, the type is looked up from the
-        /// file name's extension in <see cref="HttpContentTypes.Default"/>, and an unmapped extension is
-        /// sent as <c>application/octet-stream</c>. Pass the type explicitly for content a user
-        /// supplied: a file named <c>avatar.html</c> would otherwise be served as <c>text/html</c>.
+        /// file name's extension in <see cref="HttpContentTypes.Default"/>. A name whose extension is
+        /// unmapped, or that has none (<c>html</c>, or a dotfile such as <c>.json</c>), is sent as
+        /// <c>application/octet-stream</c>. Pass the type explicitly for content a user supplied: a
+        /// file named <c>avatar.html</c> would otherwise be served as <c>text/html</c>.
         /// </para>
         /// </remarks>
         /// <param name="file">The file to send.</param>
@@ -78,7 +79,7 @@ public static class HttpResponseFileExtensions
             ArgumentNullException.ThrowIfNull(file);
 
             string resolvedContentType = contentType is null
-                ? HttpContentTypes.GetContentType(file.Name)
+                ? HttpContentTypes.GetFromFileName(file.Name)
                 : ValidateContentType(contentType);
 
             return SendFileCoreAsync(response, file, resolvedContentType, cancellationToken);
@@ -131,7 +132,7 @@ public static class HttpResponseFileExtensions
             return SendFileCoreAsync(
                 response,
                 file,
-                explicitContentType ?? HttpContentTypes.GetContentType(file.Name),
+                explicitContentType ?? HttpContentTypes.GetFromFileName(file.Name),
                 cancellationToken);
         }
 

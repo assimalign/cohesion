@@ -90,6 +90,14 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
 - **Unknown extensions blocked by default.** Serving unmapped types as `octet-stream` invites
   accidental exposure (config files, dotfiles); the default passes them through so the
   application decides. `ServeUnknownContentTypes` + `FallbackContentType` opt in explicitly.
+- **A name with no extension has no type (#1186).** The gate asks
+  `HttpContentTypes.TryGetFromFileName` for the logical file name, and a name with no dot
+  (`html`, `json`) or a dotfile (`.json`) maps to nothing, so it is blocked like any unmapped
+  name, and with `ServeUnknownContentTypes` on it gets the fallback type. The lookup it
+  replaced read a dotless name as a bare extension token, so a user upload named `html` under
+  the static root was served as `text/html` — stored XSS from a file name alone. A
+  `ContentTypeMappings` key maps an extension only: the key `gltf` maps `model.gltf`, never a
+  file named `gltf`.
 - **Open the stream only after all no-body outcomes are resolved.** `304`/`412`/`416` never
   touch the file; a file that vanishes between resolution and open yields a clean `404`
   because nothing has been committed to the response yet. "Vanishes" covers how each mount says
@@ -120,7 +128,7 @@ prefix match (segment-aligned, ordinal)? ──no──▶ next
 unsafe segments (../.\:/NUL)? ──yes──▶ 404 (terminal)
 FileSystemPath.Parse  ──throws──▶ 404
 resolve: file | directory(+default doc | 301 append-slash) | miss ──▶ next
-content type (overlay map; unknown → next unless opted in)
+content type (overlay map, file-name lookup; unmapped or no extension → next unless opted in)
 negotiate precompressed sibling (.br/.gz, server prefers br) → validators
 preconditions (RFC 9110 §13.2.2) ──▶ 304 | 412
 range (GET only; If-Range gate) ──▶ 416 | single 206 | full 200
@@ -229,8 +237,9 @@ flowchart TD
 - **Content type.** An explicit type wins; it must be a concrete media type and may not contain
   control characters, because it is written into the header section verbatim and `HttpMediaType`
   skips a malformed parameter rather than failing (a CR/LF would otherwise reach the wire). Without
-  one, a file's type comes from its extension in `HttpContentTypes.Default`, and an unmapped extension
-  is sent as `application/octet-stream`. That differs from the middleware, which passes unknown
+  one, a file's type comes from its extension in `HttpContentTypes.Default`
+  (`HttpContentTypes.GetFromFileName`), and a name whose extension is unmapped, or that has none
+  (`html`, `.json`), is sent as `application/octet-stream`. That differs from the middleware, which passes unknown
   types through: the middleware guards a whole directory, while a handler that calls `SendFileAsync`
   chose this file. A stream defaults to `application/octet-stream`.
 - **Stream validators are the caller's, never computed.** Hashing a stream would turn every request,

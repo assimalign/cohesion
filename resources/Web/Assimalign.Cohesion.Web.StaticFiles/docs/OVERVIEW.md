@@ -43,7 +43,7 @@ app.UseStaticFiles(contentRoot, options =>
     options.CacheControl = "public, max-age=3600";     // emitted on every served response
     options.DefaultDocuments.Add("default.html");      // probed after index.html/index.htm
     options.ContentTypeMappings[".gltf"] = "model/gltf+json";
-    options.ServeUnknownContentTypes = false;          // default: unmapped extensions pass through
+    options.ServeUnknownContentTypes = false;          // default: unmapped or missing extensions pass through
     options.ServePrecompressedAssets = true;           // default: .br/.gz siblings negotiate
 });
 ```
@@ -87,7 +87,7 @@ await context.Response.WriteStreamAsync(blobStream, "video/mp4",
 
 | Helper | Content type | Validators | Ranges |
 |---|---|---|---|
-| `SendFileAsync(IFileSystemFile, ...)` | Explicit, else from the file name; unmapped → `application/octet-stream` | Strong `ETag` from `Size` + `UpdatedOn`, `Last-Modified` — the same as `UseStaticFiles` | Single range → `206`; unsatisfiable → `416` |
+| `SendFileAsync(IFileSystemFile, ...)` | Explicit, else from the file name; unmapped or no extension (`html`, `.json`) → `application/octet-stream` | Strong `ETag` from `Size` + `UpdatedOn`, `Last-Modified` — the same as `UseStaticFiles` | Single range → `206`; unsatisfiable → `416` |
 | `SendFileAsync(IFileSystem, path, ...)` | As above, for the resolved file | As above | As above; an unsafe, missing, or directory path → `404` |
 | `WriteStreamAsync(Stream, ...)` | Explicit, else `application/octet-stream` | Only the `entityTag`/`lastModified` the caller passes | Seekable stream only; a non-seekable stream is sent whole, without `Content-Length` |
 
@@ -104,7 +104,7 @@ and also ride on a `304`. Pass an explicit content type for user-supplied files:
 | Validators | Strong `ETag` derived from `Size` + `UpdatedOn`; `Last-Modified` (HTTP-date). |
 | Conditional GET | `If-None-Match` / `If-Modified-Since` → `304`; `If-Match` / `If-Unmodified-Since` → `412` (RFC 9110 §13.2.2 via `HttpConditionalRequest`). |
 | Ranges | `Accept-Ranges: bytes`; single satisfiable byte range → `206` + `Content-Range`; multi-range set → full `200` fallback; unsatisfiable → `416` + `bytes */N` (via `HttpRangeSelector`); `If-Range` gates application. |
-| Content types | Extension lookup via `HttpContentTypes` with builder-time overlays; unmapped extensions pass through by default or serve the configured fallback type. |
+| Content types | File-name lookup via `HttpContentTypes` with builder-time overlays; a name whose extension is unmapped, or that has none (`html`, the dotfile `.json`), passes through by default or serves the configured fallback type. |
 | Precompression | On-disk `name.ext.br` / `name.ext.gz` siblings negotiate against `Accept-Encoding` (server prefers `br`); served with the logical file's `Content-Type`, the sibling's bytes/length/validators, `Content-Encoding`, and `Vary: Accept-Encoding` (emitted whenever a sibling exists, including on identity responses). |
 | Default documents | Directory requests probe the configured names in order; a slash-less directory URL is `301`-redirected to its canonical slash form first. |
 | HEAD | Same header section as `GET` (including `Content-Length`), no body. |

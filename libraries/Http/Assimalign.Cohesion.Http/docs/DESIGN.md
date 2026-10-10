@@ -478,16 +478,45 @@ matches real-world compression behavior while still honoring an explicit
 no-compression preference. When no Accept-Encoding header is present the selector
 returns `identity` (do not compress for a client that never advertised support).
 
-### `HttpContentTypes` — the extension map
+### `HttpContentTypes` — the extension map and its two lookups
 
 The extension-to-content-type table is a `static FrozenDictionary<string,string>`
 built once at startup with case-insensitive keys and no reflection. `FrozenDictionary`
 (not a plain `Dictionary` or a reflection-scanned MIME registry) is the AOT-safe choice
-for a read-mostly lookup that is hot on the static-file path. Resolution matches the
-**final** extension of a file name (`archive.tar.gz` → `.gz`). The table covers common
+for a read-mostly lookup that is hot on the static-file path. The table covers common
 web asset types rather than the full IANA registry; consumers that need custom mappings
 build their own overlay with `CreateMap`, which clones the defaults and applies
 overrides — the default table is immutable and shared.
+
+**Two lookups, never a guess between them (#1186, decision 29).** The table is read
+through a file-name lookup (`TryGetFromFileName`, `GetFromFileName`) and an extension
+lookup (`TryGetFromExtension`, `GetFromExtension`). Each takes the default table or a
+caller-supplied one, and the `Get` forms return `Fallback` (`application/octet-stream`)
+where the `Try` forms return `false`.
+
+- **The file-name lookup** reads the **final** extension of the name's final segment
+  (after the last `/` or `\`), so `archive.tar.gz` is `.gz` and `assets.v2/site.css` is
+  `.css`. Leading dots belong to the name. A name with no extension maps to nothing: one
+  with no dot (`html`, `README`), a dotfile (`.json`, `.env`), one of dots only (`.`,
+  `..`), and one ending in a dot (`index.html.`). A dotfile with an extension of its own
+  resolves by it (`.config.json` is JSON). This is the dotfile rule of Python's
+  `os.path.splitext`.
+- **The extension lookup** requires the leading dot: an extension is a dot followed by
+  at least one character, none of them a dot or a path separator, which is exactly what
+  the file-name lookup can extract. `css`, `site.css`, and `.tar.gz` map to nothing.
+
+The single `TryGetContentType(fileNameOrExtension)` it replaces accepted both forms and
+could not tell a file named `json` from the bare extension token `json`, so it read every
+dotless name as an extension. `Web.StaticFiles` passes file names, so an upload named
+`html` under the static root was served as `text/html` — stored XSS from a file name —
+and passed the `ServeUnknownContentTypes = false` gate meant to block it. The bare-token
+form is gone rather than kept beside the split: a lookup that guesses is the defect. The
+source break is accepted during the previews.
+
+`CreateMap` still accepts a key with or without its leading dot. A key is always an
+extension, so there is nothing to disambiguate: the key `gltf` maps `.gltf`, and a file
+named `gltf` still maps to nothing. A key with an interior dot (`.tar.gz`) is stored but
+never matched, because neither lookup produces one.
 
 ### AOT posture
 
