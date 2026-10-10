@@ -14,14 +14,17 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// field (RFC 9113 §8.2.2, RFC 9114 §4.2) and none of the fields RFC 9110 §6.5.1 excludes from
 /// trailers (<see cref="HttpFieldRules.IsProhibitedInTrailers"/>: framing, routing, request
 /// modifiers, authentication, response controls, content processing, and <c>Trailer</c> itself).
-/// HTTP/2 and HTTP/3 field sections also carry no pseudo-header field (RFC 9113 §8.1, RFC 9114 §4.3)
-/// and only lowercase names (RFC 9113 §8.2.1, RFC 9114 §4.2).
+/// HTTP/2 and HTTP/3 field sections also carry no pseudo-header field (RFC 9113 §8.1, RFC 9114 §4.3),
+/// and their fields follow the field syntax a head's do (<see cref="HttpReceivedFieldRules"/>, #1376):
+/// lowercase token names (RFC 9113 §8.2.1, RFC 9114 §4.2) and values with no control character but
+/// HTAB and no whitespace at either end.
 /// </para>
 /// <para>
 /// HTTP/1.1 applies <see cref="EnsureReceivable"/> to each field of a chunked trailer section (#1319).
-/// The two HTTP/2 and HTTP/3 rules have no HTTP/1.1 counterpart to apply: its field names are
+/// The pseudo-header and lowercase rules have no HTTP/1.1 counterpart to apply: its field names are
 /// case-insensitive, and a name that starts with <c>:</c> is not a field name at all, so its reader
-/// rejects such a line as malformed. HTTP/1.1 sends no response trailers.
+/// rejects such a line as malformed. Its field syntax is the header section's (<c>Http1FieldLine</c>,
+/// #1341). HTTP/1.1 sends no response trailers.
 /// </para>
 /// </remarks>
 internal static class HttpTrailerFieldRules
@@ -90,9 +93,11 @@ internal static class HttpTrailerFieldRules
     /// <param name="trailers">The collection that receives the fields.</param>
     /// <param name="protocol">The protocol named in a violation message: <c>HTTP/2</c> or <c>HTTP/3</c>.</param>
     /// <exception cref="InvalidDataException">
-    /// The section is malformed: a zero-length or uppercase field name (RFC 9113 §8.2.1, RFC 9114 §4.2),
-    /// a pseudo-header field, a connection-specific field, or a field prohibited in trailers. The caller
-    /// raises its protocol's stream error.
+    /// The section is malformed: a zero-length field name, a pseudo-header field, a name that is not a
+    /// lowercase token or a value with NUL, CR, LF, another control character but HTAB, or whitespace
+    /// at either end (RFC 9113 §8.2.1, RFC 9114 §4.2, <see cref="HttpReceivedFieldRules"/>, #1376), a
+    /// connection-specific field, or a field prohibited in trailers. The caller raises its protocol's
+    /// stream error.
     /// </exception>
     public static void AddReceivedFields(List<(string Name, string Value)> fields, IHttpHeaderCollection trailers, string protocol)
     {
@@ -106,14 +111,13 @@ internal static class HttpTrailerFieldRules
             if (name[0] == ':')
             {
                 throw new InvalidDataException(
-                    $"The {protocol} trailer section contains the pseudo-header field '{name}'; a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).");
+                    $"The {protocol} trailer section contains the pseudo-header field {HttpReceivedFieldRules.DescribeName(name)}; a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).");
             }
 
-            if (!IsLowercase(name))
-            {
-                throw new InvalidDataException(
-                    $"The {protocol} trailer field name '{name}' must be lowercase (RFC 9113 §8.2.1, RFC 9114 §4.2).");
-            }
+            // The field syntax a head's fields follow (#1376): a lowercase token name, and a value with
+            // no control character but HTAB and no whitespace at either end.
+            HttpReceivedFieldRules.EnsureValidName(name, protocol);
+            HttpReceivedFieldRules.EnsureValidValue(name, value, protocol);
 
             HttpHeaderKey key = new(name);
             EnsureReceivable(key, protocol);
@@ -153,18 +157,5 @@ internal static class HttpTrailerFieldRules
     private static bool IsExcluded(HttpHeaderKey key)
     {
         return HttpFieldRules.IsProhibitedInTrailers(key) || HttpFieldNormalization.IsForbiddenInHttp2Or3(key);
-    }
-
-    private static bool IsLowercase(string name)
-    {
-        foreach (char character in name)
-        {
-            if (character is >= 'A' and <= 'Z')
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

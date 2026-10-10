@@ -249,10 +249,14 @@ quirks.
   `HttpErrorCode.InvalidResponseField`. A sender may not generate a value
   outside `field-content`, so the writers refuse every control character but
   HTAB, not only NUL, CR, and LF; they leave SP and HTAB at a value's ends
-  alone, since those split nothing. #1376 brings the HTTP/2 and HTTP/3 decoders
-  and `HttpTrailerFieldRules`. A check in the header collection alone would not
-  be enough: any `IHttpHeaderCollection` implementation could bypass it, and a
-  value built over an array shares that array with its caller.
+  alone, since those split nothing. Since #1376 the HTTP/2 and HTTP/3 decoders
+  apply the same rule to every received field line, heads and trailer sections
+  alike (`HttpReceivedFieldRules` in the transport): a lowercase token name, and
+  a value that passes `IsValidFieldValue` and holds no other control character
+  either, so all three versions refuse the same requests. A check in the header
+  collection alone would not be enough: any `IHttpHeaderCollection`
+  implementation could bypass it, and a value built over an array shares that
+  array with its caller.
 
 ### Version-specific boundaries that must NOT cross
 

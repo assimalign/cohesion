@@ -1958,9 +1958,11 @@ they are reported differently:
   `SETTINGS_MAX_HEADER_LIST_SIZE` is the one exception: `ENHANCE_YOUR_CALM` (see "The two
   header-list caps"). The same mapping (`CreateFieldBlockDecodingError`) covers a trailer
   section and the block of a refused or reset stream.
-- **A decoded field breaks a field rule** — an empty or uppercase name, a connection-specific
-  field, `TE` other than `trailers` (RFC 9113 §8.2), a pseudo-header field after a regular
-  field, or one not defined for requests (§8.3). `HPackDecodedHeaders` throws
+- **A decoded field breaks a field rule** — an empty name, a name that is not a lowercase token
+  or a value with a control character or edge whitespace (#1376, see "Received field syntax on
+  HTTP/2 and HTTP/3"), a connection-specific field, `TE` other than `trailers` (RFC 9113 §8.2),
+  a pseudo-header field after a regular field, or one not defined for requests (§8.3).
+  `HPackDecodedHeaders` throws
   `InvalidDataException`. The request is malformed, so `Http2Stream.CreateContextAsync` resets
   its stream with `RST_STREAM(PROTOCOL_ERROR)` (RFC 9113 §8.1.1, #1332): the request never
   reaches the application, and the connection keeps serving its other streams, which is safe
@@ -2726,6 +2728,42 @@ the encode-time check is what holds when an array-backed value changes after sta
   which owns the response policy and its diagnostics; it throws instead, before anything is
   on the wire, and leaves the choice to the host.
 
+## Received field syntax on HTTP/2 and HTTP/3 (#1376)
+
+Until #1376 the HTTP/2 and HTTP/3 decoders checked a received field name only for uppercase
+letters, and no value at all, in a head or a trailer section. CR, LF, NUL, `:`, and SP reached
+`IHttpRequest.Headers`, although RFC 9113 §8.2.1 and RFC 9114 §4.2 make such a request
+malformed. A value with CR or LF that an application reflects into a response is now refused by
+the response writers (#1183), so it became a remote `500`, and HTTP logging recorded the raw
+line breaks. HTTP/1.1 had refused the same characters since #1341.
+
+**The rule.** `HttpReceivedFieldRules`, one class for both versions, applies the core field rule
+(`HttpFieldNormalization`) to every decoded field line: `HPackDecodedHeaders` for an HTTP/2 head,
+`Http3HeaderCodec.BuildRequestHead` for an HTTP/3 head, and `HttpTrailerFieldRules.AddReceivedFields`
+for a trailer section on either.
+
+- **A regular field name** is a token with no uppercase letter. A token already excludes `:`, SP,
+  every control character, the delimiters `"(),/;<=>?@[\]{}`, and anything outside VCHAR, so this
+  is RFC 9113 §8.2.1's character exclusions and RFC 9110's `field-name` grammar at once. A name
+  that starts with `:` goes to the pseudo-header rules instead, which accept only the request
+  pseudo-headers (§8.3), and a trailer section carries none.
+- **Every value**, a pseudo-header's included, has no NUL, CR, or LF and no SP or HTAB at either
+  end (`IsValidFieldValue`, RFC 9113 §8.2.1, RFC 9114 §4.2, §10.3). `:authority` reached `Host`
+  unchecked before.
+- **No other control character but HTAB** either (`IndexOfInvalidControlCharacter`). RFC 9110 §5.5
+  lets a recipient keep one, and the issue asked only for the RFC 9113 minimum, but every response
+  writer refuses to send one (#1183) and the HTTP/1.1 reader rejects one (#1341). Accepting it here
+  would let a request that HTTP/1.1 answers with `400` reach the application over HTTP/2 or HTTP/3,
+  and turn an application that echoes it into a `500`.
+
+**The failure.** A violation throws `InvalidDataException`: the request is malformed, a stream
+error that costs that request alone. HTTP/2 resets the stream with `PROTOCOL_ERROR` before the
+request reaches the application, or, for a trailer section, fails the body read and resets the
+stream (RFC 9113 §8.1.1); the block was decoded to its end first, so the HPACK state stays in
+step. HTTP/3 resets the request stream with `H3_MESSAGE_ERROR` (RFC 9114 §4.1.2). Sibling
+streams and the connection carry on. A message never quotes a name that is not a token or any
+value: it names the offending character in hex, as the HTTP/1.1 reader does.
+
 ## Trailers on HTTP/2 and HTTP/3
 
 Trailers (RFC 9110 §6.5) are HTTP semantics, decided apart from gRPC (decision 18,
@@ -2758,7 +2796,9 @@ The frame pump now handles the trailer section as a field block of its own:
   decodes the whole block before any field is judged, so a malformed section still
   leaves the decoder in step.
 - **Validation.** `HttpTrailerFieldRules`, shared with HTTP/3, rejects a pseudo-header
-  field (RFC 9113 §8.1), an uppercase field name (§8.2.1), a connection-specific field
+  field (RFC 9113 §8.1), a field that breaks the field syntax — a name that is not a
+  lowercase token, a value with a control character or edge whitespace (§8.2.1, #1376) —
+  a connection-specific field
   (§8.2.2), and the fields RFC 9110 §6.5.1 excludes from trailers
   (`HttpFieldRules.IsProhibitedInTrailers`). A CONNECT stream carries only DATA after
   its head (§8.5), so any trailer section on it is malformed. A violation is a stream
@@ -2805,6 +2845,9 @@ three versions, so a trailer section that one version accepts no version refuses
   starts with `:` is not a field line, so its chunked reader rejects it as malformed. Its
   own syntax rule — a token name with nothing before the colon — is the header section's
   (`Http1FieldLine`, #1333).
+- **Every version** applies the core field syntax to a trailer field as to a header field:
+  a token name, and a value with no control character but HTAB (#1341 on HTTP/1.1, #1376 on
+  HTTP/2 and HTTP/3, `HttpReceivedFieldRules`).
 
 Each version reports a violation through its own malformed-message path: a stream error
 of type `PROTOCOL_ERROR` on HTTP/2 (above), `H3_MESSAGE_ERROR` on HTTP/3, and on HTTP/1.1
@@ -3878,8 +3921,10 @@ rules:
   "Request-target percent-decoding (h1/h2/h3 parity)"): a decoded space,
   control character, `?`, `#`, or NUL, an illegal literal character, or a
   missing leading `/` is malformed (#937).
-- **Lowercase names.** A regular field name with an uppercase character is
-  malformed.
+- **Field syntax.** A regular field name is a lowercase token, and every value,
+  a pseudo-header's included, holds no control character but HTAB and no
+  whitespace at either end (#1376, `HttpReceivedFieldRules`; see "Received
+  field syntax on HTTP/2 and HTTP/3").
 - **Connection-specific fields** are rejected, and `:authority`
   supersedes `Host`, both via the shared `HttpFieldNormalization` (see
   #336) so HTTP/2 and HTTP/3 stay byte-for-byte consistent.

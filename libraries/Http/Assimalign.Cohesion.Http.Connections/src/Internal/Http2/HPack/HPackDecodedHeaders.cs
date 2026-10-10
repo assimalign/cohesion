@@ -63,10 +63,12 @@ internal sealed class HPackDecodedHeaders
     /// section, applying the RFC 9113 §8 validation rules.
     /// </summary>
     /// <exception cref="InvalidDataException">
-    /// The field breaks a field rule: an empty or uppercase name, a connection-specific field, a
-    /// <c>TE</c> other than <c>trailers</c>, a pseudo-header after a regular field, or a pseudo-header
-    /// not defined for requests. The field was decoded, so this is not an HPACK failure: the request is
-    /// malformed, and the stream resets itself with <c>PROTOCOL_ERROR</c> (RFC 9113 §8.1.1).
+    /// The field breaks a field rule: an empty name, a name that is not a lowercase token, a value with
+    /// NUL, CR, LF, another control character but HTAB, or whitespace at either end (#1376,
+    /// <see cref="HttpReceivedFieldRules"/>), a connection-specific field, a <c>TE</c> other than
+    /// <c>trailers</c>, a pseudo-header after a regular field, or a pseudo-header not defined for
+    /// requests. The field was decoded, so this is not an HPACK failure: the request is malformed, and
+    /// the stream resets itself with <c>PROTOCOL_ERROR</c> (RFC 9113 §8.1.1).
     /// </exception>
     public void Add(string name, string value)
     {
@@ -75,16 +77,20 @@ internal sealed class HPackDecodedHeaders
             throw new InvalidDataException("The HTTP/2 field name cannot be empty.");
         }
 
+        // RFC 9113 §8.2.1 — a value, a pseudo-header's included, holds no NUL, CR, or LF and no
+        // whitespace at either end; the core rule also refuses the other control characters (#1376).
+        HttpReceivedFieldRules.EnsureValidValue(name, value, "HTTP/2");
+
         if (name[0] == ':')
         {
             AddPseudoHeader(name, value);
             return;
         }
 
-        // RFC 9113 §8.3 — pseudo-header fields MUST appear before any
-        // regular field. Once a regular field has been observed, any
-        // subsequent pseudo-header is malformed.
-        ValidateRegularFieldName(name);
+        // RFC 9113 §8.2.1 — a regular field name is a lowercase token, so it holds no ':', SP, or
+        // control character. RFC 9113 §8.3 — pseudo-header fields MUST appear before any regular
+        // field. Once a regular field has been observed, any subsequent pseudo-header is malformed.
+        HttpReceivedFieldRules.EnsureValidName(name, "HTTP/2");
         _sawRegularField = true;
 
         // RFC 9113 §8.2.2 — connection-specific header fields are
@@ -128,7 +134,7 @@ internal sealed class HPackDecodedHeaders
         if (_sawRegularField)
         {
             throw new InvalidDataException(
-                $"Pseudo-header field '{name}' appeared after regular fields; pseudo-headers MUST come first.");
+                $"Pseudo-header field {HttpReceivedFieldRules.DescribeName(name)} appeared after regular fields; pseudo-headers MUST come first.");
         }
 
         // RFC 9113 §8.3 — each pseudo-header field appears at most once. A repeat is recorded for the
@@ -169,7 +175,7 @@ internal sealed class HPackDecodedHeaders
                 // RFC 9113 §8.3 — pseudo-header names that are not
                 // defined for the given message type are malformed.
                 throw new InvalidDataException(
-                    $"Unknown pseudo-header field '{name}'.");
+                    $"Unknown pseudo-header field {HttpReceivedFieldRules.DescribeName(name)}.");
         }
     }
 
@@ -187,20 +193,6 @@ internal sealed class HPackDecodedHeaders
 
         RepeatedPseudoHeader ??= name;
         return current;
-    }
-
-    private static void ValidateRegularFieldName(string name)
-    {
-        // RFC 9113 §8.2.1 — field names MUST be lowercase. Uppercase
-        // letters in a field name are malformed.
-        foreach (char c in name)
-        {
-            if (c >= 'A' && c <= 'Z')
-            {
-                throw new InvalidDataException(
-                    $"Field name '{name}' contains uppercase characters; HTTP/2 field names MUST be lowercase.");
-            }
-        }
     }
 
     private static void RejectIfConnectionSpecific(string name, string value)

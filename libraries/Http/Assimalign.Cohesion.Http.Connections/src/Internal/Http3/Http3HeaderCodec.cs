@@ -9,8 +9,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <summary>
 /// Bridges QPACK field sections (RFC 9204) to the HTTP message model and
 /// enforces the HTTP/3 field-section rules (RFC 9114 §4.2 / §4.3): the
-/// pseudo-header set, pseudo-before-regular ordering, lowercase field
-/// names, connection-specific field prohibition, required request
+/// pseudo-header set, pseudo-before-regular ordering, the field syntax
+/// (lowercase token names and values without control characters,
+/// <see cref="HttpReceivedFieldRules"/>, #1376), connection-specific field
+/// prohibition, required request
 /// pseudo-headers, and — for a trailer section — the absence of
 /// pseudo-headers and framing fields. Decoding the QPACK representation
 /// itself (static table, or the opt-in dynamic table) is the connection
@@ -58,6 +60,11 @@ internal static class Http3HeaderCodec
                 throw new InvalidDataException("HTTP/3 field section contains a zero-length field name.");
             }
 
+            // RFC 9114 §4.2 / RFC 9113 §8.2.1 — a value, a pseudo-header's included, holds no NUL, CR,
+            // or LF and no whitespace at either end; the core rule also refuses the other control
+            // characters (#1376). The receive loop resets the stream with H3_MESSAGE_ERROR.
+            HttpReceivedFieldRules.EnsureValidValue(name, value, "HTTP/3");
+
             if (name[0] == ':')
             {
                 // RFC 9114 §4.3 — all pseudo-header fields MUST precede the
@@ -89,7 +96,7 @@ internal static class Http3HeaderCodec
                         AssignOncePseudoHeader(ref protocol, value, name);
                         break;
                     default:
-                        throw new InvalidDataException($"HTTP/3 request contains an unknown pseudo-header field '{name}' (RFC 9114 §4.3.1).");
+                        throw new InvalidDataException($"HTTP/3 request contains an unknown pseudo-header field {HttpReceivedFieldRules.DescribeName(name)} (RFC 9114 §4.3.1).");
                 }
 
                 continue;
@@ -97,12 +104,9 @@ internal static class Http3HeaderCodec
 
             seenRegularField = true;
 
-            // RFC 9114 §4.2 — field names MUST be lowercase; an uppercase
-            // character makes the request malformed.
-            if (!IsLowercaseFieldName(name))
-            {
-                throw new InvalidDataException($"HTTP/3 field name '{name}' must be lowercase (RFC 9114 §4.2).");
-            }
+            // RFC 9114 §4.2 — a field name is a lowercase token, so it holds no ':', SP, control
+            // character, or uppercase letter; any of them makes the request malformed (#1376).
+            HttpReceivedFieldRules.EnsureValidName(name, "HTTP/3");
 
             HttpHeaderKey key = new(name);
 
@@ -398,19 +402,6 @@ internal static class Http3HeaderCodec
         }
 
         slot = value;
-    }
-
-    private static bool IsLowercaseFieldName(string name)
-    {
-        foreach (char c in name)
-        {
-            if (c is >= 'A' and <= 'Z')
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>
