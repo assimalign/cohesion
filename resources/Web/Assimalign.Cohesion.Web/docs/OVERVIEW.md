@@ -29,8 +29,9 @@ Extension-form calls (`app.UseWhen(...)`, `app.Run(...)`) compile unchanged. A s
 `WebApplicationBranchingExtensions` is now `Web.Routing`'s branching type, and every binary that
 used a moved member must be rebuilt.
 
-Feature libraries (`Assimalign.Cohesion.Web.<Feature>`) reference this root and ship
-their own `Add<Feature>`/`Use<Feature>` verbs against these seams; the runtime module
+Feature libraries (`Assimalign.Cohesion.Web.<Feature>`) reference this root and ship their
+registration verbs as `builder.Services.Add<Feature>` component integrations (#1380) and their
+`Use<Feature>` pipeline verbs against `IWebApplicationPipelineBuilder`; the runtime module
 (`Assimalign.Cohesion.Web.Hosting`) implements the contracts. The build-enforced
 hosting-isolation rule that keeps those two directions apart is documented in
 `resources/Web/README.md`.

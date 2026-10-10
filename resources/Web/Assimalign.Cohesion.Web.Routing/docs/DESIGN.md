@@ -264,8 +264,8 @@ all. A CORS preflight that falls back to the requested method runs `Match` twice
 contract-only package that owns `IHttpForwardedFeature` and the `Effective*` members. It is outside
 the Web area, so the hosting-isolation rule does not constrain it, and the trust model stays in
 `Web.ForwardedHeaders`, which routing does not reference. `App.Web` already ships `Http.Forwarded`.
-`App.Database` and `App.IdentityHub`, which carry `Web.Routing` privately, list it as a private
-member.
+Every other area framework carries `Web.Hosting`, and so `Web.Routing` and `Http.Forwarded`, as
+private members (#1379).
 
 `RouteHostForwardedTests` runs the real forwarded-headers middleware ahead of `UseRouting`, from a
 known proxy address that rewrote `Host`. It pins the forwarded-host match, the internal-host route a
