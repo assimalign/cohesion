@@ -10,13 +10,17 @@ nothing resolves services per request.
 **The hosting module is dependency-isolated within the Web area** (rule adopted
 2026-07-10, recorded in `resources/Web/README.md`): no Web feature library
 references this package — a feature that did would drag the DI/configuration
-composition surface into every consumer — and this package references **no**
-Web feature library today. It references the root `Assimalign.Cohesion.Web` abstractions,
-its own hosting family under O35, and non-Web infrastructure. The rule as adopted forbade this
-module's references to Web features too; since its relaxation (COHRES002, owner decision
-2026-10-09) the module may reference any Web library except `Web.Testing`, `Web.ApplicationModel`,
-the `App.Web` producers, and harnesses, and takes such a reference only for runtime machinery it
-composes itself, because each one ships in all 18 area frameworks. Applications still see the whole Web family because the
+composition surface into every consumer — and this package references exactly two
+Web feature libraries, `Web.Routing` and `Web.Server` (#1379). It references the root
+`Assimalign.Cohesion.Web` abstractions, those two packages, its own hosting family under O35, and
+non-Web infrastructure. The rule as adopted forbade this module's references to Web features too;
+since its relaxation (COHRES002, owner decision 32 of 2026-10-09) the module may reference any Web
+library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web` producers, and harnesses, and
+takes such a reference only for runtime machinery it composes itself, because each one ships in all
+18 area frameworks. The two it takes are the contracts it runs or publishes, which left the Web root
+under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
+`IWebEndpointFeature.RouteTemplate` its telemetry reads, and `Web.Server` for the request id,
+response completion and drain features it installs on every exchange. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
 verbs ship with their features (`AddAuthentication` moved to
 `Web.Authentication`, `AddCookie`/`AddJwtBearer` to their handler packages) and
@@ -28,14 +32,24 @@ This document focuses on the piece with the most load-bearing runtime behaviour:
 and stop semantics are the contract the rest of the Web middleware stack builds
 on, so they are recorded here rather than left to be re-derived from the code.
 
-The Web runtime references the public response-completion contract and the shared terminal; the terminal depends only on the Web root within this area.
+The runtime's references within the Web area, with every arrow meaning "references":
 
 ```mermaid
 flowchart LR
     Runtime["Web.Hosting"] --> Root["Web"]
-    Runtime --> Terminal["Web.Hosting.Resources"]
-    Terminal --> Root
+    Runtime --> Routing["Web.Routing"]
+    Runtime --> Server["Web.Server"]
+    Runtime --> Resources["Web.Hosting.Resources"]
+    Routing --> Root
+    Server --> Root
+    Resources --> Root
+    Resources --> Server
 ```
+
+The runtime references the root, `Web.Routing`, `Web.Server` and its hosting family's
+`Web.Hosting.Resources`. `Web.Routing` and `Web.Server` reference only the root within the area, and
+`Web.Hosting.Resources` references the root and `Web.Server`, whose completion feature defers its
+stop route's stop.
 
 ## Design intent
 
@@ -376,7 +390,7 @@ as the stop begins is handled the same way as the rest.
 `Draining` also reaches the exchanges themselves. A graceful close ends a connection after its
 exchanges finish, but a long-lived exchange — a WebSocket, a server-sent event stream — would
 finish only when the budget cuts it off, without a close of its own. So the server installs one
-shared `IWebServerDrainFeature` (a Web-root contract, `Internal/WebServerDrainFeature`) on every
+shared `IWebServerDrainFeature` (a `Web.Server` contract, `Internal/WebServerDrainFeature`) on every
 exchange beside the response-completion feature, before the pipeline runs; its token is
 `Draining`. A long-lived exchange registers on it and ends its own work while the budget lasts:
 `UseWebSockets` (Web.WebSockets) closes each open socket with `1001 Going Away` (decision 16, Http
@@ -589,10 +603,11 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
 | The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
 
-**How `http.route` reaches the span.** `Web.Hosting` does not reference `Web.Routing` (COHRES002
-forbade it when this was designed, until the 2026-10-09 relaxation),
-so the template travels through the root's `IWebEndpointFeature`, which already carries the
-selected endpoint to the pipeline terminal. Its default member `RouteTemplate` is `null`; routing's
+**How `http.route` reaches the span.** The template travels through `IWebEndpointFeature`, which
+already carries the selected endpoint to the pipeline terminal. When this was designed COHRES002
+forbade a `Web.Routing` reference, so the contract sat in the Web root; since #1379 it is
+`Web.Routing`'s, and this module references `Web.Routing` to read it (owner decisions 32 and 33).
+The reference adds no telemetry code to routing. Its default member `RouteTemplate` is `null`; routing's
 matched route returns its template with a leading `/` (Web.Routing DESIGN, "The route template the
 server's telemetry reports"). The server reads it once, when it stops the exchange's telemetry, and
 only when a span or the duration is being recorded. Rejected:
@@ -752,12 +767,13 @@ observe cancellation through `RequestCancelled`.
 terminal reached only when every registered middleware chained to `next`.
 
 **Endpoint dispatch (#1054).** When an endpoint-selecting middleware (`UseRouting`)
-published the root's `IWebEndpointFeature`, the terminal runs that endpoint. That is
+published an `IWebEndpointFeature`, the terminal runs that endpoint. That is
 where a matched route's handler runs, after every middleware registered behind
-`UseRouting`, and where routing's 405 is written. The terminal reads only the root
-seam; this module does not reference `Web.Routing` (COHRES002 forbade it until 2026-10-09). The terminal is the root's
+`UseRouting`, and where routing's 405 is written. The terminal is
 `WebApplicationTerminal.InvokeAsync` (#1056), shared with every non-rejoining pipeline
-branch, so the application and its branches agree on what "unhandled" means.
+branch, so the application and its branches agree on what "unhandled" means. The terminal and
+the endpoint contract are `Web.Routing`'s since #1379; until then they were the Web root's,
+because COHRES002 forbade this module a `Web.Routing` reference.
 
 **The 404 fallback (#881).** With no endpoint selected, the request went unhandled.
 The terminal used to be a silent `Task.CompletedTask`, which handed the
@@ -768,8 +784,8 @@ status, a written body/content type, or a redirect `Location` — is left as-is.
 
 Two deliberate properties:
 
-- **Payload-free.** This runtime module references no Web feature library, `Web.ProblemDetails`
-  included: the resource hosting-isolation rule (COHRES002) forbade it when the fallback was
+- **Payload-free.** Neither this runtime module nor `Web.Routing` references `Web.ProblemDetails`:
+  the resource hosting-isolation rule (COHRES002) forbade it when the fallback was
   written, and since the 2026-10-09 relaxation such a reference would still ship in every
   framework that carries this module. So the terminal can only *set the status*. Turning the
   bodyless 404 into an RFC 9457 problem+json body is the job of the opt-in
@@ -823,7 +839,7 @@ Server telemetry (#1064) is pinned end to end by `WebServerTelemetryTests`, over
 transport with a real client and an `ActivityListener` and `MeterListener` subscribed by name
 (`TestObjects/TelemetryRecorder`): one server span per request, parented to the caller's
 `traceparent` and current while the pipeline runs; the attributes and the span name, a routed
-request's `http.route` (through real `Web.Routing`, a test-only reference); every outcome in the
+request's `http.route` (through real `Web.Routing`); every outcome in the
 `error.type` table; `_OTHER`, including a lower-case `get` written raw and reported with its original
 case; one span per HTTP/2 stream; an ambient activity at server start that
 must not parent requests; the duration and the active-request count; the request id with and
@@ -904,7 +920,7 @@ plus their `/cohesion/v1/healthz`, `/cohesion/v1/readyz`, and
 `/cohesion/v1/livez` aliases, together with `/cohesion/v1/endpoints`,
 `/cohesion/v1/stop`, and `/cohesion/v1/commands`.
 
-The default server installs the public Web-root `IWebResponseCompletionFeature` contract
+The default server installs the public `IWebResponseCompletionFeature` contract (`Web.Server`)
 with an internal implementation on each exchange.
 The stop terminal uses it to register the host shutdown signal, returns `202 Accepted`,
 and lets the server invoke that signal only after `SendAsync` has written the response.
@@ -1486,7 +1502,7 @@ The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosti
 library. `Web.Hosting.Resources` and `Web.Hosting.Health` own reusable hosting
 integration. They never reference this runtime module. COHRES002 permits this
 module to reference any Web library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web`
-producers, and harnesses (owner decision 2026-10-09). It references the Web root and its own
-hosting family, and it consumes
+producers, and harnesses (owner decision 2026-10-09). It references the Web root, `Web.Routing`
+and `Web.Server` (#1379), and its own hosting family, and it consumes
 `Web.Hosting.Resources` for the enabled resource's control-plane terminal
 (`Internal/EnabledResourcePipeline.cs`).

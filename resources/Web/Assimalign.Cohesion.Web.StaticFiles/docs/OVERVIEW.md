@@ -135,6 +135,8 @@ and default documents.
 
 - `Assimalign.Cohesion.Web` — pipeline contracts (`IWebApplicationPipelineBuilder`,
   `IWebApplicationMiddleware`).
+- `Assimalign.Cohesion.Web.Routing` — `MapFallbackToFile`'s fallback route, and the path-branch view
+  (`context.GetEffectivePath()`) a `Map(path)` branch publishes.
 - `Assimalign.Cohesion.Http` — the protocol primitives listed above.
 - `Assimalign.Cohesion.FileSystem` — the content-root abstraction.
 

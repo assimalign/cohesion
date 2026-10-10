@@ -2,21 +2,21 @@ using System;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Web.Internal;
+using Assimalign.Cohesion.Web.Routing.Internal;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
-/// Pipeline branching: path and predicate branches, conditional segments that rejoin the pipeline, and
-/// terminal middleware.
+/// Pipeline branches that do not rejoin: path branches (<c>Map(path)</c>) and predicate branches
+/// (<c>MapWhen</c>), and the path-base view a path branch publishes.
 /// </summary>
 /// <remarks>
 /// <para>
 /// A branch is a pipeline segment with its own middleware. <c>Map</c> and <c>MapWhen</c> branches do not
 /// rejoin: they end in the standard terminal (<see cref="WebApplicationTerminal"/>), which runs an
 /// endpoint selected before the branch (for example by <c>UseRouting</c> earlier in the pipeline) or ends
-/// the request with a 404. A <c>UseWhen</c> segment rejoins: its last middleware's <c>next</c> is the
-/// rest of the containing pipeline.
+/// the request with a 404. A segment that rejoins is the Web root's <c>UseWhen</c>, and each branch here is
+/// a <c>UseWhen</c> segment that ends in the terminal, so it composes against the root's seams alone.
 /// </para>
 /// <para>
 /// Branches hold middleware, not routes: routes belong to the application's router
@@ -54,20 +54,19 @@ public static class WebApplicationBranchingExtensions
                     $"A path branch needs an origin-form prefix below the root, such as '/static': '{path.Value}'.", nameof(path));
             }
 
-            WebApplicationBranchBuilder branch = new();
-            configure(branch);
-
             HttpPath prefixPath = new(prefix);
 
-            return builder.Use((IWebApplicationContext application, WebApplicationMiddleware next) =>
-            {
-                WebApplicationMiddleware branchPipeline = branch.Compose(application, WebApplicationTerminal.InvokeAsync);
-
-                // A nested branch matches against the path its enclosing branch sees, not the full path.
-                return context => TryRemovePrefix(context.GetEffectivePath(), prefix, out HttpPath remainder)
-                    ? InvokePathBranchAsync(context, prefixPath, remainder, branchPipeline)
-                    : next.Invoke(context);
-            });
+            // A nested branch matches against the path its enclosing branch sees, not the full path.
+            return builder.UseWhen(
+                context => MatchesPrefix(context.GetEffectivePath(), prefix),
+                branch =>
+                {
+                    // First in the branch: install the path-base view for the rest of the branch, and
+                    // restore the enclosing one when the branch returns.
+                    branch.Use((WebApplicationMiddleware next) => context => InvokePathBranchAsync(context, prefix, prefixPath, next));
+                    configure(branch);
+                    branch.Run(WebApplicationTerminal.InvokeAsync);
+                });
         }
 
         /// <summary>
@@ -84,55 +83,11 @@ public static class WebApplicationBranchingExtensions
             ArgumentNullException.ThrowIfNull(predicate);
             ArgumentNullException.ThrowIfNull(configure);
 
-            WebApplicationBranchBuilder branch = new();
-            configure(branch);
-
-            return builder.Use((IWebApplicationContext application, WebApplicationMiddleware next) =>
+            return builder.UseWhen(predicate, branch =>
             {
-                WebApplicationMiddleware branchPipeline = branch.Compose(application, WebApplicationTerminal.InvokeAsync);
-
-                return context => predicate(context) ? branchPipeline.Invoke(context) : next.Invoke(context);
+                configure(branch);
+                branch.Run(WebApplicationTerminal.InvokeAsync);
             });
-        }
-
-        /// <summary>
-        /// Runs <paramref name="configure"/>'s middleware for requests that satisfy
-        /// <paramref name="predicate"/>, then rejoins the containing pipeline: the segment's last
-        /// middleware continues into the middleware registered after this call.
-        /// </summary>
-        /// <param name="predicate">Decides, per request, whether the segment runs.</param>
-        /// <param name="configure">Configures the segment's middleware.</param>
-        /// <returns>The containing pipeline builder, for chaining.</returns>
-        /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-        public IWebApplicationPipelineBuilder UseWhen(Func<IHttpContext, bool> predicate, Action<IWebApplicationPipelineBuilder> configure)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(predicate);
-            ArgumentNullException.ThrowIfNull(configure);
-
-            WebApplicationBranchBuilder branch = new();
-            configure(branch);
-
-            return builder.Use((IWebApplicationContext application, WebApplicationMiddleware next) =>
-            {
-                WebApplicationMiddleware segment = branch.Compose(application, next);
-
-                return context => predicate(context) ? segment.Invoke(context) : next.Invoke(context);
-            });
-        }
-
-        /// <summary>
-        /// Adds terminal middleware: <paramref name="terminal"/> handles every request that reaches it, and
-        /// nothing registered after it runs.
-        /// </summary>
-        /// <param name="terminal">The terminal handler.</param>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="terminal"/> is <see langword="null"/>.</exception>
-        public void Run(WebApplicationMiddleware terminal)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(terminal);
-
-            builder.Use((WebApplicationMiddleware _) => terminal);
         }
     }
 
@@ -167,37 +122,28 @@ public static class WebApplicationBranchingExtensions
     }
 
     // A segment-boundary, case-insensitive prefix match: '/static' matches '/static', '/static/' and
-    // '/static/app.js', never '/staticx'. The remainder always starts with '/'.
-    private static bool TryRemovePrefix(HttpPath path, string prefix, out HttpPath remainder)
+    // '/static/app.js', never '/staticx'. Allocation-free: it runs for every request that reaches the branch.
+    private static bool MatchesPrefix(HttpPath path, string prefix)
     {
         string value = path.Value ?? "/";
 
-        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            remainder = default;
-            return false;
-        }
-
-        if (value.Length == prefix.Length)
-        {
-            remainder = HttpPath.Root;
-            return true;
-        }
-
-        if (value[prefix.Length] != '/')
-        {
-            remainder = default;
-            return false;
-        }
-
-        remainder = new HttpPath(value[prefix.Length..]);
-        return true;
+        return value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && (value.Length == prefix.Length || value[prefix.Length] == '/');
     }
 
-    private static async Task InvokePathBranchAsync(IHttpContext context, HttpPath prefix, HttpPath remainder, WebApplicationMiddleware branch)
+    // The path below a matched prefix; it always starts with '/'.
+    private static HttpPath RemovePrefix(HttpPath path, string prefix)
+    {
+        string value = path.Value ?? "/";
+
+        return value.Length == prefix.Length ? HttpPath.Root : new HttpPath(value[prefix.Length..]);
+    }
+
+    private static async Task InvokePathBranchAsync(IHttpContext context, string prefix, HttpPath prefixPath, WebApplicationMiddleware branch)
     {
         IWebPathBaseFeature? outer = context.Features.Get<IWebPathBaseFeature>();
-        HttpPath pathBase = (outer?.PathBase ?? HttpPath.Root).Concat(prefix);
+        HttpPath remainder = RemovePrefix(outer?.Path ?? context.Request.Path, prefix);
+        HttpPath pathBase = (outer?.PathBase ?? HttpPath.Root).Concat(prefixPath);
 
         context.Features.Set<IWebPathBaseFeature>(new WebPathBaseFeature(pathBase, remainder));
 

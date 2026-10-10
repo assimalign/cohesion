@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.StaticFiles.Internal;
 

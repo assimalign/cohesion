@@ -16,7 +16,7 @@ once; services start in registration order before servers and stop in reverse or
 every server drains. The default server drains lame-duck style: it accepts nothing new, tells
 every peer the connection is closing (`Connection: close` or `GOAWAY`), lets the requests in
 flight finish within the host's shutdown budget, and cancels only what outlives it. Each exchange
-sees the drain begin through `IWebServerDrainFeature`, so a long-lived one, such as a WebSocket,
+sees the drain begin through `IWebServerDrainFeature` (a `Web.Server` contract), so a long-lived one, such as a WebSocket,
 can end itself inside the budget. It logs
 its own failures — a listener that cannot bind, a connection fault, a drain the budget cut
 short — through `builder.Logging`, never with request content. Disposing the application
@@ -48,9 +48,13 @@ what is deliberately not emitted.
 
 ## Dependencies and hosting family
 
-Within its area the module references the Web root and its own hosting family. COHRES002 would
-let it reference any Web library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web`
-producers, and harnesses (owner decision 2026-10-09). It also references
+Within its area the module references the Web root, its own hosting family, and two feature
+packages (#1379): `Web.Routing`, whose `WebApplicationTerminal` ends the pipeline and whose
+`IWebEndpointFeature.RouteTemplate` names a request's span, and `Web.Server`, whose request id,
+response completion and drain contracts the server installs on every exchange. COHRES002 lets it
+reference any Web library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web` producers,
+and harnesses (owner decision 2026-10-09); each reference ships in every area framework that
+carries this module, so it takes only these. It also references
 Cohesion's hosting, configuration, DI, logging, and transport infrastructure. Its
 `Hosting.Resources` and `Hosting.Health` integrations are runtime concerns; the
 Web root references no hosting library. The reusable `Web.Hosting.Resources` and

@@ -70,4 +70,8 @@ preflight that names it, which is logged with the configured fields.
 | `Assimalign.Cohesion.Http.Forwarded` | the effective scheme, host, and client address (`Effective*`), resolved by `UseForwardedHeaders` behind a trusted proxy |
 | `Assimalign.Cohesion.Logging` | the emission model (`ILogger`, `LoggerEntry`, `LoggerProvider`) |
 
+Trace correlation comes from the request's `traceparent` header. The package does not read the
+server's request id (`IWebRequestIdFeature`, in `Web.Server` since #1379) and does not reference
+`Web.Server`.
+
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.

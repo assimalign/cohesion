@@ -29,6 +29,51 @@ library (O34). `IWebApplication` exposes `Context`, `StartAsync`, and `StopAsync
 registration belongs to the concrete `WebApplicationBuilder` in `Web.Hosting`.
 DI, configuration, and logging integration remain builder-time hosting concerns.
 
+## No feature contracts in the root (#1379)
+
+The owner's rule of 2026-10-09 (HTTP/Web program plan §7.4, decision 20, extended to this root by
+decision 33) is that an area root holds base contracts and composition seams only. An
+`IHttpFeature` contract is neither: it is the per-exchange surface of whichever package publishes
+it. The root used to declare five, because when they were designed COHRES002 kept the runtime module
+off every Web library but the root, so the root was the only place both the publisher and the
+runtime could see. Decision 32 relaxed COHRES002, and the five moved to their publishers' packages:
+
+| Contract | Publisher | New home | Why there |
+|---|---|---|---|
+| `IWebEndpointFeature` | `UseRouting` | `Web.Routing` | routing selects the endpoint; the standard terminal that runs it (`WebApplicationTerminal`) moved with it |
+| `IWebPathBaseFeature` | `Map(path)` | `Web.Routing` | the non-rejoining branches end in that terminal, so they and their path-base view moved too |
+| `IWebRequestIdFeature` | `Web.Hosting`'s telemetry | `Web.Server` | the server publishes it; COHRES001 rules out `Web.Hosting` itself as the home, because its readers are feature libraries |
+| `IWebResponseCompletionFeature` | `Web.Hosting` | `Web.Server` | as above |
+| `IWebServerDrainFeature` | `Web.Hosting` | `Web.Server` | as above |
+
+The root's position after the move, with every arrow meaning "references":
+
+```mermaid
+flowchart LR
+    Root["Assimalign.Cohesion.Web — area root"] --> Http["Assimalign.Cohesion.Http"]
+    Routing["Web.Routing — endpoint, path base, Map, terminal"] --> Root
+    Server["Web.Server — request id, completion, drain"] --> Root
+    Hosting["Web.Hosting — runtime module"] --> Root
+    Hosting --> Routing
+    Hosting --> Server
+    Features["Web feature libraries"] --> Root
+```
+
+The root references only Http. `Web.Routing` and `Web.Server` reference the root, and `Web.Hosting`
+references all three: it ends its pipeline in routing's terminal and installs the server features.
+Feature libraries reference the root and, when they read one of these features, the package that
+declares it.
+
+**Namespaces.** The `Web.Server` contracts keep `Assimalign.Cohesion.Web`: the new package pins its
+`RootNamespace` to the family name, as `Web.Api`, `Web.Forms` and `Web.ProblemDetails` do, so every
+reader compiles unchanged. The `Web.Routing` types take `Assimalign.Cohesion.Web.Routing`, because
+`Web.Routing` already declares that namespace across its code and the rules require its
+`Abstractions/` and `Extensions/` types to declare its `RootNamespace` (`general-rules.md`, "Every
+project pins its `RootNamespace`"). A call site of `Map(path)`, `MapWhen`, `GetPathBase`,
+`GetEffectivePath`, `WebApplicationTerminal`, `IWebEndpointFeature` or `IWebPathBaseFeature` adds
+`using Assimalign.Cohesion.Web.Routing;`, which most applications already have for `UseRouting`.
+`UseWhen` and `Run` stay here, in `WebApplicationExtensions`, so their call sites do not change.
+
 ## The pipeline model (middleware-first)
 
 The Web area composes request handling as an onion of middleware over `IHttpContext` —
@@ -40,72 +85,43 @@ attaching typed features to `IHttpContext.Features` for downstream stages. That
 feature-collection seam — not request-time service location — is the area's
 extensibility mechanism, which is why the pipeline contracts here stay this small.
 
-`WebApplicationExtensions` carries the one piece of sugar the root owns: the inline
+`WebApplicationExtensions` carries the composition sugar the root owns: the inline
 `Use(Func<IHttpContext, WebApplicationMiddleware, Task>)` adapter that bridges
 application lambdas onto the core `Use(Func<WebApplicationMiddleware, WebApplicationMiddleware>)`
-registration form.
+registration form, the `UseWhen` segment, and `Run`.
 
 That core form is a component factory: the pipeline builder invokes it once, when it builds the
 pipeline, and the delegate it returns runs for each request. The factory body is therefore the
 composition-time seam for work that must fail at startup rather than on a request, without a
 dependency on the hosting runtime: `UseRouting` builds the application's route table there (#1051).
 
-## Endpoint selection and the pipeline terminal (#1054)
+## Segments and terminal middleware (#1056)
 
-Selecting an endpoint and running it are separate pipeline steps. A selecting middleware
-(`UseRouting` in `Web.Routing`) publishes an `IWebEndpointFeature` and calls `next`, so every
-middleware registered after it runs with the endpoint known. The pipeline's **terminal** (the
-innermost delegate a pipeline builder composes, reached when every middleware called `next`)
-runs `IWebEndpointFeature.Endpoint` when the feature is present, and otherwise applies the
-builder's unhandled-request behavior (`WebApplication`'s bodyless 404).
-
-The feature is a root seam because the terminal belongs to the pipeline builder, which lives in
-`Web.Hosting`, and COHRES002 forbade that module from referencing `Web.Routing` when the seam was
-designed. The rule was relaxed on 2026-10-09 (owner decision), which unblocks moving the endpoint
-seam to `Web.Routing` (HTTP/Web program plan, decision 32); until that move it stays here. It carries the
-delegate to run and one string, `RouteTemplate`: the low-cardinality template the default server's
-telemetry names the endpoint by (`http.route`, #1064). The server reads both at the same seam for
-the same reason. `RouteTemplate` is a default interface member returning `null`, so a selector
-without a template, such as routing's `405` endpoint, needs no change. The endpoint's model (its
-route object, values and metadata) stays in the package that selected it, so the root does not
-absorb routing. Every `IWebApplicationPipelineBuilder`
-implementation must honor the contract at its terminal. That includes test doubles, which is
-why the Routing tests' application double runs the published endpoint too.
-
-The terminal itself is the root's `WebApplicationTerminal.InvokeAsync` (#1056): run the published
-endpoint, or set a bodyless `404` on an untouched response. `WebApplication` in Web.Hosting and every
-non-rejoining branch end in it, so there is one definition of "unhandled".
-
-## Pipeline branching (#1056)
-
-`WebApplicationBranchingExtensions` adds four verbs over `IWebApplicationPipelineBuilder`:
-
-| Verb | Runs the branch when | Rejoins the main pipeline |
+| Verb | Runs when | Rejoins the main pipeline |
 |---|---|---|
-| `Map(path, branch)` | the path starts with `path` at a segment boundary (case-insensitive) | no; ends in `WebApplicationTerminal` |
-| `MapWhen(predicate, branch)` | `predicate(context)` is true | no; ends in `WebApplicationTerminal` |
-| `UseWhen(predicate, branch)` | `predicate(context)` is true | yes; the branch's `next` is the rest of the pipeline |
+| `UseWhen(predicate, segment)` | `predicate(context)` is true | yes; the segment's `next` is the rest of the pipeline |
 | `Run(terminal)` | always, where registered | no; nothing after it runs |
 
-A branch is collected by an internal `WebApplicationBranchBuilder` and composed by the containing
-pipeline when that pipeline is built. Every branch registration is kept in the component-factory
+A `UseWhen` segment is collected by an internal `WebApplicationBranchBuilder` and composed by the
+containing pipeline when that pipeline is built. Every registration is kept in the component-factory
 shape that takes the application context, so middleware that needs the context at composition time
-(`UseStaticFiles` reads the web root) composes inside a branch exactly as it does on the application.
-An endpoint selected before a non-rejoining branch still runs at the branch's terminal.
+(`UseStaticFiles` reads the web root) composes inside a segment exactly as it does on the
+application.
 
-**`Map(path)` does not rewrite the request.** `IHttpRequest.Path` is read-only on the interface, and
-the Web area's model is to publish an effective view rather than mutate the request (owner decision 3,
-the forwarded-headers model; request mutation is the open #782 gate). A path branch publishes
-`IWebPathBaseFeature`: the accumulated `PathBase` (outermost prefix first) and the `Path` below it.
-Middleware that can be mounted in a branch reads `context.GetEffectivePath()`, which `Web.StaticFiles`
-does. Absolute URLs keep using the full `IHttpRequest.Path`, which also keeps a redirect such as
-static files' add-a-slash correct inside a branch. A nested `Map` matches against the effective path, so
-prefixes compose. The view is removed when the branch returns.
+These two verbs depend on nothing but the pipeline builder, which is why they stay in the root. The
+branches that do not rejoin, `Map(path)` and `MapWhen`, are `Web.Routing`'s: each is a `UseWhen`
+segment that ends in `Run(WebApplicationTerminal.InvokeAsync)`, so routing composes them against the
+root's public seams without a second internal builder. Their design (the path-base view, the
+segment-boundary prefix match, and why branches hold middleware rather than routes) is in
+[Web.Routing's DESIGN](../../Assimalign.Cohesion.Web.Routing/docs/DESIGN.md#pipeline-branching-and-the-terminal-1056-1379).
 
-**Branches hold middleware, not routes.** Routes belong to the application's router (`app.MapGet`,
-`app.MapGroup`), and per-endpoint behavior is endpoint metadata. The routing verbs require the
-application builder (`TBuilder : IWebApplicationPipelineBuilder, IWebApplication`), so they are not
-available on a branch. A sub-path API is a route group; a sub-path asset mount is a `Map` branch.
+## Endpoints and the pipeline terminal
+
+The endpoint contract (`IWebEndpointFeature`) and the standard terminal (`WebApplicationTerminal`)
+are `Web.Routing`'s since #1379. The contract the root still states is the pipeline builder's: an
+`IWebApplicationPipelineBuilder` composes its middleware around a terminal, and a builder whose
+pipeline should run selected endpoints ends in `WebApplicationTerminal.InvokeAsync`. `WebApplication`
+in `Web.Hosting` does, which is one of the two reasons `Web.Hosting` references `Web.Routing`.
 
 ## Application lifecycle services
 
@@ -122,37 +138,17 @@ drains before application services stop. This ordering holds regardless of wheth
 
 ## Server lifecycle contract
 
-`IWebResponseCompletionFeature` is the response-transmission seam beside
-`IWebApplicationServer`. The default server installs it on every exchange and invokes callbacks
-in registration order after writing the response to the transport. Registration after completion
-throws `InvalidOperationException`. Custom servers may omit it; middleware must handle a missing
-feature. This lets a terminal defer lifecycle signals until its acknowledgement has been sent.
-
-`IWebServerDrainFeature` is the drain seam (decision 16, Http ADR 1). Its `Draining` token is
-cancelled when the server begins its lame-duck drain: the server stops accepting and lets the
-exchanges in flight finish within the stop's budget. An ordinary exchange finishes on its own; a
-long-lived one (a WebSocket, a stream of server-sent events) registers on the token and ends its
-own work cleanly, as `Web.WebSockets` does by closing each socket with `1001 Going Away`. The token
-is not the exchange's cancellation: the exchange keeps running and its response is delivered;
-`RequestCancelled` fires only if it is still running when the budget runs out. The default server
-installs one shared instance on every exchange; custom servers may omit it, and its consumers must
-handle that. It is a feature rather than a member of `IWebApplicationServer` because the consumer
-is code running inside an exchange, which sees the exchange's features and not the server.
-
-`IWebRequestIdFeature` is the request-id seam (#1064). Its `RequestId` is a BCL `ActivityTraceId`:
-the request id *is* the W3C trace id, so one value finds the request in the server's span, in logs
-and in anything returned to the caller. The default server installs it on every exchange before
-the pipeline runs. With a server span the id is the span's trace id; without one it is the trace id
-of a valid `traceparent`, or else a random id generated on first read, stable for the exchange.
-It lives here, not in `Assimalign.Cohesion.Http`, because a request id is a server concern and the
-protocol core models only the wire. Like the completion seam, custom servers may omit it.
-
 `IWebApplicationServer.StartAsync` is the endpoint-acquisition boundary: it does not
 complete until every listener is bound and ready to accept. Binding failures propagate
 through startup instead of surfacing later from an accept loop. `StopAsync` is the
 symmetric release boundary and does not complete until the endpoints are released.
 Hosted restart constructs a fresh server/listener instance after the prior instance
 stops; a disposed listener is not rebound.
+
+The per-exchange features a server publishes — the request id, response completion and the drain
+signal — are `Web.Server`'s contracts since #1379; their design is in
+[Web.Server's DESIGN](../../Assimalign.Cohesion.Web.Server/docs/DESIGN.md). A custom server may
+omit any of them, so their readers handle an absent feature.
 
 `IWebApplicationBuilder.AddServer` accepts that contracts-only server directly or through
 a factory over the final `IWebApplicationContext`. The Hosting implementation supplies its
@@ -177,13 +173,13 @@ reference order.
 ## AOT posture
 
 Contracts and delegate plumbing only — no reflection, no runtime codegen
-(`IsAotCompatible=true`). `IWebRequestIdFeature` exposes the BCL `ActivityTraceId` from
-`System.Diagnostics.DiagnosticSource`, which the shared framework carries; no package is added.
+(`IsAotCompatible=true`).
 
 ## Non-goals
 
-- **Feature models or middleware.** Per-concern packages own them; the root absorbing a
-  feature is the architecture smell this design guards against.
+- **Feature models, feature contracts or middleware.** Per-concern packages own them, an
+  `IHttpFeature` contract included; the root absorbing a feature is the architecture smell this
+  design guards against.
 - **DI/configuration/logging integration.** `Web.Hosting` composes those, builder-time
   only.
 - **A return-value result model.** Withdrawn by design; the pipeline is middleware-first.

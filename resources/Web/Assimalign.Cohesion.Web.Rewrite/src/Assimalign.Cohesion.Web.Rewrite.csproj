@@ -5,6 +5,10 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- Inside a Map(path) branch the rules see the branch's effective path, and a rewrite
+		     publishes a matching IWebPathBaseFeature. Both live in Web.Routing with the branching
+		     itself (owner decision 33, #1379). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 	</ItemGroup>

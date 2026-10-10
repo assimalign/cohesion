@@ -74,6 +74,9 @@ models were set aside on 2026-07-10.
 | `ILinkGenerator` | Outbound URL generation (`GetPathByName`, `GetUriByName`, `TryGetPathByValues`, …); exposed as `IRouter.LinkGenerator` and via `context.GetLinkGenerator()`. |
 | `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) / `AcknowledgeEndpointMiddleware` / `GetLinkGenerator` over the routing features. |
 | `RoutingExtensions.UseRouting` | Pipeline integration: selects the endpoint (match / 405 / preflight candidate / none) and calls `next`; the terminal runs it. |
+| `IWebEndpointFeature` | The endpoint selected for the exchange: the delegate the terminal runs and the `RouteTemplate` the server reports as `http.route`. Moved here from the Web root (#1379). |
+| `WebApplicationTerminal` | The standard pipeline terminal: runs the published endpoint, or answers an untouched response with a bodyless 404. `WebApplication` and every non-rejoining branch end in it (#1379). |
+| `WebApplicationBranchingExtensions` / `IWebPathBaseFeature` | `Map(path, branch)` and `MapWhen` (branches that end in the terminal), and the path-base view a path branch publishes (`GetPathBase()`, `GetEffectivePath()`). Moved here from the Web root (#1379); the rejoining `UseWhen` and `Run` stay in the root. |
 
 ## Usage
 

@@ -161,7 +161,8 @@ Deriving the validators (`RepresentationMetadata.WithFile`) and every step after
 `RepresentationWriter` engine, which the response helpers run as well; the steps before it are the
 middleware's own.
 
-The request path the flow starts from is `context.GetEffectivePath()` (#1056). Inside a
+The request path the flow starts from is `context.GetEffectivePath()` (#1056; a `Web.Routing` accessor
+since #1379, which this package already references for `MapFallbackToFile`). Inside a
 `Map("/static", branch)` branch that is the path below `/static`, so `branch.UseStaticFiles()` serves
 `/static/app.js` from `wwwroot/app.js`. The add-a-slash redirect still builds its `Location` from the
 full request path, so it stays correct inside a branch. Outside a branch the effective path is the

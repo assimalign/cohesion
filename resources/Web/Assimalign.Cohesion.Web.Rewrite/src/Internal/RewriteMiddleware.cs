@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 

@@ -9,9 +9,10 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Tests.TestObjects;
 
 /// <summary>
-/// A composing <see cref="IWebApplicationPipelineBuilder"/> that ends in the standard
-/// <see cref="WebApplicationTerminal"/> and supplies a fixed application context to component factories,
-/// as the Web host does.
+/// A composing <see cref="IWebApplicationPipelineBuilder"/> that supplies a fixed application context to
+/// component factories, as the Web host does. It ends in a terminal that leaves the response untouched:
+/// the standard terminal that runs a selected endpoint ships in <c>Web.Routing</c>, which the root's
+/// tests do not reference.
 /// </summary>
 internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 {
@@ -33,7 +34,7 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 
     public IWebApplicationPipeline Build()
     {
-        WebApplicationMiddleware pipeline = WebApplicationTerminal.InvokeAsync;
+        WebApplicationMiddleware pipeline = _ => Task.CompletedTask;
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
             pipeline = _middleware[i](pipeline);
@@ -114,14 +115,4 @@ internal sealed class TestHttpResponse : HttpResponse
     public override HttpHeaderCollection Headers { get; } = new();
     public override HttpContext HttpContext { get; }
     public override Stream Body { get; set; } = new MemoryStream();
-}
-
-/// <summary>A published endpoint that records its invocation.</summary>
-internal sealed class TestEndpointFeature : IWebEndpointFeature
-{
-    public TestEndpointFeature(Func<IHttpContext, Task> endpoint) => Endpoint = context => endpoint(context);
-
-    public string Name => nameof(IWebEndpointFeature);
-
-    public WebApplicationMiddleware Endpoint { get; }
 }

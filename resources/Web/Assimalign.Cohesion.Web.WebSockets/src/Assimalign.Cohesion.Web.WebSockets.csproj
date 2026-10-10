@@ -8,6 +8,9 @@
 		<!-- MapWebSocket maps its route through the router builder and route groups; a Web feature
 		     library referencing another is within the area's dependency rule (no hosting reference). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- UseWebSockets closes open sockets with 1001 when the server's IWebServerDrainFeature
+		     fires; the contract is a Web feature package's (owner decision 33, #1379). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />

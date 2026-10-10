@@ -77,11 +77,12 @@ coordinates the two, so a receive loop written the usual way ends cleanly.
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Web` — the pipeline seams and the server drain feature (`IWebServerDrainFeature`).
+- `Assimalign.Cohesion.Web` — the pipeline seams.
+- `Assimalign.Cohesion.Web.Server` — the server drain feature (`IWebServerDrainFeature`).
 - `Assimalign.Cohesion.Web.Routing` — the router builder and route groups `MapWebSocket` maps into.
 - `Assimalign.Cohesion.Http.WebSockets` — the handshake, the negotiation and the accept.
 - `Assimalign.Cohesion.Http.Forwarded` — `EffectiveScheme` and `EffectiveHost` for the same-origin check.
 - `Assimalign.Cohesion.Http` — the protocol core.
 
-It references nothing in the hosting family; the drain signal reaches it through the Web root's
+It references nothing in the hosting family; the drain signal reaches it through `Web.Server`'s
 feature contract. See [DESIGN.md](./DESIGN.md).

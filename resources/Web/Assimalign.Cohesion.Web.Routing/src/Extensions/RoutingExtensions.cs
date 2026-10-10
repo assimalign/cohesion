@@ -28,7 +28,8 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <para>
 /// <c>UseRouting</c> selects the endpoint; it does not run it (#1054). It publishes the match and calls
 /// <c>next</c>, so every middleware registered after it runs with the endpoint and its metadata known,
-/// and the pipeline's terminal runs the endpoint through the root's <see cref="IWebEndpointFeature"/>.
+/// and the pipeline's terminal (<see cref="WebApplicationTerminal"/>) runs the endpoint through
+/// <see cref="IWebEndpointFeature"/>.
 /// Dispatch is implicit: there is no separate <c>UseEndpoints</c> step to register.
 /// </para>
 /// </remarks>

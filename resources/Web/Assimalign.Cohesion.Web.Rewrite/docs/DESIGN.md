@@ -13,15 +13,17 @@ The package owns the `UseRewrite` verb, the `RewriteOptions` rule list, the `IRe
 the `RewriteFlow` and `RewriteMatchTarget` enums, and the internal engine: the middleware, the request view,
 the target parser and the built-in rules.
 
-It references the Web root, `Http` and `Http.Forwarded`, and nothing else. It runs ahead of routing and needs
-none of Web.Routing's types, and like every Web feature it never references `Web.Hosting` or a
-`Hosting*` library (`COHRES001`, `COHRES004`).
+It references the Web root, `Web.Routing`, `Http` and `Http.Forwarded`, and nothing else. Like every Web
+feature it never references `Web.Hosting` or a `Hosting*` library (`COHRES001`, `COHRES004`).
 
 ```mermaid
 flowchart LR
     Rewrite["Web.Rewrite"] --> Web["Assimalign.Cohesion.Web"]
+    Rewrite --> Routing["Assimalign.Cohesion.Web.Routing"]
     Rewrite --> Http["Assimalign.Cohesion.Http"]
     Rewrite --> Forwarded["Assimalign.Cohesion.Http.Forwarded"]
+    Routing --> Web
+    Routing --> Forwarded
     Forwarded --> Http
     Web --> Http
     Rewrite -.->|"COHRES001 ✗"| Hosting["Web.Hosting"]
@@ -29,6 +31,13 @@ flowchart LR
 
 The dotted edge is the reference the build rejects: a feature library never references the area's runtime
 module.
+
+**Why `Web.Routing`.** The rewrite runs ahead of routing and uses none of the router's types. It references
+the package for the path-branch view: inside `Map(path)` the rules read `IWebPathBaseFeature` and
+`context.GetEffectivePath()`, and a rewrite publishes its own `IWebPathBaseFeature` (see "Path branches").
+Both lived in the Web root until #1379 moved them, with `Map(path)` itself, to `Web.Routing` (owner decision
+33: the root holds no feature contracts). The reference adds nothing to an application's closure, since
+`App.Web` carries `Web.Routing` already.
 
 ## The decision this implements: a request view
 

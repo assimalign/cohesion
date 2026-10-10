@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
 /// The view of the request path inside the <c>Map(path, branch)</c> branches the request entered: the

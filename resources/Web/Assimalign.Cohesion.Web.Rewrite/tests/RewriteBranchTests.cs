@@ -6,6 +6,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Rewrite.Tests.TestObjects;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.Rewrite.Tests;
 

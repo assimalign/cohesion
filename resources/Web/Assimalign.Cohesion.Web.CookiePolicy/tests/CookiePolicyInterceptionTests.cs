@@ -12,6 +12,7 @@ using Xunit;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.CookiePolicy.Tests.TestObjects;
 using Assimalign.Cohesion.Web.ForwardedHeaders;
+using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Testing;
 
 namespace Assimalign.Cohesion.Web.CookiePolicy.Tests;

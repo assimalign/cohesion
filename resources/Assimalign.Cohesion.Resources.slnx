@@ -1461,6 +1461,14 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Serialization/tests/Assimalign.Cohesion.Web.Serialization.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Server/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Server/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Server/src/Assimalign.Cohesion.Web.Server.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Sessions/src/Assimalign.Cohesion.Web.Sessions.csproj" />

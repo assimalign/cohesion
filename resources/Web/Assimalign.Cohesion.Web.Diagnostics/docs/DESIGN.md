@@ -30,6 +30,13 @@ into `trace.id`/`span.id` attributes when valid. Optionally (`LogRequestStart`),
 seeds an `IScopedLogger` scope so the completion entry correlates via `ILoggerEntry.ParentId` —
 the Logging library's own correlation mechanism, not a bespoke one.
 
+The package does not read the server's request id (`IWebRequestIdFeature`), and so takes no
+`Web.Server` reference. The request id is the same W3C trace id the header carries when it is valid,
+but the default server also invents one for a request without a valid `traceparent`. Logging that id
+would give every entry a `trace.id`, including entries no span or caller shares. That is a separate
+decision: if it is taken, the middleware reads the feature from `Web.Server`, where it moved from
+the Web root with #1379, and handles its absence under a custom server.
+
 ## Why-this-not-that
 
 - **Explicit logger at composition time, not DI.** `UseHttpLogging(ILogger | ILoggerFactory, ...)`

@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web.Internal;
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Default <see cref="IWebPathBaseFeature"/>, installed by a path branch for the duration of the branch.

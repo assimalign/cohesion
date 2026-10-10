@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 
 using Assimalign.Cohesion.Web.Rewrite.Internal;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.Rewrite;
 

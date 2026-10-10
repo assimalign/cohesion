@@ -37,6 +37,10 @@ Scope of this library:
   or absolute URI (#787).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
+- The **endpoint seam and the pipeline terminal** (`IWebEndpointFeature`, `WebApplicationTerminal`)
+  and the **non-rejoining branches** (`Map(path)`, `MapWhen`, `IWebPathBaseFeature`,
+  `GetPathBase()`, `GetEffectivePath()`), moved here from the Web root by #1379 (see "Pipeline
+  branching and the terminal").
 
 ## The matcher pipeline
 
@@ -557,8 +561,9 @@ at that read, so a route never observes two different metadata sets.
 
 When the pipeline is built, the `UseRouting` middleware factory builds the application's router
 (see "Router lifecycle" below). For each request the middleware **selects** the endpoint and calls
-`next`. It never runs the endpoint and never short-circuits (#1054). The pipeline's terminal runs
-whatever was selected, through the root's `IWebEndpointFeature`.
+`next`. It never runs the endpoint and never short-circuits (#1054). The pipeline's terminal
+(`WebApplicationTerminal`) runs whatever was selected, through `IWebEndpointFeature`. Both are this
+package's since #1379 (see "Pipeline branching and the terminal" below).
 
 ```mermaid
 flowchart TD
@@ -619,13 +624,16 @@ generator produces for it. That inconsistency is fixed with #1056.
 
 The endpoint runs at the pipeline's terminal; there is no `UseEndpoints` step. An explicit dispatch
 middleware would silently turn every existing application into a 404 server: its routes would match
-and publish, and nothing would run them. The terminal belongs to the pipeline builder
-(`WebApplication` in Web.Hosting), and when this was designed COHRES002 forbade Web.Hosting from
-referencing Web.Routing (relaxed 2026-10-09, which unblocks moving the endpoint seam here; HTTP/Web
-program plan, decision 32). So the selected endpoint reaches the terminal through a root seam, `IWebEndpointFeature`, which
-carries the delegate to run and the route template telemetry names it by. The route, its values and
-its metadata stay in Web.Routing's `IRouteMatchFeature`. `RouteMatchFeature` implements both
-contracts.
+and publish, and nothing would run them. The terminal is the pipeline builder's (`WebApplication` in
+Web.Hosting composes its pipeline around it), and the selected endpoint reaches it through
+`IWebEndpointFeature`, which carries the delegate to run and the route template telemetry names it
+by. The route, its values and its metadata stay in `IRouteMatchFeature`. `RouteMatchFeature`
+implements both contracts.
+
+When this was designed COHRES002 forbade Web.Hosting from referencing Web.Routing, so the endpoint
+seam and the terminal lived in the Web root. Owner decision 32 relaxed the rule on 2026-10-09, and
+decision 33 (#1379) moved both here: the root holds no feature contracts, and Web.Hosting now
+references Web.Routing for the terminal and for the `RouteTemplate` its telemetry reads.
 
 ### The route template the server's telemetry reports (#1064)
 
@@ -793,6 +801,89 @@ that is the token the handler sees.
 token at the boundary: an already-cancelled token returns a cancelled task without starting the
 middleware, and a running middleware observes cancellation through `RequestCancelled`. The Web
 host's pipeline treats its own `ExecuteAsync` token the same way.
+
+## Pipeline branching and the terminal (#1056, #1379)
+
+Until #1379 the endpoint seam, the standard terminal, the non-rejoining branches and the path-base
+view lived in the Web root. Owner decision 33 holds the root to base contracts and composition seams,
+so every `IHttpFeature` contract left it. The two this package publishes, and the code that cannot
+compile without them, moved here:
+
+| Type | Kind | Reads or publishes |
+|---|---|---|
+| `IWebEndpointFeature` | contract, `Abstractions/` | published by `UseRouting`; run by the terminal; read by Web.Hosting's telemetry |
+| `WebApplicationTerminal` | static class | runs `IWebEndpointFeature`, else a bodyless 404 |
+| `IWebPathBaseFeature` | contract, `Abstractions/` | published by `Map(path)` and by Web.Rewrite inside a branch |
+| `WebApplicationBranchingExtensions` | `Map(path)`, `MapWhen`, `GetPathBase()`, `GetEffectivePath()` | end in the terminal; read and publish the path base |
+
+The rejoining `UseWhen` and `Run` stay in the root (`WebApplicationExtensions`): they depend on no
+feature.
+
+### The terminal
+
+`WebApplicationTerminal.InvokeAsync` runs the published endpoint, or sets a bodyless `404` on an
+untouched response (a `200` with no `Location`, no `Content-Type` and no written body). It sets no
+body because routing references no error-handling library; `UseStatusCodePages` in
+Web.ErrorHandling upgrades the 404 to problem+json. `WebApplication` in Web.Hosting and every
+non-rejoining branch end in it, so there is one definition of "unhandled". A custom
+`IWebApplicationPipelineBuilder` should end in it too.
+
+### Non-rejoining branches
+
+| Verb | Runs the branch when | Rejoins the main pipeline |
+|---|---|---|
+| `Map(path, branch)` | the effective path starts with `path` at a segment boundary (case-insensitive) | no; ends in `WebApplicationTerminal` |
+| `MapWhen(predicate, branch)` | `predicate(context)` is true | no; ends in `WebApplicationTerminal` |
+
+Each branch is the root's `UseWhen` segment ending in `Run(WebApplicationTerminal.InvokeAsync)`:
+the terminal never calls `next`, so the segment never rejoins. Routing therefore composes branches
+against the root's public seams and keeps no second branch builder. The segment keeps the
+component-factory shape that takes the application context, so middleware that reads the context
+at composition time (`UseStaticFiles` reads the web root) composes inside a branch exactly as it
+does on the application. An endpoint selected before a branch still runs at the branch's terminal.
+
+The pipeline a path branch builds, in order:
+
+```mermaid
+flowchart TD
+    Match["UseWhen predicate: effective path starts with the prefix"] -->|no| Next["The rest of the containing pipeline"]
+    Match -->|yes| Base["Install IWebPathBaseFeature, restore the enclosing view on return"]
+    Base --> Branch["The branch's own middleware"]
+    Branch --> Terminal["WebApplicationTerminal: the selected endpoint, or 404"]
+```
+
+The predicate is allocation-free; the path below the prefix is computed once the branch is entered.
+
+**`Map(path)` does not rewrite the request.** `IHttpRequest.Path` is read-only on the interface, and
+the Web area's model is to publish an effective view rather than mutate the request (owner decision
+3, the forwarded-headers model; Web ADR 1 for rewrites). A path branch publishes
+`IWebPathBaseFeature`: the accumulated `PathBase` (outermost prefix first) and the `Path` below it.
+Middleware that can be mounted in a branch reads `context.GetEffectivePath()`, which Web.StaticFiles
+and Web.Rewrite do. Absolute URLs keep using the full `IHttpRequest.Path`, which also keeps a
+redirect such as static files' add-a-slash correct inside a branch. A nested `Map` matches against
+the effective path, so prefixes compose. The view is removed when the branch returns, including
+when it throws.
+
+**Branches hold middleware, not routes.** Routes belong to the application's router (`app.MapGet`,
+`app.MapGroup`), and per-endpoint behavior is endpoint metadata. The routing verbs require the
+application builder (`TBuilder : IWebApplicationPipelineBuilder, IWebApplication`), so they are not
+available on a branch. A sub-path API is a route group; a sub-path asset mount is a `Map` branch.
+
+### Namespace: `Assimalign.Cohesion.Web.Routing`
+
+The moved types declare this package's namespace, not the root's `Assimalign.Cohesion.Web`. The
+package's code already declares `Assimalign.Cohesion.Web.Routing` throughout, so its `RootNamespace`
+pin cannot become the family name, and the rules require `Abstractions/` and `Extensions/` types to
+declare the `RootNamespace` (`general-rules.md`, "Every project pins its `RootNamespace`"). The
+alternative, keeping `Assimalign.Cohesion.Web` on these four types as a marked deviation, was not
+taken: it needs the deviation protocol's owner approval, and most call sites already import this
+namespace for `UseRouting`.
+
+The source break: code that names `IWebEndpointFeature`, `IWebPathBaseFeature` or
+`WebApplicationTerminal`, or calls `Map(path, branch)`, `MapWhen`, `GetPathBase()` or
+`GetEffectivePath()`, adds `using Assimalign.Cohesion.Web.Routing;`. A library that does so adds a
+reference to this package (Web.Rewrite did). `UseWhen` and `Run` keep the root namespace. The types
+also changed assembly, so a binary compiled against the root's copies must be rebuilt.
 
 ## Parameter policies (constraints)
 
@@ -1038,6 +1129,8 @@ The endpoint-metadata seam (#150) is consumed by:
   names fail when the route table is built.
 - **#1051 Startup router build, template error messages, cancellation** — see "Router lifecycle",
   "Cancellation", and the error-model section above.
+- **#1379 The endpoint seam, the terminal and the non-rejoining branches** — moved from the Web root;
+  see "Pipeline branching and the terminal" above.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 

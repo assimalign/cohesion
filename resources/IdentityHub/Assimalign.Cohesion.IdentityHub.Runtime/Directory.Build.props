@@ -26,6 +26,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.SecurityHeaders" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Server" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Cookies" />

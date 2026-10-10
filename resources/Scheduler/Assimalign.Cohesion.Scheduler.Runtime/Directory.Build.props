@@ -23,11 +23,14 @@
         <!-- Scheduler.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Server" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Cookies" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

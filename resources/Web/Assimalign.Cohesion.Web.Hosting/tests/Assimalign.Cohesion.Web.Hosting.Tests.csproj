@@ -31,8 +31,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
-		<!-- Test-only: the server names a request's span and duration by the route template routing
-		     publishes on the root's IWebEndpointFeature (#1064). The runtime module takes no dependency on it. -->
+		<!-- The tests map routes with UseRouting. The runtime module references Web.Routing too, for
+		     the pipeline terminal and the IWebEndpointFeature.RouteTemplate its telemetry reads (#1064,
+		     #1379); the routing verbs the tests call are not runtime machinery. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

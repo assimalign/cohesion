@@ -47,7 +47,13 @@ Why the rule exists:
   `AddJwtBearer` in Web.Authentication.Bearer, `AddRouting`/`UseRouting` in Web.Routing, …) and
   compose against the root project's `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder`
   seams. Each reference `Web.Hosting` takes ships its closure in every framework that carries
-  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks.
+  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks. It takes two (owner
+  decision 33, #1379): `Web.Routing`, for the pipeline terminal and the endpoint's route template
+  its telemetry reports, and `Web.Server`, for the per-exchange features the server installs.
+- **The root holds no feature contracts** (owner decision 33, #1379). An `IHttpFeature` contract
+  lives with the package that publishes it: the endpoint and the path base in `Web.Routing`, the
+  request id, response completion and drain signal in `Web.Server`. The root keeps the base
+  contracts and composition seams (`IWebApplication*`, the pipeline, `Use`/`UseWhen`/`Run`).
 - **The exclusions** follow from earlier decisions: `Web.Testing` references `Web.Hosting`, so the
   reverse is a cycle; the realization-plan design keeps the runtime off `Web.ApplicationModel`
   (generated code in the consumer executable joins the two); the `App.Web` producers are packaging
@@ -94,13 +100,20 @@ A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is n
 5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
    stabilizes), and a row in the project map below.
 
-The runtime consumes the root and its hosting family; feature libraries remain rooted in Web. COHRES002 would also let it reference other Web libraries, and today it references none. Arrows show references.
+The runtime consumes the root, its hosting family, and two feature packages, `Web.Routing` and
+`Web.Server` (#1379); feature libraries remain rooted in Web. `Web.Hosting.Resources` reads
+`Web.Server`'s completion feature. Arrows show references.
 
 ```mermaid
 flowchart LR
     Host["Web.Hosting"] --> Root["Web"]
+    Host --> Routing["Web.Routing"]
+    Host --> Server["Web.Server"]
     Host --> Resources["Web.Hosting.Resources"]
+    Routing --> Root
+    Server --> Root
     Resources --> Root
+    Resources --> Server
     Resources --> HR["Hosting.Resources"]
     Resources --> HH["Hosting.Health"]
     Resources --> JWT["IdentityModel.Token.JsonWebToken"]
@@ -114,11 +127,12 @@ flowchart LR
 
 | Project | Role |
 | --- | --- |
-| `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) every library builds against |
+| `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) and the composition verbs `Use`, `UseWhen` and `Run` every library builds against; no `IHttpFeature` contract (#1379) |
+| `Assimalign.Cohesion.Web.Server` | Contracts only: the per-exchange features the server publishes, `IWebRequestIdFeature` (the request's W3C trace id), `IWebResponseCompletionFeature` (callbacks after the response reaches the transport) and `IWebServerDrainFeature` (the lame-duck drain signal). `Web.Hosting` installs all three; namespace `Assimalign.Cohesion.Web`, moved from the root (#1379) |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | Single resource control-plane terminal, ES256 bootstrap verification, and deferred stop; consumed by `Web.Hosting`, `Web.Testing`, and every resource area's hosting module that serves its control plane over HTTP (O35) |
-| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, concrete-builder `AddService`, builder-time DI/config/logging composition; the server's request spans and HTTP metrics (`ActivitySource` and `Meter` `Assimalign.Cohesion.Web.Hosting`) and the request id (#1064) |
+| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, concrete-builder `AddService`, builder-time DI/config/logging composition; the server's request spans and HTTP metrics (`ActivitySource` and `Meter` `Assimalign.Cohesion.Web.Hosting`) and the request id (#1064). References `Web.Routing` and `Web.Server` (#1379) |
 | `Assimalign.Cohesion.Web.Hosting.Health` | Adapts `Hosting.Health` contributors onto the `Web.Health` builder; consumed privately by `Database.Hosting` |
-| `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation; `UseRouting` selects the endpoint and the pipeline terminal runs it (#1054), so policy middleware registered after `UseRouting` reads the matched endpoint |
+| `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation; `UseRouting` selects the endpoint and the pipeline terminal runs it (#1054), so policy middleware registered after `UseRouting` reads the matched endpoint. Owns the endpoint contract (`IWebEndpointFeature`), the standard terminal (`WebApplicationTerminal`) and the branches that end in it (`Map(path)`, `MapWhen`, `IWebPathBaseFeature`), moved from the root (#1379) |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping over the router: plain `Map`/`MapGet` terminal middleware plus source-generated typed-delegate binding (`(int id, IHttpContext) => ...` — route/query/header/body/form + uploaded files + injections, 400/413/415 outcomes), returned values written with content negotiation (`string` as `text/plain`, `null` as 204), `COHWEB` compile errors for handlers it cannot bind, and neutral endpoint-description metadata (`EndpointParameterMetadata`, `EndpointResponseMetadata`, plus the `WithTags`/`WithSummary`/`WithDescription`/`ExcludeFromDescription` verbs) for documentation adapters; the interceptor generator lives in `analyzers/Assimalign.Cohesion.SourceGeneration.Web` |
 | `Assimalign.Cohesion.Web.Serialization` | The content-serialization registry: media-type-keyed request-reader/response-writer halves, `AddJsonSerialization` over a source-generated resolver (AOT), and the `ReadContentAsync`/`WriteContentAsync` call sites |
 | `Assimalign.Cohesion.Web.OpenApi` | OpenAPI 3.0/3.1/3.2 documents from endpoint metadata, never runtime reflection (#152): the Web adapter for `OpenApi.Integration`'s `IOpenApiEndpointSource` over the route table (parameters and responses from the source-generated endpoint descriptions, schemas from the application's source-generated System.Text.Json contracts via `JsonSchemaExporter`, tags/summaries/exclusion from the Web.Api description verbs, security requirements from each endpoint's effective authorization policy, fallback and named policies included); `AddOpenApi` + `MapOpenApi` serve the document as JSON or YAML, built once and revalidated by ETag. **NuGet-only**: not an `App.Web` member, so applications that do not document their API carry none of the OpenApi family |

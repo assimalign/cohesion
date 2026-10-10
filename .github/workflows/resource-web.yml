@@ -59,6 +59,7 @@ jobs:
             'Assimalign.Cohesion.Web.Routing',
             'Assimalign.Cohesion.Web.SecurityHeaders',
             'Assimalign.Cohesion.Web.Serialization',
+            'Assimalign.Cohesion.Web.Server',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',
             'Assimalign.Cohesion.Web.Testing',

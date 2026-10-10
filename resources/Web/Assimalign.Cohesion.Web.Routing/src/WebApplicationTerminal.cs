@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
 /// The standard terminal of a Web application pipeline: the innermost delegate a pipeline builder
@@ -21,8 +21,8 @@ namespace Assimalign.Cohesion.Web;
 /// The application pipeline in <c>Web.Hosting</c> and every non-rejoining branch
 /// (<c>Map(path, branch)</c>, <c>MapWhen</c>) end in this terminal, so an endpoint selected before a branch
 /// still runs inside it. A custom <see cref="IWebApplicationPipelineBuilder"/> should end in it too.
-/// The 404 carries no payload, because the root references no feature library. <c>UseStatusCodePages</c>
-/// in <c>Web.ErrorHandling</c> upgrades it to RFC 9457 problem+json.
+/// The 404 carries no payload, because routing references no error-handling library.
+/// <c>UseStatusCodePages</c> in <c>Web.ErrorHandling</c> upgrades it to RFC 9457 problem+json.
 /// </para>
 /// </remarks>
 public static class WebApplicationTerminal

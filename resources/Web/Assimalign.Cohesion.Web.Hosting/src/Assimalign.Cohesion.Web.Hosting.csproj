@@ -2,15 +2,22 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Hosting</RootNamespace>
 	</PropertyGroup>
-	<!-- Web-area dependency rule: today the hosting/runtime module references the root
-	     Assimalign.Cohesion.Web project, its own hosting family (O35), and non-Web-area libraries.
-	     COHRES002 (relaxed 2026-10-09) lets it reference any other Web library except Web.Testing,
+	<!-- Web-area dependency rule: the hosting/runtime module references the root
+	     Assimalign.Cohesion.Web project, its own hosting family (O35), the two Web feature packages
+	     whose contracts it publishes or runs, and non-Web-area libraries. COHRES002 (relaxed
+	     2026-10-09) lets it reference any other Web library except Web.Testing,
 	     Web.ApplicationModel, the App.Web producers, and harnesses - but only for runtime machinery
 	     it composes itself: the App.Web shared framework delivers features to applications, their
 	     builder verbs ship in their own packages, and every reference added here ships its closure
 	     in all 18 area frameworks. See resources/Web/README.md. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- Owner decision 33 (#1379): the pipeline ends in Web.Routing's WebApplicationTerminal, and
+		     the server's telemetry names a request by IWebEndpointFeature.RouteTemplate (http.route). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- Owner decision 33 (#1379): the server installs Web.Server's request id, response
+		     completion and drain features on every exchange. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />

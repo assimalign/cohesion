@@ -10,10 +10,10 @@ pipeline.UseResourceControlPlane(controlPlane, resourceContext,
     () => resourceApplication.Context.State is HostState.Started);
 ```
 
-Install before application middleware. An optional trailing port gates every route; null serves every listener. Hosts composing manually call `ResourceControlPlaneMiddleware.Validate(resourceContext)` and `InvokeAsync(...)`. Stop uses the Web root response-completion feature to send its acknowledgement before requesting shutdown. The feature serves health, readiness, liveness, endpoint discovery, stop, and command envelopes. Gateway-managed namespaced routes authenticate against the published application trust key; standalone resources work without a gateway. Domain command handlers remain the owning area's responsibility.
+Install before application middleware. An optional trailing port gates every route; null serves every listener. Hosts composing manually call `ResourceControlPlaneMiddleware.Validate(resourceContext)` and `InvokeAsync(...)`. Stop uses Web.Server's response-completion feature to send its acknowledgement before requesting shutdown. The feature serves health, readiness, liveness, endpoint discovery, stop, and command envelopes. Gateway-managed namespaced routes authenticate against the published application trust key; standalone resources work without a gateway. Domain command handlers remain the owning area's responsibility.
 
-This hosting-family library references the Web root, Hosting.Resources, Hosting.Health, and
-IdentityModel.Token.JsonWebToken. It never references Web.Hosting. Roots and feature libraries
+This hosting-family library references the Web root, Web.Server (for `IWebResponseCompletionFeature`,
+#1379), Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken. It never references Web.Hosting. Roots and feature libraries
 cannot reference it; other areas' hosting modules consume it privately. App.Web exposes it publicly.
 
 See [DESIGN.md](DESIGN.md) for protocol, authentication, ownership, and parity constraints.

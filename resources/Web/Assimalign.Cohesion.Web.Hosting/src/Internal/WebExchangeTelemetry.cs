@@ -6,6 +6,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 

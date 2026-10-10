@@ -8,11 +8,11 @@ Managed namespaced requests first consult the resource's registered `IResourceCr
 
 Command discovery includes both acceptedCommandKinds and applied commands. Non-object envelopes, non-string/base64 payloads, and blank identity fields are 400. Unsupported kinds return 501 and ownership/replay rejections return 409, both with status=Rejected and detail. This package declares no command kinds or handlers.
 
-O35 permits the exact Web.Hosting module to consume its own hosting family under COHRES002. COHRES001 still prevents roots and features from referencing it and prevents it from referencing Web.Hosting. Web.Hosting and Database.Hosting consume this single terminal. The Web root's IWebResponseCompletionFeature defers stop until the transport has written 202; custom servers without the feature retain direct stop. The executable regression compares the Web.Hosting wrapper through FromProgram with the direct verb, guarding both composition paths.
+O35 permits the exact Web.Hosting module to consume its own hosting family under COHRES002. COHRES001 still prevents roots and features from referencing it and prevents it from referencing Web.Hosting. Web.Hosting and Database.Hosting consume this single terminal. Web.Server's IWebResponseCompletionFeature defers stop until the transport has written 202; custom servers without the feature retain direct stop. The contract lived in the Web root until #1379 moved the server's per-exchange contracts to Web.Server (owner decision 33); its namespace stayed Assimalign.Cohesion.Web, so this package added a Web.Server reference and no code change. The executable regression compares the Web.Hosting wrapper through FromProgram with the direct verb, guarding both composition paths.
 
 ResourceControlPlaneMiddleware exposes InvokeAsync for manually composed hosts and Validate for eager identity validation. UseResourceControlPlane calls Validate before registration. Its optional trailing controlPlanePort gates every route, including bare probes; null means no gate. Web.Hosting separately treats an unknown observed http/https port as disabled, so it forwards without invoking this terminal. Web and Database validate managed identity at Build only when their control-plane listener is installed.
 
-Serialization uses Utf8JsonWriter and JsonDocument only. Dependencies are Web root, Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken. App.Web exposes the feature publicly; other areas consume its implementation privately. No ApplicationModel package enters a framework.
+Serialization uses Utf8JsonWriter and JsonDocument only. Dependencies are Web root, Web.Server, Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken. App.Web exposes the feature publicly; other areas consume its implementation privately. No ApplicationModel package enters a framework.
 
 Tests may reference Web.Hosting and the sample Program: COHRES001/002 skip the tests leaf via `_CohesionHostingRuleApplies`; COHAM001/COHRES003 skip harness path segments via `_CohesionResourceBoundaryRulesApply` (Build.Rules.targets). These are separate gates, not exemptions.
 
@@ -25,6 +25,7 @@ flowchart LR
     WebHost["Web.Hosting"] --> Terminal["Web.Hosting.Resources"]
     DbHost["Database.Hosting"] --> Terminal
     Terminal --> Web["Web"]
+    Terminal --> Server["Web.Server"]
     Terminal --> Resources["Hosting.Resources"]
     Terminal --> Health["Hosting.Health"]
     Terminal --> JWT["IdentityModel.Token.JsonWebToken"]

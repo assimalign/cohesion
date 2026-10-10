@@ -4,9 +4,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Web.Internal;
 
 /// <summary>
-/// Collects the middleware of a pipeline branch (<c>Map</c>, <c>MapWhen</c>, <c>UseWhen</c>). The
-/// pipeline that contains the branch composes it when that pipeline is built, with the application
-/// context and the branch's terminal.
+/// Collects the middleware of a <c>UseWhen</c> segment. The pipeline that contains the segment composes
+/// it when that pipeline is built, with the application context and the segment's continuation.
 /// </summary>
 /// <remarks>
 /// Every registration is kept in the component-factory shape that takes the application context, so a
@@ -59,8 +58,9 @@ internal sealed class WebApplicationBranchBuilder : IWebApplicationPipelineBuild
     /// </summary>
     /// <param name="application">The application context the containing pipeline composes with.</param>
     /// <param name="terminal">
-    /// The branch's terminal: the standard terminal for a branch that does not rejoin, or the containing
-    /// pipeline's <c>next</c> for one that does.
+    /// The segment's continuation: the containing pipeline's <c>next</c>, which the segment rejoins. A
+    /// branch that must not rejoin (<c>Map</c>, <c>MapWhen</c> in <c>Web.Routing</c>) ends its segment in
+    /// terminal middleware that never calls it.
     /// </param>
     /// <returns>The composed branch.</returns>
     public WebApplicationMiddleware Compose(IWebApplicationContext application, WebApplicationMiddleware terminal)

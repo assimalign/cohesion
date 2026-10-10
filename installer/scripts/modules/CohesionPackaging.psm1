@@ -350,6 +350,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Routing'
     'resources/Web/Assimalign.Cohesion.Web.SecurityHeaders'
     'resources/Web/Assimalign.Cohesion.Web.Serialization'
+    'resources/Web/Assimalign.Cohesion.Web.Server'
     'resources/Web/Assimalign.Cohesion.Web.Sessions'
     'resources/Web/Assimalign.Cohesion.Web.StaticFiles'
     'resources/Web/Assimalign.Cohesion.Web.Testing'

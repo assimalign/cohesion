@@ -107,7 +107,7 @@ attacker-controlled data is a per-endpoint question.
 
 ## The drain close
 
-The default server installs `IWebServerDrainFeature` on every exchange (Web root); its token fires
+The default server installs `IWebServerDrainFeature` on every exchange (a `Web.Server` contract); its token fires
 when the stop begins, before anything is cancelled. When the feature is present, the accepted socket
 is wrapped in `DrainAwareWebSocket`, which registers on the token and, when it fires, starts the
 close handshake with `1001 Going Away`.
@@ -236,11 +236,14 @@ does any request, so disable the timeout on WebSocket endpoints (`DisableRequest
 
 ## Dependency rule
 
-A Web feature library: it references the Web root (for `IWebApplicationPipelineBuilder` and
-`IWebServerDrainFeature`), `Web.Routing` (the router builder and route groups `MapWebSocket` maps
-into, a feature-to-feature reference the area allows), `Http`, `Http.WebSockets` and
-`Http.Forwarded`, and nothing in the hosting family (COHRES001, COHRES004). The drain signal crosses from `Web.Hosting` through the Web root's
-feature contract, which is how the policy reaches the server's lifecycle without referencing it.
+A Web feature library: it references the Web root (for `IWebApplicationPipelineBuilder`),
+`Web.Server` (for `IWebServerDrainFeature`), `Web.Routing` (the router builder and route groups
+`MapWebSocket` maps into), `Http`, `Http.WebSockets` and `Http.Forwarded`, and nothing in the
+hosting family (COHRES001, COHRES004). Both Web references are feature-to-feature references the
+area allows. The drain signal crosses from `Web.Hosting` through `Web.Server`'s feature contract,
+which is how the policy reaches the server's lifecycle without referencing it. The contract lived in
+the Web root until #1379 moved the server's per-exchange contracts to `Web.Server` (owner decision
+33); its namespace stayed `Assimalign.Cohesion.Web`, so this package's code did not change.
 
 ## AOT posture
 

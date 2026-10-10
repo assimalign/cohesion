@@ -26,14 +26,16 @@ registers code-first rules that run, in order, ahead of static files and routing
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Web`: the pipeline builder, the middleware abstraction, and the path-branch view
-  (`IWebPathBaseFeature`).
+- `Assimalign.Cohesion.Web`: the pipeline builder and the middleware abstraction.
+- `Assimalign.Cohesion.Web.Routing`: the path-branch view (`IWebPathBaseFeature`,
+  `context.GetEffectivePath()`), which moved there with `Map(path)` (#1379). The rewrite still runs ahead of
+  routing and uses none of the router's types.
 - `Assimalign.Cohesion.Http`: the HTTP context, the `HttpPath`, `HttpHost` and query value objects, and the
   parsing the transports use for a request target.
 - `Assimalign.Cohesion.Http.Forwarded`: the effective scheme and host the canonicalization helpers read.
 
 It never references `Assimalign.Cohesion.Web.Hosting` or any `Assimalign.Cohesion.Hosting*` library
-(`COHRES001`, `COHRES004`), nor Web.Routing: it runs ahead of routing and needs none of its types.
+(`COHRES001`, `COHRES004`).
 
 ## Usage
 
