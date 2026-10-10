@@ -66,8 +66,9 @@ await hook.HandleAsync(context, exception, context.RequestCancelled);
 - **Faults only.** Expected protocol outcomes — an authentication challenge's `401`, a router's
   `404`, an unsupported media type's `415` — are each feature's normal response path and must
   never arrive here as exceptions.
-- **The bodyless 404 terminal lives in `Web.Hosting`.** The pipeline's unhandled-request terminal
-  can only set a payload-free `404` (the runtime module does not reference `Web.ProblemDetails`);
+- **The bodyless 404 terminal is `Web.Routing`'s `WebApplicationTerminal`.** `Web.Hosting`'s
+  pipeline and every `Map`/`MapWhen` branch end in it, and it can only set a payload-free `404`
+  (neither `Web.Hosting` nor `Web.Routing` references `Web.ProblemDetails`);
   `UseStatusCodePages()` here is what upgrades it to problem+json.
 - **The payload** is `Web.ProblemDetails`' scope; this package renders it.
 

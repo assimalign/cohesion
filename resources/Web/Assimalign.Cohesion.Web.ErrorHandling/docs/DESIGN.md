@@ -127,11 +127,14 @@ a head already committed.
 Its motivating source is the **pipeline's bodyless 404 terminal**. The silent `Task.CompletedTask`
 terminal in `WebApplication.Build` (which returned an empty `200` for any unhandled request) now sets a
 bodyless `404 Not Found` when the response reaches it untouched (still `200`, no body, no `Content-Type`,
-no `Location`). That terminal lives in **`Web.Hosting`** and stays payload-free: the runtime module
-does not reference `Web.ProblemDetails` (or this package). The resource hosting-isolation rule (COHRES002)
-forbade it when this was designed, and since the 2026-10-09 relaxation the reference would still ship in
-every framework that carries the module. So the runtime can only set the status — this package's opt-in status-code-pages middleware
-is what turns it into problem+json. A middleware that deliberately produces an empty `200` must be
+no `Location`). That terminal is **`Web.Routing`'s `WebApplicationTerminal`** (it lived in
+`Web.Hosting`, then in the Web root (#1056), until #1379 moved it beside `IWebEndpointFeature`, the
+endpoint it runs). `Web.Hosting`'s application pipeline and every `Map`/`MapWhen` branch end in it,
+and it stays payload-free: neither `Web.Hosting` nor `Web.Routing` references `Web.ProblemDetails` (or
+this package). The resource hosting-isolation rule (COHRES002) forbade the runtime that reference when
+this was designed, and since the 2026-10-09 relaxation the reference would still ship in every
+framework that carries the module. So the terminal can only set the status — this package's opt-in
+status-code-pages middleware is what turns it into problem+json. A middleware that deliberately produces an empty `200` must be
 terminal (not chain to `next`); a bodyless-`200` fall-through is read as unhandled.
 
 ## Homing under the hosting-isolation rule
