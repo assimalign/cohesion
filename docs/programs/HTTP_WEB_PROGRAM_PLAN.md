@@ -309,8 +309,20 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 **Owner-directed Web restructure, between the waves (decisions 32–36).**
 - #1382, the COHRES002 change, landed first (`f71ab0af`, `57e1f049`).
-- #1379, the root features, and #1380, `builder.Services` registration plus the singleton checks, run after wave 1 is integrated and before wave 2.
-- #1381, presizing, runs alongside them.
+- Delivered 2026-10-10, between the waves, at `d1062742`. Each item was implemented, reviewed, checked by skeptics and fixed in sequence:
+  - **#1379** (`321b4a19`, fixes `6f1fb4ad`, `2ee47d33`, `83a39e32`):
+    - The Web root declares no `IHttpFeature` contract.
+    - The endpoint feature, path base, `Map`/`MapWhen` and the pipeline terminal moved to Web.Routing, under the namespace `Assimalign.Cohesion.Web.Routing`. That is a source break: callers add a `using`.
+    - Request id, response completion and drain moved to the new `Web.Server`, which keeps the `Assimalign.Cohesion.Web` namespace.
+    - Web.Hosting references both. Web.Server and Web.Routing (with Http.Forwarded) joined the 17 area frameworks privately.
+  - **#1380** (`dae986a0`, `d2d83fd9`, `10105cc8`, fixes `94f49cca`, `ad4b7fa7`, `45c19af2`):
+    - The eight registration verbs, plus `AddJsonSerialization`, are `builder.Services.AddX(...)` component integrations. Three use builder templates (Authentication, ErrorHandling, ContentSerialization) and six use static factories.
+    - Authentication's `defaultScheme` overload and `dataProtectionProvider` parameter became `auth.Options.DefaultScheme` and `auth.UseDataProtection(...)`.
+    - ErrorHandling and ContentSerialization builders now build immutable snapshots.
+    - Web.Hosting enforces decision 35.
+  - **#1381** (`3dbb2395`, `fdb90ac5`, fixes `0b0761a0`, `d00d8b7b`, `1398131c`, `d1062742`):
+    - A generic `HttpConnectionListenerOptions.ExchangeFeatureCapacity`, sized by Web.Hosting and rounded to the unsized growth chain.
+    - Per plain GET on HTTP/1.1: −128 B with no application features, −544 B at 4, −1,296 B at 16.
 - Wave 2's #1340 touches HTTP logging and the exception boundary, so it runs after #1380.
 
 ### Stage 12 — Protocol conformance
@@ -958,7 +970,8 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - At `Build`, Web.Hosting rejects:
       - a non-singleton `IHttpFeature` registration;
       - a registration under a narrower type than `IHttpFeature`, which would never be stamped;
-      - a disposable `IHttpFeature`.
+      - a disposable `IHttpFeature` registered as an instance or an implementation type.
+    - A disposable feature that a factory produces does not exist until the pipeline is built, so it is rejected there, before the host starts. That covers the builder-template verbs and `AddFeature(factory)`.
     - Request-scoped services for handlers stay a separate future decision: a lazily created scope owned by the server, for a separate service type.
 36. **Presize each exchange's feature collection (owner, 2026-10-09; #1381).** Dictionary resizes are almost all of today's stamping cost: 560 B at 4 features and 1,744 B at 16. The capacity constructor already exists. The other per-request lever, an allocation-free `Get<T>()` (#1337), stays in Stage 14.
 
