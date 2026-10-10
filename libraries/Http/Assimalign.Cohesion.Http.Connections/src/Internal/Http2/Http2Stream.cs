@@ -1119,14 +1119,16 @@ internal sealed class Http2Stream
         }
 
         // RFC 9113 §8.5 and §8.3.1 — a classic CONNECT carries the host and port in :authority and neither
-        // :scheme nor :path, and a :path of '*' belongs to OPTIONS alone (#1334). The rule is shared with
-        // HTTP/3 and matches HTTP/1.1's authority-form and asterisk-form.
+        // :scheme nor :path, and a :path of '*' belongs to OPTIONS alone (#1334). The :path, :authority and
+        // Host hold only VCHAR, since the decoder keeps obs-text (#1387). The rule is shared with HTTP/3 and
+        // matches HTTP/1.1's request line and Host.
         string? requestTargetViolation = HttpFieldNormalization.ValidateRequestTarget(
             methodValue,
             decodedHeaders.Scheme,
             decodedHeaders.Path,
             decodedHeaders.Authority,
-            decodedHeaders.Protocol);
+            decodedHeaders.Protocol,
+            decodedHeaders.Headers);
         if (requestTargetViolation is not null)
         {
             throw new Http2StreamException(

@@ -111,7 +111,7 @@ internal sealed class HPackDecoder
             {
                 int headerIndex = DecodeInteger(headerBlock, ref index, 7);
                 ref readonly HPackHeaderField headerField = ref GetHeaderField(headerIndex);
-                AccountAndAdd(addField, ToAsciiString(headerField.Name), ToAsciiString(headerField.Value));
+                AccountAndAdd(addField, ToLatin1String(headerField.Name), ToLatin1String(headerField.Value));
                 continue;
             }
 
@@ -136,13 +136,13 @@ internal sealed class HPackDecoder
         {
             nameBytesBuffer = DecodeStringBytes(headerBlock, ref index);
             ReadOnlySpan<byte> nameBytes = nameBytesBuffer;
-            name = ToAsciiString(nameBytes);
+            name = ToLatin1String(nameBytes);
         }
         else
         {
             ref readonly HPackHeaderField headerField = ref GetHeaderField(nameIndex);
             ReadOnlySpan<byte> nameBytes = headerField.Name;
-            name = ToAsciiString(nameBytes);
+            name = ToLatin1String(nameBytes);
 
             if (nameIndex <= HPackStaticTable.Count)
             {
@@ -152,7 +152,7 @@ internal sealed class HPackDecoder
 
         byte[] valueBytesBuffer = DecodeStringBytes(headerBlock, ref index);
         ReadOnlySpan<byte> valueBytes = valueBytesBuffer;
-        string value = ToAsciiString(valueBytes);
+        string value = ToLatin1String(valueBytes);
         AccountAndAdd(addField, name, value);
 
         if (!indexHeader)
@@ -275,8 +275,13 @@ internal sealed class HPackDecoder
         throw new HPackDecodingException("The HPACK integer was incomplete.");
     }
 
-    private static string ToAsciiString(ReadOnlySpan<byte> value)
+    private static string ToLatin1String(ReadOnlySpan<byte> value)
     {
-        return value.IsEmpty ? string.Empty : Encoding.ASCII.GetString(value);
+        // RFC 9110 §5.5 — obs-text (%x80-FF) is a field-value octet. Latin-1 maps each octet to the
+        // character of the same value, as the HTTP/1.1 reader (#1341) and QPACK (QPackStringCodec) do, so
+        // the same octets read the same on every version (#1387). An ASCII decode turned each such octet
+        // into '?', which in a :path split the path from a query that was never sent. A name stays
+        // token-only: no octet above 0x7F is a tchar, so HttpReceivedFieldRules refuses it either way.
+        return value.IsEmpty ? string.Empty : Encoding.Latin1.GetString(value);
     }
 }

@@ -319,14 +319,15 @@ public static class HttpFieldNormalization
 
     /// <summary>
     /// Validates the request target that an HTTP/2 or HTTP/3 request carries in
-    /// its pseudo-header fields against the two target forms those versions
-    /// share with HTTP/1.1's authority-form and asterisk-form: a classic
-    /// <c>CONNECT</c> (no <c>:protocol</c>) carries the host and port to connect
-    /// to in <c>:authority</c> and neither <c>:scheme</c> nor <c>:path</c>
-    /// (RFC 9113 §8.5, RFC 9114 §4.4), and a <c>:path</c> of <c>*</c> is valid
-    /// only for <c>OPTIONS</c> (RFC 9110 §7.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).
-    /// Returns a description of the violation, or <see langword="null"/> when the
-    /// target is well-formed.
+    /// its pseudo-header fields, and the <c>Host</c> field that can stand in for
+    /// its authority, against the rules HTTP/1.1 applies to its request line and
+    /// <c>Host</c>: a classic <c>CONNECT</c> (no <c>:protocol</c>) carries the
+    /// host and port to connect to in <c>:authority</c> and neither
+    /// <c>:scheme</c> nor <c>:path</c> (RFC 9113 §8.5, RFC 9114 §4.4), a
+    /// <c>:path</c> of <c>*</c> is valid only for <c>OPTIONS</c> (RFC 9110 §7.1,
+    /// RFC 9113 §8.3.1, RFC 9114 §4.3.1), and the target and host hold only
+    /// visible US-ASCII. Returns a description of the violation, or
+    /// <see langword="null"/> when the target is well-formed.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -337,6 +338,14 @@ public static class HttpFieldNormalization
     /// (RFC 9112 §3.2.3), and asterisk-form is the single character <c>*</c>
     /// (RFC 9112 §3.2.4): a <c>:path</c> such as <c>*foo</c> or <c>*?x</c> is no
     /// request target at all, whatever the method.
+    /// </para>
+    /// <para>
+    /// The <c>:path</c>, the <c>:authority</c>, and every <c>Host</c> field value
+    /// hold only visible US-ASCII (VCHAR), as HTTP/1.1 holds its request line and
+    /// its <c>Host</c> field (RFC 3986 §2, RFC 9110 §7.2, RFC 9112 §3, §3.2).
+    /// HPACK and QPACK decode a field octet above <c>0x7F</c> as itself
+    /// (obs-text, RFC 9110 §5.5), which an ordinary field value may carry, but
+    /// such an octet is part of no request target or host.
     /// </para>
     /// <para>
     /// The caller has already applied <see cref="ValidateExtendedConnect"/>, which
@@ -356,15 +365,51 @@ public static class HttpFieldNormalization
     /// <param name="protocol">
     /// The decoded <c>:protocol</c> value, or <see langword="null"/> when the field is absent.
     /// </param>
+    /// <param name="headers">
+    /// The request's regular fields, whose <c>Host</c> supplies the authority when <c>:authority</c>
+    /// is absent (<see cref="ResolveAuthority"/>).
+    /// </param>
     /// <returns>
     /// A human-readable violation message, or <see langword="null"/> when valid.
     /// Callers raise their own protocol-appropriate error from the message.
     /// </returns>
-    public static string? ValidateRequestTarget(string? method, string? scheme, string? path, string? authority, string? protocol)
+    /// <exception cref="ArgumentNullException"><paramref name="headers"/> is <see langword="null"/>.</exception>
+    public static string? ValidateRequestTarget(string? method, string? scheme, string? path, string? authority, string? protocol, IHttpHeaderCollection headers)
     {
+        ArgumentNullException.ThrowIfNull(headers);
+
+        // RFC 3986 §3.2 / RFC 9110 §7.2 — an authority is uri-host [":" port], every octet a VCHAR. obs-text
+        // is a field-value octet (RFC 9110 §5.5), which HPACK and QPACK keep (#1387), but HTTP/1.1 refuses
+        // it in Host (#1341): an allowlist that trims "api.test\xA0" to "api.test" would admit a host a
+        // front end routing on the raw octets sees as another. Neither value is echoed.
+        if (authority is not null && !IsVisibleAscii(authority))
+        {
+            return "The ':authority' pseudo-header holds only visible US-ASCII characters (RFC 3986 §3.2, RFC 9113 §8.3.1).";
+        }
+
+        if (headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue host))
+        {
+            foreach (string? entry in host)
+            {
+                if (entry is not null && !IsVisibleAscii(entry))
+                {
+                    return "The 'host' field holds only visible US-ASCII characters (RFC 9110 §7.2, RFC 9112 §3.2).";
+                }
+            }
+        }
+
         if (protocol is null && string.Equals(method, HttpMethod.Connect.Value, StringComparison.Ordinal))
         {
             return ValidateClassicConnect(scheme, path, authority);
+        }
+
+        // RFC 3986 §2 / RFC 9112 §3 — a request target is visible US-ASCII, and HTTP/1.1 refuses any other
+        // octet in its request line (#1341), so a :path carrying one is malformed rather than routed as a
+        // path no other version would accept. An ASCII decode once turned such an octet into '?', which
+        // split the path from a query that was never sent.
+        if (path is not null && !IsVisibleAscii(path))
+        {
+            return "A ':path' holds only visible US-ASCII characters (RFC 3986 §2, RFC 9113 §8.3.1); an octet outside them is not part of a request target.";
         }
 
         // RFC 9112 §3.2.4 — asterisk-form is exactly '*', and RFC 9110 §7.1 reserves it for OPTIONS.
@@ -411,5 +456,11 @@ public static class HttpFieldNormalization
         }
 
         return null;
+    }
+
+    private static bool IsVisibleAscii(string value)
+    {
+        // VCHAR, %x21-7E (RFC 5234 §B.1): what the HTTP/1.1 request line accepts besides the SP between parts.
+        return !value.AsSpan().ContainsAnyExceptInRange('!', '~');
     }
 }

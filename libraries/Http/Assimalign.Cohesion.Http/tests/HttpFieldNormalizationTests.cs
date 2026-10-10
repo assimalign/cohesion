@@ -174,7 +174,7 @@ public class HttpFieldNormalizationTests
         // Arrange — RFC 9113 §8.5 / RFC 9114 §4.4 (#1334).
 
         // Act
-        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", scheme, path, authority, protocol: null);
+        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", scheme, path, authority, protocol: null, new HttpHeaderCollection());
 
         // Assert
         violation.ShouldNotBeNull();
@@ -188,7 +188,7 @@ public class HttpFieldNormalizationTests
     public void ValidateRequestTarget_OnClassicConnectWithHostAndPort_ShouldReturnNull(string authority)
     {
         // Act
-        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", null, null, authority, protocol: null);
+        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", null, null, authority, protocol: null, new HttpHeaderCollection());
 
         // Assert
         violation.ShouldBeNull();
@@ -205,7 +205,7 @@ public class HttpFieldNormalizationTests
         // Arrange — RFC 9110 §7.1, RFC 9112 §3.2.4. CONNECT here is an extended CONNECT, which carries a :path.
 
         // Act
-        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, "https", path, "api.test", method == "CONNECT" ? "websocket" : null);
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, "https", path, "api.test", method == "CONNECT" ? "websocket" : null, new HttpHeaderCollection());
 
         // Assert
         violation.ShouldNotBeNull();
@@ -219,10 +219,37 @@ public class HttpFieldNormalizationTests
     public void ValidateRequestTarget_OnWellFormedTarget_ShouldReturnNull(string method, string scheme, string path, string authority, string? protocol)
     {
         // Act
-        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, scheme, path, authority, protocol);
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, scheme, path, authority, protocol, new HttpHeaderCollection());
 
         // Assert
         violation.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A :path, :authority or Host with an octet other than VCHAR is not a valid request target")]
+    [InlineData("GET", "/adminÿx", "api.test", null, "':path'")]
+    [InlineData("GET", "/café", "api.test", null, "':path'")]
+    [InlineData("GET", "/a b", "api.test", null, "':path'")]
+    [InlineData("GET", "/", "api.test ", null, "':authority'")]
+    [InlineData("GET", "/", "api.tést", null, "':authority'")]
+    [InlineData("CONNECT", null, "upstream.tést:443", null, "':authority'")]
+    [InlineData("GET", "/", null, "api.test ", "'host'")]
+    [InlineData("GET", "/", "api.test", "\u0085api.test", "'host'")]
+    public void ValidateRequestTarget_OnNonVisibleOctet_ShouldReturnViolation(string method, string? path, string? authority, string? host, string expected)
+    {
+        // Arrange — HPACK and QPACK keep obs-text (#1387), and HTTP/1.1 refuses it in its request line and Host (#1341).
+        HttpHeaderCollection headers = new();
+
+        if (host is not null)
+        {
+            headers[HttpHeaderKey.Host] = host;
+        }
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, method == "CONNECT" ? null : "https", path, authority, protocol: null, headers);
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain(expected);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Only a CONNECT with a non-empty :protocol is an extended CONNECT")]

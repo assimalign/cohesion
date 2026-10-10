@@ -187,11 +187,12 @@ internal static class Http3HeaderCodec
         }
 
         // RFC 9114 §4.4 and §4.3.1 — a classic CONNECT carries the host and port in :authority and neither
-        // :scheme nor :path, and a :path of '*' belongs to OPTIONS alone (#1334). The rule is shared with
-        // HTTP/2 and matches HTTP/1.1's authority-form and asterisk-form; a violation is malformed, so the
-        // stream alone is reset with H3_MESSAGE_ERROR.
+        // :scheme nor :path, and a :path of '*' belongs to OPTIONS alone (#1334). The :path, :authority and
+        // Host hold only VCHAR, since QPACK keeps obs-text (#1387). The rule is shared with HTTP/2 and matches
+        // HTTP/1.1's request line and Host; a violation is malformed, so the stream alone is reset with
+        // H3_MESSAGE_ERROR.
         string? requestTargetViolation = HttpFieldNormalization.ValidateRequestTarget(
-            method, schemeValue, pathValue, authority, protocol);
+            method, schemeValue, pathValue, authority, protocol, headers);
         if (requestTargetViolation is not null)
         {
             throw new InvalidDataException(requestTargetViolation);

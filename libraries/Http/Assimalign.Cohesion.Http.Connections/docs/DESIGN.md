@@ -2291,6 +2291,7 @@ Whether the pseudo-header fields make a complete request is judged afterwards, b
 | A `:path` that is present is not empty (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:method` is present (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:scheme` and `:path` are present (§8.3.1) | every request but a classic CONNECT (§8.5) | stream `PROTOCOL_ERROR` |
+| `:path`, `:authority`, and every `host` value hold only VCHAR (RFC 3986 §2, RFC 9110 §7.2, #1387) | every request | stream `PROTOCOL_ERROR` |
 | `:authority` is `host:port` and `:scheme` and `:path` are absent (§8.5, #1334) | a classic CONNECT | stream `PROTOCOL_ERROR` |
 | A `:path` that starts with `*` is exactly `*`, and the method is `OPTIONS` (§8.3.1, RFC 9110 §7.1, #1334) | every request | stream `PROTOCOL_ERROR` |
 | `:path` decodes to a legal path (#937) | every request | stream `PROTOCOL_ERROR` |
@@ -3155,6 +3156,22 @@ stream (RFC 9113 §8.1.1); the block was decoded to its end first, so the HPACK 
 step. HTTP/3 resets the request stream with `H3_MESSAGE_ERROR` (RFC 9114 §4.1.2). Sibling
 streams and the connection carry on. A message never quotes a name that is not a token or any
 value: it names the offending character in hex, as the HTTP/1.1 reader does.
+
+**obs-text decodes the same on every version (#1387).** A field octet in `0x80`–`0xFF` is valid in
+a value (RFC 9110 §5.5). HTTP/1.1 (#1341) and QPACK (`QPackStringCodec`) decode a string as Latin-1,
+one character per octet, and HPACK now does too (`HPackDecoder`, raw or Huffman-coded), so an
+application reads the same string whichever version carried it. HPACK decoded ASCII until #1387, and
+each such octet arrived as `?`. The rule above is unchanged: no octet above `0x7F` is a `tchar`, so a
+name holding one is refused either way, and obs-text is not a control character, so a value keeps it.
+
+The request target and its host are not ordinary values. HTTP/1.1 refuses any octet but VCHAR in its
+request line and in `Host`, and `HttpFieldNormalization.ValidateRequestTarget` holds `:path`,
+`:authority`, and every `Host` value on HTTP/2 and HTTP/3 to the same set (see "HTTP/2 request
+heads"). Without it the faithful decode would route a path or admit a host that HTTP/1.1 answers
+with `400`: an allowlist that trims `api.test\xA0` to `api.test` would admit a host that a front end
+routing on the raw octets sees as another. HTTP/3 had that gap since QPACK decoded Latin-1, and the
+ASCII decode gave HTTP/2 a worse one: `/admin\xFFx` became the path `/admin` and the query `x`, the
+split #1341 removed from HTTP/1.1.
 
 **A trailer section is judged whole before any of it is published.** HTTP/2 always collected a
 section into a collection of its own and published it once valid; HTTP/3 added each field to
@@ -4322,6 +4339,8 @@ rules:
   `:authority` and neither `:scheme` nor `:path` (RFC 9114 §4.4), and a
   `:path` that starts with `*` is exactly `*` on an OPTIONS request (the shared
   `HttpFieldNormalization.ValidateRequestTarget`; see "HTTP/2 request heads").
+  The same rule holds `:path`, `:authority`, and every `Host` value to VCHAR
+  (#1387), since QPACK decodes obs-text faithfully.
 - **Path.** The `:path` must percent-decode to a legal path (see
   "Request-target percent-decoding (h1/h2/h3 parity)"): a decoded space,
   control character, `?`, `#`, or NUL, an illegal literal character, or a

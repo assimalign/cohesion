@@ -220,9 +220,12 @@ quirks.
   (RFC 8441 §4, RFC 9220 §3). A classic CONNECT carries the host and port in
   `:authority` and neither `:scheme` nor `:path` (RFC 9113 §8.5, RFC 9114 §4.4),
   and a `:path` that starts with `*` is exactly `*` on an OPTIONS request
-  (RFC 9110 §7.1, #1334). Both return a violation message rather than throw, so
-  HTTP/2 resets the stream with `PROTOCOL_ERROR` and HTTP/3 with
-  `H3_MESSAGE_ERROR`. `ValidateRequestTarget` reuses
+  (RFC 9110 §7.1, #1334). `:path`, `:authority`, and every `Host` value hold
+  only VCHAR, as HTTP/1.1 holds its request line and `Host` (#1341, #1387):
+  HPACK and QPACK decode obs-text as Latin-1, which an ordinary value may
+  carry but no request target or host does. Both return a violation message
+  rather than throw, so HTTP/2 resets the stream with `PROTOCOL_ERROR` and
+  HTTP/3 with `H3_MESSAGE_ERROR`. `ValidateRequestTarget` reuses
   `HttpRequestTarget.TryParse` for the authority-form, so HTTP/1.1, which
   parses its request line through the same type, accepts the same CONNECT and
   asterisk-form targets.
@@ -249,8 +252,11 @@ quirks.
     member. HTTP/1.1 applies it to every received value once SP and HTAB are
     trimmed. obs-text (`%x80-FF`, C1 controls included) is a valid octet in
     both rules.
-  - The rules judge characters, not octets. A character above U+00FF is never
-    produced by a Latin-1 decode and is left to the encoder that writes it.
+  - The rules judge characters, not octets. Every reader decodes a field
+    octet as Latin-1 (HTTP/1.1 since #1341, QPACK, and HPACK since #1387), so
+    obs-text reaches the rules as the character of the same value, and a
+    character above U+00FF is never produced by a reader; it is left to the
+    encoder that writes it.
 
   Callers: HTTP/1.1's `Http1FieldLine`, for headers and chunked trailers, and
   `Http1ChunkExtensions`, for the tokens and quoted strings of chunk
