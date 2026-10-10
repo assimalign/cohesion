@@ -320,16 +320,42 @@ internal static class Http3HeaderCodec
         return QPackFieldSectionEncoder.Encode(fields);
     }
 
+    /// <summary>
+    /// Encodes the response field section for a <em>buffered</em> response: the section
+    /// <see cref="EncodeResponseHeaders(Http3Context)"/> encodes, with a <c>content-length</c> synthesized
+    /// from <paramref name="bodyBytes"/> when the application set none. The synthesized field is added to
+    /// the response headers.
+    /// </summary>
+    /// <param name="context">The exchange whose response head is encoded.</param>
+    /// <param name="bodyBytes">The buffered body.</param>
+    /// <returns>The QPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">
+    /// A field name is not a token, or a value holds a control character other than HTAB. The synthesized
+    /// <c>content-length</c> is removed again first, so a response sent in this one's place is framed by its
+    /// own body.
+    /// </exception>
     public static byte[] EncodeResponseHeaders(Http3Context context, byte[] bodyBytes)
     {
         HttpHeaderCollection headers = context.Response.Headers;
 
-        if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
+        if (headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
-            headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return EncodeResponseHeaders(context);
         }
 
-        return EncodeResponseHeaders(context);
+        headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        try
+        {
+            return EncodeResponseHeaders(context);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // A refused head leaves the response replaceable (#1183); a stale length would make the
+            // replacement malformed (RFC 9114 §4.1.2) whenever its body differs.
+            headers.Remove(HttpHeaderKey.ContentLength);
+            throw;
+        }
     }
 
     /// <summary>

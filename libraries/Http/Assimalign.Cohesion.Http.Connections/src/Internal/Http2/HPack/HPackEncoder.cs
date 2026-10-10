@@ -10,14 +10,41 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static partial class HPackEncoder
 {
+    /// <summary>
+    /// Encodes the response field section for a <em>buffered</em> response: the section
+    /// <see cref="EncodeResponseHeaders(HttpStatusCode, IHttpHeaderCollection)"/> encodes, with a
+    /// <c>content-length</c> synthesized from <paramref name="bodyLength"/> when the application set none.
+    /// The synthesized field is added to <paramref name="headers"/>.
+    /// </summary>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="headers">The response headers to emit.</param>
+    /// <param name="bodyLength">The length of the buffered body.</param>
+    /// <returns>The HPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">
+    /// A field name is not a token, or a value holds a control character other than HTAB. The synthesized
+    /// <c>content-length</c> is removed again first, so a response sent in this one's place is framed by its
+    /// own body.
+    /// </exception>
     public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, int bodyLength)
     {
-        if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
+        if (headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
-            headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
+            return EncodeResponseHeaders(statusCode, headers);
         }
 
-        return EncodeResponseHeaders(statusCode, headers);
+        headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
+
+        try
+        {
+            return EncodeResponseHeaders(statusCode, headers);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // A refused head leaves the response replaceable (#1183); a stale length would make the
+            // replacement malformed (RFC 9113 §8.1.1) whenever its body differs.
+            headers.Remove(HttpHeaderKey.ContentLength);
+            throw;
+        }
     }
 
     /// <summary>

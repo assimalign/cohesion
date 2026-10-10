@@ -784,14 +784,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // GET representation's length). An empty HEAD body gets none, because RFC 9110 §8.6 forbids
                 // a content-length that differs from what GET would send, and the transport cannot know it.
                 //
-                // The head and the trailer section are encoded before the response is claimed. A field that
+                // The trailer section and the head are encoded before the response is claimed. A field that
                 // either section cannot carry (#1183, RFC 9113 §8.2.1) throws here, with nothing on the wire
                 // and the response unclaimed and unstarted, so the caller can still send another response.
+                // The trailers go first: the encoder never indexes, so the order changes no octet, and the
+                // head's encode, which adds a synthesized content-length and withdraws it when the head is
+                // refused, is then the last thing that can fail, so a refused trailer section never leaves
+                // that length behind for a replacement with another body.
                 bool isHead = http2Context.Request.Method == HttpMethod.Head;
-                byte[] headerBlock = isHead && bodyBytes.Length == 0
-                    ? HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers)
-                    : HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
-                ReadOnlyMemory<byte> content = isHead ? ReadOnlyMemory<byte>.Empty : bodyBytes;
 
                 // RFC 9113 §8.1 — staged trailers follow the content as a HEADERS frame that ends the
                 // stream. A response to HEAD carries none: it has no content for them to follow, and
@@ -799,6 +799,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 byte[]? trailerBlock = !isHead && http2Context.Response.StagedTrailers is { } trailers
                     ? HPackEncoder.EncodeTrailers(trailers)
                     : null;
+
+                byte[] headerBlock = isHead && bodyBytes.Length == 0
+                    ? HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers)
+                    : HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
+                ReadOnlyMemory<byte> content = isHead ? ReadOnlyMemory<byte>.Empty : bodyBytes;
 
                 // Claim the stream's final response. The claim fails only when the transport has already
                 // answered the stream itself — the request body crossed its cap and the frame pump wrote

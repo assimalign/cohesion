@@ -65,7 +65,10 @@ public interface IHttpConnectionContext
     /// <see cref="HttpContextTransportExtensions"/> stays <see langword="false"/>), so the exchange is
     /// not finalized: the caller replaces the response
     /// (for example with a bodyless <c>500</c>) and sends again, or calls <see cref="IHttpContext.Cancel"/>
-    /// and sends to reset it. When a streamed response's trailer section is refused, its head and body
+    /// and sends to reset it. The framing fields the transport added for the refused response
+    /// (<c>Content-Length</c>, and HTTP/1.1's <c>Transfer-Encoding: chunked</c> on a streamed head) are
+    /// removed from the headers again, so the replacement is framed by its own body even when the caller
+    /// removes only the offending field. When a streamed response's trailer section is refused, its head and body
     /// are already on the wire, so the transport resets the HTTP/2 stream with
     /// <c>INTERNAL_ERROR</c> or the HTTP/3 request stream with <c>H3_INTERNAL_ERROR</c> before the
     /// refusal propagates, and the exchange is finalized.

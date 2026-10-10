@@ -161,6 +161,29 @@ public class HttpResponseFieldSyntaxTests
         wire.ShouldContain("Content-Length: 0");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: A refused HTTP/1.1 buffered head should leave no synthesized Content-Length to misframe its replacement")]
+    public async Task Http1SendAsync_OnRefusedBufferedHead_ShouldFrameReplacementByItsOwnBody()
+    {
+        // Arrange — an 11-octet body, so the refused head synthesized Content-Length: 11.
+        await using Http1Exchange exchange = await Http1Exchange.OpenAsync();
+        exchange.Context.Response.Headers[HttpHeaderKey.Location] = "/next\r\nSet-Cookie: injected=1";
+        exchange.Context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("eleven-byte"));
+        (await Should.ThrowAsync<HttpException>(() => exchange.Connection.SendAsync(exchange.Context).AsTask()))
+            .Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+
+        // Act — a host that removes only the offending field and swaps in a shorter body.
+        exchange.Context.Response.Headers.Remove(HttpHeaderKey.Location);
+        exchange.Context.Response.StatusCode = HttpStatusCode.InternalServerError;
+        exchange.Context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("oops"));
+        await exchange.Connection.SendAsync(exchange.Context).AsTask().WaitAsync(_timeout);
+
+        // Assert — framed by the body it carries, so the connection stays aligned for the next response.
+        string wire = await exchange.ReadWireUntilAsync("\r\n\r\noops");
+        wire.ShouldStartWith("HTTP/1.1 500");
+        wire.ShouldContain("Content-Length: 4\r\n");
+        wire.ShouldNotContain("Content-Length: 11");
+    }
+
     // ------------------------------------------------------------------ HTTP/2
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/2 head with a value it cannot carry should be refused before a frame is written")]
@@ -240,6 +263,33 @@ public class HttpResponseFieldSyntaxTests
         context.HasResponseStarted.ShouldBeFalse();
         peer.Output.ForStream(1).ShouldBeEmpty();
         await ShouldAnswerHttp2ReplacementAsync(peer, context);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: A refused HTTP/2 buffered response should leave no synthesized content-length to misframe its replacement")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Http2SendAsync_OnRefusedBufferedResponse_ShouldFrameReplacementByItsOwnBody(bool refuseTrailer)
+    {
+        // Arrange — an 11-octet body; the head or the trailer section is refused.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/echo"));
+        IHttpContext context = await peer.ReceiveContextAsync();
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("eleven-byte"));
+        RefuseHeadOrTrailer(context, refuseTrailer);
+        (await Should.ThrowAsync<HttpException>(() => peer.ConnectionContext.SendAsync(context).AsTask()))
+            .Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+
+        // Act — a host that removes only the offending field and swaps in a shorter body.
+        RemoveRefusedField(context, refuseTrailer);
+        context.Response.StatusCode = HttpStatusCode.InternalServerError;
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("oops"));
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+        await peer.SyncAsync();
+
+        // Assert — a stale content-length: 11 would make the response malformed (RFC 9113 §8.1.1).
+        IReadOnlyList<Http2WireFrame> frames = peer.Output.ForStream(1);
+        HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(frames[0].Payload)["content-length"].ShouldBe("4");
+        frames.Where(frame => frame.IsData).Sum(frame => frame.Payload.Length).ShouldBe(4);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/2 streamed head it cannot carry should be refused before a frame is written")]
@@ -394,6 +444,32 @@ public class HttpResponseFieldSyntaxTests
         await ShouldAnswerHttp3ReplacementAsync(stream, connection, context);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: A refused HTTP/3 buffered response should leave no synthesized content-length to misframe its replacement")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Http3SendAsync_OnRefusedBufferedResponse_ShouldFrameReplacementByItsOwnBody(bool refuseTrailer)
+    {
+        // Arrange — an 11-octet body; the head or the trailer section is refused.
+        TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/echo", "https", "a"));
+        (IHttpConnectionContext connection, IHttpContext context) = await ReceiveHttp3Async(stream);
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("eleven-byte"));
+        RefuseHeadOrTrailer(context, refuseTrailer);
+        (await Should.ThrowAsync<HttpException>(() => connection.SendAsync(context).AsTask()))
+            .Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+
+        // Act — a host that removes only the offending field and swaps in a shorter body.
+        RemoveRefusedField(context, refuseTrailer);
+        context.Response.StatusCode = HttpStatusCode.InternalServerError;
+        context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("oops"));
+        await connection.SendAsync(context).AsTask().WaitAsync(_timeout);
+
+        // Assert — a stale content-length: 11 would make the response malformed (RFC 9114 §4.1.2).
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp3Frames(await stream.ReadOutputAsync());
+        frames[0].FrameType.ShouldBe((long)Http3FrameType.Headers);
+        HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload)["content-length"].ShouldBe("4");
+        frames.Where(frame => frame.FrameType == (long)Http3FrameType.Data).Sum(frame => frame.Payload.Length).ShouldBe(4);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Response Field Syntax: An HTTP/3 streamed head it cannot carry should be refused before a frame is written")]
     public async Task Http3StreamingWrite_OnInvalidFieldValue_ShouldRefuseBeforeWriting()
     {
@@ -511,6 +587,32 @@ public class HttpResponseFieldSyntaxTests
         string?[] values = ["abc123"];
         context.Response.Trailers[new HttpHeaderKey("x-checksum")] = new HttpHeaderValue(values);
         values[0] = "abc123\r\nx-injected: 1";
+    }
+
+    // A response the transport refuses for one field: a reflected Location in the head, or a trailer.
+    private static void RefuseHeadOrTrailer(IHttpContext context, bool refuseTrailer)
+    {
+        if (refuseTrailer)
+        {
+            StageTrailerThenCorrupt(context);
+        }
+        else
+        {
+            context.Response.Headers[HttpHeaderKey.Location] = "/next\r\nx-injected: 1";
+        }
+    }
+
+    // What a host that removes only the offending field does; everything else it leaves as it was.
+    private static void RemoveRefusedField(IHttpContext context, bool refuseTrailer)
+    {
+        if (refuseTrailer)
+        {
+            context.Response.Trailers.Remove(new HttpHeaderKey("x-checksum"));
+        }
+        else
+        {
+            context.Response.Headers.Remove(HttpHeaderKey.Location);
+        }
     }
 
     // What a host does with a refused response: a bare 500 in its place.

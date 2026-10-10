@@ -2066,19 +2066,23 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // HEAD body gets none, because RFC 9110 §8.6 forbids a Content-Length that differs from what GET
         // would send, and the transport cannot know it — the choice the HTTP/2 path makes too.
         //
-        // The head and the trailer section are encoded before the commit point. A field that either
+        // The trailer section and the head are encoded before the commit point. A field that either
         // section cannot carry (#1183, RFC 9114 §4.2) throws here, with nothing on the wire and the
-        // response unstarted, so the caller can still send another response.
+        // response unstarted, so the caller can still send another response. The trailers go first: the
+        // encoder is static-only, so the order changes no octet, and the head's encode, which adds a
+        // synthesized content-length and withdraws it when the head is refused, is then the last thing
+        // that can fail, so a refused trailer section never leaves that length behind for a replacement.
         bool isHead = http3Context.Request.Method == HttpMethod.Head;
-        byte[] headerBlock = isHead && bodyBytes.Length == 0
-            ? Http3HeaderCodec.EncodeResponseHeaders(http3Context)
-            : Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
 
         // RFC 9114 §4.1 — staged trailers follow the content as a HEADERS frame, before the FIN that
         // ends the response. A response to HEAD carries none, as on HTTP/2.
         byte[]? trailerBlock = !isHead && http3Context.Response.StagedTrailers is { } trailers
             ? Http3HeaderCodec.EncodeTrailers(trailers)
             : null;
+
+        byte[] headerBlock = isHead && bodyBytes.Length == 0
+            ? Http3HeaderCodec.EncodeResponseHeaders(http3Context)
+            : Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
 
         // Commit point: from here the final response is on the wire, so the exchange control's
         // probes must report the response as started (no more interim writes).

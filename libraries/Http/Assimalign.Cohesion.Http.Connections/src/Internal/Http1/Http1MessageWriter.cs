@@ -80,7 +80,7 @@ internal static class Http1MessageWriter
     /// Prepares a buffered response: reads its body, completes the head's framing fields
     /// (<c>Content-Length</c>, and <c>Connection: close</c> when the connection will not be kept
     /// alive), and encodes the head. Nothing is written, so a refused field leaves the response
-    /// unstarted.
+    /// unstarted, and the <c>Content-Length</c> synthesized for this body is withdrawn again.
     /// </summary>
     /// <param name="context">The exchange whose response is prepared.</param>
     /// <param name="cancellationToken">A token to cancel reading the body.</param>
@@ -92,10 +92,12 @@ internal static class Http1MessageWriter
     {
         byte[] bodyBytes = await ReadBodyAsync(context.Response.Body, cancellationToken).ConfigureAwait(false);
         HttpHeaderCollection headers = context.Response.Headers;
+        bool addedContentLength = false;
 
         if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
             headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            addedContentLength = true;
         }
 
         if (!context.KeepAlive)
@@ -103,7 +105,23 @@ internal static class Http1MessageWriter
             headers[HttpHeaderKey.Connection] = "close";
         }
 
-        return (EncodeHead(context.Response.StatusCode, headers), bodyBytes);
+        try
+        {
+            return (EncodeHead(context.Response.StatusCode, headers), bodyBytes);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // A refused head leaves the response replaceable (#1183). The length synthesized for this body
+            // goes with it: a replacement with another body would otherwise carry it, and a stale length
+            // misframes the keep-alive connection, so the client reads the next response as this one's
+            // body. The streamed head withdraws its chunked coding for the same reason.
+            if (addedContentLength)
+            {
+                headers.Remove(HttpHeaderKey.ContentLength);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
