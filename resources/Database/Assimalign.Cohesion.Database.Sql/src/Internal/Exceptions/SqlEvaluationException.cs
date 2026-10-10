@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -62,12 +63,15 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal const string FunctionSignatureMismatchCode = "COHSQLE006";
 
     /// <summary>
-    /// A function threw while the statement ran: anything a <see cref="SqlFunction"/>'s core throws
-    /// other than <see cref="OperationCanceledException"/>, <see cref="InsufficientExecutionStackException"/>,
-    /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/>, which is the inner
-    /// exception (ISO SQLSTATE 38000, external routine exception). The statement fails like any
-    /// other coded failure: it writes nothing, and an explicit transaction stays usable (owner
-    /// decision 71 of 2026-10-09).
+    /// A function or a cast threw while the statement ran: anything a <see cref="SqlFunction"/>'s
+    /// core throws other than <see cref="OperationCanceledException"/>,
+    /// <see cref="InsufficientExecutionStackException"/>, <see cref="OutOfMemoryException"/> or a
+    /// <see cref="DatabaseException"/>, which is the inner exception (ISO SQLSTATE 38000, external
+    /// routine exception); and anything a <see cref="SqlCast"/>'s conversion throws other than those
+    /// and a value's fault (<see cref="FormatException"/>, <see cref="OverflowException"/>,
+    /// <see cref="InvalidCastException"/>), a cancellation the statement did not ask for included
+    /// (phase E3). The statement fails like any other coded failure: it writes nothing, and an
+    /// explicit transaction stays usable (owner decision 71 of 2026-10-09).
     /// </summary>
     internal const string FunctionFailedCode = "COHSQLE007";
 
@@ -99,6 +103,15 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// </summary>
     internal const string UnregisteredTypeCode = "COHSQLE010";
 
+    /// <summary>
+    /// A <c>CAST</c> whose operand's type no registered cast converts to the target (ISO SQLSTATE
+    /// 42846, cannot coerce; PostgreSQL's "cannot cast type ... to ...", raised by
+    /// <c>transformTypeCast</c>, <c>src/backend/parser/parse_expr.c</c>). Raised while planning when
+    /// the plan knows the operand's type, the same over an empty table as over a populated one, and
+    /// while evaluating when only the value reveals it, a parameter's (phase E3).
+    /// </summary>
+    internal const string CannotCastCode = "COHSQLE011";
+
     private readonly string _detail;
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
@@ -129,12 +142,44 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal static bool IsFunctionFailure(Exception exception)
         => exception is not (OperationCanceledException or InsufficientExecutionStackException or OutOfMemoryException or DatabaseException);
 
+    /// <summary>
+    /// Whether an exception a cast's conversion threw, past a value's fault, becomes <c>COHSQLE007</c>:
+    /// anything but an exhausted stack or memory, a database exception, or a cancellation of the
+    /// statement itself. The conversion never receives the statement's token, so a cancellation it
+    /// throws while the statement was not cancelled is its own fault, which must not end the session
+    /// as a cancellation would.
+    /// </summary>
+    /// <param name="exception">What the conversion threw.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <returns><see langword="true"/> when the engine codes it as <c>COHSQLE007</c>.</returns>
+    internal static bool IsCastFailure(Exception exception, CancellationToken cancellationToken)
+        => exception is not (InsufficientExecutionStackException or OutOfMemoryException or DatabaseException)
+            && !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested);
+
     /// <summary>Creates the failure of a function that threw.</summary>
     /// <param name="functionName">The function's registered name.</param>
     /// <param name="innerException">What the function threw.</param>
     /// <returns>The coded failure.</returns>
     internal static SqlEvaluationException FunctionFailed(string functionName, Exception innerException)
         => new(FunctionFailedCode, $"Function '{functionName}' failed: {innerException.Message}", innerException);
+
+    /// <summary>Creates the failure of a cast whose conversion threw what is not a value's fault.</summary>
+    /// <param name="cast">The registered cast.</param>
+    /// <param name="innerException">What the conversion threw.</param>
+    /// <returns>The coded failure (<c>COHSQLE007</c>).</returns>
+    internal static SqlEvaluationException CastFailed(SqlCast cast, Exception innerException)
+        => new(FunctionFailedCode, $"Cast {cast} failed: {innerException.Message}", innerException);
+
+    /// <summary>Creates the failure for a <c>CAST</c> no registered cast performs.</summary>
+    /// <param name="source">The operand's type, as the dialect names it (a domain by its name).</param>
+    /// <param name="target">The target type.</param>
+    /// <returns>The coded failure (<c>COHSQLE011</c>).</returns>
+    internal static SqlEvaluationException CannotCast(string source, SqlType target)
+        => new(CannotCastCode,
+            $"Cannot CAST type {source} to {target.Name}: no cast from {source} to {target.Name}" +
+            $"{(target.IsDomain ? $" or to its base type {target.BaseType!.Name}" : string.Empty)} is registered. " +
+            "Register one on the engine's builder (SqlDatabaseEngineBuilder.Types.AddCast) before Build.",
+            null);
 
     /// <summary>Creates the failure for a call whose argument types no overload of its function accepts.</summary>
     /// <param name="functionName">The function name as written.</param>

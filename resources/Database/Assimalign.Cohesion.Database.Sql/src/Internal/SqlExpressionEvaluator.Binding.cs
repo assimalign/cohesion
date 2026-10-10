@@ -210,9 +210,11 @@ internal sealed partial class SqlExpressionEvaluator
 
     /// <summary>
     /// The domain a CAST's operand is known to be of while planning: a column of a domain, or a CAST to
-    /// one, under any COLLATE; null for any other operand, whose casts are its storage type's.
+    /// one, under any COLLATE; null for any other operand, whose casts are its storage type's. An
+    /// expression over a domain's value (<c>COALESCE</c>, <c>CASE</c>, arithmetic) has the base type,
+    /// so a cast from the domain does not apply to it: the dialect documents the shape.
     /// </summary>
-    private SqlType? SourceDomain(SqlExpression operand)
+    internal SqlType? SourceDomain(SqlExpression operand)
     {
         while (operand is SqlCollateExpression collate)
         {

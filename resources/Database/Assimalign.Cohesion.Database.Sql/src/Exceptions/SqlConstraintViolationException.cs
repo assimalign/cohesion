@@ -21,9 +21,25 @@ public sealed class SqlConstraintViolationException : DatabaseException
         OffendingValue = offendingValue;
     }
 
-    /// <summary>Gets the declared or generated constraint name.</summary>
+    /// <summary>
+    /// Creates a violation whose message the engine words: a <c>CAST</c> to a domain whose check
+    /// refuses the value, which names no table (phase E3).
+    /// </summary>
+    /// <param name="message">The message.</param>
+    /// <param name="constraintName">The constraint's name; a domain's name for a domain.</param>
+    /// <param name="table">The schema-qualified table, or empty when no table is written.</param>
+    /// <param name="constraintKind">The SQL constraint kind.</param>
+    internal SqlConstraintViolationException(string message, string constraintName, string table, string constraintKind)
+        : base(message)
+    {
+        ConstraintName = constraintName;
+        Table = table;
+        ConstraintKind = constraintKind;
+    }
+
+    /// <summary>Gets the declared or generated constraint name; a domain's name for kind <c>DOMAIN</c>.</summary>
     public string ConstraintName { get; }
-    /// <summary>Gets the schema-qualified table name.</summary>
+    /// <summary>Gets the schema-qualified table name; empty for a <c>CAST</c> to a domain, which writes no table.</summary>
     public string Table { get; }
     /// <summary>Gets the SQL constraint kind.</summary>
     public string ConstraintKind { get; }

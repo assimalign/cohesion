@@ -20,24 +20,28 @@ internal static class SqlTypeRules
     private static readonly string[] _reservedWords = ["SOME", "LOCALTIME", "LOCALTIMESTAMP"];
 
     /// <summary>
-    /// Checks a domain's name: an identifier (a letter or underscore, then letters, digits and
-    /// underscores, as the lexer reads one) that is neither a SQL keyword, a quantifier or date-time
-    /// value word, a pseudo-type's name, nor a built-in type name or alias. A domain named like a
-    /// built-in type would be unreachable, since built-in names resolve first.
+    /// Checks a domain's name: an ASCII identifier (an ASCII letter or underscore, then ASCII letters,
+    /// digits and underscores) that is neither a SQL keyword, a quantifier or date-time value word, a
+    /// pseudo-type's name, nor a built-in type name or alias. A domain named like a built-in type
+    /// would be unreachable, since built-in names resolve first. ASCII is the rule the typed schema,
+    /// <c>Sdk.Database</c> and the DDL renderer apply to a type name, so every domain the engine
+    /// registers can be named in <c>table.Column(selector, sqlType)</c>, and the case-insensitive
+    /// matches the catalog makes agree with its upper-cased cast keys.
     /// </summary>
     /// <param name="name">The name.</param>
     /// <exception cref="ArgumentException">The name breaks a rule.</exception>
     internal static void ValidateDomainName(string name)
     {
-        if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_'))
+        if (name.Length == 0 || !(char.IsAsciiLetter(name[0]) || name[0] == '_'))
         {
-            throw new ArgumentException($"Domain name '{name}' is not an identifier: it must start with a letter or an underscore.", nameof(name));
+            throw new ArgumentException($"Domain name '{name}' is not an identifier: it must start with an ASCII letter or an underscore.", nameof(name));
         }
         foreach (char character in name)
         {
-            if (!(char.IsLetterOrDigit(character) || character == '_'))
+            if (!(char.IsAsciiLetterOrDigit(character) || character == '_'))
             {
-                throw new ArgumentException($"Domain name '{name}' is not an identifier: it may hold only letters, digits and underscores.", nameof(name));
+                throw new ArgumentException(
+                    $"Domain name '{name}' is not an identifier: it may hold only ASCII letters, digits and underscores.", nameof(name));
             }
         }
         foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
@@ -118,6 +122,20 @@ internal static class SqlTypeRules
 
         return name.Length > 0;
     }
+
+    /// <summary>
+    /// Whether two type names as written name the same type the way the catalog resolves them: the
+    /// same name ignoring case and quotes (<c>email</c>, <c>"Email"</c>), with the same arguments. Text
+    /// that does not split compares as written.
+    /// </summary>
+    /// <param name="left">One type as written.</param>
+    /// <param name="right">The other type as written.</param>
+    /// <returns><see langword="true"/> when both name the same type.</returns>
+    internal static bool SameTypeName(string left, string right)
+        => TrySplit(left, out string leftName, out int? leftFirst, out int? leftSecond)
+            && TrySplit(right, out string rightName, out int? rightFirst, out int? rightSecond)
+                ? string.Equals(leftName, rightName, StringComparison.OrdinalIgnoreCase) && leftFirst == rightFirst && leftSecond == rightSecond
+                : string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Resolves a built-in type name and its arguments as DDL does: a second argument is always a

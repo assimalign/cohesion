@@ -50,16 +50,20 @@ internal static class Program
         [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["or_none"], ["product"], ["scaled"], ["slugify"]];
 
     // E3: a domain column, an application's casts to and from the cents domain (the inner CAST tells
-    // the outer one its source is cents), and a built-in cast from text to DATE.
+    // the outer one its source is cents), a built-in cast from text to DATE, and an application's cast
+    // between two built-in types the standard library does not convert (UUID to TEXT).
     private const string Domains =
         "SELECT Email, CAST(CAST(Score AS cents) AS TEXT) AS shown, CAST('$4.56' AS cents) AS parsed, " +
-        "CAST('2026-02-01' AS DATE) AS day FROM customers ORDER BY Id";
+        "CAST('2026-02-01' AS DATE) AS day, CAST(Token AS TEXT) AS token FROM customers ORDER BY Id";
 
     private static readonly object?[][] _domains =
     [
-        ["ada@example.com", "$1.00", 456L, new DateOnly(2026, 2, 1)],
-        ["grace@example.com", "$2.00", 456L, new DateOnly(2026, 2, 1)],
+        ["ada@example.com", "$1.00", 456L, new DateOnly(2026, 2, 1), "00000001000000000000000000000000"],
+        ["grace@example.com", "$2.00", 456L, new DateOnly(2026, 2, 1), "00000002000000000000000000000000"],
     ];
+
+    // E3: a CAST no registered cast performs is refused while planning, rows or not.
+    private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
     private static int _passed;
     private static int _failed;
@@ -117,7 +121,8 @@ internal static class Program
             .AddCast(SqlCast.Create<string, long>(SqlType.Text, cents,
                 static text => (long)(decimal.Parse(text.TrimStart('$'), CultureInfo.InvariantCulture) * 100), SqlCastContext.Explicit))
             .AddCast(SqlCast.Create<long, string>(cents, SqlType.Text,
-                static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment));
+                static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment))
+            .AddCast(SqlCast.Create<Guid, string>(SqlType.Uuid, SqlType.Text, static token => token.ToString("N"), SqlCastContext.Assignment));
         sql.AddDatabase(DatabaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Id);
@@ -160,6 +165,9 @@ internal static class Program
         CheckFailure("in process: a throwing function is COHSQLE007",
             await FailureAsync(() => RowsAsync(session, "SELECT clamp(1, 5, 0) FROM customers")),
             "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.");
+        CheckFailure("in process: a CAST no cast performs is COHSQLE011 while planning",
+            await FailureAsync(() => RowsAsync(session, CannotCast)),
+            "COHSQLE011: Cannot CAST type BOOLEAN to DATE");
     }
 
     // A row whose name slugifies to nothing, which the declared CHECK refuses.
@@ -196,6 +204,9 @@ internal static class Program
         CheckFailure("over the wire: a throwing function is COHSQLE007",
             await FailureAsync(() => RowsAsync(connection, "SELECT clamp(1, 5, 0) FROM customers", timeout.Token)),
             "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.");
+        CheckFailure("over the wire: a CAST no cast performs is COHSQLE011 while planning",
+            await FailureAsync(() => RowsAsync(connection, CannotCast, timeout.Token)),
+            "COHSQLE011: Cannot CAST type BOOLEAN to DATE");
         Check("over the wire: the parameterized call folds",
             await RowsAsync(connection, "SELECT slugify(@text) AS s FROM customers WHERE Id = 1", timeout.Token,
                 new Dictionary<string, object?> { ["text"] = " Hello, World " }),

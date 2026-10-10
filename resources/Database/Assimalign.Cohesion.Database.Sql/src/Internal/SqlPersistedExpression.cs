@@ -370,7 +370,7 @@ internal static class SqlPersistedExpression
             (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
         (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo is { } x && b.TargetTypeInfo is { } y
             ? x.Type == y.Type && x.MaxLength == y.MaxLength && x.Precision == y.Precision && x.Scale == y.Scale
-            : a.TargetTypeInfo is null && b.TargetTypeInfo is null && Same(a.TargetType, b.TargetType),
+            : a.TargetTypeInfo is null && b.TargetTypeInfo is null && SqlTypeRules.SameTypeName(a.TargetType, b.TargetType),
         (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SameQuery(a.Subquery, b.Subquery),
         (SqlSubqueryExpression a, SqlSubqueryExpression b) => SameQuery(a.Select, b.Select),
         _ => false,

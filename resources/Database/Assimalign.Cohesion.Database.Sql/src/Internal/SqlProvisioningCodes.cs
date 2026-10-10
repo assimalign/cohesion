@@ -9,8 +9,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal static class SqlProvisioningCodes
 {
     /// <summary>
-    /// A declaration the engine's build refuses before any file is touched (phase 3): a schema
-    /// that does not compile, or declares a principal or a custom type.
+    /// A declaration the engine's build refuses before any file is touched (phases 2 and 3): a schema
+    /// that does not compile, declares a principal, declares a domain that conflicts with a type the
+    /// engine registers, or declares a column of a type the engine's catalog does not resolve.
     /// </summary>
     internal const string DeclarationRefused = "COHSQLP001";
 

@@ -41,6 +41,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
             .ToFrozenDictionary(static type => type.Name, StringComparer.OrdinalIgnoreCase);
         _castsByKey = _casts.ToFrozenDictionary(static cast => CastKey(cast.Source, cast.Target), StringComparer.Ordinal);
         HasDomainChecks = _types.Any(static type => type.Check is not null);
+        HasApplicationCasts = _casts.Any(static cast => !SqlStandardCasts.Contains(cast));
     }
 
     /// <summary>Gets the built-in types and casts alone: the catalog of an engine created by <see cref="SqlDatabaseEngine.Create"/>.</summary>
@@ -51,6 +52,13 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     /// context carries the statement's cancellation token.
     /// </summary>
     internal bool HasDomainChecks { get; }
+
+    /// <summary>
+    /// Gets whether an application registered a cast: its code a <c>CAST</c> runs, which never sees
+    /// the statement's cancellation token, but whose cancellation the engine tells apart from the
+    /// statement's own by that token, so the statement's evaluator must carry it.
+    /// </summary>
+    internal bool HasApplicationCasts { get; }
 
     /// <summary>Gets the number of types: the built-in storage types and the domains.</summary>
     public int Count => _types.Length;
@@ -142,10 +150,9 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     }
 
     /// <summary>
-    /// The casts a <c>CAST</c> to a target may apply, by the storage type of the value it converts:
-    /// for a source domain known while planning, a cast from it; then a cast from the value's storage
-    /// type; and for a domain target, a cast to its base type when none to the domain is registered.
-    /// A slot without a cast converts only a value of the target's own storage type, unchanged.
+    /// The casts a <c>CAST</c> to a target may apply, by the storage type of the value it converts
+    /// (<see cref="ResolveCast"/> for each storage type). A slot without a cast converts only a value
+    /// of the target's own storage type, unchanged.
     /// </summary>
     /// <param name="sourceDomain">The domain the operand is known to be of, or null.</param>
     /// <param name="target">The target type.</param>
@@ -157,18 +164,45 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
         string? baseKey = target.IsDomain ? StorageKey(target.Storage.Type) : null;
         for (int storage = 1; storage < casts.Length; storage++)
         {
-            SqlCast? cast = null;
-            if (sourceDomain is not null && (int)sourceDomain.Storage.Type == storage)
-            {
-                string domainKey = TypeKey(sourceDomain);
-                cast = Lookup(domainKey, targetKey) ?? (baseKey is null ? null : Lookup(domainKey, baseKey));
-            }
-
-            string storageKey = StorageKey((DatabaseType)storage);
-            casts[storage] = cast ?? Lookup(storageKey, targetKey) ?? (baseKey is null ? null : Lookup(storageKey, baseKey));
+            casts[storage] = ResolveCast(sourceDomain, (DatabaseType)storage, target, targetKey, baseKey);
         }
 
         return casts;
+    }
+
+    /// <summary>
+    /// The cast a <c>CAST</c> to a target applies to a value of one storage type: for a source domain
+    /// known while planning, a cast from it; then a cast from the value's storage type; and for a
+    /// domain target, a cast to its base type when none to the domain is registered. A value of a
+    /// domain cast to that same domain takes none: PostgreSQL reduces both sides to the base type and
+    /// relabels the value (<c>src/backend/parser/parse_coerce.c</c>, <c>find_coercion_pathway</c>), so
+    /// the domain's own casts to and from its base type never run on it.
+    /// </summary>
+    /// <param name="sourceDomain">The domain the operand is known to be of, or null.</param>
+    /// <param name="storage">The storage type of the value converted.</param>
+    /// <param name="target">The target type.</param>
+    /// <returns>The cast, or null when none applies.</returns>
+    internal SqlCast? ResolveCast(SqlType? sourceDomain, DatabaseType storage, SqlType target)
+        => ResolveCast(sourceDomain, storage, target, TypeKey(target), target.IsDomain ? StorageKey(target.Storage.Type) : null);
+
+    private SqlCast? ResolveCast(SqlType? sourceDomain, DatabaseType storage, SqlType target, string targetKey, string? baseKey)
+    {
+        if (sourceDomain is not null && sourceDomain.Storage.Type == storage)
+        {
+            if (target.IsDomain && string.Equals(sourceDomain.Name, target.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            string domainKey = TypeKey(sourceDomain);
+            if ((Lookup(domainKey, targetKey) ?? (baseKey is null ? null : Lookup(domainKey, baseKey))) is { } fromDomain)
+            {
+                return fromDomain;
+            }
+        }
+
+        string storageKey = StorageKey(storage);
+        return Lookup(storageKey, targetKey) ?? (baseKey is null ? null : Lookup(storageKey, baseKey));
     }
 
     /// <summary>The identity of a cast's source and target: a domain by name, a built-in type by storage type.</summary>

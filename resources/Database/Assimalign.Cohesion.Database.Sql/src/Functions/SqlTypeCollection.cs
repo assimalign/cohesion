@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -23,10 +24,14 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>What <see cref="Add"/> refuses</b>: a type that is not a domain (the built-in types are
 /// registered already), and a domain whose name another registered domain has, ignoring case.
-/// <b>What <see cref="AddCast"/> refuses</b>: a cast between two built-in types (those are the
-/// standard library's, and cannot be replaced or added to), a cast to or from a domain that is not
-/// registered in this collection, and a second cast of the same source and target, a built-in's
-/// included. Both refuse any call once the engine's build began. There is no removal.
+/// <b>What <see cref="AddCast"/> refuses</b>: a cast to or from a domain that is not registered in
+/// this collection, and a second cast of the same source and target, a built-in's included, so a
+/// built-in cast cannot be replaced (the standard library registers first). The rules are the same
+/// for every registrant: the standard library's casts pass through them as an application's do, and
+/// an application may add a cast between two built-in types the standard library leaves out
+/// (<c>DOUBLE</c> to <c>TEXT</c>, say), as PostgreSQL's <c>CREATE CAST</c> checks only who owns the
+/// types (<c>src/backend/commands/functioncmds.c</c>). Both refuse any call once the engine's build
+/// began. There is no removal.
 /// </para>
 /// <para>
 /// The engine's build freezes the collection into the engine's <see cref="SqlTypeCatalog"/>
@@ -83,26 +88,21 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         return this;
     }
 
-    /// <summary>Registers a cast to or from a registered domain.</summary>
+    /// <summary>
+    /// Registers a cast: between two built-in types the standard library does not convert, or to or
+    /// from a registered domain.
+    /// </summary>
     /// <param name="cast">The cast (<see cref="SqlCast.Create"/>).</param>
     /// <returns>This collection.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="cast"/> is null.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The engine's build began; the cast is between two built-in types; a domain it names is not
-    /// registered in this collection; or a cast of the same source and target is registered.
+    /// The engine's build began; a domain it names is not registered in this collection; or a cast
+    /// of the same source and target is registered, a built-in one included.
     /// </exception>
     public SqlTypeCollection AddCast(SqlCast cast)
     {
         ArgumentNullException.ThrowIfNull(cast);
         _ensureMutable?.Invoke();
-        bool standard = SqlStandardCasts.Contains(cast);
-        if (!standard && !cast.Source.IsDomain && !cast.Target.IsDomain)
-        {
-            throw new InvalidOperationException(
-                $"Cast {cast} is between two built-in types, whose casts are the standard library's and cannot be added or replaced; " +
-                "an application adds casts to or from its domains.");
-        }
-
         foreach (var end in (ReadOnlySpan<SqlType>)[cast.Source, cast.Target])
         {
             if (end.IsDomain && !ReferenceEquals(Find(end.Name), end))
@@ -125,14 +125,18 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         return this;
     }
 
-    /// <summary>Whether a type of a name is known, ignoring case: a built-in type's name or a registered domain's.</summary>
+    /// <summary>
+    /// Whether a type of a name is known, ignoring case: a built-in type name or alias
+    /// (<c>INT</c>, <c>VARCHAR</c>, <c>TIMESTAMPTZ</c>), or a registered domain's name, as the frozen
+    /// catalog's <see cref="SqlTypeCatalog.Find"/> resolves one.
+    /// </summary>
     /// <param name="name">The SQL name, for example <c>BIGINT</c> or <c>email</c>.</param>
     /// <returns><see langword="true"/> when the collection has the type.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     public bool Contains(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return Find(name) is not null;
+        return SqlTypeNames.TryResolve(name, out _) || Find(name) is { IsDomain: true };
     }
 
     /// <summary>Returns the types in registration order: the built-in types, then the domains.</summary>

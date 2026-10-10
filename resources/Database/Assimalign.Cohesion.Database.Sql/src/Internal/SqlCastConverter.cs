@@ -20,31 +20,41 @@ internal static class SqlCastConverter
     /// <param name="cancellationToken">The statement's cancellation token, for a domain check's context.</param>
     /// <returns>The converted value; null for NULL.</returns>
     /// <exception cref="DatabaseException">
-    /// No cast converts the value, the conversion failed or loses content, or the value violates the
-    /// domain target's check; a <see cref="DatabaseException"/> a conversion threw passes unchanged.
+    /// The conversion failed on the value or loses content; a <see cref="DatabaseException"/> a
+    /// conversion threw passes unchanged.
     /// </exception>
+    /// <exception cref="SqlEvaluationException">
+    /// No cast converts the value's type (<c>COHSQLE011</c>), or the conversion's code failed
+    /// (<c>COHSQLE007</c>).
+    /// </exception>
+    /// <exception cref="SqlConstraintViolationException">The value violates the domain target's check.</exception>
     internal static object? Convert(object? value, SqlBoundCast cast, CancellationToken cancellationToken)
     {
         object? converted = null;
         if (value is not null)
         {
+            var source = StorageTypeOf(value);
+            SqlCast? registered = source == DatabaseType.Null ? null : cast.Casts[(int)source];
+            if (registered is null && source != DatabaseType.Null && source != cast.Target.Storage.Type)
+            {
+                // The planner refuses this pair when it knows the operand's type; only a value
+                // reveals a parameter's, so the same code is raised here.
+                throw SqlEvaluationException.CannotCast(SqlType.NameOf(source), cast.Target);
+            }
+
             try
             {
-                var source = StorageTypeOf(value);
-                SqlCast? registered = source == DatabaseType.Null ? null : cast.Casts[(int)source];
                 if (registered is not null)
                 {
                     converted = registered.Apply(value);
                 }
-                else if (source != DatabaseType.Null && source == cast.Target.Storage.Type)
+                else if (source != DatabaseType.Null)
                 {
                     converted = value;
                 }
                 else
                 {
-                    throw new InvalidCastException(source == DatabaseType.Null
-                        ? "Unsupported source/target pair."
-                        : $"no cast from {SqlType.NameOf(source)} to {cast.Target.Name} is registered.");
+                    throw new InvalidCastException("Unsupported source/target pair.");
                 }
 
                 if (converted is not null)
@@ -52,18 +62,26 @@ internal static class SqlCastConverter
                     converted = ApplyModifiers(converted, cast.Target.Storage);
                 }
             }
-            catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+            catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
             {
+                // The value's fault, the built-ins' only failures: the conversion contract's message.
                 throw new DatabaseException($"CAST from {value.GetType().Name} to {cast.TargetText} failed: {exception.Message}", exception);
+            }
+            catch (Exception exception) when (registered is not null && SqlEvaluationException.IsCastFailure(exception, cancellationToken))
+            {
+                // A fault of the conversion's code, an application's or a built-in's alike.
+                throw SqlEvaluationException.CastFailed(registered, exception);
             }
         }
 
         // A domain's check sees every value the CAST produces; a strict check passes NULL uncalled.
+        // Its refusal is the one a write raises for the domain (PostgreSQL's 23514 for both).
         if (cast.Target.Check is { } check && (converted is not null || check.NullBehavior == SqlNullBehavior.CalledOnNullInput)
             && check.InvokeResolved(converted, cast.CheckTarget, cast.Database, cast.Collation, cancellationToken) is false)
         {
-            throw new DatabaseException(
-                $"CAST to {cast.TargetText} failed: the value violates the check of domain '{cast.Target.Name}' ({check}).");
+            throw new SqlConstraintViolationException(
+                $"CAST to {cast.TargetText} failed: the value violates the check of domain '{cast.Target.Name}' ({check}).",
+                cast.Target.Name, string.Empty, "DOMAIN");
         }
 
         return converted;
@@ -71,13 +89,20 @@ internal static class SqlCastConverter
 
     /// <summary>
     /// Applies a target's length, precision and scale to a converted value, which never rounds or
-    /// truncates: PostgreSQL's length coercion, a step after the cast itself.
+    /// truncates: PostgreSQL's length coercion, a step after the cast itself, and the bound a write to
+    /// a column of a domain applies too.
     /// </summary>
     /// <param name="value">The converted value, of the target's storage type.</param>
     /// <param name="target">The target's storage type and constraints.</param>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">A string or binary value is longer than the target, or a decimal has more scale.</exception>
     /// <exception cref="OverflowException">A decimal exceeds the target's precision.</exception>
+    /// <remarks>
+    /// A precision or scale beyond what <see cref="decimal"/> holds (a scale of 28 or more, or more
+    /// than 28 integer digits, which DDL and <see cref="SqlType.Decimal(int, int)"/> accept) bounds
+    /// nothing the runtime can represent, so it is not checked: <see cref="decimal.Round(decimal, int)"/>
+    /// takes no scale beyond 28, and the limit 10^(p - s) overflows past 10^28.
+    /// </remarks>
     internal static object ApplyModifiers(object value, DatabaseTypeInfo target)
     {
         switch (value)
@@ -87,14 +112,14 @@ internal static class SqlCastConverter
             case byte[] bytes when target.MaxLength is int length && bytes.Length > length:
                 throw new InvalidCastException($"Binary length exceeds {length}; truncation is not supported.");
             case decimal number when target.Type == DatabaseType.Decimal:
-                if (target.Scale is int scale && decimal.Round(number, scale) != number)
+                if (target.Scale is int scale && scale < MaxDecimalScale && decimal.Round(number, scale) != number)
                 {
                     throw new InvalidCastException($"Value exceeds scale {scale}; rounding is not supported.");
                 }
-                if (target.Precision is int precision)
+                if (target.Precision is int precision && precision - (target.Scale ?? 0) is var digits && digits <= MaxDecimalScale)
                 {
                     decimal limit = 1m;
-                    for (int i = 0; i < precision - (target.Scale ?? 0); i++) { limit *= 10m; }
+                    for (int i = 0; i < digits; i++) { limit *= 10m; }
                     if (number <= -limit || number >= limit)
                     {
                         throw new OverflowException($"Value exceeds precision {precision} and scale {target.Scale ?? 0}.");
@@ -105,6 +130,9 @@ internal static class SqlCastConverter
                 return value;
         }
     }
+
+    // The largest scale System.Decimal holds, and the most integer digits whose power of ten it holds.
+    private const int MaxDecimalScale = 28;
 
     /// <summary>
     /// The storage type of a value as the row holds it: exactly one of the codec's CLR types, so a

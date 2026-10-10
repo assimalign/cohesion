@@ -584,8 +584,9 @@ whose `table.Check` calls one; runs the same statements in process and over the 
 refusal, `COHSQLE007`, `COHESION_SCHEMA.FUNCTIONS` and a folded parameterized call); and
 exits 1 when a check fails. E3 added a domain with a check (`email`, a declared column of
 it, and its refusal), a domain with application casts to and from it (`cents`, under
-`CAST(CAST(Score AS cents) AS TEXT)`) and a built-in cast from text to DATE, in process and
-over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
+`CAST(CAST(Score AS cents) AS TEXT)`), a built-in cast from text to DATE, an application's
+cast between two built-in types the standard library does not convert (UUID to TEXT), and a
+`CAST` no cast performs refused while planning (`COHSQLE011`), in process and over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
 has ILC treat every warning of its whole-program analysis as an error, reported at its
 source (`IlcTreatWarningsAsErrors`, `TrimmerSingleWarn=false`); it is published for
 win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs the binary,
@@ -801,15 +802,21 @@ flowchart LR
   precision and scale, and an optional check: an `Immutable` scalar function of one argument
   that takes the base type (its storage type, an implicit widening of it, or a pseudo-type)
   and returns BOOLEAN, the rule E2 holds a CHECK's functions to (decision 64). The name is an
-  identifier that is not a keyword, a built-in type name or alias, or a pseudo-type's name, since
-  a built-in name resolves first. A domain over a domain is refused in this iteration. A
+  ASCII identifier, the rule the typed schema, `Sdk.Database` and the DDL renderer apply, that is
+  not a keyword, a built-in type name or alias, or a pseudo-type's name, since a built-in name
+  resolves first. A domain over a domain is refused in this iteration. A
   function parameter or result of a domain type is its base type for resolution and signature
   identity, as `func_get_detail` reduces one.
 - **One catalog** (open-closed). `SqlDatabaseEngineBuilder.Types` starts with the built-in
   types and casts; `Add` registers a domain and `AddCast` a cast, refusing a built-in type, a
-  second domain of a name, a cast between two built-in types (the standard library's), a cast
-  that names a domain the collection does not register, a second cast of the same source and
-  target (a built-in's included), and anything once the build began. Build phase 2 adds the
+  second domain of a name, a cast that names a domain the collection does not register, a second
+  cast of the same source and target (a built-in's included, so the standard library, which
+  registers first, cannot be replaced), and anything once the build began. Those are the only
+  refusals, and they bind the standard library's registrations as they bind an application's: an
+  application may add a cast between two built-in types the standard library does not convert
+  (`DOUBLE` to `TEXT`, `BOOLEAN` to `INTEGER`), as PostgreSQL's `CreateCast` checks who owns the
+  types, not who registers (`src/backend/commands/functioncmds.c`). `Contains` answers as the
+  frozen catalog's `Find` resolves, built-in aliases included. Build phase 2 adds the
   domains the declared schemas declare and freezes the collection into
   `SqlDatabaseEngine.Types`, engine-wide like the function catalog (decision 61); every open
   database's `SqlFunctionEnvironment` carries it. DDL (`CREATE TABLE`, `ADD COLUMN`) and `CAST`
@@ -825,11 +832,19 @@ flowchart LR
   where the value is assigned, as PostgreSQL's `ExecEvalConstraintCheck` does
   (`src/backend/executor/execExprInterp.c`): an INSERT, INSERT ... SELECT included, for every
   column, its default included; an UPDATE for the columns it sets; `ADD COLUMN` for the default
-  each existing row takes. Only FALSE refuses the value, so a strict check passes NULL without a
-  call: `SqlConstraintViolationException` of kind `DOMAIN`, naming the domain and the table.
+  each existing row takes. First the base type's length, precision and scale bound the value, as
+  `coerce_to_domain` applies the base type's modifier before the check
+  (`src/backend/parser/parse_coerce.c`) and as a `CAST` to the domain does: a NUMERIC value out of
+  them is `COHSQLE002`, a string or binary too long, or a NUMERIC with more scale, a statement
+  failure naming the column, the table and the domain. (A plain `VARCHAR(n)` or `NUMERIC(p, s)`
+  column does not apply its bound on a write yet; that gap predates E3.) Then the check: only
+  FALSE refuses the value, so a strict check passes NULL without a call:
+  `SqlConstraintViolationException` of kind `DOMAIN`, naming the domain and the table.
 - **An unregistered domain at reopen** (decision 65's rule, applied to types). When the engine
   that opens a database registers no domain of a stored column's name, or one over another
-  storage type, the column binds as unresolved: the database opens, reads proceed and so do
+  storage type, length, precision or scale than the column stores (a column keeps the bound it
+  was created with, which a `CAST` to the changed domain would no longer apply), the column binds
+  as unresolved: the database opens, reads proceed and so do
   writes that do not assign the column (an UPDATE of another column, a DELETE), and a write that
   assigns it fails with `COHSQLE010`, naming the column, the table and the domain. An engine
   that declares the database fails its build with it instead (`FindUnresolvedDomain`,
@@ -842,19 +857,50 @@ flowchart LR
   same `AddCast`: the pairs `SqlCastConverter`'s switch had (text, BOOLEAN, the integers and
   NUMERIC, and those to text, with their semantics), and new ones, REAL and DOUBLE from text and
   the numbers, and DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL and UUID from text (DATE from
-  TIMESTAMP too), parsed as INSERT parses text for a column of the type. Each carries
-  PostgreSQL's context for the pair. An application adds casts to or from its domains, which
-  PostgreSQL warns it ignores (`src/backend/commands/functioncmds.c`, "cast will be ignored
-  because the source data type is a domain"); here they are what the owner asked for.
+  TIMESTAMP too), parsed as INSERT parses text for a column of the type. DATE, TIMESTAMP and
+  TIMESTAMPTZ text reads through one parser for both (`SqlTemporalText`): it starts with an ISO
+  8601 `yyyy-mm-dd` (text without a year would take the clock's), a `TIMESTAMP` keeps the clock
+  time written and ignores an offset (`timestamp_in`), and a `TIMESTAMPTZ` without an offset is
+  UTC, so neither depends on the host's time zone. Each carries PostgreSQL's context for the
+  pair. An application adds casts to or from its domains, which PostgreSQL warns it ignores
+  (`src/backend/commands/functioncmds.c`, "cast will be ignored because the source data type is
+  a domain"); here they are what the owner asked for (a cast from a domain is an open owner
+  question, below).
 - **CAST** binds once per statement (`SqlBoundCast`): the target type, and one cast per storage
   type of the value it may convert, chosen in this order: from the operand's domain when the
   plan knows it (a domain column, or a `CAST` to a domain), then from the value's storage type;
-  for a domain target, to the domain before to its base type. A value of the target's storage
-  type with no entry needs none (PostgreSQL's binary-coercible pair). Then the target's length,
-  precision and scale apply (PostgreSQL's separate length coercion), then a domain target's
-  check. A row looks nothing up. Whatever a conversion throws, other than a `DatabaseException`,
-  cancellation, an exhausted stack or memory, is `CAST from X to T failed: ...` with the original
-  as its inner exception, the built-ins' and an application's alike.
+  for a domain target, to the domain before to its base type. A value of a domain cast to that
+  same domain takes no cast, the domain's own casts to and from its base type included:
+  PostgreSQL relabels it (`find_coercion_pathway`, `src/backend/parser/parse_coerce.c`), and the
+  length, precision, scale and check still apply. A value of the target's storage type with no
+  entry needs none (PostgreSQL's binary-coercible pair). Then the target's length, precision and
+  scale apply (PostgreSQL's separate length coercion), then a domain target's check, whose
+  refusal is the `SqlConstraintViolationException` of kind `DOMAIN` a write raises (its `Table`
+  is empty; PostgreSQL raises 23514 for both). A row looks nothing up.
+- **A CAST no cast performs** is refused while planning when the plan knows the operand's type
+  (a literal, a column, a `CAST`, a predicate, a scalar call's result type, a bound subquery):
+  `COHSQLE011` (SQLSTATE 42846), PostgreSQL's "cannot cast type ... to ..." from
+  `transformTypeCast` (`src/backend/parser/parse_expr.c`), the same over an empty table as over a
+  populated one. A parameter's or NULL's type only its value reveals, so the evaluator raises the
+  same code for it. Before E3 the parser refused these targets outright; E3 made every built-in
+  type a target, so the planner owns the refusal.
+- **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
+  throws is the value's fault: `CAST from X to T failed: ...`, with the original as its inner
+  exception, the only failures the built-ins throw. Anything else, other than a
+  `DatabaseException`, an exhausted stack or memory, is a fault of the conversion's code:
+  `COHSQLE007` (`Cast TEXT AS cents failed: ...`), the code decision 71 gives a function that
+  throws, so the session and an explicit transaction stay usable. That includes an
+  `OperationCanceledException` the statement did not ask for: a conversion never receives the
+  statement's token, and a raw cancellation would end a wire session. The rule is the same for
+  the built-ins and an application's casts. (E2's functions and a domain's check, which run
+  through E2's `SqlScalarFunction`, still let any cancellation through: a follow-up.)
+- **A cast from a domain depends on the expression's shape.** The plan knows an operand's domain
+  only for a column of the domain or a `CAST` to it, under any `COLLATE`: `CAST(amount AS TEXT)`
+  runs the domain's cast, but `CAST(COALESCE(amount, 0) AS TEXT)` and `CAST(CASE ... THEN amount
+  END AS TEXT)` have the base type and run its cast. PostgreSQL avoids the question by ignoring
+  such casts; whether to keep them, refuse them in `AddCast` until expression typing carries
+  domains, or type more shapes is an owner question. A cast to a domain does not depend on the
+  shape: it is chosen by the value's storage type.
 - **Contexts in this iteration.** Only `CAST` consults the registry, and it applies an entry of
   any context. Assignment coercion (`CoerceForColumn`) and overload resolution keep their rules,
   so `Assignment` and `Implicit` are recorded for the phase that applies them.
@@ -874,8 +920,13 @@ flowchart LR
 coercion or overload resolution (an uncast string literal still does not reach a DATE
 parameter: PostgreSQL types it `unknown` and resolves it to the parameter, `parse_func.c`'s
 `func_select_candidate`, which the design's narrow lattice does not, and which is an owner
-question); casts from the date, time, UUID and binary floating-point types to text;
-`COHESION_SCHEMA` views of types and casts; and SQL `CREATE DOMAIN`, which is E4.
+question); built-in casts from the date, time, UUID and binary floating-point types to text, and
+from REAL and DOUBLE to NUMERIC (their text forms are a dialect decision; an application registers
+any of them through `AddCast` meanwhile); a volatility on `SqlCast`, which a phase that runs casts
+in a CHECK, an index or a generated expression, or applies `Implicit` contexts, needs first;
+PostgreSQL's text forms of INTERVAL (the engine reads .NET's `[d.]hh:mm:ss`, so `'12'` is twelve
+days, not seconds); `COHESION_SCHEMA` views of types and casts; and SQL `CREATE DOMAIN`, which is
+E4.
 
 ## Compiled-schema provisioning
 

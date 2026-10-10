@@ -58,17 +58,25 @@ public class CompiledSchemaTests
         hash.ShouldBe(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document))));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: a v1 document, which carried the engine model, no longer reads")]
-    public void Deserialize_VersionOneDocument_ShouldBeRefused()
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: a document that carries the engine model, as v1 did, no longer reads")]
+    public void Deserialize_DocumentWithModel_ShouldBeRefused()
     {
-        SqlCompiledSchema schema = CompileOrders();
-        string versionTwo = schema.CanonicalDocument;
-        string withModel = versionTwo.Replace("\"name\":", "\"model\":1,\"name\":", StringComparison.Ordinal);
-        string versionOne = versionTwo.Replace(SqlCompiledSchema.CurrentFormat, "cohesion/database-schema/v1", StringComparison.Ordinal);
+        string withModel = CompileOrders().CanonicalDocument.Replace("\"name\":", "\"model\":1,\"name\":", StringComparison.Ordinal);
 
         Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(withModel))
             .Errors.ShouldHaveSingleItem().Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
-        Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(versionOne))
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database] - Schema compiler: a document of an earlier format version no longer reads")]
+    [InlineData("cohesion/database-schema/v1")]
+    [InlineData("cohesion/database-schema/v2")]
+    public void Deserialize_EarlierFormatVersion_ShouldBeRefused(string format)
+    {
+        // v1 carried the engine model; v2 had no domains or named column types (phase E3 made v3).
+        string earlier = CompileOrders().CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, format, StringComparison.Ordinal);
+
+        earlier.ShouldContain(format, Case.Sensitive);
+        Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(earlier))
             .Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.format");
     }
 

@@ -35,8 +35,9 @@ internal sealed class SqlFunctionEnvironment
     internal DatabaseName Database { get; }
 
     /// <summary>
-    /// Gets whether a statement may run an application's code that reads its cancellation token: a
-    /// registered function, or a domain's check.
+    /// Gets whether a statement may run an application's code whose failure depends on its
+    /// cancellation token: a registered function or a domain's check, which read it, or an
+    /// application's cast, whose cancellation is the statement's only when the token says so.
     /// </summary>
-    internal bool RunsApplicationCode => Catalog.HasApplicationFunctions || Types.HasDomainChecks;
+    internal bool RunsApplicationCode => Catalog.HasApplicationFunctions || Types.HasDomainChecks || Types.HasApplicationCasts;
 }

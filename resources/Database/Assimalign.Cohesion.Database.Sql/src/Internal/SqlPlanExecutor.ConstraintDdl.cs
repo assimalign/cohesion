@@ -235,14 +235,15 @@ internal sealed partial class SqlPlanExecutor
         var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
         var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement);
         var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken);
+
+        // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
+        int[]? added = bound is null ? null : [columns.Length - 1];
         foreach (var row in rows)
         {
             CoerceForColumn(row[^1], plan.Column);
-
-            // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
-            if (bound is not null)
+            if (added is not null)
             {
-                CheckDomains(bound, row, evaluator!, [columns.Length - 1]);
+                CheckDomains(bound!, row, evaluator!, added);
             }
         }
 

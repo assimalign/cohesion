@@ -105,6 +105,48 @@ public sealed class SqlDomainWireTests
         }
     }
 
+    /// <summary>
+    /// An application cast that throws is a coded statement failure over the wire, a cancellation it
+    /// throws while the statement was not cancelled included: the connection stays usable (COHSQLE007,
+    /// as for a function), where a raw cancellation would have closed it.
+    /// </summary>
+    /// <param name="input">The text the cast is given.</param>
+    /// <param name="message">The failure the client receives.</param>
+    /// <returns>The asynchronous test operation.</returns>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: a throwing application cast is COHSQLE007 over the wire and the connection stays usable")]
+    [InlineData("npe", "COHSQLE007: Cast TEXT AS points failed: npe!")]
+    [InlineData("oce", "COHSQLE007: Cast TEXT AS points failed: not this statement")]
+    [InlineData("bad", "CAST from String to points failed: not a number of points")]
+    public async Task QueryAsync_ThrowingApplicationCast_ShouldBeCodedAndKeepTheConnection(string input, string message)
+    {
+        // Arrange
+        await using var harness = await DomainHarness.StartAsync(static types =>
+        {
+            var points = SqlType.CreateDomain("points", SqlType.BigInt);
+            types.Add(points).AddCast(SqlCast.Create<string, long>(SqlType.Text, points, static text => text switch
+            {
+                "npe" => throw new NullReferenceException("npe!"),
+                "oce" => throw new TaskCanceledException("not this statement"),
+                "bad" => throw new FormatException("not a number of points"),
+                _ => long.Parse(text, CultureInfo.InvariantCulture),
+            }, SqlCastContext.Explicit));
+        });
+        await using var connection = await harness.Client.ConnectAsync(Timeout());
+        await connection.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)", cancellationToken: Timeout());
+        await connection.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: Timeout());
+
+        // Act
+        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.QueryAsync($"SELECT CAST('{input}' AS points) AS p FROM t", cancellationToken: Timeout()));
+        SqlResultSet after = await connection.QueryAsync("SELECT CAST('7' AS points) AS p FROM t", cancellationToken: Timeout());
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        failure.Message.ShouldBe(message);
+        after.ShouldHaveSingleItem()["p"].ShouldBe(7L);
+    }
+
     private static CancellationToken Timeout(int seconds = 10) => SqlClientTestHarness.Timeout(seconds);
 
     private static void Register(SqlTypeCollection types)

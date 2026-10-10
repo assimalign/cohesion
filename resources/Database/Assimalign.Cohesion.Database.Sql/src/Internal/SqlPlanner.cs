@@ -1082,10 +1082,8 @@ internal sealed partial class SqlPlanner
             case SqlCollateExpression collate:
                 Collation.FromName(collate.CollationName);
                 break;
-            case SqlCastExpression { TargetTypeInfo: null } cast:
-                // A name the parser does not know: a domain of the engine's type catalog, or COHSQLE010
-                // while planning, the same over an empty table as over a populated one.
-                ResolveCastTarget(cast, evaluator.Functions.Types);
+            case SqlCastExpression cast:
+                ValidateCast(cast, evaluator, boundSubqueries, boundValues);
                 break;
             case SqlSubqueryExpression or SqlExistsExpression when !isBound:
                 throw new DatabaseException("COHDBL001: Subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
@@ -1131,6 +1129,51 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
+    /// Checks a <c>CAST</c> while planning, the same over an empty table as over a populated one: its
+    /// target resolves (a name the parser does not know is a domain of the engine's type catalog, or
+    /// <c>COHSQLE010</c>), and when the plan knows the operand's type, a registered cast converts it
+    /// to the target, or the operand has the target's storage type already (<c>COHSQLE011</c>
+    /// otherwise, PostgreSQL's "cannot cast type ... to ..." at parse analysis). An operand whose
+    /// type only its value reveals, a parameter or NULL, is checked when it is evaluated.
+    /// </summary>
+    /// <param name="cast">The CAST.</param>
+    /// <param name="evaluator">The scope its operand is typed in.</param>
+    /// <param name="boundSubqueries">The subqueries the statement bound, with their types.</param>
+    /// <param name="boundValues">ORDER BY nodes already bound to output values.</param>
+    /// <exception cref="SqlEvaluationException">The target does not resolve, or no cast converts the operand.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ValidateCast(SqlCastExpression cast, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        var types = evaluator.Functions.Types;
+        var target = ResolveCastTarget(cast, types);
+        if (StaticOperandType(cast.Operand, evaluator, boundSubqueries, boundValues) is not { } declared || declared == DatabaseType.Null)
+        {
+            return;
+        }
+
+        // The value the evaluator converts is the row's: a JSON value is text and a JSONB value bytes,
+        // so the cast is chosen as SqlCastConverter chooses it for that value.
+        var source = declared switch
+        {
+            DatabaseType.Json => DatabaseType.String,
+            DatabaseType.JsonBinary => DatabaseType.Binary,
+            _ => declared,
+        };
+        if (source == target.Storage.Type)
+        {
+            return;
+        }
+
+        var sourceDomain = evaluator.SourceDomain(cast.Operand);
+        if (types.ResolveCast(sourceDomain, source, target) is null)
+        {
+            throw SqlEvaluationException.CannotCast(
+                sourceDomain is not null && sourceDomain.Storage.Type == declared ? sourceDomain.Name : SqlType.NameOf(declared), target);
+        }
+    }
+
+    /// <summary>
     /// Resolves a call to its overload while planning: a call no overload's types accept fails here
     /// with <c>COHSQLE006</c>, and one several accept equally well with <c>COHSQLE008</c>, the same
     /// over an empty table as over a populated one.
@@ -1148,12 +1191,13 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
-    /// The type a sign's operand has whatever row it is evaluated on, when the plan can tell:
-    /// a string or Boolean literal, a column, a COLLATE or CAST, a predicate, a concatenation,
-    /// <c>UPPER</c>/<c>LOWER</c>, or a bound scalar subquery. Null when only the value can tell —
-    /// a parameter (which <see cref="ValidateExpression"/> checks against its supplied value
-    /// instead), arithmetic, other calls, CASE, NULL — or when the node is an ORDER BY value
-    /// bound to an output column.
+    /// The type a sign's or a CAST's operand has whatever row it is evaluated on, when the plan can
+    /// tell: a literal (an integer literal is BIGINT and a fractional one NUMERIC, the values they
+    /// bind to), a column, a COLLATE or CAST, a predicate, a concatenation, a scalar call's resolved
+    /// result type, or a bound scalar subquery. Null when only the value can tell — a parameter
+    /// (which <see cref="ValidateExpression"/> checks against its supplied value instead for a
+    /// sign), arithmetic, an aggregate, CASE, NULL — or when the node is an ORDER BY value bound to
+    /// an output column.
     /// </summary>
     private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
@@ -1168,6 +1212,8 @@ internal sealed partial class SqlPlanner
         {
             SqlLiteralExpression { LiteralType: SqlLiteralType.String } => DatabaseType.String,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Boolean } => DatabaseType.Boolean,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } => DatabaseType.Int64,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Float } => DatabaseType.Decimal,
             SqlColumnReferenceExpression column => evaluator.ResolveColumnType(column),
             SqlCollateExpression collate => StaticOperandType(collate.Operand, evaluator, boundSubqueries, boundValues),
             SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? evaluator.TryResolveCastTarget(cast)?.Storage.Type,

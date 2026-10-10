@@ -22,7 +22,17 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </para>
 /// <para>
 /// Each conversion maps storage type to storage type; the engine applies the target's length,
-/// precision and scale afterwards (<see cref="SqlCastConverter.ApplyModifiers"/>).
+/// precision and scale afterwards (<see cref="SqlCastConverter.ApplyModifiers"/>). Each fails only
+/// with a <see cref="FormatException"/>, an <see cref="OverflowException"/> or an
+/// <see cref="InvalidCastException"/>, the value's faults <c>CAST</c> reports as conversion failures;
+/// anything else a cast throws is a fault of its code (<c>COHSQLE007</c>), so a built-in that threw
+/// another type would be reported as one. DATE, TIMESTAMP and TIMESTAMPTZ text reads through
+/// <see cref="SqlTemporalText"/>, as INSERT reads it.
+/// </para>
+/// <para>
+/// Not here, for now (Sql DESIGN, "Not in E3"): the date, time, UUID and binary floating-point types
+/// to text, and REAL and DOUBLE to NUMERIC. An application registers any of them through the same
+/// <see cref="SqlTypeCollection.AddCast"/>.
 /// </para>
 /// </remarks>
 internal static class SqlStandardCasts
@@ -69,12 +79,10 @@ internal static class SqlStandardCasts
         SqlCast.Create<string, decimal>(SqlType.Text, SqlType.Numeric, static text => SqlCastConverter.ParseExactDecimal(text), Explicit),
         SqlCast.Create<string, float>(SqlType.Text, SqlType.Real, static text => ToReal(ParseFloat(text)), Explicit),
         SqlCast.Create<string, double>(SqlType.Text, SqlType.Double, static text => ParseFloat(text), Explicit),
-        SqlCast.Create<string, DateOnly>(SqlType.Text, SqlType.Date, static text => DateOnly.Parse(text, CultureInfo.InvariantCulture), Explicit),
+        SqlCast.Create<string, DateOnly>(SqlType.Text, SqlType.Date, static text => SqlTemporalText.ParseDate(text), Explicit),
         SqlCast.Create<string, TimeOnly>(SqlType.Text, SqlType.Time, static text => TimeOnly.Parse(text, CultureInfo.InvariantCulture), Explicit),
-        SqlCast.Create<string, DateTime>(SqlType.Text, SqlType.Timestamp,
-            static text => DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), Explicit),
-        SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz,
-            static text => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), Explicit),
+        SqlCast.Create<string, DateTime>(SqlType.Text, SqlType.Timestamp, static text => SqlTemporalText.ParseTimestamp(text), Explicit),
+        SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampTz(text), Explicit),
         SqlCast.Create<string, TimeSpan>(SqlType.Text, SqlType.Interval, static text => TimeSpan.Parse(text, CultureInfo.InvariantCulture), Explicit),
         SqlCast.Create<string, Guid>(SqlType.Text, SqlType.Uuid, static text => Guid.Parse(text), Explicit),
 

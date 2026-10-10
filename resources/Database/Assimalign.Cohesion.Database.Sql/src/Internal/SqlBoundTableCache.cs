@@ -223,9 +223,12 @@ internal sealed class SqlBoundTableCache
 
     /// <summary>
     /// Binds a stored column's domain against the engine's type catalog (phase E3): its check as a call
-    /// over the column's value, or, when the engine registers no domain of the name or one over another
-    /// storage type, an unresolved binding that fails each write to the column with <c>COHSQLE010</c>
-    /// while the table opens and its reads proceed, as owner decision 65 has it for a function.
+    /// over the column's value, or, when the engine registers no domain of the name, or one over another
+    /// storage type or another length, precision or scale than the column stores, an unresolved
+    /// binding that fails each write to the column with <c>COHSQLE010</c> while the table opens and its
+    /// reads proceed, as owner decision 65 has it for a function. A column keeps the bound it was
+    /// created with, so a domain whose base type changed would otherwise bound the column's writes and
+    /// a <c>CAST</c> to the domain differently.
     /// </summary>
     private SqlBoundDomain BindDomain(SqlCatalogTable table, int ordinal, string tableName)
     {
@@ -234,7 +237,10 @@ internal sealed class SqlBoundTableCache
         string? reason = !Functions.Types.TryGetDomain(name, out var domain)
             ? "which this engine does not register"
             : domain.Storage.Type != column.Type.Type
-                ? $"which this engine registers over {domain.BaseType!.Name}, but the column stores {SqlType.NameOf(column.Type.Type)}"
+                || domain.Storage.MaxLength != column.Type.MaxLength
+                || domain.Storage.Precision != column.Type.Precision
+                || domain.Storage.Scale != column.Type.Scale
+                ? $"which this engine registers over {domain.BaseType!.Name}, but the column stores {SqlType.ForStorage(column.Type).Name}"
                 : null;
         if (reason is not null)
         {

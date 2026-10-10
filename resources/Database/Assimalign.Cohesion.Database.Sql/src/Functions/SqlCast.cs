@@ -16,7 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// a narrower one, text to a date — are casts created with this type's <see cref="Create"/> and
 /// registered through the same <see cref="SqlTypeCollection.AddCast"/> an application calls, so
 /// <c>CAST</c> resolves and runs an application's cast exactly as a built-in one. An application
-/// adds casts to or from its domains; a cast between two built-in types is the standard library's.
+/// adds casts to or from its domains, and between two built-in types the standard library does not
+/// convert; a pair the standard library converts already cannot be registered again, by anyone.
 /// </para>
 /// <para>
 /// <b>What a cast does and what the engine does.</b> The conversion maps a value of the source's
@@ -25,15 +26,24 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// target's check, so a conversion never has to. A cast whose source or target is a domain is
 /// preferred to the cast of the domain's base type, which applies otherwise; between two types of
 /// the same storage type no cast is needed (PostgreSQL's binary-coercible pair), unless one is
-/// registered.
+/// registered. A value of a domain cast to that same domain is never converted, as PostgreSQL
+/// relabels it (<c>src/backend/parser/parse_coerce.c</c>): no cast applies, the domain's own casts
+/// included, and the length, precision, scale and check do. A cast from a domain applies only where
+/// the plan knows the operand's domain: a column of the domain, or a <c>CAST</c> to it, under any
+/// <c>COLLATE</c>; any other expression over such a value (<c>COALESCE</c>, <c>CASE</c>, arithmetic)
+/// has the base type, and its cast is the base type's.
 /// </para>
 /// <para>
-/// <b>Failures.</b> Whatever the conversion throws other than a <see cref="DatabaseException"/>,
-/// <see cref="OperationCanceledException"/>, <see cref="InsufficientExecutionStackException"/> or
-/// <see cref="OutOfMemoryException"/> fails the statement as a conversion failure naming the source
-/// and the target (<c>CAST from String to DATE failed: ...</c>), the original as its inner exception;
-/// a <see cref="DatabaseException"/> passes unchanged. One instance serves every session, so the
-/// conversion must be thread-safe.
+/// <b>Failures.</b> A <see cref="FormatException"/>, <see cref="OverflowException"/> or
+/// <see cref="InvalidCastException"/> the conversion throws is the value's fault: the statement fails
+/// as a conversion failure naming the source and the target (<c>CAST from String to DATE failed:
+/// ...</c>), the original as its inner exception, as the built-in casts fail. Anything else it throws,
+/// other than a <see cref="DatabaseException"/> (which passes unchanged), an exhausted stack or
+/// memory, is a fault of the conversion's code: <c>COHSQLE007</c> (<c>Cast TEXT AS cents failed:
+/// ...</c>), which leaves the session and an explicit transaction usable, as for a function. That
+/// includes an <see cref="OperationCanceledException"/>: the conversion never sees the statement's
+/// cancellation token, so only the statement's own cancellation cancels it. One instance serves every
+/// session, so the conversion must be thread-safe.
 /// </para>
 /// </remarks>
 public sealed class SqlCast

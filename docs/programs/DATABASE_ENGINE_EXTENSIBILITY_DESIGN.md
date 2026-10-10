@@ -688,7 +688,8 @@ public sealed class SqlCast
     public SqlCastContext Context { get; }
 }
 public enum SqlCastContext : byte { Explicit, Assignment, Implicit }
-// SqlTypeCollection: Add(SqlType), AddCast(SqlCast)
+// SqlTypeCollection: Add(SqlType), AddCast(SqlCast), Contains(string); frozen at build phase 2 into
+// SqlTypeCatalog (SqlDatabaseEngine.Types): Find(string), FindCast(SqlType, SqlType), Casts
 ```
 
 Deleted with E2: `SqlFunctionSignatures`, `SqlFunctionSignature`, the internal `SqlFunctionKind` and
@@ -811,7 +812,9 @@ evaluated function.
   reports `SQL0004` for an unknown name; E3 makes it keep the name and leave it to the planner.
 - **Casts.** `SqlCastConverter`'s pairs are re-registered as built-in `SqlCast` entries, the
   `pg_cast` model (`castfunc` and `castcontext`, `src/include/catalog/pg_cast.h:45-48`); an
-  application adds casts to or from its domains.
+  application adds casts to or from its domains, and between built-in types the standard library
+  does not convert (the owner's open-closed rule: the same `AddCast`, with the same refusals, for
+  the built-ins and the application; a registered pair cannot be replaced).
 - **The typed schema.** `table.Column(selector, "email")` names a domain. Today's
   `schema.Type<T>(t => t.Decimal(p, s))` (`Sql.Schema/src/SqlSchemaBuilder.cs:48`), which the
   provisioner refuses, lowers to a domain over DECIMAL.
@@ -1267,6 +1270,15 @@ from text; only `CAST` consults the registry in this iteration. The typed schema
 `schema.Type<T>` lowers to a domain named for `T` (document format `v3`), which build phase 2 registers
 engine-wide; the planner plans `AddDomain`/`DropDomain`, which render no statement. The SDK extracts
 both with hash parity and no longer refuses `Type<T>` (`COHDBSDK108` is principals only).
+*E3 review fixes.* `AddCast` refuses only an unregistered domain and a registered pair, the same for
+the standard library and an application, so an application fills the standard library's gaps (no
+built-in-only privilege). A `CAST` no registered cast performs is `COHSQLE011` (SQLSTATE 42846) while
+planning whenever the operand's type is known, as PostgreSQL refuses it at parse analysis; a value of
+a domain cast to that domain is relabeled; a write to a domain column applies the base type's length,
+precision and scale before the check; a domain whose base type changed between opens is unresolved;
+a cast that throws past a value's fault is `COHSQLE007`; DATE, TIMESTAMP and TIMESTAMPTZ text no
+longer depends on the host's clock or time zone. Open owner questions: casts from a domain (their
+shape dependence is documented), and whether `COHSQLE010` splits as E2 split `COHSQLE006`/`COHSQLE009`.
 
 **E4: SQL-defined functions, domains and scripts.** §4.9 and the scripts of §5.5. *Gates:* reopening
 a persisted function and domain; DROP refused while a definition depends on the object; ownership;

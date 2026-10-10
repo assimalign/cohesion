@@ -202,9 +202,10 @@ public sealed class SqlType : IEquatable<SqlType>
     /// (<see cref="SqlTypeCollection.Add"/>) before DDL or CAST can name it.
     /// </summary>
     /// <param name="name">
-    /// The name DDL and CAST write, matched ignoring case: an identifier (a letter or underscore, then
-    /// letters, digits and underscores) that is neither a SQL keyword nor a built-in type name or
-    /// alias (<c>INT</c>, <c>VARCHAR</c>, <c>DATE</c>, ...).
+    /// The name DDL and CAST write, matched ignoring case: an ASCII identifier (an ASCII letter or
+    /// underscore, then ASCII letters, digits and underscores, the rule the typed schema applies) that
+    /// is neither a SQL keyword nor a built-in type name or alias (<c>INT</c>, <c>VARCHAR</c>,
+    /// <c>DATE</c>, ...).
     /// </param>
     /// <param name="baseType">
     /// The built-in type the domain's values are stored as, with its length, precision and scale
