@@ -176,11 +176,13 @@ public class Http2ResponseFlowControlTests
         Encoding.ASCII.GetString(peer.Output.DataPayload(3)).ShouldBe("ok");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response FlowControl: Cancellation should release a buffered writer waiting for credit")]
-    public async Task SendAsync_OnCancellationWhileAwaitingCredit_ShouldThrowOperationCanceled()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response FlowControl: Cancellation should release a buffered writer waiting for credit and reset its stream")]
+    public async Task SendAsync_OnCancellationWhileAwaitingCredit_ShouldResetStreamWithCancel()
     {
-        // Arrange
+        // Arrange — one concurrent stream, and a 10-octet stream window that parks the writer after its
+        // first DATA frame.
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
+            configure: static http2 => http2.Limits.MaxStreamsPerConnection = 1,
             initialWindowSize: 10);
         await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/slow"));
         IHttpContext exchange = await peer.ReceiveContextAsync();
@@ -195,14 +197,21 @@ public class Http2ResponseFlowControlTests
         // Act
         cancellation.Cancel();
 
-        // Assert — the wait for WINDOW_UPDATE honors the token.
+        // Assert — the wait for WINDOW_UPDATE honors the token, and the response the stream can no
+        // longer complete is ended with RST_STREAM(CANCEL) (#1075).
         await Should.ThrowAsync<OperationCanceledException>(() => send.WaitAsync(_timeout));
-
-        // The abandoned stream is the peer's to reset; doing so also ends the exchange for the
-        // connection's graceful-close drain.
-        await peer.SendRstStreamAsync(1, Http2ErrorCode.Cancel);
-        await peer.SyncAsync();
+        await peer.Output.ReadUntilAsync(
+            frames => frames.Any(frame => frame.IsRstStream && frame.StreamId == 1),
+            "the reset of stream 1");
+        peer.Output.ForStream(1).Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.Cancel);
         peer.Output.DataLength(1).ShouldBe(10);
+        peer.Output.ForStream(1).ShouldNotContain(frame => frame.EndStream);
+
+        // The exchange ended with its send, so the stream's slot is free for the next one.
+        await peer.SendHeadersAsync(3, endStream: true, Http2TestPeer.Get("/next"));
+        IHttpContext next = await peer.ReceiveContextAsync();
+        next.Request.Path.Value.ShouldBe("/next");
+        await peer.ConnectionContext.SendAsync(next).AsTask().WaitAsync(_timeout);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response FlowControl: A peer reset should release a streaming writer waiting for credit")]

@@ -1978,8 +1978,30 @@ because the peer never received those octets and will never credit them back.
   throwing `SendAsync` as fatal to the connection keeps the connection's other
   streams. The streaming sink behaves the same way.
 - **Cancellation** of the `SendAsync` token cancels the wait with
-  `OperationCanceledException`. That token is the host's shutdown signal, so the
-  stream is left for the connection teardown, or the peer, to reset.
+  `OperationCanceledException`, and once the application's final response is
+  claimed it also resets the stream with `RST_STREAM(CANCEL)` before the
+  exception propagates (#1075) — on the buffered path, and when the streaming sink's
+  completion is cancelled. The stream can carry no other response, so before #1075
+  it stayed open with no response: it held its concurrency slot for the life of
+  the connection, the graceful-close drain waited its whole five-second window for
+  it, and the peer was left with a half-open stream. The reset removes the stream,
+  which releases the drain and returns its receive-window debt, and the exchange
+  gives its slot back when `SendAsync` ends (see "A reset stream keeps its slot
+  until its exchange ends"). Send credit reserved for a frame that never reached
+  the wire was already returned by the writer. Nothing is sent for a stream already
+  reset, or one the transport answered itself with its `413`.
+- **A reset with a cancelled token is still written.** The caller of the reset is
+  often the one that gave up: the cancelled send above, or a host that resets an
+  exchange with its own, already cancelled, stop token (Web.Hosting does, once its
+  stop budget runs out). The write gate refuses a cancelled token at once, so the
+  reset used to be dropped while the stream was removed, and the peer never learned
+  the stream had ended. `EmitRstStreamAsync` now writes the frame, and the
+  connection `WINDOW_UPDATE` that returns the stream's receive debt, on a token
+  bounded by a fixed two-second window when the caller's token was already
+  cancelled, so a transport that takes nothing cannot hold the caller. A
+  cancellation can land after the frame that carries `END_STREAM` was handed to the
+  transport, since only a write's wait is cut short; the reset then follows a
+  complete response, which a peer that ended its side ignores (RFC 9113 §5.1).
 - **The pump exiting** still fails a waiting writer with `IOException`, because no
   credit can ever arrive.
 
