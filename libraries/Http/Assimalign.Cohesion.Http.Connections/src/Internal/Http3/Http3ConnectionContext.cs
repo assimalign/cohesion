@@ -1967,7 +1967,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <inheritdoc />
     /// <remarks>
     /// The exchange ends when this call returns or throws, whatever it wrote: from then on its request
-    /// stream no longer keeps the connection from going idle (#1085).
+    /// stream no longer keeps the connection from going idle (#1085). The one exception is a head or
+    /// buffered trailer section the encoder refused (#1183): nothing reached the wire and the response
+    /// has not started, so the exchange stays running, and its request stream keeps the connection busy,
+    /// until the caller finalizes it again or disposes it — as HTTP/2 keeps the stream's slot.
     /// </remarks>
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
@@ -1976,13 +1979,23 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
+        bool headRefused = false;
+
         try
         {
             await SendCoreAsync(http3Context, cancellationToken).ConfigureAwait(false);
         }
+        catch (HttpInvalidResponseFieldException) when (!http3Context.HasFinalResponseStarted)
+        {
+            headRefused = true;
+            throw;
+        }
         finally
         {
-            EndExchange(http3Context);
+            if (!headRefused)
+            {
+                EndExchange(http3Context);
+            }
         }
     }
 

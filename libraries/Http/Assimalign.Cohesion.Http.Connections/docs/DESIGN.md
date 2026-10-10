@@ -1905,9 +1905,11 @@ QUIC's idle timeout cannot do this job: any packet resets it, PING included. The
 counts the request streams in flight instead. The accept loop counts a bidirectional stream
 when it accepts one. The stream stops counting when its head yields no exchange (reset,
 rejected, or answered `431`), or when the exchange it yielded ends: its `SendAsync` returns or
-throws, or the exchange is disposed (`Http3Context.TryEndExchange` makes that once). The idle
-period is measured from the later of the receive loop's start and the end of the last exchange,
-so only an exchange's end moves it. A stream whose head yielded no exchange stops counting
+throws, or the exchange is disposed (`Http3Context.TryEndExchange` makes that once). A `SendAsync`
+that refuses the head or a buffered trailer section (#1183) does not end the exchange: nothing is on
+the wire, the caller may still send a replacement, and until it does the stream keeps counting, as
+an HTTP/2 stream keeps its slot. The idle period is measured from the later of the receive loop's
+start and the end of the last exchange, so only an exchange's end moves it. A stream whose head yielded no exchange stops counting
 without moving it, and a peer cannot keep an idle connection open by opening an empty or
 malformed request stream every so often. At zero an `ITimer` is armed for what is left of
 `KeepAliveTimeout`, at once when nothing is. When it fires it re-checks the count and how long the
@@ -2757,7 +2759,7 @@ each path encodes before it commits any exchange state:
 
 | Path | Refused where | State it leaves |
 |---|---|---|
-| Buffered `SendAsync`, every version | `SendAsync` throws | nothing written; the response neither claimed (HTTP/2) nor marked started, so `HasResponseStarted` stays `false`; HTTP/2 keeps the exchange running, slot included, until it is finalized again or disposed; the `Content-Length` synthesized from the refused body is removed from the headers again, so a replacement that keeps the other headers and changes the body is framed by its own body (a stale length would misframe an HTTP/1.1 keep-alive connection, and make an HTTP/2 or HTTP/3 response malformed) |
+| Buffered `SendAsync`, every version | `SendAsync` throws | nothing written; the response neither claimed (HTTP/2) nor marked started, so `HasResponseStarted` stays `false`; HTTP/2 keeps the exchange running, slot included, and HTTP/3 keeps it running, its request stream counted as in flight for the keep-alive, until it is finalized again or disposed; the `Content-Length` synthesized from the refused body is removed from the headers again, so a replacement that keeps the other headers and changes the body is framed by its own body (a stale length would misframe an HTTP/1.1 keep-alive connection, and make an HTTP/2 or HTTP/3 response malformed) |
 | Streamed head (the raw body sink's first write or flush) | the write throws | nothing written; the sink returns to unstarted, and HTTP/1.1 withdraws the `Transfer-Encoding: chunked` it added, so a buffered response sent in its place is framed by `Content-Length` alone |
 | Interim (`103`, `100`) | `WriteInterimResponseAsync` throws | nothing written; the final response is unaffected |
 | Extended CONNECT tunnel accept (HTTP/2, HTTP/3) | `AcceptTunnelAsync` throws | nothing written; unclaimed, unstarted, the staged status restored; the accept is spent |

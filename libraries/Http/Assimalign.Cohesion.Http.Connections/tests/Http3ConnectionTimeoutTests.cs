@@ -74,6 +74,41 @@ public class Http3ConnectionTimeoutTests
         (await Http3InMemoryPeer.ReadToEndAsync(request)).ShouldNotBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Timeouts: A connection should stay open while a refused response head awaits its replacement")]
+    public async Task ReceiveAsync_OnRefusedResponseHeadAwaitingReplacement_ShouldCloseOnlyOnceReplaced()
+    {
+        // Arrange — one request is dispatched, and its response carries a value no head may (#1183).
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 =>
+        {
+            http3.Limits.KeepAliveTimeout = _shortTimeout;
+            http3.Limits.RequestHeadersTimeout = _longTimeout;
+        });
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/echo", "https", "a"));
+        request.Output.Complete();
+        IHttpContext exchange = await peer.NextContextAsync();
+        Task<bool> next = peer.MoveNextAsync();
+        exchange.Response.Headers[new HttpHeaderKey("x-echo")] = "a\r\nLocation: /evil";
+        exchange.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("body"));
+
+        // Act — the head is refused, and the replacement is not sent for three keep-alive periods.
+        HttpException refusal = await Should.ThrowAsync<HttpException>(() => peer.ConnectionContext.SendAsync(exchange).AsTask());
+        await Task.Delay(_shortTimeout * 3);
+
+        // Assert — the refused exchange is still running, so the connection is busy and not closed.
+        refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        next.IsCompleted.ShouldBeFalse();
+
+        // The replacement ends the exchange; the connection is then idle, and closed after the keep-alive deadline.
+        exchange.Response.Headers.Clear();
+        exchange.Response.Body = new MemoryStream();
+        exchange.Response.StatusCode = HttpStatusCode.InternalServerError;
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
+        (await next).ShouldBeFalse();
+        (await peer.ReadGoAwayAsync()).ShouldBe(4L);
+        (await Http3InMemoryPeer.ReadToEndAsync(request)).ShouldNotBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Timeouts: A request stream whose head never arrives should be reset with H3_REQUEST_REJECTED")]
     public async Task ReceiveAsync_OnRequestHeadNeverArriving_ShouldResetWithRequestRejected()
     {
