@@ -126,6 +126,11 @@ internal sealed class TestHttpContext : HttpContext
 
     public static TestHttpContext Create(HttpMethod method, HttpPath path)
     {
+        return Create(method, path, CancellationToken.None);
+    }
+
+    public static TestHttpContext Create(HttpMethod method, HttpPath path, CancellationToken requestCancelled)
+    {
         return new TestHttpContext(
             HttpVersion.Http11,
             new TestHttpRequest
@@ -134,6 +139,21 @@ internal sealed class TestHttpContext : HttpContext
                 Path = path,
                 Scheme = HttpScheme.Http,
             },
-            new TestHttpResponse());
+            new TestHttpResponse(),
+            requestCancelled: requestCancelled);
+    }
+
+    public static TestHttpContext Create(HttpMethod method, HttpPath path, HttpConnectionInfo connectionInfo)
+    {
+        return new TestHttpContext(
+            HttpVersion.Http11,
+            new TestHttpRequest
+            {
+                Method = method,
+                Path = path,
+                Scheme = HttpScheme.Http,
+            },
+            new TestHttpResponse(),
+            connectionInfo);
     }
 }

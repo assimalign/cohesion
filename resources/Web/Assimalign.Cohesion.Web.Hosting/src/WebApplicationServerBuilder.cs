@@ -1,14 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
 /// <summary>
@@ -16,6 +19,27 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// </summary>
 public sealed class WebApplicationServerBuilder
 {
+    /// <summary>
+    /// The number of features the default server's exchanges carry besides the application's own:
+    /// the <c>IHttpMaxRequestBodySizeFeature</c> the first default interceptor attaches while the
+    /// request is parsed (see <see cref="ApplyDefaultInterceptors"/>), and the request id, response
+    /// completion and drain features the server installs before the pipeline runs. The other default
+    /// interceptors attach a feature only to an upgrade, an extended CONNECT, or an HTTP/1.1 request that
+    /// declares a body (the client-fault feature, #1340). Each exchange's feature collection is sized for
+    /// these plus the stamped application features (#1381).
+    /// </summary>
+    internal const int HostFeatureCount = 4;
+
+    /// <summary>
+    /// The sizes an unsized feature collection's dictionary passes through as it grows: three slots,
+    /// then each time the runtime's smallest hash-table prime at least twice the previous size. A
+    /// collection created at one of these sizes and then outgrown grows to the next one, exactly as an
+    /// unsized collection does, so it never allocates more than an unsized collection holding the same
+    /// features. A size between two of these (11, 23, 29, 47, ...) grows to another size between them,
+    /// and its overflow costs more than never presizing (#1381).
+    /// </summary>
+    private static ReadOnlySpan<int> UnsizedGrowthSizes => [3, 7, 17, 37, 89, 197, 431, 919];
+
     private readonly WebApplicationBuilder _builder;
     private readonly List<Action<IServiceProvider, HttpConnectionListenerOptions>> _configurations = new();
 
@@ -23,7 +47,25 @@ public sealed class WebApplicationServerBuilder
     // server's factory below; DI/Config integration for the Web server stays builder-time only.
     private int? _maxConcurrentConnections;
 
+    // The Limits:MaxConcurrentConnections a configuration binding read. It is set while the default
+    // server's factory runs the listener configurations, just before the factory reads it, and an
+    // explicit LimitConcurrentConnections call takes precedence over it.
+    private int? _configuredMaxConcurrentConnections;
+
     internal void OwnEndpointCertificate(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate) => _builder.OwnEndpointCertificate(certificate);
+
+    /// <summary>
+    /// Gets the application's content root, against which a relative configured certificate path
+    /// resolves.
+    /// </summary>
+    internal string? ContentRootPath => _builder.Environment.ContentRootPath?.ToString();
+
+    /// <summary>
+    /// Records the connection cap a configuration binding read. An explicit
+    /// <see cref="LimitConcurrentConnections(int)"/> call takes precedence.
+    /// </summary>
+    /// <param name="maxConcurrentConnections">The configured cap; the binder has already checked it is positive.</param>
+    internal void UseConfiguredConnectionLimit(int maxConcurrentConnections) => _configuredMaxConcurrentConnections = maxConcurrentConnections;
 
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
@@ -40,23 +82,33 @@ public sealed class WebApplicationServerBuilder
                 return new InactiveWebApplicationServer();
             }
 
+            // The pipeline is resolved first: building it counts the application features it stamps
+            // onto every exchange, which the listener needs to size each exchange's features.
+            IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
+            int featureCount = HostFeatureCount + _builder.StampedFeatureCount;
+
             IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
                 ApplyDefaultInterceptors(options);
+                options.ExchangeFeatureCapacity = featureCount;
 
                 foreach (var action in _configurations)
                 {
                     action.Invoke(serviceProvider, options);
                 }
-            });
 
-            IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
+                // Rounded last, so the slots a configuration added for its middleware's features are
+                // rounded with the host's count.
+                options.ExchangeFeatureCapacity = RoundExchangeFeatureCapacity(options.ExchangeFeatureCapacity);
+            });
 
             return new WebApplicationServer(new WebApplicationServerOptions
             {
                 Pipeline = pipeline,
                 Listener = listener,
-                MaxConcurrentConnections = _maxConcurrentConnections
+                MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections,
+                // The application's logging (builder.Logging), created once with the server.
+                Logger = serviceProvider.GetRequiredService<ILoggerFactory>().Create(WebApplicationServerLog.Category),
             });
         });
     }
@@ -68,7 +120,9 @@ public sealed class WebApplicationServerBuilder
     /// By default the server is unlimited. When a cap is set, the accept loop reserves a slot
     /// before accepting each connection, so once the cap is reached additional connections are left
     /// in the listener backlog — accepted but not opened or served — until an active connection
-    /// completes and frees a slot.
+    /// completes and frees a slot. The cap can also come from configuration
+    /// (<c>Http:Limits:MaxConcurrentConnections</c>, bound by <c>UseConfiguration</c> and by an entry
+    /// point's default endpoints); a cap set here takes precedence over a configured one.
     /// </remarks>
     /// <param name="maxConcurrentConnections">The maximum number of concurrently served connections. Must be greater than zero.</param>
     /// <returns>The same builder instance for chaining.</returns>
@@ -135,6 +189,16 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// Configures the default web server's HTTP connection listener.
     /// </summary>
+    /// <remarks>
+    /// The server's default interceptors and its
+    /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> are set before
+    /// <paramref name="configure"/> runs. The capacity counts the features the server installs on every
+    /// exchange and the application features the pipeline stamps onto it. A middleware that installs
+    /// its own feature on every exchange, such as routing on a matched request or response compression,
+    /// is not counted; add one slot for each (<c>options.ExchangeFeatureCapacity += 1</c>). After every
+    /// configuration has run, the server rounds the capacity up to a size from which an exchange that
+    /// carries more features still allocates no more than an unsized collection would.
+    /// </remarks>
     /// <param name="configure">The listener configuration callback.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
@@ -148,6 +212,11 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// Configures the default web server's HTTP connection listener using application services.
     /// </summary>
+    /// <remarks>
+    /// Runs in registration order after the server's defaults, as described for
+    /// <see cref="UseServer(Action{HttpConnectionListenerOptions})"/>, including the rounding of
+    /// <see cref="HttpConnectionListenerOptions.ExchangeFeatureCapacity"/> after the last configuration.
+    /// </remarks>
     /// <param name="configure">The callback that receives the service provider and listener options.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
@@ -161,17 +230,89 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// Installs the web host's default request-parse interceptors. Runs before any user
-    /// configuration so the defaults occupy the front of the interceptor order: the
-    /// max-request-body-size interceptor is registered first, guaranteeing every request
-    /// carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
-    /// interceptors' <c>AfterRequestHead</c> hooks can observe it (all three protocol versions
-    /// run the request-parse seam). User configurations may still inspect or clear
-    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out.
+    /// Gets whether the default server has at least one listener configuration.
+    /// </summary>
+    internal bool HasListenerConfiguration => _configurations.Count > 0;
+
+    /// <summary>
+    /// Configures the default server from the <c>Http</c> configuration section, binding
+    /// <paramref name="developmentEndPoint"/> when the section declares no endpoint. The
+    /// configuration is read when the server is created at host start, so sources added after
+    /// this call still apply.
+    /// </summary>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="developmentEndPoint">The endpoint bound when no endpoint is configured.</param>
+    internal void UseDefaultEndpoints(IConfiguration configuration, IPEndPoint developmentEndPoint)
+    {
+        UseServer((_, options) => HttpServerConfiguration.BindOrDefault(
+            configuration,
+            HttpServerConfiguration.DefaultSectionKey,
+            options,
+            developmentEndPoint,
+            OwnEndpointCertificate,
+            ContentRootPath,
+            UseConfiguredConnectionLimit));
+    }
+
+    /// <summary>
+    /// Installs the web host's default interceptors. Runs before any user configuration so the
+    /// defaults occupy the front of the interceptor order: the max-request-body-size interceptor
+    /// is registered first, guaranteeing every request carries the typed
+    /// <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered interceptors'
+    /// <c>AfterRequestHead</c> hooks can observe it (all three protocol versions run the
+    /// request-parse seam). The HTTP/1.1 protocol-upgrade interceptor follows, so
+    /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1
+    /// listener. The extended CONNECT interceptor follows, so <c>context.ExtendedConnect</c>, and
+    /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. The
+    /// client-fault interceptor comes last: it publishes the transport's client-fault report as
+    /// <see cref="IWebClientFaultFeature"/> on an HTTP/1.1 request that declares a body, so the HTTP
+    /// logging middleware, the exception boundary and request decompression classify a malformed or
+    /// over-limit body as the client's fault rather than the application's (#1340). A request that no
+    /// application accepts is served exactly as before, and an ordinary exchange keeps the transport's
+    /// fast path under all four; an HTTP/1.1 request with a body takes the response phase, for its
+    /// exchange control. User configurations may still inspect or clear
+    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
+    /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended
+    /// CONNECT but no feature then surfaces it, and a malformed body is then classified as an
+    /// application fault again.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+        options.Interceptors.Add(new WebClientFaultInterceptor());
+    }
+
+    /// <summary>
+    /// Rounds the number of features an exchange is expected to carry up to the smallest of
+    /// <see cref="UnsizedGrowthSizes"/> that holds it. The count leaves out the features middleware
+    /// install as an exchange passes through, such as routing's route match on every matched request,
+    /// so an exchange can carry more than it. Sized on that chain, the overflow grows the collection as
+    /// an unsized one grows and never costs more than leaving it unsized. The price is unused slots when
+    /// the count falls between two sizes (#1381).
+    /// </summary>
+    /// <param name="featureCount">The features an ordinary exchange is expected to carry.</param>
+    /// <returns>
+    /// The capacity to size each exchange's feature collection for. <c>0</c>, which leaves the
+    /// collection unsized, stays <c>0</c>, and a count above the largest size is returned unchanged.
+    /// </returns>
+    internal static int RoundExchangeFeatureCapacity(int featureCount)
+    {
+        if (featureCount == 0)
+        {
+            return 0;
+        }
+
+        foreach (int size in UnsizedGrowthSizes)
+        {
+            if (featureCount <= size)
+            {
+                return size;
+            }
+        }
+
+        return featureCount;
     }
 }

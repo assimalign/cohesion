@@ -10,12 +10,22 @@ metadata the attributes map to and a mapper that applies the mapping rules with 
   `[OpenApiSecurityScheme]`, `[OpenApiSecurityRequirement]`.
 - Metadata: flat `OpenApi*Metadata` records the source generator emits and the generation pipeline
   consumes.
+- Provider contract: `IOpenApiMetadataProvider` and `[assembly: OpenApiMetadataProvider]`, through which
+  an assembly advertises its generated metadata so a referencing compilation composes it at compile
+  time.
 - `OpenApiAttributeMapper`: maps attribute instances to metadata, reporting invalid combinations.
 
 ## Dependencies
 
 - `Assimalign.Cohesion.OpenApi` (for `OperationType`, `ParameterLocation`, `SchemaType`,
   `SecuritySchemeType`). No serialization or validation dependency.
+- Carries the `Assimalign.Cohesion.OpenApi.SourceGeneration` analyzer under `analyzers/dotnet/cs/`.
+  It runs at build time and is not a package dependency: a project that references this package,
+  directly or through `OpenApi.Generation` or `OpenApi.Integration`, gets an internal
+  `OpenApiMetadataRegistry` that combines its own annotated code with every annotated assembly it
+  references. A project inside this repository references the package by project, which carries no
+  analyzer, so it adds
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />` itself.
 
 ## Usage
 

@@ -30,6 +30,13 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
     public bool IsDisposed { get; private set; }
 
     /// <summary>
+    /// The reason passed to the most recent <see cref="Abort"/>, or <see langword="null"/> when the
+    /// connection was never aborted. The HTTP/3 engine aborts with an exception carrying the
+    /// connection error code, so tests read the intended RFC 9114 §8 code from here.
+    /// </summary>
+    public Exception? AbortReason { get; private set; }
+
+    /// <summary>
     /// The outbound streams the holder opened via <see cref="OpenStreamAsync"/>,
     /// in the order they were opened. The HTTP/3 engine opens its control stream
     /// first, so <see cref="ControlStream"/> is the first entry.
@@ -60,6 +67,7 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public override void Abort(Exception? reason = null)
     {
+        AbortReason = reason;
         _state = ConnectionState.Aborted;
         _closedSource.Cancel();
     }

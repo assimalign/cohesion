@@ -161,6 +161,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Cookie</c> HTTP header name.</summary>
     public static HttpHeaderKey Cookie {get;}= new( "Cookie");
 
+    /// <summary>Gets the <c>Cross-Origin-Embedder-Policy</c> HTTP header name (HTML Standard, cross-origin embedder policies).</summary>
+    public static HttpHeaderKey CrossOriginEmbedderPolicy {get;}= new( "Cross-Origin-Embedder-Policy");
+
+    /// <summary>Gets the <c>Cross-Origin-Opener-Policy</c> HTTP header name (HTML Standard, cross-origin opener policies).</summary>
+    public static HttpHeaderKey CrossOriginOpenerPolicy {get;}= new( "Cross-Origin-Opener-Policy");
+
+    /// <summary>Gets the <c>Cross-Origin-Resource-Policy</c> HTTP header name (Fetch Standard).</summary>
+    public static HttpHeaderKey CrossOriginResourcePolicy {get;}= new( "Cross-Origin-Resource-Policy");
+
     /// <summary>Gets the <c>Date</c> HTTP header name.</summary>
     public static HttpHeaderKey Date {get;}= new( "Date");
 
@@ -248,6 +257,13 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>:path</c> HTTP header name.</summary>
     public static HttpHeaderKey Path {get;}= new( ":path");
 
+    /// <summary>Gets the <c>Permissions-Policy</c> HTTP header name (W3C Permissions Policy).</summary>
+    /// <remarks>
+    /// Its value is an RFC 9651 Structured Field Dictionary mapping each policy-controlled feature to its
+    /// allowlist, for example <c>camera=(), geolocation=(self)</c>.
+    /// </remarks>
+    public static HttpHeaderKey PermissionsPolicy {get;}= new( "Permissions-Policy");
+
     /// <summary>Gets the <c>Pragma</c> HTTP header name.</summary>
     public static HttpHeaderKey Pragma {get;}= new( "Pragma");
 
@@ -271,6 +287,12 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
 
     /// <summary>Gets the <c>Referer</c> HTTP header name.</summary>
     public static HttpHeaderKey Referer {get;}= new( "Referer");
+
+    /// <summary>Gets the <c>Referrer-Policy</c> HTTP header name (W3C Referrer Policy).</summary>
+    /// <remarks>
+    /// The response field is spelled correctly, unlike the <see cref="Referer"/> request field it governs.
+    /// </remarks>
+    public static HttpHeaderKey ReferrerPolicy {get;}= new( "Referrer-Policy");
 
     /// <summary>Gets the <c>Repr-Digest</c> HTTP header name (RFC 9530 &#167; 3).</summary>
     /// <remarks>

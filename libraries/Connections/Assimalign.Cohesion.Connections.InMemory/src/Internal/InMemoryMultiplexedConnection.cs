@@ -106,12 +106,14 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
             }
         }
 
-        // The local end takes the requested direction; the peer end takes the mirror direction.
+        // The local end takes the requested direction; the peer end takes the mirror direction. The
+        // ends signal each other's ConnectionClosed when one abandons the stream, as QUIC streams do.
         (InMemoryConnection local, InMemoryConnection remote) = InMemoryConnection.CreatePair(
             _streamCapabilities,
             endPointA: _localEndPoint,
             endPointB: _remoteEndPoint,
-            directionA: direction);
+            directionA: direction,
+            isStream: true);
 
         if (!_peer._inboundStreams.Writer.TryWrite(remote))
         {

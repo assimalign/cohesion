@@ -68,6 +68,32 @@ set further, and `none` is always rejected.
 Signature is checked before the claims are trusted; issuer/audience after
 the token is proven authentic and in-window.
 
+## Fail-closed defaults (#1046)
+
+Issuer and audience validation are **on by default** (`ValidateIssuer` and
+`ValidateAudience` default to `true`). A scheme with validation on and an
+empty `ValidIssuers` or `ValidAudiences` is a configuration error:
+
+- `AddJwtBearer` validates the options when the scheme is registered, so the
+  application fails at startup where the misconfiguration is written.
+- `JwtBearerAuthentication.CreateHandler` runs the same check, for composition
+  roots that build handlers themselves.
+- The handler treats an empty list with validation on as matching nothing,
+  which covers options mutated after registration.
+
+Until 2026-09 an empty list meant "skip this check", so an application that
+configured only signing keys accepted a token minted for any audience by any
+issuer holding a trusted key (RFC 8725 §3.9). The opt-outs are explicit
+properties rather than empty collections so the choice is visible in the
+options. Turning issuer validation off is reasonable only when a key is shared
+with exactly one issuer; turning audience validation off is rarely right for a
+service that accepts tokens from a shared authority.
+
+The algorithm set needs no separate default: with `AllowedAlgorithms` empty,
+the accepted algorithms are exactly those the configured keys' verifiers
+accept, and `none` is always rejected (see the algorithm-confusion paragraph
+above).
+
 ## JWT &rarr; ClaimsPrincipal mapping
 
 `JwtClaimsPrincipalMapper` is the single place IdentityModel's claim model

@@ -1,59 +1,121 @@
 using System;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Internal;
 using Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
 /// API-oriented endpoint mapping helpers for web application pipelines.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Two families of overloads live here:
+/// </para>
 /// <list type="bullet">
 /// <item>
 /// The <see cref="WebApplicationMiddleware"/> overloads register a terminal endpoint verbatim — no
 /// parameter binding takes place.
 /// </item>
 /// <item>
-/// The <see cref="Delegate"/> overloads accept a typed handler lambda (for example
-/// <c>(int id, IHttpContext context) =&gt; ...</c>). They are placeholders: the Cohesion Web source
-/// generator (<c>Assimalign.Cohesion.SourceGeneration.Web</c>) intercepts the call site and
-/// substitutes an AOT-safe binding thunk. Their bodies throw, so reaching one at run time signals
-/// the generator was not wired in.
+/// The <see cref="Delegate"/> overloads accept a typed handler — a lambda such as
+/// <c>(long id) =&gt; orders.Get(id)</c>, or a method group. They are placeholders: the Cohesion Web
+/// source generator (<c>Assimalign.Cohesion.SourceGeneration.Web</c>) intercepts the call site and
+/// substitutes an AOT-safe thunk that binds the handler's parameters, invokes it, and writes the value
+/// it returns, if any: a <see cref="string"/> as <c>text/plain</c>, <see langword="null"/> as
+/// <c>204 No Content</c>, and any other value through the content-serialization registry with
+/// <c>Accept</c> negotiation. The generator also describes the endpoint on its route, with an
+/// <see cref="EndpointParameterMetadata"/> per request-bound parameter and its
+/// <see cref="EndpointResponseMetadata"/> responses, for documentation adapters. A handler the generator
+/// cannot bind is a <c>COHWEB</c> compile-time error; the placeholder bodies throw only when the
+/// generator was not wired in at all.
 /// </item>
 /// </list>
+/// <para>
+/// Every <c>Map*</c> returns the mapped route's <see cref="IRouterRouteBuilder"/>, so per-endpoint
+/// policies attach where the endpoint is mapped (<c>WithMetadata</c>, <c>WithName</c>, and feature verbs
+/// such as <c>RequireRateLimiting</c>). Route groups carry the same verbs
+/// (<see cref="RouterGroupBuilderEndpointExtensions"/>).
+/// </para>
 /// </remarks>
 public static class WebApplicationPipelineBuilderExtensions
 {
     extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
     {
         /// <summary>
+        /// Creates a route group on the application's router: every endpoint mapped through the group
+        /// composes <paramref name="prefix"/> and the group's shared metadata and parameter policies.
+        /// </summary>
+        /// <param name="prefix">
+        /// The route-template prefix applied to the group's endpoints. May contain parameters (for
+        /// example <c>{tenant}/api</c>) and may be empty to share only metadata and policies.
+        /// </param>
+        /// <returns>The route group builder.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="prefix"/> is <see langword="null"/>.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>).</exception>
+        /// <exception cref="Routing.Exceptions.RoutePatternException"><paramref name="prefix"/> is not a valid route template.</exception>
+        public IRouterGroupBuilder MapGroup(string prefix)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentNullException.ThrowIfNull(prefix);
+
+            return EndpointMapping.GetRouterBuilder(builder.Context).MapGroup(prefix);
+        }
+
+        /// <summary>
         /// Maps a route to the supplied terminal middleware.
         /// </summary>
         /// <param name="method">The HTTP method the route matches.</param>
         /// <param name="pattern">The route pattern to parse.</param>
         /// <param name="middleware">The middleware to execute when the route matches.</param>
-        /// <returns>The current pipeline builder.</returns>
-        public IWebApplicationPipelineBuilder Map(HttpMethod method, string pattern, WebApplicationMiddleware middleware)
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
+        public IRouterRouteBuilder Map(HttpMethod method, string pattern, WebApplicationMiddleware middleware)
         {
             ArgumentException.ThrowIfNullOrEmpty(pattern);
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(middleware);
-            IWebApplicationContext context = builder.Context;
 
-            IRouterFeature? feature = context.Features.OfType<IRouterFeature>().FirstOrDefault();
+            return EndpointMapping.GetRouterBuilder(builder.Context).Map(method, pattern, new RouterRouteHandler(middleware));
+        }
 
-            if (feature is null || feature.Builder is null)
-            {
-                throw new InvalidOperationException("No router builder was registered. Call AddRouting() on the application builder before mapping endpoints.");
-            }
+        /// <summary>
+        /// Maps the application's fallback route to the supplied terminal middleware: it answers
+        /// <c>GET</c> (and <c>HEAD</c>) requests whose path no other route matches and whose last segment
+        /// names no file (<c>{**path:nonfile}</c>). See <c>IRouterBuilder.MapFallback</c> for the semantics.
+        /// </summary>
+        /// <param name="middleware">The middleware to execute for requests the fallback answers.</param>
+        /// <returns>The fallback route's builder, for attaching endpoint metadata.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
+        public IRouterRouteBuilder MapFallback(WebApplicationMiddleware middleware)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentNullException.ThrowIfNull(middleware);
 
-            feature.Builder.Map(new Route(method, pattern, new RouterRouteHandler(middleware)));
+            return EndpointMapping.GetRouterBuilder(builder.Context).MapFallback(new RouterRouteHandler(middleware));
+        }
 
-            return builder;
+        /// <summary>
+        /// Maps a fallback route with its own template (for example <c>admin/{**path:nonfile}</c>) to the
+        /// supplied terminal middleware.
+        /// </summary>
+        /// <param name="pattern">The fallback route's template.</param>
+        /// <param name="middleware">The middleware to execute for requests the fallback answers.</param>
+        /// <returns>The fallback route's builder, for attaching endpoint metadata.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
+        public IRouterRouteBuilder MapFallback(string pattern, WebApplicationMiddleware middleware)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentException.ThrowIfNullOrEmpty(pattern);
+            ArgumentNullException.ThrowIfNull(middleware);
+
+            return EndpointMapping.GetRouterBuilder(builder.Context).MapFallback(pattern, new RouterRouteHandler(middleware));
         }
 
         /// <summary>
@@ -61,8 +123,11 @@ public static class WebApplicationPipelineBuilderExtensions
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
         /// <param name="middleware">The middleware to execute when the route matches.</param>
-        /// <returns>The current pipeline builder.</returns>
-        public IWebApplicationPipelineBuilder MapGet(
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>builder.Services.AddRouting</c>), or the route table has already been built.</exception>
+        public IRouterRouteBuilder MapGet(
             string pattern,
             WebApplicationMiddleware middleware)
         {
@@ -79,78 +144,65 @@ public static class WebApplicationPipelineBuilderExtensions
         /// </summary>
         /// <param name="method">The HTTP method the route matches.</param>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <returns>The current pipeline builder.</returns>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder Map(HttpMethod method, string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
+        public IRouterRouteBuilder Map(HttpMethod method, string pattern, Delegate handler)
+            => throw EndpointMapping.RequiresSourceGenerator();
 
         /// <summary>
         /// Maps a GET route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <returns>The current pipeline builder.</returns>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapGet(string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
+        public IRouterRouteBuilder MapGet(string pattern, Delegate handler)
+            => throw EndpointMapping.RequiresSourceGenerator();
 
         /// <summary>
         /// Maps a POST route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <returns>The current pipeline builder.</returns>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapPost(string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
+        public IRouterRouteBuilder MapPost(string pattern, Delegate handler)
+            => throw EndpointMapping.RequiresSourceGenerator();
 
         /// <summary>
         /// Maps a PUT route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <returns>The current pipeline builder.</returns>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapPut(string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
+        public IRouterRouteBuilder MapPut(string pattern, Delegate handler)
+            => throw EndpointMapping.RequiresSourceGenerator();
 
         /// <summary>
         /// Maps a PATCH route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <returns>The current pipeline builder.</returns>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapPatch(string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
+        public IRouterRouteBuilder MapPatch(string pattern, Delegate handler)
+            => throw EndpointMapping.RequiresSourceGenerator();
 
         /// <summary>
         /// Maps a DELETE route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <returns>The current pipeline builder.</returns>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
+        /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapDelete(string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
+        public IRouterRouteBuilder MapDelete(string pattern, Delegate handler)
+            => throw EndpointMapping.RequiresSourceGenerator();
     }
-
-    /// <summary>
-    /// Produces the exception thrown by the typed <see cref="Delegate"/> overloads when the source
-    /// generator did not intercept the call site.
-    /// </summary>
-    /// <returns>The exception to throw.</returns>
-    private static NotSupportedException RequiresSourceGenerator()
-        => new(
-            "This typed endpoint overload is a placeholder that the Cohesion Web source generator " +
-            "(Assimalign.Cohesion.SourceGeneration.Web) rewrites at the call site. Reaching it at run time means the " +
-            "generator did not intercept the call: reference the generator with " +
-            "<CohesionAnalyzerReference Include=\"Assimalign.Cohesion.SourceGeneration.Web\" /> and allow-list its " +
-            "generated namespace with <InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>.");
 }

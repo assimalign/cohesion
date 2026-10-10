@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using System.Threading;
@@ -10,6 +11,7 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.Web;
@@ -21,7 +23,7 @@ namespace Assimalign.Cohesion.Web.Authentication.Tests;
 
 /// <summary>
 /// Covers the builder-time composition chain now homed with the scheme model:
-/// <c>AddAuthentication</c> on <see cref="IWebApplicationBuilder"/>, the handler packages'
+/// <c>builder.Services.AddAuthentication</c> over <see cref="AuthenticationBuilder"/>, the handler packages'
 /// grafted <c>AddCookie</c>/<c>AddJwtBearer</c> verbs, and the <c>UseAuthentication</c>
 /// middleware. Moved from the Web.Hosting tests when the verbs left the hosting module
 /// (Web-area dependency rule: hosting neither references nor is referenced by feature libraries).
@@ -52,29 +54,117 @@ public sealed class AuthenticationCompositionTests : IDisposable
     public void AddAuthentication_RegistersCookieAndBearerSchemes()
     {
         // Arrange
-        StubWebApplicationBuilder builder = new();
+        ServiceProviderBuilder services = new();
+        AuthenticationBuilder? auth = null;
 
         // Act
-        AuthenticationBuilder auth = builder
-            .AddAuthentication(options => options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme, _dataProtection)
-            .AddCookie()
-            .AddJwtBearer(options => options.SigningKeys.Add(
-                JwtSignatureVerifier.CreateHmac(Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!"))));
+        IServiceProviderBuilder returned = services.AddAuthentication(authentication =>
+        {
+            auth = authentication;
+            authentication.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            authentication
+                .UseDataProtection(_dataProtection)
+                .AddCookie()
+                .AddJwtBearer(options =>
+                {
+                    options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!")));
+                    options.ValidIssuers.Add("https://issuer.example");
+                    options.ValidAudiences.Add("api://default");
+                });
+        });
 
-        // Assert
+        // Assert — the service is one IHttpFeature singleton (owner decision 35) over the composed options.
+        returned.ShouldBeSameAs(services);
+        ServiceDescriptor descriptor = services.Container.ShouldHaveSingleItem();
+        descriptor.ServiceType.ShouldBe(typeof(IHttpFeature));
+        descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+        IAuthenticationService service = Resolve(services).ShouldHaveSingleItem().ShouldBeAssignableTo<IAuthenticationService>()!;
+        service.DefaultAuthenticateScheme.ShouldBe(CookieAuthenticationDefaults.AuthenticationScheme);
+        auth.ShouldNotBeNull();
         auth.Options.GetScheme(CookieAuthenticationDefaults.AuthenticationScheme).ShouldNotBeNull();
         auth.Options.GetScheme(JwtBearerDefaults.AuthenticationScheme).ShouldNotBeNull();
         auth.Options.ResolveDefaultChallengeScheme().ShouldBe(CookieAuthenticationDefaults.AuthenticationScheme);
-        builder.Features.ShouldContain(feature => feature is IAuthenticationService);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddAuthentication rejects a null configure callback")]
+    public void AddAuthentication_WithNullConfigure_ShouldThrow()
+    {
+        // Arrange
+        ServiceProviderBuilder services = new();
+
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => services.AddAuthentication(null!));
+        services.Container.Count.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseDataProtection after a scheme read the provider fails")]
+    public void UseDataProtection_AfterSchemeReadTheProvider_ShouldThrow()
+    {
+        // Arrange
+        IDataProtectionProvider other = DataProtectionProvider.Create(
+            KeyRepository.CreateFileSystem(Path.Combine(_keysDirectory, "other")));
+        AuthenticationBuilder auth = new AuthenticationBuilder().UseDataProtection(_dataProtection).AddCookie();
+
+        // Act / Assert — the cookie scheme already derived its protector from the first provider.
+        Should.Throw<InvalidOperationException>(() => auth.UseDataProtection(other));
+        auth.UseDataProtection(_dataProtection).ShouldBeSameAs(auth);
+        auth.DataProtectionProvider.ShouldBeSameAs(_dataProtection);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseDataProtection after a caller read the provider fails and says a caller may have read it")]
+    public void UseDataProtection_AfterCallerReadTheProvider_ShouldThrowNamingEitherReader()
+    {
+        // Arrange
+        IDataProtectionProvider other = DataProtectionProvider.Create(
+            KeyRepository.CreateFileSystem(Path.Combine(_keysDirectory, "other")));
+        AuthenticationBuilder auth = new AuthenticationBuilder().UseDataProtection(_dataProtection);
+        _ = auth.DataProtectionProvider;
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => auth.UseDataProtection(other));
+
+        // Assert — no scheme is registered; the caller's read fixed the provider.
+        exception.Message.ShouldContain("by a registered scheme or by a caller", Case.Sensitive);
+        auth.Options.Schemes.ShouldBeEmpty();
+        auth.DataProtectionProvider.ShouldBeSameAs(_dataProtection);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseDataProtection supplies the provider scheme verbs read")]
+    public void UseDataProtection_BeforeSchemes_ShouldBeTheProviderSchemesRead()
+    {
+        // Arrange
+        AuthenticationBuilder auth = new();
+
+        // Act
+        auth.UseDataProtection(_dataProtection).AddCookie();
+
+        // Assert
+        auth.DataProtectionProvider.ShouldBeSameAs(_dataProtection);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddJwtBearer fails at registration when no issuer or audience is configured")]
+    public void AddJwtBearer_WithoutIssuerOrAudience_ThrowsAtRegistration()
+    {
+        // Arrange
+        AuthenticationBuilder auth = new AuthenticationBuilder().UseDataProtection(_dataProtection);
+        byte[] key = Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!");
+
+        // Act + Assert — the misconfiguration surfaces where it is written, not on a request.
+        Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer(options => options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(key))));
+        Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer("audience-only", options =>
+        {
+            options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(key));
+            options.ValidIssuers.Add("https://issuer.example");
+        }));
+        auth.Options.GetScheme(JwtBearerDefaults.AuthenticationScheme).ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddCookie wires a working ticket protector from the provider")]
     public async Task AddCookie_WiresTicketProtector()
     {
         // Arrange
-        StubWebApplicationBuilder builder = new();
-        AuthenticationBuilder auth = builder
-            .AddAuthentication(options => options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme, _dataProtection)
+        AuthenticationBuilder auth = new AuthenticationBuilder()
+            .UseDataProtection(_dataProtection)
             .AddCookie();
 
         AuthenticationScheme scheme = auth.Options.GetScheme(CookieAuthenticationDefaults.AuthenticationScheme)!;
@@ -153,31 +243,11 @@ public sealed class AuthenticationCompositionTests : IDisposable
             => Task.CompletedTask;
     }
 
-    /// <summary>
-    /// A minimal <see cref="IWebApplicationBuilder"/> that records registered features — the only
-    /// builder capability <c>AddAuthentication</c> composes against.
-    /// </summary>
-    private sealed class StubWebApplicationBuilder : IWebApplicationBuilder
+    // Resolves the application features the way the host does when it composes the pipeline.
+    private static IHttpFeature[] Resolve(IServiceProviderBuilder services)
     {
-        public List<IHttpFeature> Features { get; } = new();
-
-        public IWebApplicationContext Context => throw new NotSupportedException();
-
-        public IWebApplicationBuilder AddFeature(IHttpFeature feature)
-        {
-            Features.Add(feature);
-            return this;
-        }
-
-        public IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure) => this;
-
-        public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
-
-        public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => this;
-
-        public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
-
-        public IWebApplication Build() => throw new NotSupportedException();
+        IServiceProvider provider = services.Build();
+        return provider.GetRequiredService<IEnumerable<IHttpFeature>>().ToArray();
     }
 
     /// <summary>

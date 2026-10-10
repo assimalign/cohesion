@@ -25,6 +25,16 @@ internal sealed class LayeredConnectionFactory : IConnectionFactory
     {
         IConnection connection = await _inner.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
 
-        return await _layer.UpgradeAsync(connection, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await _layer.UpgradeAsync(connection, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A connection whose upgrade failed still belongs to the caller (IConnectionLayer.UpgradeAsync),
+            // and nothing else holds it: a TLS layer that fails disposes only its own stream (#1309).
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 }

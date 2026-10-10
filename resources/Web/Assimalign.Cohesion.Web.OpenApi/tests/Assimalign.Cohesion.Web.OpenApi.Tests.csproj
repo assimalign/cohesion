@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.OpenApi.Tests</RootNamespace>
+		<IsPackable>false</IsPackable>
+		<!-- Allow the Web.Api endpoint-binding generator's interceptors (typed Map* call sites). -->
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
+		<!-- Drive the real runtime through the in-memory test factory; test projects are exempt from
+		     the hosting-isolation rule (COHRES001). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- The generated thunk of a [FromForm] endpoint reads the form through Http.Forms. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<!-- Read the served document back and check it against the official schemas. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Integration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Validation" />
+		<!-- Activate the endpoint-binding generator so typed endpoints carry their descriptions. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
+	</ItemGroup>
+</Project>

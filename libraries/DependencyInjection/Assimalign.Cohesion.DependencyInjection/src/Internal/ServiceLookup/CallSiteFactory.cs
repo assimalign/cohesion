@@ -245,6 +245,15 @@ internal sealed class CallSiteFactory : IServiceLookup
             }
 
             Type itemType = serviceType.GenericTypeArguments[0];
+            if (ServiceProvider.VerifyAotCompatibility && itemType.IsValueType)
+            {
+                // Without dynamic code there is no guarantee the code for ValueType[] (and the
+                // IEnumerable<ValueType> over it) was generated, so fail here, at call-site
+                // construction, rather than at an arbitrary resolution later.
+                throw new InvalidOperationException(
+                    $"Unable to create an enumerable of '{itemType}' because it is a value type. Native code for enumerables of value-type services might not be available with NativeAOT.");
+            }
+
             CallSiteResultCacheLocation cacheLocation = CallSiteResultCacheLocation.Root;
             CallSiteService[] callSites;
 
@@ -391,6 +400,10 @@ internal sealed class CallSiteFactory : IServiceLookup
         Justification = "MakeGenericType here is used to create a closed generic implementation type given the closed service type. " +
         "Trimming annotations on the generic types are verified when 'Assimalign.Cohesion.DependencyInjection.VerifyOpenGenericServiceTrimmability' is set, which is set by default when PublishTrimmed=true. " +
         "That check informs developers when these generic types don't have compatible trimming annotations.")]
+    [UnconditionalSuppressMessage("AotAnalysis", "IL3050:RequiresDynamicCode",
+        Justification = "When ServiceProvider.VerifyAotCompatibility is true, which it is whenever dynamic code is unsupported (NativeAOT), " +
+        "VerifyOpenGenericAotCompatibility throws before MakeGenericType if any generic argument is a value type, so only " +
+        "reference-type instantiations, which share canonical code, are ever created.")]
     private CallSiteService CreateOpenGeneric(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot, bool throwOnConstraintViolation)
     {
         CallSiteServiceCacheKey callSiteKey = new CallSiteServiceCacheKey(serviceType, slot);
@@ -404,7 +417,13 @@ internal sealed class CallSiteFactory : IServiceLookup
         Type closedType;
         try
         {
-            closedType = descriptor.ImplementationType.MakeGenericType(serviceType.GenericTypeArguments);
+            Type[] genericTypeArguments = serviceType.GenericTypeArguments;
+            if (ServiceProvider.VerifyAotCompatibility)
+            {
+                VerifyOpenGenericAotCompatibility(serviceType, genericTypeArguments);
+            }
+
+            closedType = descriptor.ImplementationType.MakeGenericType(genericTypeArguments);
         }
         catch (ArgumentException)
         {
@@ -417,6 +436,18 @@ internal sealed class CallSiteFactory : IServiceLookup
         }
 
         return _callSiteCache[callSiteKey] = CreateConstructorCallSite(lifetime, serviceType, closedType, callSiteChain);
+    }
+
+    private static void VerifyOpenGenericAotCompatibility(Type serviceType, Type[] genericTypeArguments)
+    {
+        foreach (Type typeArgument in genericTypeArguments)
+        {
+            if (typeArgument.IsValueType)
+            {
+                throw new InvalidOperationException(
+                    $"Unable to create a generic service for type '{serviceType}' because '{typeArgument}' is a value type. Native code to support creating generic services over value types might not be available with NativeAOT.");
+            }
+        }
     }
 
     private CallSiteService CreateConstructorCallSite(

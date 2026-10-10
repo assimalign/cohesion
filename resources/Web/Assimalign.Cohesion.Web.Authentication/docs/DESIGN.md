@@ -47,7 +47,7 @@ different:
 - **Middleware composes it.** Authentication-result metadata, ticket
   properties, and downstream re-authentication all want to mutate the
   same object reference, not look it up by name and risk replacing it.
-- **AOT-safe lookup.** `Features.Get<IHttpAuthenticationFeature>()` is
+- **AOT-safe lookup.** `Features.Get<IAuthenticationFeature>()` is
   `typeof(T)`-keyed; no reflection, no string-table lookup, no boxing.
 
 `IHttpContext.Features` &mdash; defined in the protocol core but
@@ -65,7 +65,7 @@ later is additive and source-compatible; locking in a wide surface up
 front based on guesses is not.
 
 This deliberately mirrors ASP.NET Core's
-`IHttpAuthenticationFeature` evolution: the original shape was just
+`IAuthenticationFeature` evolution: the original shape was just
 `User`, and per-scheme handlers grew in `IAuthenticationService`
 sibling features rather than bloating the per-request feature.
 
@@ -73,7 +73,7 @@ sibling features rather than bloating the per-request feature.
 
 Every consumer that touches `context.User` would otherwise need a
 defensive null-check. Returning a singleton empty `ClaimsPrincipal`
-(no identity, no claims) when no `IHttpAuthenticationFeature` is
+(no identity, no claims) when no `IAuthenticationFeature` is
 attached matches the ASP.NET Core `HttpContext.User` default so
 existing patterns like `if (context.User.Identity?.IsAuthenticated)`
 work unchanged. The empty principal is a static singleton; it costs
@@ -81,7 +81,7 @@ nothing to return.
 
 The setter, in contrast, throws on `null` &mdash; setting "no user"
 should be done by removing the feature
-(`context.Features.Set<IHttpAuthenticationFeature>(null)`), not by
+(`context.Features.Set<IAuthenticationFeature>(null)`), not by
 installing a feature with a null `User`. That keeps the invariant
 "if a feature exists, its `User` is non-null" cheap to reason about.
 
@@ -180,7 +180,7 @@ a challenge reuses one initialized instance.
 **Result feature alongside the principal feature.**
 `IAuthenticationResultFeature` holds the default-scheme `AuthenticateResult`
 (ticket, properties, failure) so authorization and diagnostics can inspect
-*how* the principal was established, next to `IHttpAuthenticationFeature`
+*how* the principal was established, next to `IAuthenticationFeature`
 which holds only `context.User`. This mirrors ASP.NET Core's
 `IAuthenticateResultFeature`.
 
@@ -196,22 +196,54 @@ needs no check.
 **Builder-time registration lives with the model, not in `*.Hosting`.**
 (Revised 2026-07-10 with the Web-area dependency rule — the original #790
 design placed the verbs in `Web.Hosting`.) The hosting/runtime module
-neither references nor is referenced by the feature libraries, so
-`AddAuthentication` (on the root `IWebApplicationBuilder`), the
-`AuthenticationBuilder` scheme surface, and `UseAuthentication` live in
-*this* package, and each handler package grafts its own scheme verb onto
-`AuthenticationBuilder` via `extension(...)` (`AddCookie` in the Cookie
-package, `AddJwtBearer` in the Bearer package). Composition stays
-dependency-free — the service is attached as a typed feature
-(`builder.AddFeature`), schemes are registered as values, and no service
-container or configuration binding is involved, so moving the verbs out
-of Hosting does not violate the "DI/config composition only in
-`*.Hosting`" philosophy. The ticket-crypto seam travels with the builder:
-`AuthenticationBuilder.DataProtectionProvider` defaults to a
+neither references nor is referenced by the feature libraries, so the
+registration verb, the `AuthenticationBuilder` scheme surface, and
+`UseAuthentication` live in *this* package, and each handler package
+grafts its own scheme verb onto `AuthenticationBuilder` via
+`extension(...)` (`AddCookie` in the Cookie package, `AddJwtBearer` in
+the Bearer package).
+
+**Registration is `builder.Services.AddAuthentication(auth => ...)`**
+(owner decisions 34 and 35, 2026-10-09, #1380). The package declares a
+component integration over `AuthenticationBuilder.Build`
+(`src/Properties/ComponentIntegrations.cs`); the generator projects the
+builder template onto `IServiceProviderBuilder` in the application's
+compilation, so the package takes no dependency-injection reference. The
+template constructs an `AuthenticationBuilder` (public, parameterless),
+runs the callback, calls `Build()` and registers the resulting
+`IAuthenticationService` as an `IHttpFeature` singleton, the only
+lifetime `Web.Hosting` accepts:
+
+```csharp
+builder.Services.AddAuthentication(auth =>
+{
+    auth.Options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    auth.UseDataProtection(dataProtection)
+        .AddCookie()
+        .AddJwtBearer(options => { /* keys, issuers, audiences */ });
+});
+```
+
+Until #1380 the verb was an `extension(IWebApplicationBuilder)` member that
+returned the `AuthenticationBuilder` for chaining, with overloads taking a
+default scheme and a data-protection provider. Both now live on the builder
+the callback receives (`Options.DefaultScheme`, `UseDataProtection`), and
+the scheme graft is unchanged. Composition stays dependency-free —
+schemes are registered as values and no service container or
+configuration binding is involved; a composition surface without a
+container registers `new AuthenticationBuilder()...Build()` through
+`IWebApplicationBuilder.AddFeature`. The ticket-crypto seam travels with
+the builder: `AuthenticationBuilder.DataProtectionProvider` defaults to a
 file-system-backed rotating key ring under `AppContext.BaseDirectory`
-when no provider is supplied to `AddAuthentication` (the host-content-root
-default that Hosting used to supply is gone — pass a provider explicitly
-to control key placement). `AuthenticationService.Create` and the public
+unless `UseDataProtection` supplied one (the host-content-root default
+that Hosting used to supply is gone — pass a provider explicitly to
+control key placement). Reading the provider fixes it: a scheme verb
+derives its protector at registration, so `UseDataProtection` after a
+scheme has read the provider throws instead of leaving that scheme on
+the earlier key ring. The builder cannot tell a scheme's read from any
+other, so a caller that reads `DataProtectionProvider` (to share the key
+ring with antiforgery, say) fixes it too, and the error says either may
+have read it. `AuthenticationService.Create` and the public
 handler factories (`CookieAuthentication.CreateHandler`,
 `JwtBearerAuthentication.CreateHandler`) remain the seams the verbs use
 while the concrete handler and service implementations stay `internal`.
@@ -220,7 +252,7 @@ while the concrete handler and service implementations stay `internal`.
 
 | Package | Role | Dependencies |
 |---------|------|---------------|
-| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (`AddAuthentication`, `AuthenticationBuilder`, `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
+| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (the `builder.Services.AddAuthentication` component integration over `AuthenticationBuilder`, and `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
 | `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
 | `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) + the grafted `AddJwtBearer` verb | This package, `IdentityModel.Token.JsonWebToken` |
 
@@ -236,7 +268,7 @@ the `App.Web` shared framework delivers the family to applications
 `<IsAotCompatible>true</IsAotCompatible>` is inherited from the shared
 build targets. The package contains no reflection, no runtime code
 generation, and no dynamic type loading. The feature lookup uses
-`typeof(IHttpAuthenticationFeature)` as a JIT-time constant key into a
+`typeof(IAuthenticationFeature)` as a JIT-time constant key into a
 `Dictionary<Type, object>`; trim and AOT roots are unaffected.
 
 `ClaimsPrincipal` itself is AOT-safe in .NET 10; no special
@@ -251,13 +283,17 @@ serialization or runtime-policy surface is consumed by this package.
   `IAuthenticationHandler`. This package ships no handler.
 - **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer` ship with their
   handler packages as `extension(AuthenticationBuilder)` members; this
-  package exposes only the scheme-agnostic surface (`AddAuthentication`,
-  `AddScheme`, `UseAuthentication`).
+  package exposes only the scheme-agnostic surface (`AuthenticationBuilder`
+  with `AddScheme`, `UseDataProtection` and `Build`, which the projected
+  `builder.Services.AddAuthentication` verb drives, and
+  `UseAuthentication`).
 - **OAuth2 / OIDC interactive login.** Authorization-code and other
   redirect-based sign-in flows are follow-ups behind the IdentityModel
   and IdentityHub epics, not part of this scheme model.
-- **Authorization.** Policy evaluation, role checks, and requirement
-  handlers live in `Assimalign.Cohesion.Web.Authorization`.
+- **Authorization.** Policy evaluation, role and claim requirements,
+  and per-endpoint scheme selection live in
+  `Assimalign.Cohesion.Web.Authorization`, which answers a failed policy
+  through this package's `ChallengeAsync`/`ForbidAsync`.
 - **Wire-level identity.** TLS client certificates, mutual-TLS
   identity, and HTTP `Authorization` header parsing remain in the
   transport / protocol layers; this package only consumes the result.

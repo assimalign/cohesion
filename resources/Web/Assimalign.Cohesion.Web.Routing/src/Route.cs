@@ -584,7 +584,10 @@ public sealed class Route : IRouterRoute
             return true;
         }
 
-        if (parameter.IsOptional)
+        // An omitted optional or catch-all parameter captures no value (Routing DESIGN, "Parameter
+        // policies"): '/files/{**path}' matches '/files' as the link generator's collapsed form
+        // produces it, and a fallback's '{**path:nonfile}' matches the site root.
+        if (parameter.IsOptional || parameter.IsCatchAll)
         {
             values.Remove(parameter.Name);
             return true;

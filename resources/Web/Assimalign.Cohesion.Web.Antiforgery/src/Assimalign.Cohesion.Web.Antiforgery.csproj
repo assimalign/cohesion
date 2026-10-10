@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Antiforgery</RootNamespace>
+		<Description>Cross-site request forgery (CSRF) protection for the Cohesion Web pipeline over the Assimalign.Cohesion.Http.Antiforgery signed double-submit token engine. AddAntiforgery registers the application's antiforgery service - protected by a purpose-bound Assimalign.Cohesion.Security.DataProtection protector when the application supplies a data-protection provider, otherwise by a per-process random key that is for development only. UseAntiforgery, registered after UseRouting, validates unsafe-method requests to endpoints carrying AntiforgeryMetadata (RequireAntiforgery, DisableAntiforgery, and implicitly every source-generated form-bound endpoint) from the token header or the form field, skips safe methods and CORS preflights, answers a failed validation with 400 application/problem+json, and fails closed at dispatch when an endpoint that requires validation was not processed.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Antiforgery" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
+	</ItemGroup>
+</Project>

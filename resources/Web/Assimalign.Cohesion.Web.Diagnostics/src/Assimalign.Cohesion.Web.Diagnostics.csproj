@@ -1,11 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Diagnostics</RootNamespace>
-		<Description>HTTP request/response logging and W3C access logs for Cohesion web applications. Owns the UseHttpLogging middleware (builder-time field flags, allowlist-based header redaction with Authorization/Cookie/Set-Cookie never logged by default, bounded opt-in body capture, duration and status capture, traceparent correlation) and a W3C extended / NCSA common+combined access-log file writer built as an Assimalign.Cohesion.Logging provider — emission rides the repo's own logging pipeline (providers/enrichers/filters), not a parallel one. AOT-safe span formatting, zero reflection.</Description>
+		<Description>HTTP request/response logging and W3C access logs for Cohesion web applications. Owns the UseHttpLogging middleware (builder-time field flags, allowlist-based header redaction with Authorization/Cookie/Set-Cookie never logged by default, bounded opt-in body capture, duration and status capture, the effective client address/scheme/host resolved by the forwarded-headers trust model, traceparent correlation) and a W3C extended / NCSA common+combined access-log file writer built as an Assimalign.Cohesion.Logging provider — emission rides the repo's own logging pipeline (providers/enrichers/filters), not a parallel one. AOT-safe span formatting, zero reflection.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
+		<!-- IWebClientFaultFeature keeps a client fault off the Error level (#1340), and
+		     IHttpResponseStreamingFeature.HasStarted tells whether the transport's status replaced the
+		     response. Both packages are App.Web members already. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
 </Project>

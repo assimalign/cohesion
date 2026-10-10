@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Quic;
@@ -122,6 +124,124 @@ public class WebHttp3HostingIntegrationTests
         finally
         {
             await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Streams on one QUIC connection should run concurrently (the first completes only after the second)")]
+    public async Task UseHttp3_ConcurrentStreams_ShouldCompleteTheFirstOnlyAfterTheSecond()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — /first parks until /second's handler has finished. Serving the connection's
+        // request streams one at a time (#1049) would never start /second.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        int port = GetAvailableUdpPort();
+        using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.UseServer(options =>
+        {
+            options.UseHttp3(quic =>
+            {
+                quic.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
+                quic.ServerAuthenticationOptions.ServerCertificate = certificate;
+            });
+        });
+
+        WebApplication app = builder.Build();
+
+        TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource secondCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ConcurrentQueue<string?> connections = new();
+        app.Use(async (context, next) =>
+        {
+            string path = context.Request.Path.ToString();
+
+            if (path != "/warmup")
+            {
+                connections.Enqueue(context.ConnectionInfo.RemoteEndPoint?.ToString());
+            }
+
+            if (path == "/first")
+            {
+                firstEntered.TrySetResult();
+                await secondCompleted.Task.WaitAsync(cancellationToken);
+            }
+
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            context.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes(path));
+
+            if (path == "/second")
+            {
+                secondCompleted.TrySetResult();
+            }
+        });
+
+        IWebApplicationServer server = app.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
+        await server.StartAsync(cancellationToken);
+
+        try
+        {
+            using HttpClientHandler handler = new()
+            {
+                // The certificate is a throwaway self-signed test cert; accept it unconditionally.
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            };
+            using HttpClient client = new(handler)
+            {
+                BaseAddress = new Uri($"https://127.0.0.1:{port}/"),
+                DefaultRequestVersion = NetHttpVersion.Version30,
+                DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
+            };
+
+            // The warm-up establishes the QUIC connection (retrying through the startup race), so the
+            // two requests below ride streams of that one connection.
+            await WarmUpAsync(client, cancellationToken);
+
+            // Act
+            Task<HttpResponseMessage> first = client.GetAsync("/first", cancellationToken);
+            await firstEntered.Task.WaitAsync(cancellationToken);
+
+            using HttpResponseMessage second = await client.GetAsync("/second", cancellationToken);
+            using HttpResponseMessage completedFirst = await first.WaitAsync(cancellationToken);
+
+            // Assert
+            second.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
+            (await second.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("/second");
+            completedFirst.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
+            completedFirst.Version.ShouldBe(NetHttpVersion.Version30);
+            (await completedFirst.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("/first");
+            connections.Count.ShouldBe(2);
+            connections.Distinct().Count().ShouldBe(1);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static async Task WarmUpAsync(HttpClient client, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                using HttpResponseMessage response = await client.GetAsync("/warmup", cancellationToken).ConfigureAwait(false);
+                await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+
+                return;
+            }
+            catch (HttpRequestException)
+            {
+                // Connect/handshake not ready yet — retry until the shared timeout.
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 

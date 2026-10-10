@@ -317,4 +317,110 @@ public class JwtBearerHandlerTests
         // Act + Assert
         Should.Throw<InvalidOperationException>(() => JwtBearerAuthentication.CreateHandler(options));
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - CreateHandler fails closed when no issuer is configured")]
+    public void CreateHandler_NoValidIssuers_Throws()
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.ValidIssuers.Clear();
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => JwtBearerAuthentication.CreateHandler(options));
+
+        // Assert
+        exception.Message.ShouldContain(nameof(JwtBearerOptions.ValidIssuers), Case.Sensitive);
+        exception.Message.ShouldContain(nameof(JwtBearerOptions.ValidateIssuer), Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - CreateHandler fails closed when no audience is configured")]
+    public void CreateHandler_NoValidAudiences_Throws()
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.ValidAudiences.Clear();
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => JwtBearerAuthentication.CreateHandler(options));
+
+        // Assert
+        exception.Message.ShouldContain(nameof(JwtBearerOptions.ValidAudiences), Case.Sensitive);
+        exception.Message.ShouldContain(nameof(JwtBearerOptions.ValidateAudience), Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Turning issuer validation off accepts any issuer a key verifies")]
+    public async Task Authenticate_IssuerValidationDisabled_AcceptsAnyIssuer()
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.ValidIssuers.Clear();
+        options.ValidateIssuer = false;
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, issuer: "https://other-issuer.example", audience: Audience));
+        TestHttpContext context = TestHttpContext.Create();
+        context.SetAuthorization("Bearer " + token);
+        IAuthenticationHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        AuthenticateResult result = await handler.AuthenticateAsync();
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Turning audience validation off accepts any audience")]
+    public async Task Authenticate_AudienceValidationDisabled_AcceptsAnyAudience()
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.ValidAudiences.Clear();
+        options.ValidateAudience = false;
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, Issuer, audience: "api://another-service"));
+        TestHttpContext context = TestHttpContext.Create();
+        context.SetAuthorization("Bearer " + token);
+        IAuthenticationHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        AuthenticateResult result = await handler.AuthenticateAsync();
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - Issuer validation still applies with audience validation off")]
+    public async Task Authenticate_AudienceValidationDisabled_StillRejectsWrongIssuer()
+    {
+        // Arrange
+        JwtBearerOptions options = HmacOptions();
+        options.ValidAudiences.Clear();
+        options.ValidateAudience = false;
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, issuer: "https://evil.example", audience: Audience));
+        TestHttpContext context = TestHttpContext.Create();
+        context.SetAuthorization("Bearer " + token);
+        IAuthenticationHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        AuthenticateResult result = await handler.AuthenticateAsync();
+
+        // Assert
+        result.Succeeded.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Bearer] - An RS256 token is rejected when only an HMAC key is configured")]
+    public async Task Authenticate_AsymmetricTokenWithOnlyHmacKey_Fails()
+    {
+        // Arrange — with AllowedAlgorithms empty the accepted set is bounded by the key types, so an
+        // HMAC-only scheme accepts no asymmetric algorithm (RFC 8725 §3.1).
+        using RSA rsa = RSA.Create(2048);
+        string token = TestJwt.Rsa(rsa, TestJwt.Payload(_now, Issuer, Audience));
+        TestHttpContext context = TestHttpContext.Create();
+        context.SetAuthorization("Bearer " + token);
+        IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
+
+        // Act
+        AuthenticateResult result = await handler.AuthenticateAsync();
+
+        // Assert
+        result.Succeeded.ShouldBeFalse();
+        result.Failure.ShouldNotBeNull();
+    }
 }

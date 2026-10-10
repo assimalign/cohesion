@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.WebSockets</RootNamespace>
+		<Description>WebSockets for the Cohesion Web pipeline. MapWebSocket maps one endpoint for every handshake shape (the HTTP/1.1 upgrade and the HTTP/2 and HTTP/3 extended CONNECT) on an application or a route group, and runs its handler over the accepted socket. UseWebSockets refuses a cross-site WebSocket handshake with 403 unless its Origin is the request's own origin (read from the effective, proxy-resolved scheme and host) or an allowed one, refuses a malformed handshake with 400 or 426, applies keep-alive and compression defaults to every accept (compression stays off unless enabled), and closes open sockets with 1001 Going Away when the default server begins its drain. The handshake and the framing come from Assimalign.Cohesion.Http.WebSockets.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- MapWebSocket maps its route through the router builder and route groups; a Web feature
+		     library referencing another is within the area's dependency rule (no hosting reference). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- UseWebSockets closes open sockets with 1001 when the server's IWebServerDrainFeature
+		     fires; the contract is a Web feature package's (owner decision 33, #1379). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
+	</ItemGroup>
+</Project>

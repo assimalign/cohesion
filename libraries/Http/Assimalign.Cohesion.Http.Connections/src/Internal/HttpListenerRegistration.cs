@@ -15,16 +15,16 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class HttpListenerRegistration
 {
     private readonly Func<IConnectionListener>? _streamListenerFactory;
-    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
-    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
         Func<IConnectionListener>? streamListenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory>? streamConnectionFactoryBuilder,
         Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
     {
         Protocol = protocol;
         _streamListenerFactory = streamListenerFactory;
@@ -34,7 +34,8 @@ internal sealed class HttpListenerRegistration
     }
 
     /// <summary>
-    /// The single HTTP protocol this registration serves.
+    /// The HTTP protocol this registration serves: a single version, or HTTP/1.1 and HTTP/2 together
+    /// for a TLS registration that picks between them per connection through ALPN.
     /// </summary>
     public HttpProtocol Protocol { get; }
 
@@ -46,14 +47,14 @@ internal sealed class HttpListenerRegistration
     public static HttpListenerRegistration ForStream(
         HttpProtocol protocol,
         Func<IConnectionListener> listenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(protocol, listenerFactory, connectionFactoryBuilder, multiplexedListenerFactory: null, multiplexedConnectionFactoryBuilder: null);
     }
 
     public static HttpListenerRegistration ForMultiplexed(
         Func<IMultiplexedConnectionListener> listenerFactory,
-        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(HttpProtocol.Http30, streamListenerFactory: null, streamConnectionFactoryBuilder: null, listenerFactory, connectionFactoryBuilder);
     }
@@ -74,16 +75,17 @@ internal sealed class HttpListenerRegistration
 
     /// <summary>
     /// Builds the stream connection factory, binding it to the listener-wide request/response
-    /// interceptors (which are only snapshotted once the listener is constructed); the
-    /// registration's captured per-version options (limits) are already closed over by the
-    /// builder.
+    /// interceptors and per-exchange feature capacity (which are only snapshotted once the listener
+    /// is constructed); the registration's captured per-version options (limits) are already closed
+    /// over by the builder.
     /// </summary>
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
+    /// <param name="featureCapacity">The snapshotted number of features each exchange is expected to carry.</param>
     /// <returns>The stream connection factory.</returns>
-    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity)
     {
-        return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
+        return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors, featureCapacity);
     }
 
     /// <summary>
@@ -97,21 +99,24 @@ internal sealed class HttpListenerRegistration
 
     /// <summary>
     /// Builds the multiplexed (HTTP/3) connection factory, binding it to the listener-wide
-    /// request/response interceptors (which are only snapshotted once the listener is
-    /// constructed); the registration's captured HTTP/3 options are already closed over by the
-    /// builder.
+    /// request/response interceptors and per-exchange feature capacity (which are only snapshotted
+    /// once the listener is constructed); the registration's captured HTTP/3 options are already
+    /// closed over by the builder.
     /// </summary>
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
+    /// <param name="featureCapacity">The snapshotted number of features each exchange is expected to carry.</param>
     /// <returns>The multiplexed connection factory.</returns>
-    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity)
     {
-        return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
+        return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors, featureCapacity);
     }
 
     /// <summary>
     /// Gates a stream-protocol registration on transport capabilities (never on protocol
-    /// identity): HTTP/1.1 and HTTP/2 require a reliable, ordered byte stream.
+    /// identity): HTTP/1.1 and HTTP/2 require a reliable, ordered byte stream, and a registration
+    /// serving both on one listener also requires TLS, because it chooses between them through ALPN,
+    /// a TLS extension (RFC 7301).
     /// </summary>
     /// <param name="capabilities">The capabilities reported by the candidate listener.</param>
     /// <param name="protocol">The HTTP protocol being registered.</param>
@@ -119,18 +124,36 @@ internal sealed class HttpListenerRegistration
     /// <exception cref="ArgumentException">Thrown when the capabilities do not satisfy the protocol's requirements.</exception>
     public static void ValidateStreamCapabilities(ConnectionCapabilities capabilities, HttpProtocol protocol, string? paramName)
     {
-        if (capabilities.Delivery == ConnectionDelivery.Stream && capabilities.IsReliable && capabilities.IsOrdered)
+        string protocolName = protocol switch
         {
-            return;
+            HttpProtocol.Http20 => "HTTP/2",
+            HttpProtocol.Http11 | HttpProtocol.Http20 => "HTTP/1.1 and HTTP/2 on one listener",
+            _ => "HTTP/1.1",
+        };
+
+        if (capabilities.Delivery != ConnectionDelivery.Stream || !capabilities.IsReliable || !capabilities.IsOrdered)
+        {
+            throw CreateCapabilityException(
+                $"{protocolName} requires a transport whose capabilities report a reliable, ordered byte stream " +
+                $"(Delivery=Stream, IsReliable=true, IsOrdered=true); the supplied listener reports " +
+                $"Delivery={capabilities.Delivery}, IsReliable={capabilities.IsReliable}, IsOrdered={capabilities.IsOrdered}.",
+                paramName);
         }
 
-        string protocolName = protocol == HttpProtocol.Http20 ? "HTTP/2" : "HTTP/1.1";
-        string message =
-            $"{protocolName} requires a transport whose capabilities report a reliable, ordered byte stream " +
-            $"(Delivery=Stream, IsReliable=true, IsOrdered=true); the supplied listener reports " +
-            $"Delivery={capabilities.Delivery}, IsReliable={capabilities.IsReliable}, IsOrdered={capabilities.IsOrdered}.";
+        if (protocol == (HttpProtocol.Http11 | HttpProtocol.Http20) && capabilities.Security != ConnectionSecurity.Tls)
+        {
+            throw CreateCapabilityException(
+                $"{protocolName} chooses the protocol for each connection through ALPN (RFC 7301), a TLS extension, " +
+                $"so it requires a listener whose capabilities report Security=Tls; the supplied listener reports " +
+                $"Security={capabilities.Security}. Compose TLS onto the listener before registering it, or register " +
+                $"UseHttp1 and UseHttp2 on separate listeners.",
+                paramName);
+        }
+    }
 
-        throw paramName is null
+    private static ArgumentException CreateCapabilityException(string message, string? paramName)
+    {
+        return paramName is null
             ? new ArgumentException(message)
             : new ArgumentException(message, paramName);
     }

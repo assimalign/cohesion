@@ -19,20 +19,25 @@
 
          The framework is what delivers the Web family to applications:
          the hosting/runtime module (Assimalign.Cohesion.Web.Hosting)
-         deliberately has NO project references to the feature libraries,
+         references only the two feature packages whose contracts it
+         publishes or runs (Web.Routing and Web.Server, owner decision 33),
          and the feature libraries never reference the hosting module -
          apps see the whole family because Sdk.Web pulls this framework
          (Web-area dependency rule: resources/Web/README.md).
 
-         Exclusions: Web.Testing (test harness, not runtime) and
+         Exclusions: Web.Testing (test harness, not runtime),
          Web.ApplicationModel (NuGet-only; Sdk.Web injects it only for an
-         orchestration-enabled executable).
+         orchestration-enabled executable), and Web.OpenApi (NuGet-only, #152:
+         an application that documents its API references it, so one that does
+         not carries none of the OpenApi family; the description verbs it reads
+         ship in Web.Api, which is a member).
          ================================================================ -->
     <ItemGroup>
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
 
         <!-- The Web family. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Antiforgery" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Api" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
@@ -56,29 +61,50 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.RateLimiting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.RequestTimeouts" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Rewrite" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.SecurityHeaders" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Serialization" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Server" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.StaticFiles" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Validation" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.WebSockets" />
 
         <!-- Supporting libraries the Web family closes over that the base App
              framework does not carry (computed transitive closure). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Antiforgery" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Cookies" />
+        <!-- Public: Web.Hosting registers its interceptor by default and Http.WebSockets reads
+             context.ExtendedConnect, and handlers read it directly (#1368). -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.WebSockets" />
+        <!-- Public, not private: Web.Validation's registration surface takes its IValidator and
+             IValidationProfile<T>, so applications compile against it. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
 
         <!-- App-facing HTTP capabilities delivered deliberately even though no Web
-             assembly references them: incremental response streaming and the
-             Server-Sent Events primitives ride the transport interceptor seam and
-             are consumed directly by application handlers. -->
+             assembly references them, and consumed directly by application handlers.
+             Incremental response streaming, the Server-Sent Events primitives, 1xx
+             interim responses (100 Continue, 103 Early Hints) and RFC 9530 digest
+             fields ride the transport interceptor seam. Http.Tls holds
+             IHttpTlsConnectionFeature and context.TlsConnection, which it builds from the
+             ITlsConnectionInfo facet the transport publishes on each exchange's
+             connection info (#1367); its other reference, Connections, is an App kernel root. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Tls" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Streaming" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.InterimResponses" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.DigestFields" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
@@ -99,7 +125,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenApi" />
-        -->
+        The OpenApi family stays out: Web.OpenApi ships NuGet-only (see Exclusions above). -->
     </ItemGroup>
 </Project>

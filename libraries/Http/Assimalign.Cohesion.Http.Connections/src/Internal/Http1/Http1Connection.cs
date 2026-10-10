@@ -12,16 +12,18 @@ internal sealed class Http1Connection : HttpConnection
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly int _featureCapacity;
     private readonly string? _altSvcHeaderValue;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
+    public Http1Connection(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(isSecure)
     {
         _connection = connection;
         _limits = limits;
         _interceptors = interceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -40,7 +42,7 @@ internal sealed class Http1Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits, _interceptors, _responseInterceptors, _altSvcHeaderValue);
+        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits, _interceptors, _responseInterceptors, _featureCapacity, _altSvcHeaderValue);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

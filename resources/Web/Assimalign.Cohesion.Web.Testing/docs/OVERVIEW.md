@@ -27,7 +27,7 @@ caller's business.
 await using WebApplicationTestFactory factory = new();
 
 // 1. Builder-time configuration (services, features, extra listener options).
-factory.Builder.AddRouting();
+factory.Builder.Services.AddRouting();
 
 // 2. Pipeline configuration on the built application.
 factory.Application.Use(async (context, next) =>
@@ -47,6 +47,16 @@ Prior-knowledge HTTP/2 over the same in-memory pair:
 await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions
 {
     Protocol = WebApplicationTestProtocol.Http2,
+});
+```
+
+Point the application at a content root on disk (its `wwwroot` becomes the web root that
+`UseStaticFiles()` serves; the default is the test assembly's base directory):
+
+```csharp
+await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions
+{
+    ContentRootPath = FileSystemPath.Parse(contentRootDirectory),
 });
 ```
 

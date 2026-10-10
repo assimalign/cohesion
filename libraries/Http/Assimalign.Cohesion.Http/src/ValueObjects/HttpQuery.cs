@@ -26,6 +26,12 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
     /// <summary>
     /// Parses the query-string into a collection.
     /// </summary>
+    /// <remarks>
+    /// A parameter with an empty name — <c>=1</c>, or a bare <c>=</c> — is skipped: a
+    /// <see cref="HttpQueryKey"/> is never empty, and RFC 3986 §3.4 gives the query no syntax that
+    /// would require one. The parameter stays in the raw <see cref="Value"/>. Skipping it, rather than
+    /// failing, keeps a request any client can send from failing as it is read.
+    /// </remarks>
     /// <returns>A parsed <see cref="HttpQueryCollection"/>.</returns>
     public HttpQueryCollection Parse()
     {
@@ -39,6 +45,12 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
         foreach (string segment in Value.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             string[] parts = segment.Split('=', 2);
+
+            if (parts[0].Length == 0)
+            {
+                continue;
+            }
+
             string key = Uri.UnescapeDataString(parts[0]);
             string rawValue = parts.Length == 2 ? Uri.UnescapeDataString(parts[1]) : string.Empty;
 

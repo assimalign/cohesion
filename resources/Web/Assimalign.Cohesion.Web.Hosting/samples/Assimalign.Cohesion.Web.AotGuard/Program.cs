@@ -1,0 +1,270 @@
+using System;
+using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Threading.RateLimiting;
+
+using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Antiforgery;
+using Assimalign.Cohesion.Web.AotGuard;
+using Assimalign.Cohesion.Web.Authentication;
+using Assimalign.Cohesion.Web.Authentication.Bearer;
+using Assimalign.Cohesion.Web.Authentication.Cookie;
+using Assimalign.Cohesion.Web.Authorization;
+using Assimalign.Cohesion.Web.Compression;
+using Assimalign.Cohesion.Web.CookiePolicy;
+using Assimalign.Cohesion.Web.Cors;
+using Assimalign.Cohesion.Web.ErrorHandling;
+using Assimalign.Cohesion.Web.Hosting;
+using Assimalign.Cohesion.Web.OpenApi;
+using Assimalign.Cohesion.Web.RateLimiting;
+using Assimalign.Cohesion.Web.RequestTimeouts;
+using Assimalign.Cohesion.Web.Rewrite;
+using Assimalign.Cohesion.Web.Routing;
+using Assimalign.Cohesion.Web.SecurityHeaders;
+using Assimalign.Cohesion.Web.Serialization;
+using Assimalign.Cohesion.Web.StaticFiles;
+using Assimalign.Cohesion.Web.Validation;
+using Assimalign.Cohesion.Web.WebSockets;
+
+// NativeAOT guard for the Web area (#1052): a representative application composed the way a
+// customer's Program.cs composes one. Run plainly it serves like any Web application; run with
+// --smoke it serves on a free loopback port, exercises every feature over real HTTP, and exits
+// non-zero on the first failed check.
+bool smoke = Array.IndexOf(args, "--smoke") >= 0;
+byte[] signingKey = RandomNumberGenerator.GetBytes(32);
+int port = smoke ? GuardSmoke.GetFreeTcpPort() : 0;
+int http2Port = smoke ? GuardSmoke.GetFreeTcpPort() : 0;
+string[] hostArgs = smoke
+    ?
+    [
+        "--Http:Endpoints:Main:Host=127.0.0.1", $"--Http:Endpoints:Main:Port={port}",
+        // Prior-knowledge cleartext HTTP/2, for the extended CONNECT WebSocket (RFC 8441).
+        "--Http:Endpoints:H2:Protocol=Http2", "--Http:Endpoints:H2:Host=127.0.0.1", $"--Http:Endpoints:H2:Port={http2Port}",
+    ]
+    : args;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(hostArgs);
+// The feature registration verbs are component integrations on the service registrations (#1380):
+// each registers one IHttpFeature singleton the host stamps onto every exchange.
+builder.Services
+    .AddRouting()
+    .AddJsonSerialization(GuardJsonContext.Default)
+    // No OnError handler: every fault renders the RFC 9457 ProblemDetails default.
+    .AddErrorHandling(errors => { })
+    .AddAuthentication(authentication =>
+    {
+        authentication.Options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+        authentication
+            .AddCookie()
+            .AddJwtBearer(options =>
+            {
+                options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(signingKey));
+                options.ValidIssuers.Add(GuardSmoke.Issuer);
+                options.ValidAudiences.Add(GuardSmoke.Audience);
+            });
+    })
+    .AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")))
+    .AddAntiforgery()
+    .AddOpenApi(options => options.Title = "Cohesion Web AOT guard")
+    .AddValidation(validation => validation.AddProfile(new GuardItemProfile()));
+
+await using WebApplication application = builder.Build();
+
+// Outermost, ahead of the exception boundary, so error pages carry the headers too.
+application.UseSecurityHeaders();
+application.UseErrorHandling();
+
+// Ahead of static files and routing, so both see the rewritten URL; redirects ahead of rewrites. The
+// rules cover an interpreted pattern and a source-generated one.
+application.UseRewrite(rules => rules
+    .AddRedirect("^/old-greeting$", "/greeting", HttpStatusCode.MovedPermanently)
+    .AddRewrite("^/legacy/items/(\\d+)$", "/items/$1")
+    .AddRewrite(GuardRewriteRules.CatalogValue(), "/values/${id}"));
+application.UseCookiePolicy();
+application.UseResponseCompression();
+application.UseRequestDecompression();
+application.UseStaticFiles();
+application.UseAuthentication();
+application.Map("/branch", branch => branch.Run(async context =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
+    await context.Response.Body.WriteAsync(
+        Encoding.UTF8.GetBytes($"{context.GetPathBase()}|{context.GetEffectivePath()}"),
+        context.RequestCancelled);
+}));
+application.UseRouting();
+
+// Endpoint policy middleware reads the endpoint UseRouting published, so it follows it. CORS goes
+// first: it answers preflights before anything that could reject one.
+application.UseCors(options => options
+    .AddDefaultPolicy(policy => policy.WithOrigins(GuardSmoke.TrustedOrigin))
+    .AddPolicy("json-clients", policy => policy.WithOrigins(GuardSmoke.TrustedOrigin).WithHeaders("Content-Type")));
+application.UseAuthorization();
+application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
+application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy.Create(
+    static (IHttpContext _) => "global",
+    static (string _) => new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+    {
+        PermitLimit = 1000,
+        Window = TimeSpan.FromMinutes(1),
+    })));
+application.UseAntiforgery();
+
+// WebSockets (decision 16): the origin policy goes last, closest to the endpoints that accept.
+application.UseWebSockets();
+
+application.MapGet("/items/{id:int}", async (int id, IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.WriteContentAsync(new GuardItem(id, $"item-{id}"), context.RequestCancelled);
+});
+
+application.MapPost("/items", async (GuardItem item, IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.WriteContentAsync(item with { Name = item.Name + "-echo" }, context.RequestCancelled);
+})
+    .RequireCors("json-clients");
+
+// Handler return values (#1059): the generated thunk writes the value. A model is negotiated through the
+// source-generated JSON context, a string is text/plain, and null answers 204.
+application.MapGet("/values/{id:int}", (int id) => new GuardItem(id, $"value-{id}"));
+application.MapGet("/values/async/{id:int}", async (int id) =>
+{
+    await Task.Yield();
+    return new GuardItem(id, $"async-value-{id}");
+});
+application.MapGet("/greeting", () => "hello from the AOT guard");
+application.MapGet("/values/none", () => (GuardItem?)null);
+
+application.MapGet("/large", async (IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(new string('c', 8192)), context.RequestCancelled);
+});
+
+application.MapGet("/me", async (IHttpContext context) =>
+{
+    if (context.User.Identity is not { IsAuthenticated: true } identity)
+    {
+        await context.ChallengeAsync(cancellationToken: context.RequestCancelled);
+        return;
+    }
+
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(identity.Name ?? string.Empty), context.RequestCancelled);
+});
+
+// A named role policy: UseAuthorization challenges, forbids or admits before the endpoint runs.
+application.MapGet("/admin", async (IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(context.User.Identity?.Name ?? string.Empty), context.RequestCancelled);
+}).RequireAuthorization("admins");
+
+application.MapGet("/boom", async (IHttpContext context) =>
+{
+    await Task.Yield();
+    throw new InvalidOperationException("The AOT guard's fault endpoint.");
+});
+
+// A route group: the typed endpoint binds the group's prefix value, and the group's and the route's
+// policy verbs must both be applied, or dispatch fails closed.
+IRouterGroupBuilder tenants = application.MapGroup("/tenants/{tenant}")
+    .WithRequestTimeout(TimeSpan.FromSeconds(10));
+tenants.MapGet("orders/{id:int}", async (string tenant, int id, IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.WriteContentAsync(new GuardItem(id, $"{tenant}-order-{id}"), context.RequestCancelled);
+})
+    .WithName("tenant-order")
+    .RequireRateLimiting(RateLimitingPolicy.Create(
+        static (IHttpContext _) => "tenant-orders",
+        static (string _) => new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1000,
+            Window = TimeSpan.FromMinutes(1),
+        })));
+
+// Antiforgery: the render path mints the token pair; the protected post requires it.
+application.MapGet("/antiforgery/token", async (IHttpContext context) =>
+{
+    HttpAntiforgeryTokenSet tokens = context.RequireAntiforgery.GetAndStoreTokens(context);
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(tokens.RequestToken ?? string.Empty), context.RequestCancelled);
+});
+application.Map(HttpMethod.Post, "/antiforgery/submit", async (IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync("accepted"u8.ToArray(), context.RequestCancelled);
+}).RequireAntiforgery();
+
+// The cookie policy judges cookies as they are appended: SameSite=None without Secure is upgraded.
+application.MapGet("/cookies", (IHttpContext context) =>
+{
+    context.Response.Cookies.Add(new HttpCookie("guard-tracking", "1", new HttpCookieOptions { SameSite = HttpCookieSameSiteMode.None }));
+    context.Response.StatusCode = HttpStatusCode.NoContent;
+    return Task.CompletedTask;
+});
+
+// File binding (#1061): an uploaded file binds to a typed handler under Http.Forms' limits. Form-bound
+// endpoints require antiforgery by default; this one opts out, since antiforgery has its own checks.
+application.MapPost("/upload", async (IHttpFormFile file, IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"{file.FileName}:{file.Length}"), context.RequestCancelled);
+}).DisableAntiforgery();
+
+// A WebSocket echo (#765, #1336): MapWebSocket serves the HTTP/1.1 upgrade the default server installs
+// and the HTTP/2 extended CONNECT (RFC 8441) from one endpoint. permessage-deflate is accepted when the
+// client offers it, so the guard exercises zlib under NativeAOT too. The socket outlives any request
+// timeout, so the endpoint disables it.
+application.MapWebSocket(
+        "/ws/echo",
+        EchoWebSocketAsync,
+        static _ => new HttpWebSocketAcceptOptions { DangerousEnableCompression = true })
+    .DisableRequestTimeout();
+
+// The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
+// JSON contracts, then served with an ETag.
+application.MapOpenApi();
+
+// A single-page application's client routes; a path that names a file is never answered with it.
+application.MapFallbackToFile("index.html");
+
+if (!smoke)
+{
+    await application.RunAsync();
+    return 0;
+}
+
+IWebApplication web = application;
+using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(2));
+await web.StartAsync(cancellation.Token);
+try
+{
+    return await GuardSmoke.RunAsync(port, http2Port, signingKey, cancellation.Token);
+}
+finally
+{
+    await web.StopAsync(CancellationToken.None);
+}
+
+static async Task EchoWebSocketAsync(IHttpContext context, WebSocket socket)
+{
+    byte[] buffer = new byte[4096];
+    WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestCancelled);
+    while (result.MessageType != WebSocketMessageType.Close)
+    {
+        await socket.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), result.MessageType, result.EndOfMessage, context.RequestCancelled);
+        result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestCancelled);
+    }
+
+    await socket.CloseAsync(result.CloseStatus ?? WebSocketCloseStatus.NormalClosure, result.CloseStatusDescription, CancellationToken.None);
+}

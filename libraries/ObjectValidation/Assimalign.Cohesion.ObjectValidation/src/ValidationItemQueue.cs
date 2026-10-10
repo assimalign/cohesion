@@ -6,6 +6,14 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.ObjectValidation;
 
+/// <summary>
+/// The validation items of a profile, one per declared member, in a first-in, first-out queue: the
+/// validator evaluates them in the order they were pushed, which is the order they are declared.
+/// </summary>
+/// <remarks>
+/// Enumeration, the indexer, <see cref="ToArray()"/>, <see cref="CopyTo(IValidationItem[], int)"/>,
+/// <c>Peek</c> and <c>Pop</c> all start at the item pushed first.
+/// </remarks>
 public class ValidationItemQueue : IValidationItemQueue
 {
 	private int _size;
@@ -28,6 +36,12 @@ public class ValidationItemQueue : IValidationItemQueue
 		this._array = new IValidationItem[capacity];
 	}
 
+	/// <summary>
+	/// Initializes a queue holding the items of <paramref name="collection"/> in the collection's order, so
+	/// its first item is evaluated first.
+	/// </summary>
+	/// <param name="collection">The items to queue.</param>
+	/// <exception cref="ArgumentNullException"><paramref name="collection"/> is <see langword="null"/>.</exception>
 	public ValidationItemQueue(IEnumerable<IValidationItem> collection)
 	{
 		if (collection == null)
@@ -61,6 +75,15 @@ public class ValidationItemQueue : IValidationItemQueue
 		return false;
 	}
 
+	/// <summary>
+	/// Copies the items to <paramref name="array"/>, starting at <paramref name="arrayIndex"/>, in queue order:
+	/// the item pushed first is copied first.
+	/// </summary>
+	/// <param name="array">The array to copy to.</param>
+	/// <param name="arrayIndex">The index in <paramref name="array"/> to copy the first item to.</param>
+	/// <exception cref="ArgumentNullException"><paramref name="array"/> is <see langword="null"/>.</exception>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="arrayIndex"/> is negative or past the end of <paramref name="array"/>.</exception>
+	/// <exception cref="ArgumentException"><paramref name="array"/> has too little room after <paramref name="arrayIndex"/>.</exception>
 	public void CopyTo(IValidationItem[] array, int arrayIndex)
 	{
 		if (array == null)
@@ -75,46 +98,8 @@ public class ValidationItemQueue : IValidationItemQueue
 		{
 			throw new ArgumentException("The size of the array is less than the current size.");
 		}
-		int num = 0;
-		int num2 = arrayIndex + _size;
-		while (num < _size)
-		{
-			array[--num2] = this._array[num++];
-		}
+		Array.Copy(this._array, 0, array, arrayIndex, _size);
 	}
-
-	//void ICollection<IValidationItem>.CopyTo(Array array, int arrayIndex)
-	//{
-	//	if (array == null)
-	//	{
-	//		throw new ArgumentNullException("array");
-	//	}
-	//	if (array.Rank != 1)
-	//	{
-	//		throw new ArgumentException("Multi-dimension arrays not supported.", "array");
-	//	}
-	//	if (array.GetLowerBound(0) != 0)
-	//	{
-	//		throw new ArgumentException("Non-zero lower-bound arrays no supported.", "array");
-	//	}
-	//	if (arrayIndex < 0 || arrayIndex > array.Length)
-	//	{
-	//		throw new ArgumentOutOfRangeException("arrayIndex", arrayIndex, "The index is either less than 0 or greater than the array.");
-	//	}
-	//	if (array.Length - arrayIndex < size)
-	//	{
-	//		throw new ArgumentException("The size of the array is less than the current size.");
-	//	}
-	//	try
-	//	{
-	//		Array.Copy(this.array, 0, array, arrayIndex, size);
-	//		Array.Reverse(array, arrayIndex, size);
-	//	}
-	//	catch (ArrayTypeMismatchException)
-	//	{
-	//		throw new ArgumentException("The array type is invalid", "array");
-	//	}
-	//}
 
 
 	public void TrimExcess()
@@ -129,64 +114,56 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	IValidationItem IValidationItemQueue.Peek()
 	{
-		int num = _size - 1;
-		IValidationItem[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
-			ThrowForEmptyStack();
+			ThrowForEmptyQueue();
 		}
-		return array[num];
+		return _array[0];
 	}
 
 	bool IValidationItemQueue.TryPeek([MaybeNullWhen(false)] out IValidationItem result)
 	{
-		int num = _size - 1;
-		IValidationItem[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
 			result = default(IValidationItem);
 			return false;
 		}
-		result = array[num];
+		result = _array[0];
 		return true;
 	}
 
 
 	IValidationItem IValidationItemQueue.Pop()
 	{
-		int num = _size - 1;
-		IValidationItem[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
-			ThrowForEmptyStack();
+			ThrowForEmptyQueue();
 		}
-		_version++;
-		_size = num;
-		IValidationItem result = array[num];
-		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationItem>())
-		{
-			array[num] = default;
-		}
-		return result;
+		return RemoveFront();
 	}
 
 	bool IValidationItemQueue.TryPop([MaybeNullWhen(false)] out IValidationItem result)
 	{
-		int num = _size - 1;
-		IValidationItem[] array = this._array;
-		if ((uint)num >= (uint)array.Length)
+		if (_size == 0)
 		{
 			result = default;
 			return false;
 		}
-		_version++;
-		_size = num;
-		result = array[num];
-		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationItem>())
-		{
-			array[num] = default;
-		}
+		result = RemoveFront();
 		return true;
+	}
+
+	// Removes the item at the front, the one pushed first, and moves the rest up one place, so the items
+	// stay at 0.._size - 1 in the order they were pushed: the order enumeration, the indexer and every copy
+	// read.
+	private IValidationItem RemoveFront()
+	{
+		IValidationItem result = _array[0];
+		_size--;
+		Array.Copy(_array, 1, _array, 0, _size);
+		_array[_size] = default!;
+		_version++;
+		return result;
 	}
 
 	void IValidationItemQueue.Push(IValidationItem item)
@@ -242,6 +219,10 @@ public class ValidationItemQueue : IValidationItemQueue
 		Array.Resize(ref _array, num);
 	}
 
+	/// <summary>
+	/// Copies the items to a new array in queue order: the item pushed first is at index 0.
+	/// </summary>
+	/// <returns>The items, in the order they are evaluated.</returns>
 	public IValidationItem[] ToArray()
 	{
 		if (_size == 0)
@@ -249,16 +230,13 @@ public class ValidationItemQueue : IValidationItemQueue
 			return Array.Empty<IValidationItem>();
 		}
 		IValidationItem[] array = new IValidationItem[_size];
-		for (int i = 0; i < _size; i++)
-		{
-			array[i] = this._array[_size - i - 1];
-		}
+		Array.Copy(this._array, 0, array, 0, _size);
 		return array;
 	}
 
-	private void ThrowForEmptyStack()
+	private void ThrowForEmptyQueue()
 	{
-		throw new InvalidOperationException();// (System.SR.InvalidOperation_EmptyStack);
+		throw new InvalidOperationException("The queue is empty.");
 	}
 
 
@@ -310,6 +288,11 @@ public class ValidationItemQueue : IValidationItemQueue
 		return Array.Empty<T>();
 	}
 
+	/// <summary>
+	/// Returns an enumerator over the items in queue order: the item pushed first, which is evaluated first,
+	/// comes first.
+	/// </summary>
+	/// <returns>The enumerator.</returns>
 	public IEnumerator<IValidationItem> GetEnumerator()
 	{
 		return new Enumerator(this);
@@ -323,8 +306,10 @@ public class ValidationItemQueue : IValidationItemQueue
 	internal struct Enumerator : IEnumerator<IValidationItem>, IDisposable, IEnumerator
 	{
 		private readonly int _version;
-		private readonly ValidationItemQueue _stack;
+		private readonly ValidationItemQueue _queue;
 
+		// -2 before the first MoveNext, -1 once the enumeration has ended, otherwise the current position
+		// counted from the front of the queue.
 		private int _index;
 		private IValidationItem _current;
 
@@ -342,10 +327,10 @@ public class ValidationItemQueue : IValidationItemQueue
 
 		object? IEnumerator.Current => Current;
 
-		internal Enumerator(ValidationItemQueue stack)
+		internal Enumerator(ValidationItemQueue queue)
 		{
-			this._stack = stack;
-			this._version = stack._version;
+			this._queue = queue;
+			this._version = queue._version;
 			this._index = -2;
 			this._current = default;
 		}
@@ -357,35 +342,23 @@ public class ValidationItemQueue : IValidationItemQueue
 
 		public bool MoveNext()
 		{
-			if (this._version != _stack._version)
+			if (this._version != _queue._version)
 			{
 				throw new InvalidOperationException("");// System.SR.InvalidOperation_EnumFailedVersion);
-			}
-			bool flag;
-			if (this._index == -2)
-			{
-				this._index = _stack._size - 1;
-				flag = _index >= 0;
-				if (flag)
-				{
-					this._current = _stack._array[_index];
-				}
-				return flag;
 			}
 			if (_index == -1)
 			{
 				return false;
 			}
-			flag = --_index >= 0;
-			if (flag)
+			_index = _index == -2 ? 0 : _index + 1;
+			if (_index < _queue._size)
 			{
-				this._current = _stack._array[_index];
+				this._current = _queue._array[_index];
+				return true;
 			}
-			else
-			{
-				this._current = default;
-			}
-			return flag;
+			_index = -1;
+			this._current = default;
+			return false;
 		}
 
 		private void ThrowEnumerationNotStartedOrEnded()
@@ -395,7 +368,7 @@ public class ValidationItemQueue : IValidationItemQueue
 
 		void IEnumerator.Reset()
 		{
-			if (_version != _stack._version)
+			if (_version != _queue._version)
 			{
 				throw new InvalidOperationException("");// System.SR.InvalidOperation_EnumFailedVersion);
 			}

@@ -5,7 +5,5 @@
          owns the generated default control plane. Without it this is a plain executable that a gateway cannot reference. -->
     <CohesionApplicationModel>disabled</CohesionApplicationModel>
   </PropertyGroup>
-  <ItemGroup>
-    <None Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!-- Sdk.Web copies wwwroot/** and appsettings*.json to the build and publish output. -->
 </Project>

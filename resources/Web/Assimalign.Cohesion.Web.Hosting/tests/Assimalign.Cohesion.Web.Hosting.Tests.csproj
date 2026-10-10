@@ -11,8 +11,18 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ExtendedConnect" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
+		<!-- Test-only: handlers read the TLS session through context.TlsConnection over real handshakes
+		     (#1065, #1367). The runtime module takes no dependency on it. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Tls" />
+		<!-- Test-only: a stream that faults after its response started through the streaming feature
+		     must be reset, not finalized (#1049). The runtime module takes no dependency on it. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<!-- Test-only: a raw in-memory connection pipelines HTTP/1.1 requests, which a real client never does. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
@@ -21,6 +31,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
+		<!-- The tests map routes with UseRouting. The runtime module references Web.Routing too, for
+		     the pipeline terminal and the IWebEndpointFeature.RouteTemplate its telemetry reads (#1064,
+		     #1379); the routing verbs the tests call are not runtime machinery. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+    <!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+    <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="Shouldly" />

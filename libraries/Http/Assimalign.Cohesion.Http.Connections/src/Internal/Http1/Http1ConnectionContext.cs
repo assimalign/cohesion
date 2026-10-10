@@ -18,14 +18,24 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly int _featureCapacity;
     private readonly string? _altSvcHeaderValue;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
+    // A graceful close (BeginGracefulClose) and the receive loop meet under this lock: the close marks
+    // the exchange in flight and ends a read still waiting for the next request to begin, and the loop
+    // registers each of those under the same lock, so a close that races a transition is never lost.
+    private readonly Lock _gracefulCloseGate = new();
+    private bool _gracefulCloseRequested;
+    private Http1Context? _exchangeInFlight;
+    private Http1ReadTimeout? _pendingRead;
+
+    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _limits = limits;
         _interceptors = interceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -45,6 +55,10 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     /// exceptions still propagate so cooperative shutdown and programmer
     /// errors are not masked.
     /// </para>
+    /// <para>
+    /// A graceful close (<see cref="BeginGracefulClose"/>) ends the enumerable after the exchange in
+    /// flight, whose keep-alive it clears, or at once when the connection is idle.
+    /// </para>
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -60,13 +74,17 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // Expose the raw chunked response body sink and the exchange control to registered
             // response interceptors so feature packages (streaming / SSE, protocol upgrade / CONNECT
             // tunnelling, interim responses) can wrap them and install typed response features —
-            // without this transport depending on any of those packages. Zero interceptors → buffered
-            // fast path. An HTTP/1.1 exchange owns its whole connection, so its control offers the
-            // full surface: interim (1xx) writes, the raw-stream takeover, and the exchange abort.
-            if (_responseInterceptors.Length > 0)
+            // without this transport depending on any of those packages. Zero interceptors (none
+            // registered for the response phase, none added to this exchange by a request hook) →
+            // buffered fast path. An HTTP/1.1 exchange owns its whole connection, so its control
+            // offers the full surface: interim (1xx) writes, the raw-stream takeover, and the
+            // exchange abort.
+            IHttpExchangeInterceptor[] responseInterceptors = context.ResolveResponseInterceptors(_responseInterceptors);
+
+            if (responseInterceptors.Length > 0)
             {
                 context.RunResponseInterceptors(
-                    _responseInterceptors,
+                    responseInterceptors,
                     new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider, _altSvcHeaderValue),
                     new Http1ExchangeControl(context, Stream));
             }
@@ -90,6 +108,37 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// RFC 9112 §9.6. The exchange in flight, if any, stops being kept alive, so its response head
+    /// carries <c>Connection: close</c> when it is committed and the receive loop ends after it. A read
+    /// still waiting for the first octet of the next request ends now: the connection is idle, so it is
+    /// reclaimed without a response, as on a keep-alive timeout. A request whose head has started to
+    /// arrive is read and answered under its request-headers deadline, with <c>Connection: close</c>.
+    /// No further request is read. A response head committed before the close began goes out without
+    /// <c>Connection: close</c>; the connection still ends after that exchange, which RFC 9112 §9.5
+    /// permits at any time.
+    /// </remarks>
+    public override void BeginGracefulClose()
+    {
+        lock (_gracefulCloseGate)
+        {
+            if (_gracefulCloseRequested)
+            {
+                return;
+            }
+
+            _gracefulCloseRequested = true;
+
+            if (_exchangeInFlight is { } exchange)
+            {
+                exchange.KeepAlive = false;
+            }
+
+            _pendingRead?.CancelIdleWait();
+        }
+    }
+
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         if (context is not Http1Context http1Context)
@@ -107,13 +156,43 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             return;
         }
 
-        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        // The exchange was aborted (IHttpContext.Cancel / CancelAsync — the
         // directive is Abort). HTTP/1.1 has no per-exchange reset finer than the connection, so
         // no response is written and the keep-alive loop ends after this exchange.
         if (http1Context.CancelRequested)
         {
             http1Context.KeepAlive = false;
             return;
+        }
+
+        // Reading the body after the head was dispatched failed on the client's side, so the transport
+        // rejects the request itself, as HTTP/2 and HTTP/3 do:
+        //   - RFC 9112 §5.1 / §7.1: a malformed body (a broken chunk framing, or a trailer field line
+        //     whose name is not a token) is answered 400 (#1333);
+        //   - RFC 9110 §15.5.14 / §15.5.9: a body over the size cap is answered 413, and one received
+        //     below the minimum data rate 408 (#1339). Without this the application only saw the
+        //     read fail, and a host's fault boundary answered 500;
+        //   - RFC 9110 §15.5.22: a chunked body whose trailer section breaks the header-section
+        //     bounds is answered 431 (#1375);
+        //   - RFC 9112 §8: a body the peer cut short by closing the connection is an incomplete
+        //     request, answered 400 before the connection closes (#1340). The peer may have closed
+        //     only its sending side, so the answer can still reach it.
+        // The status replaces whatever the application staged, unless it staged that status itself,
+        // whose representation is kept; the exchange's status is updated too, so a host reports what
+        // went on the wire. The connection then closes, since where the request ends on the wire is no
+        // longer known. A response already on the wire is finished as it is, and the connection still
+        // closes after it.
+        if (http1Context.RequestBodyRejectedStatusCode is { } rejectedStatus)
+        {
+            http1Context.KeepAlive = false;
+
+            if (!http1Context.HasFinalResponseStarted && http1Context.Response.StatusCode != rejectedStatus)
+            {
+                http1Context.Response.StatusCode = rejectedStatus;
+                http1Context.MarkFinalResponseStarted();
+                await TryWriteErrorResponseAsync(rejectedStatus, cancellationToken).ConfigureAwait(false);
+                return;
+            }
         }
 
         // If a response feature streamed to the raw sink, the head and body are already on the
@@ -157,10 +236,20 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         // never overwrites an application value).
         HttpAltServiceInjector.Inject(http1Context.Response.Headers, _altSvcHeaderValue);
 
+        // The head is encoded before the commit point, and a field it cannot carry (#1183, RFC 9110
+        // §5.5) throws here: nothing is on the wire and the response has not started, so the caller can
+        // still replace it, and the connection stays aligned for the next request.
+        (ReadOnlyMemory<byte> head, byte[] body) = await Http1MessageWriter.EncodeResponseAsync(http1Context, cancellationToken).ConfigureAwait(false);
+
         // Commit point: from here the final response is on the wire, so the exchange control's
         // probes must report the response as started (no more interim writes or takeover).
         http1Context.MarkFinalResponseStarted();
-        await Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken).ConfigureAwait(false);
+        await Http1MessageWriter.WriteResponseAsync(
+            Stream,
+            head,
+            body,
+            writeBody: http1Context.Request.Method != HttpMethod.Head,
+            cancellationToken).ConfigureAwait(false);
         await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -178,6 +267,13 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     {
         using Http1ReadTimeout readTimeout = new(cancellationToken, _limits.KeepAliveTimeout, _limits.RequestHeadersTimeout);
 
+        // A graceful close that already began wants no next request; one that begins while this read
+        // waits for it ends the wait (BeginGracefulClose).
+        if (!TryBeginRead(readTimeout))
+        {
+            return null;
+        }
+
         try
         {
             Http1Context? context = await Http1MessageReader.ReadRequestAsync(
@@ -186,9 +282,15 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 GetScheme(),
                 _limits,
                 _interceptors,
+                _featureCapacity,
                 _timeProvider,
                 readTimeout,
                 cancellationToken).ConfigureAwait(false);
+
+            if (context is not null)
+            {
+                AdmitExchange(context);
+            }
 
             return context;
         }
@@ -199,6 +301,16 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // drop, so a conformant client learns why. Body-size (413) and data-rate (408)
             // violations surface after dispatch on the streamed body read, not here.
             await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Http1BadRequestException)
+        {
+            // RFC 9112 §5.1 — a field line whose name is not a token (whitespace before the colon, an
+            // empty name) MUST be answered with 400 before the connection is closed (#1333). A field
+            // value with a control character other than HTAB (RFC 9110 §5.5), a request line with an
+            // octet other than VCHAR and SP (RFC 9112 §3), and a Host value with an octet other than
+            // VCHAR (RFC 9112 §3.2) are answered the same way (#1341).
+            await TryWriteErrorResponseAsync(HttpStatusCode.BadRequest, cancellationToken).ConfigureAwait(false);
             return null;
         }
         catch (HttpRequestRejectedException rejection)
@@ -230,6 +342,64 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // `await using` disposes the connection) and let the
             // listener keep accepting subsequent connections.
             return null;
+        }
+        finally
+        {
+            EndRead(readTimeout);
+        }
+    }
+
+    /// <summary>
+    /// Registers <paramref name="readTimeout"/> as the read a graceful close ends while it waits for the
+    /// next request, unless the close already began. The previous exchange is over by now, so a close
+    /// no longer needs to mark it.
+    /// </summary>
+    /// <returns><see langword="false"/> when a graceful close began and no further request is read.</returns>
+    private bool TryBeginRead(Http1ReadTimeout readTimeout)
+    {
+        lock (_gracefulCloseGate)
+        {
+            if (_gracefulCloseRequested)
+            {
+                return false;
+            }
+
+            _exchangeInFlight = null;
+            _pendingRead = readTimeout;
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Makes the exchange just read the one a graceful close marks. A close that began while its head
+    /// was arriving marks it now, so its response still carries <c>Connection: close</c>.
+    /// </summary>
+    private void AdmitExchange(Http1Context context)
+    {
+        lock (_gracefulCloseGate)
+        {
+            _exchangeInFlight = context;
+
+            if (_gracefulCloseRequested)
+            {
+                context.KeepAlive = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Unregisters <paramref name="readTimeout"/> before it is disposed, so a graceful close never
+    /// cancels a disposed read.
+    /// </summary>
+    private void EndRead(Http1ReadTimeout readTimeout)
+    {
+        lock (_gracefulCloseGate)
+        {
+            if (ReferenceEquals(_pendingRead, readTimeout))
+            {
+                _pendingRead = null;
+            }
         }
     }
 

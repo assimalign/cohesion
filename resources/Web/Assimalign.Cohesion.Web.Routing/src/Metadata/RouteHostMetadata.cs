@@ -25,6 +25,11 @@ namespace Assimalign.Cohesion.Web.Routing.Metadata;
 /// snapshots at construction. Host patterns are parsed once here and reused for every
 /// request, so a malformed pattern fails at the producer rather than at match time.
 /// </para>
+/// <para>
+/// The constraints select among routes; they do not control access. The host they match is one
+/// the client asserts, on the wire or through a trusted proxy that forwards it, so any client can
+/// reach a host-constrained route by sending a host it accepts.
+/// </para>
 /// </remarks>
 public sealed class RouteHostMetadata
 {

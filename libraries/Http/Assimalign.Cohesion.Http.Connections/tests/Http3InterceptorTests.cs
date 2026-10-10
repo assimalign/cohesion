@@ -16,10 +16,10 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 /// <summary>
 /// Exercises the request-parse interceptor seam end to end over the HTTP/3 transport at its
-/// context-construction site (<c>Http3ConnectionContext.ReadRequestAsync</c>): head hooks attaching
-/// features and observing read-only headers, body hooks wrapping the request stream, the freeze
-/// contract, CONNECT body-hook skipping, empty-body invocation, the buffered-body per-protocol
-/// timing difference, and typed rejection surfaced as a stream abort.
+/// context-construction site (<c>Http3ConnectionContext.CreateContextAsync</c>): head hooks attaching
+/// features and observing read-only headers, body hooks wrapping the lazily read request stream, the
+/// freeze-at-first-read contract (HTTP/1.1 parity) and the cap the body read enforces, CONNECT body-hook
+/// skipping, empty-body invocation, and typed rejection surfaced as a stream abort.
 /// </summary>
 public class Http3InterceptorTests
 {
@@ -97,20 +97,33 @@ public class Http3InterceptorTests
         wrapper.Created!.Disposed.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: The body-size knob should freeze once the head hooks have run")]
-    public async Task Knob_ShouldFreezeAfterHeadHooks()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: The body-size knob should stay writable until the body is read, then freeze")]
+    public async Task Knob_ShouldRemainWritableUntilBodyRead()
     {
+        // HTTP/1.1 parity: the request is dispatched at its HEADERS frame with a lazily read body, so
+        // the per-request cap can still be adjusted after dispatch — by middleware or an endpoint —
+        // right up until the body is first read, at which point it freezes.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
 
-        await ReceiveFirstContextAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
         interceptor.Captured.ShouldNotBeNull();
         interceptor.WasWritableDuringHeadHook.ShouldBeTrue();
-        interceptor.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
+
+        // Dispatched, body not yet read: still writable, so a post-dispatch adjustment sticks.
+        interceptor.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeFalse();
+        interceptor.Captured.MaxRequestBodySize = 1024;
+
+        using (StreamReader reader = new(httpContext.Request.Body))
+        {
+            (await reader.ReadToEndAsync()).ShouldBe("hello");
+        }
+
+        interceptor.Captured.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
         Should.Throw<InvalidOperationException>(() => interceptor.Captured.MaxRequestBodySize = 1);
     }
 
@@ -152,6 +165,50 @@ public class Http3InterceptorTests
         interceptor.BodyInvocations.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hooks should observe the validated :protocol of an extended CONNECT")]
+    public async Task AfterRequestHead_OnExtendedConnect_ShouldObserveProtocol()
+    {
+        // Arrange — RFC 9220 §3: the :protocol is the only signal that tells an extended CONNECT from a
+        // classic one, so the transport hands the validated value to the head hooks (#1368).
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(payload, options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBe("websocket");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hooks should observe no :protocol on any other request")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AfterRequestHead_OnClassicConnectOrOrdinaryRequest_ShouldObserveNoProtocol(bool classicConnect)
+    {
+        // Arrange — a classic CONNECT carries only :method and :authority (RFC 9114 §4.4).
+        byte[] payload = classicConnect
+            ? HttpProtocolPayloadFactory.CreateHttp3RequestRaw((":method", "CONNECT"), (":authority", "api.test:443"))
+            : HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test");
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(payload, options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Body hooks should run for empty bodies")]
     public async Task EmptyBody_ShouldStillRunBodyHooks()
     {
@@ -166,13 +223,12 @@ public class Http3InterceptorTests
         interceptor.BodyInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: A lowered cap should not reject the already-buffered body")]
-    public async Task AfterRequestHead_LoweringCap_ShouldNotRejectBufferedBody()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hook lowering the cap should reject the body with 413 on the body read")]
+    public async Task AfterRequestHead_LoweringCap_ShouldRejectBodyWith413()
     {
-        // Per-protocol timing difference (documented on IHttpRequestInterceptor): HTTP/3 drains the
-        // request stream before the head is decoded, so lowering the cap at head-hook time cannot
-        // reject an already-received body — the request still dispatches. Body-cap enforcement on h3
-        // is tracked separately (#750/#764); a lowered cap here only affects the exposed feature.
+        // The listener-wide default (~28.6 MB) would accept this 64-octet body; the hook lowers the
+        // per-request cap below it, so the lazily read body is rejected (413) before its DATA frame is
+        // delivered — HTTP/1.1 parity.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes(new string('x', 64)));
         HttpConnectionListenerOptions options = new();
@@ -181,7 +237,24 @@ public class Http3InterceptorTests
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
         using StreamReader reader = new(httpContext.Request.Body);
-        (await reader.ReadToEndAsync()).Length.ShouldBe(64);
+        await Should.ThrowAsync<IOException>(async () => await reader.ReadToEndAsync());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hook raising the cap should admit a body over the listener limit")]
+    public async Task AfterRequestHead_RaisingCap_ShouldAdmitLargerBody()
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
+            "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes("hello"));
+        HttpConnectionListenerOptions options = new();
+        options.Interceptors.Add(new CapSettingInterceptor(1024));
+
+        IHttpContext httpContext = await ReceiveFirstContextAsync(
+            payload,
+            options,
+            http3 => http3.Limits.MaxRequestBodySize = 2); // would reject the 5-octet body
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Zero interceptors should dispatch a context with no attached features")]
@@ -199,11 +272,14 @@ public class Http3InterceptorTests
 
     // ------------------------------------------------------------------ helpers
 
-    private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload, HttpConnectionListenerOptions options)
+    private static async Task<IHttpContext> ReceiveFirstContextAsync(
+        byte[] payload,
+        HttpConnectionListenerOptions options,
+        Action<Http3ConnectionListenerOptions>? configure = null)
     {
         TestConnection stream = new(payload);
         TestMultiplexedConnection connection = new(stream);
-        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();

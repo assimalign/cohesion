@@ -9,8 +9,8 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This type is populated at composition time (a <c>*.Hosting</c> project): the root
-/// <c>AddAuthentication</c> call sets the default-scheme names, and each <c>AddCookie</c> /
+/// This type is populated at composition time (a <c>*.Hosting</c> project): the
+/// <c>builder.Services.AddAuthentication</c> callback sets the default-scheme names, and each <c>AddCookie</c> /
 /// <c>AddJwtBearer</c> call registers a <see cref="AuthenticationScheme"/>. The
 /// <see cref="IAuthenticationService"/> reads it live per request, so schemes registered after
 /// the options are first handed out are still visible.

@@ -47,8 +47,9 @@ belongs.
 
 ## Close / Dispose / Abort Semantics
 
-Teardown propagates to the peer purely through pipe completion — no end holds a reference to the
-other, and there is no background watcher:
+Teardown propagates to the peer through pipe completion, and there is no background watcher. The ends
+of a byte-stream pair hold no reference to each other; the two ends of a multiplexed stream do, only
+to signal an abandoned stream (see "Multiplexed Variant"):
 
 - **Graceful half-close** — the holder completes `Output`. Completing `A.Output` (the `aToB`
   writer) makes `B.Input` (the `aToB` reader) observe `ReadResult.IsCompleted`. The connection's
@@ -64,11 +65,12 @@ other, and there is no background watcher:
   flush observes completion. State becomes `Aborted` and `ConnectionClosed` is signaled. A `null`
   reason surfaces a `ConnectionAbortedException` on the peer.
 
-`ConnectionClosed` fires when **this** end is disposed or aborted. It does not fire proactively
-when the *peer* closes — a peer close is observed by reading `Input` (which completes) or writing
-`Output` (whose flush reports completion), which is exactly how a byte-stream consumer such as an
-HTTP parser already detects end-of-connection. Keeping the closed token local avoids a background
-watcher and keeps the driver allocation-light and trim-safe.
+`ConnectionClosed` fires when **this** end is disposed or aborted. On a byte-stream pair it does not
+fire proactively when the *peer* closes — a peer close is observed by reading `Input` (which
+completes) or writing `Output` (whose flush reports completion), which is exactly how a byte-stream
+consumer such as an HTTP parser already detects end-of-connection. Keeping the closed token local
+avoids a background watcher and keeps the driver allocation-light and trim-safe. A multiplexed
+stream also fires it when the other end abandons the stream (see "Multiplexed Variant").
 
 Completion of the underlying pipe ends is guarded (idempotent, and tolerant of the holder having
 already completed a writer), so double dispose, abort-then-dispose, and holder-completed-output
@@ -91,6 +93,37 @@ remote side may write to. Disposing or aborting a multiplexed connection complet
 channel (so pending and future `AcceptStreamAsync` calls observe `OperationCanceledException`) and
 tears down any queued-but-unaccepted streams; opening a stream toward a closed peer throws
 `ConnectionAbortedException`.
+
+**An end that abandons a stream signals the other end (#1329).** The two ends of a stream pair hold
+each other. An end that aborts, or whose holder completes `Output` with an error (the in-memory
+`RESET_STREAM`) or `Input` with an error (the in-memory `STOP_SENDING`), cancels the other end's
+`ConnectionClosed` at once, on the calling thread, and leaves its state alone. That is what the QUIC
+driver reports for a peer `RESET_STREAM` or `STOP_SENDING`, and it lets an HTTP/3 server fire
+`RequestCancelled` for a request the client cancelled while the application neither reads nor
+writes. A clean completion (`Output` without an error, the FIN) is a half-close and signals nothing.
+To see an errored `Input` completion, a stream end hands out a thin delegating `PipeReader` instead of
+the pipe's own reader.
+
+**A stream end carries application error codes (#1080).** It implements the contracts'
+`IMultiplexedStreamAbort`, the in-memory `STOP_SENDING` and `RESET_STREAM` with a code, so a protocol
+tested over this driver puts its codes where the QUIC driver puts them:
+
+- `AbortRead(errorCode)` completes the end's receive pipe with a `ConnectionResetException` whose
+  `ApplicationErrorCode` is the code, so the other end's next flush throws it. A read waiting on the
+  pipe is woken first: completing a pipe reader leaves a pending read waiting for the writer, so the
+  delegating reader cancels it and fails it, and every later read, with `ConnectionAbortedException`.
+- `AbortWrite(errorCode)` completes the end's send pipe with the same exception, so the other end's
+  reads throw it, a read in flight included.
+- Both signal the other end's `ConnectionClosed`, leave this end's state alone, and do nothing for a
+  direction that has already ended or that a unidirectional end lacks. A later `Abort(reason)` or
+  dispose does not complete an aborted direction again, so the other end keeps seeing the code, not the
+  reason. Codes outside 0 to 2^62 - 1 throw, as on the QUIC driver.
+- The ends of a byte-stream pair do not implement the facet: a single-stream transport has no code to
+  carry, and a consumer's type test should say so. The stream ends are a private subclass of the
+  connection type, created only for multiplexed streams.
+
+The multiplexed connection itself does not implement `IMultiplexedConnectionAbort`: its abort reaches
+no peer, so a close code would have nowhere to go.
 
 ## Dial / Accept Model
 

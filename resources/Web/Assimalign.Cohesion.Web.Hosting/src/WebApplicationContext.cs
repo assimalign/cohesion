@@ -35,11 +35,38 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 
     internal List<X509Certificate2> EndpointCertificates { get; } = new();
 
+    /// <summary>
+    /// Gets or sets the number of application features the built pipeline stamps onto every
+    /// exchange. It stays zero until the pipeline is built, and when a pipeline passed to
+    /// <c>AddPipeline</c> replaces it, since that pipeline stamps none. The default server sizes
+    /// each exchange's feature collection with it (#1381).
+    /// </summary>
+    internal int StampedFeatureCount { get; set; }
+
     internal WebApplicationContext()
     {
     }
 
+    /// <summary>
+    /// Gets the application's content root: the directory configuration files are read from.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="WebApplicationOptions.ContentRootPath"/> when set; otherwise the ambient resource
+    /// context's content root for an orchestrated resource; otherwise
+    /// <see cref="AppContext.BaseDirectory"/>.
+    /// </remarks>
     public FileSystemPath? ContentRootPath { get; init; }
+
+    /// <summary>
+    /// Gets the directory static web assets are served from, or <see langword="null"/> when the
+    /// application has no web root.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="WebApplicationOptions.WebRootPath"/> resolved against
+    /// <see cref="ContentRootPath"/> when set; otherwise <c>wwwroot</c> under the content root
+    /// when that directory exists.
+    /// </remarks>
+    public FileSystemPath? WebRootPath { get; init; }
 
     /// <summary>
     /// Gets the application's service provider.

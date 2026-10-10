@@ -48,4 +48,32 @@ internal static class SelfSignedCertificateFactory
         // rejects for server auth.
         return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx), password: null);
     }
+
+    /// <summary>
+    /// Builds a self-signed client certificate (client-authentication EKU) for the mutual-TLS tests.
+    /// It chains to no trusted root, so the platform's default validation rejects it.
+    /// </summary>
+    /// <param name="subjectName">The certificate subject common name.</param>
+    /// <returns>A loaded <see cref="X509Certificate2"/> with a private key the platform TLS stack can use.</returns>
+    public static X509Certificate2 CreateClient(string subjectName)
+    {
+        using ECDsa ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CertificateRequest request = new(
+            new X500DistinguishedName($"CN={subjectName}"),
+            ecdsa,
+            HashAlgorithmName.SHA256);
+
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection
+            {
+                new("1.3.6.1.5.5.7.3.2")
+            },
+            false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, false));
+
+        using X509Certificate2 ephemeral = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(7));
+
+        return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx), password: null);
+    }
 }

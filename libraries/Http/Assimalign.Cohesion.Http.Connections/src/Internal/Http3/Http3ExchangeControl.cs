@@ -11,20 +11,29 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// (<c>1xx</c>) responses are emitted as additional QPACK-encoded HEADERS frames on the request
 /// stream ahead of the final HEADERS frame (RFC 9114 §4.1), delegated to
 /// <see cref="Http3ConnectionContext.WriteInterimResponseAsync"/>. Takeover is unsupported —
-/// HTTP/3 exchanges are multiplexed QUIC streams over a shared connection (RFC 9114 §4.2).
-/// Aborting is not a control mechanism — it is the application-owned
-/// <see cref="IHttpContext.Cancel"/>, which the send path honors by resetting the single request
-/// stream, leaving the QUIC connection's other streams intact.
+/// HTTP/3 exchanges are multiplexed QUIC streams over a shared connection (RFC 9114 §4.2); their
+/// per-stream counterpart, the extended CONNECT tunnel (RFC 9220), is
+/// <see cref="AcceptTunnelAsync"/>, which writes the <c>200</c> HEADERS frame on the request stream
+/// without ending it, through the tunnel's own serialized writer
+/// (<see cref="Http3ExtendedConnectStream"/>). Aborting is not a control mechanism — it is the
+/// application-owned <see cref="IHttpContext.Cancel"/>, which the send path honors by resetting the
+/// single request stream, leaving the QUIC connection's other streams intact.
 /// </summary>
 internal sealed class Http3ExchangeControl : IHttpExchangeControl
 {
     private readonly Http3ConnectionContext _connection;
     private readonly Http3Context _context;
+    private readonly bool _isExtendedConnect;
+    private int _tunnelAcceptCalled;
 
     public Http3ExchangeControl(Http3ConnectionContext connection, Http3Context context)
     {
         _connection = connection;
         _context = context;
+        // RFC 9220 §3 — defense in depth over the head validation: only a CONNECT that carries a
+        // non-empty :protocol may become a tunnel. Captured at dispatch, before the application can
+        // see the request or rewrite its method.
+        _isExtendedConnect = HttpFieldNormalization.IsExtendedConnect(context.Request.Method.Value, context.ExtendedConnectProtocol);
     }
 
     /// <inheritdoc />
@@ -60,4 +69,77 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
             "HTTP/3 exchanges are multiplexed QUIC streams over a shared connection and cannot be taken over (RFC 9114 §4.2).");
     }
 
+    /// <inheritdoc />
+    public bool CanAcceptTunnel =>
+        _isExtendedConnect
+        && Volatile.Read(ref _tunnelAcceptCalled) == 0
+        && !_context.CancelRequested
+        && !HasResponseStarted;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The guards run in the order <see cref="HttpExtendedConnectRules"/> records. HTTP/3 keeps no
+    /// separate response claim: marking the final response started and registering the tunnel before
+    /// the head is written is what keeps the exchange's own send path off the request stream.
+    /// </remarks>
+    public async ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_isExtendedConnect)
+        {
+            throw new InvalidOperationException(HttpExtendedConnectRules.NotExtendedConnectMessage);
+        }
+
+        if (Interlocked.Exchange(ref _tunnelAcceptCalled, 1) == 1)
+        {
+            throw new InvalidOperationException(HttpExtendedConnectRules.AlreadyAcceptedMessage);
+        }
+
+        if (_context.CancelRequested)
+        {
+            throw new InvalidOperationException(HttpExtendedConnectRules.CancelledMessage);
+        }
+
+        if (HasResponseStarted)
+        {
+            throw new InvalidOperationException(HttpExtendedConnectRules.ResponseStartedMessage);
+        }
+
+        if (_context.RequestBody.IsReset)
+        {
+            throw new IOException("The HTTP/3 request stream was reset before the extended CONNECT tunnel was accepted.");
+        }
+
+        if (_connection.ConnectionClosed.IsCancellationRequested)
+        {
+            throw new IOException("The HTTP/3 connection closed before the extended CONNECT tunnel was accepted.");
+        }
+
+        HttpStatusCode stagedStatus = _context.Response.StatusCode;
+        HttpExtendedConnectRules.PrepareResponseHead(_context.Response);
+
+        // Encoded before the response starts: a field the head cannot carry (#1183) throws with nothing
+        // on the wire and the exchange unstarted, its staged status restored. The accept is spent, and
+        // the exchange is answered like any other.
+        byte[] headerBlock;
+
+        try
+        {
+            headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            _context.Response.StatusCode = stagedStatus;
+            throw;
+        }
+
+        _context.MarkFinalResponseStarted();
+
+        Http3ExtendedConnectStream tunnel = new(_connection, _context);
+        _context.Tunnel = tunnel;
+
+        await tunnel.WriteHeadAsync(headerBlock, cancellationToken).ConfigureAwait(false);
+        tunnel.MarkHeadCommitted();
+
+        return tunnel;
+    }
 }

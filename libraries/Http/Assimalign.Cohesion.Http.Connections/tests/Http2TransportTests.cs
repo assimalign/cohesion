@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -78,6 +79,31 @@ public class Http2TransportTests
 
         using StreamReader reader = new(httpContext.Request.Body);
         (await reader.ReadToEndAsync()).ShouldBe(queryBody);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: A standard :method in another case should be an unknown method (RFC 9110 §9.1)")]
+    [InlineData("get", "GET")]
+    [InlineData("head", "HEAD")]
+    [InlineData("connect", "CONNECT")]
+    public async Task Http2_OnMethodInAnotherCase_ShouldParseAnUnknownMethod(string method, string standard)
+    {
+        // Arrange — 'connect' carries :scheme and :path, as any method but CONNECT must, so it is not a tunnel.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, method, "/items", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Act
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Assert
+        httpContext.Request.Method.Value.ShouldBe(method);
+        httpContext.Request.Method.ShouldNotBe(HttpMethod.GetCanonicalizedValue(standard));
+        httpContext.Request.Path.Value.ShouldBe("/items");
+        httpContext.Request.Trailers.IsSupported.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should yield multiple streams in sequence")]
@@ -457,8 +483,10 @@ public class Http2TransportTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")]
     public async Task Http2_OnConnect_ShouldAdvertiseConnectProtocolEnabled()
     {
-        // RFC 8441 §3 — a server willing to accept extended CONNECT advertises
-        // SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 in its initial SETTINGS.
+        // RFC 8441 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 in the initial SETTINGS tells the
+        // client it may send extended CONNECT. The transport advertises it unconditionally, as here
+        // on a listener with no interceptors; surfacing an extended CONNECT to the application is the
+        // Http.ExtendedConnect interceptor's job, which the listener must register.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
 
@@ -491,13 +519,12 @@ public class Http2TransportTests
         serverSettings[Http2TestSettings.Parameter.EnableConnectProtocol].ShouldBe(1u);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should surface a valid extended CONNECT via the :protocol item")]
-    public async Task Http2_OnExtendedConnect_ShouldSurfaceProtocolItem()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should install the extended CONNECT feature in the exchange's feature collection")]
+    public async Task Http2_OnExtendedConnect_ShouldInstallFeatureInFeatureCollection()
     {
         // RFC 8441 §4 — CONNECT + :protocol with :scheme/:path/:authority is a
-        // valid extended CONNECT. The transport surfaces the :protocol
-        // pseudo-header verbatim through IHttpContext.Items so the
-        // ExtendedConnect package can model it without a transport dependency.
+        // valid extended CONNECT. The extended CONNECT interceptor (#1368) installs
+        // the feature on the exchange's feature collection, once.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
@@ -512,6 +539,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -519,15 +547,16 @@ public class Http2TransportTests
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
         httpContext.Request.Path.Value.ShouldBe("/chat");
-        httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeTrue();
-        httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
+        IHttpExtendedConnectFeature? feature = httpContext.Features.Get<IHttpExtendedConnectFeature>();
+        feature.ShouldNotBeNull();
+        feature!.Protocol.ShouldBe("websocket");
+        httpContext.ExtendedConnect.ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A valid extended CONNECT exposes the ExtendedConnect feature")]
     public async Task Http2_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
     {
-        // The transport surfaces :protocol via IHttpContext.Items; the
-        // Http.ExtendedConnect package models it as a typed feature.
+        // The interceptor installs the feature; the Http.ExtendedConnect accessors read it.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
@@ -542,6 +571,7 @@ public class Http2TransportTests
         TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -559,6 +589,7 @@ public class Http2TransportTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -568,57 +599,35 @@ public class Http2TransportTests
         httpContext.ExtendedConnect.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A normal request carries no :protocol item")]
-    public async Task Http2_OnNormalRequest_ShouldNotSurfaceProtocolItem()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A classic CONNECT carries no extended CONNECT feature")]
+    public async Task Http2_OnClassicConnect_ShouldNotInstallExtendedConnectFeature()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
-        TestConnection connection = new(payload);
-        HttpConnectionListenerOptions options = new();
-        options.UseHttp2(new TestConnectionListener(connection));
-
-        await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
-        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
-
-        httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeFalse();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR")]
-    public async Task Http2_OnProtocolPseudoHeaderWithoutConnect_ShouldGoAway()
-    {
-        // RFC 8441 §4 — :protocol is only valid on CONNECT; on any other method
-        // the request is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            1,
-            0x4 | 0x1,
-            (":method", "GET"),
-            (":protocol", "websocket"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"));
-
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an extended CONNECT missing :path with PROTOCOL_ERROR")]
-    public async Task Http2_OnExtendedConnectMissingPath_ShouldGoAway()
-    {
-        // RFC 8441 §4 — an extended CONNECT MUST include :scheme, :path, and
-        // :authority. Omitting :path is malformed.
+        // RFC 9113 §8.5 — a CONNECT without :protocol carries only :method and :authority. It is an
+        // ordinary CONNECT request, not an extended CONNECT, so no tunnel feature is installed.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
             1,
             0x4 | 0x1,
             (":method", "CONNECT"),
-            (":protocol", "websocket"),
-            (":scheme", "https"),
-            (":authority", "api.test"));
+            (":authority", "api.test:443"));
 
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
+        TestConnection connection = new(Combine(preface, settings, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+        options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
+        httpContext.Features.Get<IHttpExtendedConnectFeature>().ShouldBeNull();
     }
+
+    // A :protocol on a method other than CONNECT, an empty :protocol, and an extended CONNECT missing a
+    // pseudo-header are malformed requests, reset per stream (RFC 9113 §8.1.1): see
+    // Http2RequestPseudoHeaderTests.
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a non-SETTINGS first client frame with PROTOCOL_ERROR")]
     public async Task Http2_OnFirstClientFrameNotSettings_ShouldGoAwayProtocolError()
@@ -759,6 +768,21 @@ public class Http2TransportTests
         // expected error code.
         byte[] output = await connection.ReadOutputAsync();
         Http2TestSettings.AssertContainsGoAway(output, expectedErrorCode);
+    }
+
+    /// <summary>
+    /// A complete request head on <paramref name="streamId"/> with END_HEADERS but not END_STREAM, so
+    /// the stream opens and its request dispatches while the peer can still send on it.
+    /// </summary>
+    private static byte[] CreateRequestHeadersWithoutEndStream(int streamId)
+    {
+        return HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            streamId,
+            0x4 /* END_HEADERS */,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject HEADERS on stream 0 with PROTOCOL_ERROR")]
@@ -1050,120 +1074,10 @@ public class Http2TransportTests
         await pump;
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a request with the response-only :status pseudo-header")]
-    public async Task Http2_OnStatusPseudoHeaderInRequest_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — :status is a response pseudo-header. Receiving
-        // it in a request field section is malformed and surfaces as a
-        // connection-level PROTOCOL_ERROR.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1, // END_HEADERS + END_STREAM
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            (":status", "200"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject pseudo-headers that appear after regular fields")]
-    public async Task Http2_OnPseudoHeaderAfterRegularField_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — pseudo-header fields MUST appear in the field
-        // section BEFORE regular fields. A pseudo-header after a regular
-        // field is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            ("user-agent", "tests"),       // regular field
-            (":path", "/"),                 // pseudo-header after regular — illegal
-            (":authority", "api.test"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an unknown pseudo-header field")]
-    public async Task Http2_OnUnknownPseudoHeader_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — pseudo-header names that aren't defined for the
-        // message type are malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            (":foo", "bar"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject duplicate pseudo-header fields")]
-    public async Task Http2_OnDuplicatePseudoHeader_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — each pseudo-header MUST appear at most once.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":method", "POST"),     // duplicate
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject connection-specific header fields")]
-    [InlineData("connection", "close")]
-    [InlineData("proxy-connection", "keep-alive")]
-    [InlineData("keep-alive", "timeout=5")]
-    [InlineData("transfer-encoding", "chunked")]
-    [InlineData("upgrade", "h2c")]
-    public async Task Http2_OnConnectionSpecificHeader_ShouldGoAwayProtocolError(string name, string value)
-    {
-        // RFC 9113 §8.2.2 — these connection-specific header fields are
-        // forbidden in HTTP/2 because their semantics conflict with
-        // multiplexed framing.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            (name, value));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject TE field with value other than 'trailers'")]
-    public async Task Http2_OnTeFieldNotTrailers_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.2.2 — TE MAY appear with the single value
-        // 'trailers'. Any other value is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            ("te", "gzip"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
+    // A malformed request head resets only its stream (RFC 9113 §8.1.1): a repeated, missing or empty
+    // pseudo-header field (#1321, Http2RequestPseudoHeaderTests), and a field that breaks a field rule —
+    // an uppercase name, a connection-specific field, TE other than trailers, a pseudo-header that is
+    // unknown, response-only or after a regular field (#1332, Http2MalformedRequestHeadTests).
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept TE: trailers")]
     public async Task Http2_OnTeFieldTrailers_ShouldAcceptRequest()
@@ -1193,25 +1107,6 @@ public class Http2TransportTests
         httpContext.Request.Headers[new HttpHeaderKey("te")].Value.ShouldBe("trailers");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject field names with uppercase letters")]
-    public async Task Http2_OnUppercaseFieldName_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.2.1 — HTTP/2 field names MUST be lowercase. The
-        // encoder is required to lower-case names before sending; a
-        // mixed-case name is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            ("User-Agent", "tests"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should coalesce multiple Cookie fields into one with '; ' separator")]
     public async Task Http2_OnMultipleCookieFields_ShouldCoalesceWithSeparator()
     {
@@ -1239,6 +1134,38 @@ public class Http2TransportTests
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Headers[HttpHeaderKey.Cookie].Value.ShouldBe("a=1; b=2");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Cookie crumbs should join in time linear in their count")]
+    public void DecodeRequestHeaders_OnManyCookieCrumbs_ShouldJoinLinearly()
+    {
+        // Arrange — RFC 9113 §8.2.3: what a raised SETTINGS_MAX_HEADER_LIST_SIZE lets through. Joining each
+        // crumb onto the value so far copies about 500 MB for this many; joining them once, well under one.
+        const int crumbs = 10_000;
+        byte[] frame = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            streamId: 1,
+            flags: 0x4 | 0x1,
+            [
+                (":method", "GET"),
+                (":scheme", "https"),
+                (":path", "/"),
+                (":authority", "api.test"),
+                ("x-before", "1"),
+                .. Enumerable.Repeat(("cookie", "a=1"), crumbs),
+                ("x-after", "2"),
+            ]);
+        byte[] headerBlock = frame[9..]; // The field block, past the 9-octet frame header.
+        HPackDecoder decoder = new();
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        HPackDecodedHeaders decoded = decoder.DecodeRequestHeaders(headerBlock);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert — the joined value, in the place the first crumb arrived.
+        decoded.Headers[HttpHeaderKey.Cookie].Value.ShouldBe(string.Join("; ", Enumerable.Repeat("a=1", crumbs)));
+        decoded.Headers.Select(static header => header.Key.Value).ShouldBe(["x-before", "cookie", "x-after"]);
+        allocated.ShouldBeLessThan(16L * 1024 * 1024);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: HPackHuffmanDecoder should decode RFC 7541 §C.4 example strings")]
@@ -1530,7 +1457,7 @@ public class Http2TransportTests
         for (int cycle = 0; cycle < 6; cycle++)
         {
             int streamId = 1 + (cycle * 2);
-            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4 /* END_HEADERS */, streamId, Array.Empty<byte>()));
+            parts.Add(CreateRequestHeadersWithoutEndStream(streamId));
             parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 } /* CANCEL */));
         }
 
@@ -1553,7 +1480,7 @@ public class Http2TransportTests
         for (int cycle = 0; cycle < 5; cycle++)
         {
             int streamId = 1 + (cycle * 2);
-            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4, streamId, Array.Empty<byte>()));
+            parts.Add(CreateRequestHeadersWithoutEndStream(streamId));
             parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 }));
         }
 

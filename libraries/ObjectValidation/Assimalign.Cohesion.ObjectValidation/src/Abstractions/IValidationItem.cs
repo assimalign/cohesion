@@ -9,7 +9,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 public interface IValidationItem
 {
     /// <summary>
-    /// A stack of rules to be evaluated against the given context: <see cref="Evaluate(IValidationContext)"/>.
+    /// The rules chained to this item, which <see cref="Evaluate(IValidationContext)"/> runs in the order they
+    /// were chained (first in, first out).
     /// </summary>
     IValidationRuleQueue ItemRuleStack { get; }
 

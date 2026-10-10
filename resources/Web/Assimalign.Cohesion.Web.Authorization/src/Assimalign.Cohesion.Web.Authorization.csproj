@@ -1,8 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Authorization</RootNamespace>
+		<Description>Endpoint authorization for the Cohesion Web pipeline over the BCL ClaimsPrincipal. Immutable AuthorizationPolicy values carry self-evaluating requirements (an authenticated user, roles, claims with allowed values, sync or async delegate assertions, or a custom IAuthorizationRequirement) plus the authentication schemes they evaluate; AddAuthorization registers the default, fallback and named policies at builder time. RequireAuthorization and AllowAnonymous attach sealed AuthorizationMetadata to routes and groups, and UseAuthorization (after UseRouting and UseAuthentication) combines an endpoint's items, authenticates the policy's schemes, and challenges or forbids through Web.Authentication. An endpoint that requires authorization fails at dispatch when UseAuthorization did not process it. The registered options and each endpoint's effective policy are readable from the application context, so describers such as Web.OpenApi document what the middleware enforces.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 	</ItemGroup>
 </Project>

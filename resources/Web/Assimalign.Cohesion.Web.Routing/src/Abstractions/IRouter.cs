@@ -37,6 +37,21 @@ public interface IRouter
     RouteMatch Match(IHttpContext context);
 
     /// <summary>
+    /// Evaluates the request against the configured routes as though it used <paramref name="method"/>,
+    /// without invoking a handler or mutating the response.
+    /// </summary>
+    /// <remarks>
+    /// Resolves the endpoint a request <em>would</em> reach with another method. Routing uses it to find
+    /// the candidate endpoint of a CORS preflight: an <c>OPTIONS</c> request that names the method of the
+    /// actual request in <c>Access-Control-Request-Method</c>. Host constraints, precedence and the
+    /// <c>HEAD</c>-to-<c>GET</c> rule apply exactly as in <see cref="Match(IHttpContext)"/>.
+    /// </remarks>
+    /// <param name="context">The HTTP context to evaluate.</param>
+    /// <param name="method">The method to match with in place of the request's own method.</param>
+    /// <returns>A <see cref="RouteMatch"/> for <paramref name="method"/>.</returns>
+    RouteMatch Match(IHttpContext context, HttpMethod method);
+
+    /// <summary>
     /// Routes the request: on a successful match the mapped handler is invoked; on a method mismatch a 405
     /// response with an <c>Allow</c> header is produced; on no match the router takes no action.
     /// </summary>

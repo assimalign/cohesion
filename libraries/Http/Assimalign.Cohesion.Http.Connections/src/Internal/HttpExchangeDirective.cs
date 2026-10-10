@@ -6,9 +6,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// before reusing the connection). Derived from the exchange's flags rather than stored:
 /// an application-driven <see cref="IHttpContext.Cancel"/> maps to <see cref="Abort"/>, and an
 /// HTTP/1.1 takeover (<see cref="IHttpExchangeControl.TakeOver"/>, which finalizes the exchange
-/// out-of-band) maps to <see cref="TakeOver"/>. Deliberately internal: aborting is authored on
-/// the application surface (<see cref="IHttpContext.Cancel"/>) and takeover on the exchange
-/// control — this enum is how the transport reads the result, not a public seam.
+/// out-of-band) or an accepted HTTP/2 / HTTP/3 extended CONNECT tunnel
+/// (<see cref="IHttpExchangeControl.AcceptTunnelAsync"/>) maps to <see cref="TakeOver"/>.
+/// Deliberately internal: aborting is authored on the application surface
+/// (<see cref="IHttpContext.Cancel"/>) and takeover on the exchange control — this enum is how the
+/// transport reads the result, not a public seam.
 /// </summary>
 internal enum HttpExchangeDirective
 {
@@ -28,8 +30,9 @@ internal enum HttpExchangeDirective
 
     /// <summary>
     /// The transport has given up control of the exchange: a feature took over the underlying
-    /// byte stream, so the transport suppresses its own response for the exchange and stops
-    /// reusing the connection for further HTTP requests.
+    /// byte stream, so the transport suppresses its own response for the exchange. On HTTP/1.1 a
+    /// takeover claims the whole connection, which then stops carrying HTTP requests; on HTTP/2 and
+    /// HTTP/3 an accepted extended CONNECT tunnel claims only the exchange's stream.
     /// </summary>
     TakeOver = 2,
 }

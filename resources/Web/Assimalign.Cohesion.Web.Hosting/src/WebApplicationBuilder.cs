@@ -53,7 +53,23 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
     private bool _isBuilt;
 
+    // CreateBuilder(args) is the application entry point: it composes the default configuration
+    // and, for a plain application, the default listener (see ApplyDefaultEndpoints).
+    private readonly bool _isEntryPoint;
+
     internal void OwnEndpointCertificate(X509Certificate2 certificate) => _context.EndpointCertificates.Add(certificate);
+
+    /// <summary>
+    /// Gets the number of application features the built pipeline stamps onto every exchange; zero
+    /// until the pipeline is built (see <see cref="WebApplicationContext.StampedFeatureCount"/>).
+    /// </summary>
+    internal int StampedFeatureCount => _context.StampedFeatureCount;
+
+    /// <summary>
+    /// Gets or sets the endpoint a plain entry-point application binds when neither its code nor
+    /// its configuration declares a listener. Tests substitute an ephemeral port.
+    /// </summary>
+    internal IPEndPoint DevelopmentEndPoint { get; set; } = HttpServerConfiguration.DevelopmentEndPoint;
 
     public WebApplicationBuilder(WebApplicationOptions options)
         : this(options, resourceAssembly: null)
@@ -84,16 +100,16 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             options.Environment = resourceContext.EnvironmentName;
         }
 
-        Environment = resourceContext is null
-            ? new HostEnvironment(options.Environment!)
-            : new HostEnvironment(options.Environment!)
-            {
-                ContentRootPath = FileSystemPath.Parse(resourceContext.ContentRootPath),
-            };
+        string contentRootPath = ResolveContentRoot(options.ContentRootPath, resourceContext);
+        Environment = new HostEnvironment(options.Environment!)
+        {
+            ContentRootPath = FileSystemPath.Parse(contentRootPath),
+        };
         Configuration = new ConfigurationManager();
         if (args is not null)
         {
-            AddDefaultConfiguration(args, resourceContext);
+            _isEntryPoint = true;
+            AddDefaultConfiguration(args, contentRootPath, resourceContext);
         }
 
         Logging = new LoggerFactoryBuilder();
@@ -105,7 +121,11 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         });
         Server = new WebApplicationServerBuilder(this);
 
-        _context = new WebApplicationContext();
+        _context = new WebApplicationContext
+        {
+            ContentRootPath = Environment.ContentRootPath,
+            WebRootPath = ResolveWebRoot(contentRootPath, options.WebRootPath),
+        };
 
         if (_controlPlane is not null && resourceContext is not null)
         {
@@ -215,9 +235,26 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     }
 
     /// <summary>
-    /// 
+    /// Closes registration and builds the application.
     /// </summary>
-    /// <returns></returns>
+    /// <remarks>
+    /// Every request feature must be registered as an <see cref="IHttpFeature"/> singleton, the way
+    /// <c>IWebApplicationBuilder.AddFeature</c> and the feature packages' <c>builder.Services.Add&lt;Feature&gt;</c>
+    /// verbs register it: the host stamps the same instances onto every exchange, and middleware reads
+    /// them while the pipeline is composed. A scoped or transient <see cref="IHttpFeature"/> registration,
+    /// a registration under a contract derived from <see cref="IHttpFeature"/>, or an
+    /// <see cref="IHttpFeature"/> instance or implementation type that is <see cref="IDisposable"/> or
+    /// <see cref="IAsyncDisposable"/> fails the build. A disposable feature a factory registration produces
+    /// is rejected when the pipeline is built, because the product exists only once it is resolved.
+    /// </remarks>
+    /// <returns>The built application.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The application has already been built; the options ask for concurrent service start or stop;
+    /// an <see cref="IHttpFeature"/> registration is not a singleton; a registration's service type
+    /// derives from <see cref="IHttpFeature"/> without being <see cref="IHttpFeature"/>; or an
+    /// <see cref="IHttpFeature"/> registration's instance or implementation type is disposable. Each feature
+    /// error names the registration's position in <see cref="Services"/>.
+    /// </exception>
     public WebApplication Build()
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The application has already been built.");
@@ -225,11 +262,15 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             _options.StartServicesConcurrently || _options.StopServicesConcurrently,
             "Web application servers require serial host lifecycle execution so they start in registration order and stop in reverse order.");
 
+        ValidateFeatureRegistrations();
+
         if (_controlPlane is not null && _resourceContext?.GatewayName is not null &&
             (_controlPlane.ObservedEndpoints.ContainsKey("http") || _controlPlane.ObservedEndpoints.ContainsKey("https")))
         {
             ResourceControlPlaneMiddleware.Validate(_resourceContext);
         }
+
+        ApplyDefaultEndpoints();
 
         var applicationOptions = new WebApplicationOptions
         {
@@ -342,7 +383,10 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                 _context.EndpointCertificates.Add(issuer);
             }
             SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(leaf, chain, offline: true);
-            Server.UseServer(options => options.UseHttp1s(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
+
+            // An https origin offers h2 and http/1.1 and serves each connection the protocol its TLS
+            // handshake negotiated (RFC 7301, RFC 9113 §3.2); a client that negotiates none gets HTTP/1.1.
+            Server.UseServer(options => options.UseHttps(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
                 new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
         }
         else
@@ -371,9 +415,152 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             : null;
     }
 
-    private void AddDefaultConfiguration(string[] args, ResourceContext? resourceContext)
+    // A plain entry-point application (CreateBuilder(args), no generated control plane) that
+    // configured no listener and registered no custom server serves the Http:Endpoints section,
+    // or the loopback development endpoint when that section is empty, so `dotnet run` answers
+    // instead of running without a listener. Explicit compositions (CreateBuilder(options), a
+    // UseServer/UseConfiguration call, a custom server) and orchestrated resources, whose
+    // endpoints come from the ambient resource context, are left exactly as composed.
+    private void ApplyDefaultEndpoints()
     {
-        string contentRootPath = resourceContext?.ContentRootPath ?? AppContext.BaseDirectory;
+        if (!_isEntryPoint || _controlPlane is not null || Server.HasListenerConfiguration)
+        {
+            return;
+        }
+
+        int servers = 0;
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IWebApplicationServer))
+            {
+                servers++;
+            }
+        }
+
+        // The first registration is the default server itself.
+        if (servers > 1)
+        {
+            return;
+        }
+
+        Server.UseDefaultEndpoints(Configuration, DevelopmentEndPoint);
+    }
+
+    // Owner decision 35 (#1380): a request feature is an IHttpFeature singleton. The pipeline stamps
+    // one snapshot of the IHttpFeature aggregate onto every exchange, and composition-time readers
+    // (UseRouting, UseAntiforgery, the OpenAPI document) resolve the aggregate from the root provider.
+    // One scoped item makes the whole aggregate unresolvable from the root, and a transient item hands
+    // each reader its own instance, so routes mapped into one router are served by another. A
+    // registration under a narrower contract (IRouterFeature, say) never joins the aggregate, so it is
+    // never stamped. An exchange disposes the disposable features it carries when it ends, so a
+    // disposable feature, stamped as one shared instance, would be disposed after its first request.
+    // The provider's own validation sees none of these: this module registers factories and
+    // instances, whose lifetimes and products it does not inspect. The disposal check here covers the
+    // registrations that carry their product's type in the descriptor (an instance, as AddFeature(instance)
+    // and every static-factory verb register, or an implementation type); a factory's product exists only
+    // once it is resolved, so WebApplication's pipeline build checks it. Checked before the build adds its
+    // own registrations, so a rejected build leaves the builder as the caller composed it.
+    private void ValidateFeatureRegistrations()
+    {
+        int index = 0;
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IHttpFeature))
+            {
+                if (descriptor.Lifetime != ServiceLifetime.Singleton)
+                {
+                    throw new InvalidOperationException(
+                        $"The request feature registration {DescribeRegistration(descriptor, index)} is " +
+                        $"{descriptor.Lifetime}. A Web application feature must be a singleton: the host stamps " +
+                        "the same feature instances onto every exchange, and middleware such as UseRouting reads " +
+                        "them while the pipeline is composed. Register it with AddSingleton<IHttpFeature>, " +
+                        "IWebApplicationBuilder.AddFeature, or the feature package's builder.Services.Add<Feature> verb.");
+                }
+
+                if (IsDisposableImplementation(descriptor))
+                {
+                    string name = descriptor.ImplementationInstance is IHttpFeature feature ? $" '{feature.Name}'" : string.Empty;
+                    throw new InvalidOperationException(
+                        $"The request feature registration{name} {DescribeRegistration(descriptor, index)} is " +
+                        "disposable. The host stamps the same feature instance onto every exchange, and an exchange " +
+                        "disposes the disposable features it carries when it ends, so this instance would be disposed " +
+                        "after its first request. Keep disposable per-request state in a feature that middleware " +
+                        "installs on each exchange.");
+                }
+            }
+            else if (typeof(IHttpFeature).IsAssignableFrom(descriptor.ServiceType))
+            {
+                throw new InvalidOperationException(
+                    $"The registration {DescribeRegistration(descriptor, index)} uses the service type " +
+                    $"{descriptor.ServiceType.FullName}, which derives from IHttpFeature but is not IHttpFeature. " +
+                    "The host stamps only IHttpFeature registrations onto exchanges, so this feature would never " +
+                    "reach a request. Register it as IHttpFeature, with AddSingleton<IHttpFeature> or " +
+                    "IWebApplicationBuilder.AddFeature.");
+            }
+
+            index++;
+        }
+    }
+
+    private static bool IsDisposableImplementation(ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is { } instance)
+        {
+            return instance is IDisposable or IAsyncDisposable;
+        }
+
+        return descriptor.ImplementationType is { } type
+            && (typeof(IDisposable).IsAssignableFrom(type) || typeof(IAsyncDisposable).IsAssignableFrom(type));
+    }
+
+    private static string DescribeRegistration(ServiceDescriptor descriptor, int index)
+    {
+        string implementation = descriptor.ImplementationType?.FullName
+            ?? descriptor.ImplementationInstance?.GetType().FullName
+            ?? "created by a factory";
+
+        return $"builder.Services[{index}] ({descriptor.Lifetime} {descriptor.ServiceType.Name}, implementation {implementation})";
+    }
+
+    // The explicit option wins, then the ambient resource context, then the application's base
+    // directory (where the SDK copies appsettings*.json and wwwroot).
+    private static string ResolveContentRoot(FileSystemPath? configured, ResourceContext? resourceContext)
+    {
+        if (configured is { IsEmpty: false } contentRoot)
+        {
+            return System.IO.Path.GetFullPath(contentRoot.ToString());
+        }
+
+        return resourceContext?.ContentRootPath ?? AppContext.BaseDirectory;
+    }
+
+    // A configured web root is resolved against the content root and kept even when it does not
+    // exist yet (the static-files middleware then serves nothing). Without one, wwwroot under the
+    // content root is the web root only when that directory exists. The content root itself is
+    // never a web root: it holds appsettings*.json and the application's binaries.
+    private static FileSystemPath? ResolveWebRoot(string contentRootPath, FileSystemPath? configured)
+    {
+        if (configured is { IsEmpty: false } webRoot)
+        {
+            string path = webRoot.ToString();
+            return FileSystemPath.Parse(System.IO.Path.IsPathRooted(path)
+                ? System.IO.Path.GetFullPath(path)
+                : System.IO.Path.GetFullPath(System.IO.Path.Combine(contentRootPath, path)));
+        }
+
+        // Explicit branches: FileSystemPath converts implicitly from string, so "cond ? path : null"
+        // would type as FileSystemPath and turn the null into an empty (non-null) path.
+        string defaultWebRoot = System.IO.Path.Combine(contentRootPath, "wwwroot");
+        if (!Directory.Exists(defaultWebRoot))
+        {
+            return null;
+        }
+
+        return FileSystemPath.Parse(defaultWebRoot);
+    }
+
+    private void AddDefaultConfiguration(string[] args, string contentRootPath, ResourceContext? resourceContext)
+    {
         var contentRoot = new PhysicalFileSystem(new PhysicalFileSystemOptions
         {
             Root = contentRootPath,

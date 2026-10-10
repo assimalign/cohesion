@@ -46,6 +46,42 @@ public class HttpConnectionListenerOptionsTests
         options.BacklogCapacity.ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: Should default the exchange feature capacity to zero")]
+    public void ExchangeFeatureCapacity_OnCreate_ShouldDefaultToZero()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+
+        // Assert
+        options.ExchangeFeatureCapacity.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: Should reject a negative exchange feature capacity")]
+    public void ExchangeFeatureCapacity_OnNegativeValue_ShouldThrowArgumentOutOfRangeException()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+
+        // Act + Assert
+        Should.Throw<ArgumentOutOfRangeException>(() => options.ExchangeFeatureCapacity = -1);
+        options.ExchangeFeatureCapacity.ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: Should accept a zero or positive exchange feature capacity")]
+    [InlineData(0)]
+    [InlineData(16)]
+    public void ExchangeFeatureCapacity_OnNonNegativeValue_ShouldAcceptValue(int value)
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new() { ExchangeFeatureCapacity = 8 };
+
+        // Act
+        options.ExchangeFeatureCapacity = value;
+
+        // Assert
+        options.ExchangeFeatureCapacity.ShouldBe(value);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: UseHttp1 should reject a null listener")]
     public void UseHttp1_OnNullListener_ShouldThrowArgumentNullException()
     {

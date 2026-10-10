@@ -41,10 +41,15 @@ public static class HstsExtensions
         /// resolves nothing per request.
         /// </para>
         /// <para>
-        /// Connection security is the transport-derived typed scheme (#763); there is no scheme-string
-        /// sniffing. Excluded-host matching reuses <see cref="HttpHostMatcher"/> from the Http core, so
-        /// it shares the same case-insensitive, port-ignoring, IPv6-bracket-insensitive host semantics
-        /// as the rest of the stack.
+        /// Connection security is the effective typed scheme
+        /// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>): the scheme a trusted
+        /// TLS-terminating proxy asserted when the forwarded-headers middleware resolved one, otherwise the
+        /// transport-derived scheme (#763); there is no scheme-string or header sniffing. The excluded
+        /// hosts are matched against the effective host. Both are read after the pipeline unwinds, so
+        /// the forwarded identity is honored wherever <c>UseForwardedHeaders</c> sits in the pipeline.
+        /// Excluded-host matching reuses <see cref="HttpHostMatcher"/> from the Http core, so it shares
+        /// the same case-insensitive, port-ignoring, IPv6-bracket-insensitive host semantics as the rest
+        /// of the stack.
         /// </para>
         /// </remarks>
         public IWebApplicationPipelineBuilder UseHsts(Action<HstsOptions>? configure = null)

@@ -6,6 +6,10 @@ on:
       - 'libraries/OpenApi/**'
       - '!libraries/OpenApi/**/*.slnx'
       - '!libraries/OpenApi/**/*.md'
+      # The source generator ships inside OpenApi.Attributes and runs in the Generation and
+      # Integration tests, so a generator change rebuilds and retests the packages that carry it.
+      - 'analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/**'
+      - '!analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/**/*.md'
       - '.github/workflows/library-openapi.yml'                 # When Pipeline File Changes
 
 permissions:
@@ -19,8 +23,13 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             'Assimalign.Cohesion.OpenApi',
+            'Assimalign.Cohesion.OpenApi.Attributes',
+            'Assimalign.Cohesion.OpenApi.Fluent',
+            'Assimalign.Cohesion.OpenApi.Generation',
+            'Assimalign.Cohesion.OpenApi.Integration',
             'Assimalign.Cohesion.OpenApi.Serialization',
             'Assimalign.Cohesion.OpenApi.Validation',
+            'Assimalign.Cohesion.OpenApi.Versioning',
         ]
     steps:
       - uses: actions/checkout@v4

@@ -6,6 +6,8 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -442,6 +444,56 @@ public sealed class ResourceControlPlaneHostingTests
         application.Context.Environment.Name.ShouldBe("ControlPlaneTest");
         report.Contributions.Keys.ShouldContain("builder");
         report.Contributions.Keys.ShouldContain("services");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Ambient https endpoint: Should serve HTTP/2 and HTTP/1.1 on one port")]
+    public async Task AmbientHttpsEndpoint_WhenBound_ShouldServeHttp2AndHttp11()
+    {
+        // Arrange — the orchestrated https endpoint with its certificate in the default 'tls' mount.
+        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
+        int port = ReservePort();
+        Uri endpoint = Uri.CreateEndpoint("https", "127.0.0.1", port);
+        using X509Certificate2 certificate = new ResourceContext(environmentName: AppEnvironment.Keys.Local)
+            .CreateDevelopmentEndpointCertificate("127.0.0.1");
+        using ECDsa key = certificate.GetECDsaPrivateKey()!;
+        string pem = certificate.ExportCertificatePem() + "\n" + key.ExportPkcs8PrivateKeyPem();
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
+            environmentName: "AmbientHttps",
+            endpoints: new Dictionary<string, Uri> { ["https"] = endpoint },
+            mounts: new Dictionary<string, ResourceMount> { ["tls"] = ResourceMount.FromBytes(Encoding.UTF8.GetBytes(pem)) }));
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
+        await using WebApplication application = builder.Build();
+        await ((IHost)application).StartAsync(cancellation.Token);
+
+        try
+        {
+            foreach (Version version in new[] { HttpVersion.Version20, HttpVersion.Version11 })
+            {
+                // Act — a fresh client per version, so each request negotiates its own connection.
+                using SocketsHttpHandler handler = new()
+                {
+                    SslOptions = { RemoteCertificateValidationCallback = static (_, _, _, _) => true },
+                };
+                using HttpClient client = new(handler);
+                using HttpRequestMessage request = new(HttpMethod.Get, new Uri(endpoint, "/healthz"))
+                {
+                    Version = version,
+                    VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                };
+                using HttpResponseMessage response = await client.SendAsync(request, cancellation.Token);
+
+                // Assert — h2 is offered beside http/1.1, and each client gets the protocol it asked for.
+                response.StatusCode.ShouldBe(HttpStatusCode.OK);
+                response.Version.ShouldBe(version);
+            }
+        }
+        finally
+        {
+            await ((IHost)application).StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - CreateBuilder(): remains a plain application")]

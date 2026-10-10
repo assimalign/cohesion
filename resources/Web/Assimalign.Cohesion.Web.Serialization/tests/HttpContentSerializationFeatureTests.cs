@@ -17,15 +17,14 @@ public class HttpContentSerializationFeatureTests
 {
     private static IHttpContentSerializationFeature Compose(params IHttpContentReader[] readers)
     {
-        TestWebApplicationBuilder builder = new();
-        ContentSerializationBuilder composition = builder.AddContentSerialization();
+        ContentSerializationBuilder composition = new();
 
         foreach (IHttpContentReader reader in readers)
         {
             composition.AddReader(reader);
         }
 
-        return builder.Features.OfType<IHttpContentSerializationFeature>().Single();
+        return composition.Build();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - GetReader: Should resolve an exact media-type match")]
@@ -103,10 +102,8 @@ public class HttpContentSerializationFeatureTests
     public void GetWriter_RangeCoveredMediaType_ShouldResolve()
     {
         // Arrange
-        TestWebApplicationBuilder builder = new();
         FakeContentWriter writer = new(HttpMediaType.ApplicationJson, HttpMediaType.Parse("application/*"));
-        builder.AddContentSerialization().AddWriter(writer);
-        IHttpContentSerializationFeature feature = builder.Features.OfType<IHttpContentSerializationFeature>().Single();
+        IHttpContentSerializationFeature feature = new ContentSerializationBuilder().AddWriter(writer).Build();
 
         // Act
         IHttpContentWriter? resolved = feature.GetWriter(HttpMediaType.Parse("application/vnd.example"));

@@ -17,6 +17,11 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Adds a nested validation profile to be used to validate <typeparamref name="TValue"/>.
     /// </summary>
+    /// <remarks>
+    /// An error the nested profile reports with its default source (its member selector, such as
+    /// <c>a =&gt; a.City</c>) is reported under this member: <c>p =&gt; p.Address.City</c>. A source the
+    /// nested rule set explicitly is kept as written.
+    /// </remarks>
     /// <typeparam name="TValue"></typeparam>
     /// <param name="builder"></param>
     /// <param name="profile"></param>
@@ -35,7 +40,8 @@ public static partial class ValidationExtensions
         {
             Profile = profile,
             Name = $"Validate member with Profile for {builder.ValidationItem}",
-            Error = new ValidationError() { }
+            Error = new ValidationError() { },
+            ParentSource = builder.ValidationItem.ToString()
         };
 
         builder.ValidationItem.ItemRuleStack.Push(rule);
@@ -46,6 +52,11 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a nested validation profile with the described rules in the <paramref name="configure"/> parameter.
     /// </summary>
+    /// <remarks>
+    /// An error a nested rule reports with its default source (its member selector, such as
+    /// <c>a =&gt; a.City</c>) is reported under this member: <c>p =&gt; p.Address.City</c>. A source the
+    /// nested rule set explicitly is kept as written.
+    /// </remarks>
     /// <typeparam name="TValue"></typeparam>
     /// <param name="builder"></param>
     /// <param name="configure">A delegate to configure a custom validation error.</param>
@@ -66,7 +77,8 @@ public static partial class ValidationExtensions
         {
             Profile = profile,
             Name = $"Validate child members of {builder.ValidationItem}",
-            Error = new ValidationError() { }
+            Error = new ValidationError() { },
+            ParentSource = builder.ValidationItem.ToString()
         };
 
         builder.ValidationItem.ItemRuleStack.Push(rule);
@@ -79,6 +91,10 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the member must be in the format of an email address.
     /// </summary>
+    /// <remarks>
+    /// The check runs in time linear in the value's length. An address longer than 254 UTF-8 octets, or with a
+    /// local part longer than 64, fails (RFC 5321 §4.5.3.1).
+    /// </remarks>
     /// <param name="builder">The current instance of the validation builder.</param>
     /// <returns><see cref="IValidationRuleBuilder{TValue}"/></returns>
     /// <exception cref="ValidationException">Is thrown when <see cref="IValidationRuleBuilder{TValue}.ValidationItem"/> is not of type <see cref="IValidationRule{TValue}"/>.</exception>
@@ -97,6 +113,10 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the member must be in the format of an email address.
     /// </summary>
+    /// <remarks>
+    /// The check runs in time linear in the value's length. An address longer than 254 UTF-8 octets, or with a
+    /// local part longer than 64, fails (RFC 5321 §4.5.3.1).
+    /// </remarks>
     /// <param name="builder">The current instance of the validation builder.</param>
     /// <param name="configure"></param>
     /// <returns><see cref="IValidationRuleBuilder{TValue}"/></returns>
@@ -1276,9 +1296,15 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared. A pattern the non-backtracking engine supports is matched in
+    /// time linear in the value's length, and any other by the backtracking engine. Each match may run for one
+    /// second, per element under <c>RuleForEach</c>, and a match that runs out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <returns></returns>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -1304,11 +1330,17 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared. A pattern the non-backtracking engine supports is matched in
+    /// time linear in the value's length, and any other by the backtracking engine. Each match may run for one
+    /// second, per element under <c>RuleForEach</c>, and a match that runs out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <param name="configure">A delegate to configure a custom validation error.</param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException"></exception>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern, Action<IValidationError> configure)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -1345,10 +1377,18 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared, with <paramref name="options"/>. A pattern and options the
+    /// non-backtracking engine supports are matched in time linear in the value's length, and any others by the
+    /// backtracking engine. Each match may run for one second, per element under <c>RuleForEach</c>, and a match
+    /// that runs out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <param name="options"></param>
     /// <returns></returns>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression, or <paramref name="options"/> is not a valid combination.</exception>
+    /// <exception cref="NotSupportedException">Is thrown when <paramref name="options"/> includes <see cref="RegexOptions.NonBacktracking"/> and <paramref name="pattern"/> uses a construct that engine does not support.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern, RegexOptions options)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -1373,12 +1413,20 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a rule specifying that the input string value must match the input <paramref name="pattern"/>.
     /// </summary>
+    /// <remarks>
+    /// The pattern is built when the rule is declared, with <paramref name="options"/>. A pattern and options the
+    /// non-backtracking engine supports are matched in time linear in the value's length, and any others by the
+    /// backtracking engine. Each match may run for one second, per element under <c>RuleForEach</c>, and a match
+    /// that runs out of time fails the rule.
+    /// </remarks>
     /// <param name="builder"></param>
     /// <param name="pattern"></param>
     /// <param name="options"></param>
     /// <param name="configure">A delegate to configure a custom validation error.</param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException"></exception>
+    /// <exception cref="ArgumentException">Is thrown when <paramref name="pattern"/> is not a valid regular expression, or <paramref name="options"/> is not a valid combination.</exception>
+    /// <exception cref="NotSupportedException">Is thrown when <paramref name="options"/> includes <see cref="RegexOptions.NonBacktracking"/> and <paramref name="pattern"/> uses a construct that engine does not support.</exception>
     public static IValidationRuleBuilder<string> Matches(this IValidationRuleBuilder<string> builder, string pattern, RegexOptions options, Action<IValidationError> configure)
     {
         if (string.IsNullOrEmpty(pattern))

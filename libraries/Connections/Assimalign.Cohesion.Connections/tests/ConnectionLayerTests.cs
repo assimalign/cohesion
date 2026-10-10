@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Threading.Tasks;
 
@@ -114,6 +115,26 @@ public class ConnectionLayerTests
         LayerWrappedConnection innerWrapper = outer.Inner.ShouldBeOfType<LayerWrappedConnection>();
         innerWrapper.LayerName.ShouldBe("first");
         innerWrapper.Inner.ShouldBeSameAs(inner);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections] - ConnectAsync: A failed upgrade should dispose the dialed connection")]
+    public async Task ConnectAsync_WhenTheUpgradeFails_ShouldDisposeTheDialedConnectionAndRethrow()
+    {
+        // Arrange
+        TestConnection dialed = new();
+        TestConnectionFactory factory = new();
+        factory.Enqueue(dialed);
+        IOException failure = new("The server's certificate was refused.");
+        ControlledConnectionLayer layer = new();
+        layer.Fail(dialed, failure);
+        IConnectionFactory layered = factory.Use(layer);
+
+        // Act
+        Exception? exception = await Record.ExceptionAsync(async () => await layered.ConnectAsync(_testEndPoint));
+
+        // Assert
+        exception.ShouldBeSameAs(failure);
+        dialed.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
     }
 
     [Fact]

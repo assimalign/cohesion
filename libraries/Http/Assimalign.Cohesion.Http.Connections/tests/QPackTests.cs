@@ -148,7 +148,7 @@ public class QPackTests
         // Prefix (0,0) + Indexed Field Line, static, index 25 (:status 200).
         byte[] section = [0x00, 0x00, 0xC0 | 25];
 
-        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section);
+        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section, long.MaxValue);
 
         fields.ShouldHaveSingleItem();
         fields[0].ShouldBe((":status", "200"));
@@ -160,7 +160,7 @@ public class QPackTests
         // Prefix + Literal w/ Name Reference (static, name index 4 = content-length) + value "42".
         byte[] section = [0x00, 0x00, 0x50 | 4, 0x02, (byte)'4', (byte)'2'];
 
-        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section);
+        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section, long.MaxValue);
 
         fields.ShouldHaveSingleItem();
         fields[0].ShouldBe(("content-length", "42"));
@@ -176,7 +176,7 @@ public class QPackTests
         QPackStringCodec.Encode(stream, "x-custom", 3, 0b0010_0000);
         QPackStringCodec.Encode(stream, "hello", 7, 0x00);
 
-        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(stream.ToArray());
+        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(stream.ToArray(), long.MaxValue);
 
         fields.ShouldHaveSingleItem();
         fields[0].ShouldBe(("x-custom", "hello"));
@@ -187,7 +187,7 @@ public class QPackTests
     {
         // Required Insert Count = 1 — implies a dynamic-table reference.
         byte[] section = [0x01, 0x00, 0xC0 | 25];
-        Should.Throw<InvalidDataException>(() => QPackFieldSectionDecoder.Decode(section));
+        Should.Throw<InvalidDataException>(() => QPackFieldSectionDecoder.Decode(section, long.MaxValue));
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - QPack: Rejects dynamic and post-base references")]
@@ -198,7 +198,7 @@ public class QPackTests
     public void Decode_DynamicOrPostBaseReference_Throws(int firstFieldByte)
     {
         byte[] section = [0x00, 0x00, (byte)firstFieldByte, 0x00, 0x00];
-        Should.Throw<InvalidDataException>(() => QPackFieldSectionDecoder.Decode(section));
+        Should.Throw<InvalidDataException>(() => QPackFieldSectionDecoder.Decode(section, long.MaxValue));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - QPack: Rejects out-of-range static index")]
@@ -207,7 +207,7 @@ public class QPackTests
         // Indexed Field Line, static, index 99 (one past the table): 0xFF then
         // continuation 99 - 63 = 36.
         byte[] section = [0x00, 0x00, 0xFF, 36];
-        Should.Throw<InvalidDataException>(() => QPackFieldSectionDecoder.Decode(section));
+        Should.Throw<InvalidDataException>(() => QPackFieldSectionDecoder.Decode(section, long.MaxValue));
     }
 
     // ---- Encoder + round-trip (RFC 9204 §4.5) ----
@@ -235,7 +235,7 @@ public class QPackTests
     {
         byte[] encoded = QPackFieldSectionEncoder.Encode([("X-Custom", "V")]);
 
-        List<(string Name, string Value)> decoded = QPackFieldSectionDecoder.Decode(encoded);
+        List<(string Name, string Value)> decoded = QPackFieldSectionDecoder.Decode(encoded, long.MaxValue);
         decoded.ShouldHaveSingleItem();
         decoded[0].Name.ShouldBe("x-custom");
         decoded[0].Value.ShouldBe("V");
@@ -253,7 +253,7 @@ public class QPackTests
         ];
 
         byte[] encoded = QPackFieldSectionEncoder.Encode(fields);
-        List<(string Name, string Value)> decoded = QPackFieldSectionDecoder.Decode(encoded);
+        List<(string Name, string Value)> decoded = QPackFieldSectionDecoder.Decode(encoded, long.MaxValue);
 
         decoded.ShouldBe(fields.ToList());
     }

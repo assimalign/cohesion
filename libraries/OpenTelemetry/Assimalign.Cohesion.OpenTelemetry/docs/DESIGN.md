@@ -2,7 +2,7 @@
 
 ## Intent and boundaries
 
-This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using BCL HttpClient and System.Text.Json. Core is the only direct project dependency. Hosting.Telemetry owns the Logging adapter; this package is transport-only, with internal implementation types. There is no receiver or instrumentation SDK here, no gRPC and no protobuf binary encoder. Protobuf is deferred. Traces and metrics are reserved in OtlpSignal but deferred: libraries/Logging has no span or instrument primitive; ILoggerEntry (Abstractions/ILoggerEntry.cs) is its only structured diagnostics record.
+This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using BCL HttpClient and System.Text.Json. Core is the only direct project dependency. Hosting.Telemetry owns the Logging adapter; this package is transport-only, with internal implementation types. There is no receiver or instrumentation SDK here, no gRPC and no protobuf binary encoder. Protobuf is deferred. Traces and metrics are reserved in OtlpSignal but deferred. libraries/Logging has no span or instrument primitive; ILoggerEntry (Abstractions/ILoggerEntry.cs) is its only structured diagnostics record. Emitters use the BCL ActivitySource and Meter instead (the Web server's `Assimalign.Cohesion.Web.Hosting`, #1064), so a trace or metric exporter would subscribe through ActivityListener and MeterListener (#317).
 
 ## JSON mapping and AOT
 
@@ -41,4 +41,4 @@ Hosting.Telemetry registers an IHostService to flush within the lesser of five s
 
 ## gRPC deferral
 
-The Cohesion HTTP server has no application/grpc framing or service dispatch. IHttpResponse.Trailers defaults to HttpTrailerCollection.Unsupported (libraries/Http/Assimalign.Cohesion.Http/src/Abstractions/IHttpResponse.cs); HTTP/1 and HTTP/2 read trailers but do not emit response trailers/grpc-status. LocalPlanController.CanRealize already refuses gRPC probes. Implementing gRPC requires that separate server capability, not just changing a content type.
+The Cohesion HTTP server has no application/grpc framing or service dispatch. Trailers no longer stand in the way: decision 18 (docs/libraries/Http/DECISIONS.md, ADR 2) ships response trailers on HTTP/2 and HTTP/3, so a handler could stage grpc-status on IHttpResponse.Trailers there, while HTTP/1.1 keeps the unsupported collection. Request trailers are read on all three versions. LocalPlanController.CanRealize already refuses gRPC probes. Implementing gRPC still requires that separate server capability — message framing, serialization, and service dispatch — not just changing a content type; gRPC hosting stays outside the HTTP/Web program.

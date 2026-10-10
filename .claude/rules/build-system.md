@@ -228,7 +228,11 @@ orchestration gateway:
   family is classified case-insensitively.
   COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
   integrations from roots/features. Each assembly is filtered against the project's named
-  exemptions independently. COHRES002 still checks only the exact runtime module and excludes the module's own hosting family.
+  exemptions independently. COHRES002 checks only the exact runtime module; since owner decision
+  2026-10-09 it rejects only the same-area `Testing`, `ApplicationModel`,
+  `ApplicationModel.Orchestration`, framework-producer, and harness projects among its direct
+  references, and `<Area>.ApplicationModel` or `<Area>.ApplicationModel.Orchestration` anywhere in
+  its resolved closure (`resource-areas.md`).
 - **COHAM002** requires `<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>` for
   every non-harness `resources/**` assembly whose name ends in `.ApplicationModel` or
   `.ApplicationModel.Orchestration`. One `using` then composes every area's verbs and every opt-in
@@ -422,7 +426,7 @@ Both publish jobs re-verify `checksums.sha256` before pushing, so "what we publi
 A package ships only if **(1)** a per-area CI workflow builds it, **(2)** it is not `IsPackable=false`, and **(3)** it has at least one source file. `Assert-CohesionReleaseInventory` enforces all three in both directions — a package CI never built cannot ship, and a packable project CI does build cannot be silently omitted — plus three guards that the build itself cannot provide:
 
 - **Dependency closure.** A public `CohesionProjectReference` becomes a `<dependency>` in the `.nuspec`. If the target is not itself shipped, the package publishes green and then restores to NU1101 for every consumer — permanently, since nuget.org unlists but never deletes. A name that resolves to no project at all is dropped silently by the reference resolver, so that case warns rather than fails.
-- **No empty packages.** Six projects under `libraries/` and `resources/` currently compile to an empty assembly: Amqp, the three Dns.Client transports, Web.Authorization, and Web.Cors (`Assert-CohesionReleaseInventory` prints the live set). They stay in CI, and the two Web ones still reach consumers inside the App.Web packs, but the release publishes no standalone package for them; `$script:CohesionReleaseSourcelessPackage` is the deliberate opt-in for reserving such an id anyway.
+- **No empty packages.** Four projects under `libraries/` currently compile to an empty assembly: Amqp and the three Dns.Client transports (`Assert-CohesionReleaseInventory` prints the live set). They stay in CI, but the release publishes no standalone package for them; `$script:CohesionReleaseSourcelessPackage` is the deliberate opt-in for reserving such an id anyway.
 - **No matrix blind spots.** Every packable project with source under `libraries/`, `resources/`, `sdks/`, `analyzers/`, `tooling/`, or `extensions/` must appear in a workflow's static `projects` matrix or have an exact-path entry with a non-empty reason in `$script:CohesionCiMatrixExclusion`. This catches a project omitted from both the inventory and CI, which the two-way set comparison cannot see. Existing gaps are recorded individually rather than hidden by path or name wildcards.
 
 Note what (1) does *not* claim: 12 shipping entries have no tests csproj beside them, so "CI builds it" is the guarantee and "CI tests it" is true of most, not all.

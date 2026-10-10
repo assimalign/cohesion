@@ -38,8 +38,9 @@ rationale in `analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/docs
 
 ## Adding an integration — the whole recipe
 
-One declaration file in the owning library, one line in the canary. No csproj edits on either
-library, no MSBuild edits, no generator edits, no slnx/CI edits, no new project.
+One declaration file in the owning library, one line in the canary, and one path in the canary's
+CI trigger. No csproj edits on either library, no MSBuild edits, no generator edits, no slnx edits,
+no new project.
 
 **Preferred shape — the builder template (zero added public surface).** If the library already has
 a publicly-constructible builder (`new ThingBuilder()` → configure → `Build()`), name its
@@ -66,7 +67,13 @@ of declaring `HttpClientFactoryBuilder.Build`).
 **Fallback shape — a static factory** for compositions a builder can't express: a `public static`
 factory class whose method the attribute names. Quarantine it — `[EditorBrowsable(
 EditorBrowsableState.Never)]`, ideally in a `<RootNamespace>.ComponentModel` sub-namespace — since
-it exists only for the generator to call. If the product is disposable the factory **must** return
+it exists only for the generator to call. The generator emits the verb into the **factory type's
+namespace**, so a factory in a sub-namespace makes every caller import that sub-namespace too; when
+the verb belongs beside the package's other verbs, keep the factory in a `ComponentModel/` folder
+but declare the root namespace (Web precedent: `RoutingComponents` in `Assimalign.Cohesion.Web.Routing`
+projects `builder.Services.AddRouting()`). The builder template always takes a required
+`Action<TBuilder>`, so a verb callers invoke bare (`AddRouting()`) or with only an optional options
+callback is a static factory. If the product is disposable the factory **must** return
 `Func<IServiceProvider, T>`, never a bare instance: an instance registration becomes a
 `ConstantCallSite`, which the resolver returns **without** `CaptureDisposable`, so the container
 would never dispose it (`COHCMP0007` guards this; the builder template is immune by construction).
@@ -75,13 +82,28 @@ overload of the named method is projected, so adding an overload needs no attrib
 
 **Both shapes:** add one `CohesionProjectReference` for the library to
 `build/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj` and exercise the verb in its
-`IntegrationSurface.cs`. **Never skip this** — the canary is the only thing that catches
-sink-signature drift, which otherwise breaks consumers while the declaring library's CI stays
-green.
+`IntegrationSurface.cs`, calling every overload, then add the library's path to the `push.paths`
+filter of `.github/workflows/analyzers.yml`, which builds the canary. **Never skip this** — the
+canary is the only thing that catches sink-signature drift, which otherwise breaks consumers while
+the declaring library's CI stays green.
 
-Changing lifetime = change `targetMethodName` (`AddScoped`, …). Deleting = delete the attribute
-line (source-breaking for consumers, same severity as deleting a public method). A method group
-mixing static and instance members is rejected (`COHCMP0003`).
+**Lifetime is not just `targetMethodName`.** Naming `AddScoped` or `AddTransient` changes the
+descriptor's lifetime, but what a resolve returns depends on the shape:
+
+- **Builder template:** the verb builds one product eagerly, at registration, and registers
+  `_ => product`, so every scope and every transient resolve gets that same instance, and a
+  disposable product is disposed with the first scope and then handed out disposed. A builder
+  template targets `AddSingleton`.
+- **Static factory returning an instance:** only the `AddSingleton` instance overload binds; any
+  other sink fails to compile in the consumer.
+- **Static factory returning `Func<IServiceProvider, T>`:** the only shape where the sink's
+  lifetime is real, because the container invokes the factory per scope or per resolve.
+
+A seam owner may also require a lifetime: `Web.Hosting` rejects any `IHttpFeature` registration
+that is not a singleton at `Build` (owner decision 35, 2026-10-09), so every Web feature
+integration targets `AddSingleton`. Deleting = delete the attribute line (source-breaking for
+consumers, same severity as deleting a public method). A method group mixing static and instance
+members is rejected (`COHCMP0003`).
 
 ## Rules
 
@@ -103,8 +125,11 @@ mixing static and instance members is rejected (`COHCMP0003`).
 - **Both libraries already reference each other's family** (e.g. `Configuration.Json` →
   `Configuration`): write the `extension(...)` verb in the owning package — that is the ordinary
   "builder verbs ship with their feature" rule.
-- **The verb returns a sub-builder** for others to graft onto (`AddAuthentication` →
-  `AuthenticationBuilder`): the projected verb always returns the seam; hand-write these.
+- **The verb must return a sub-builder** that callers keep using after the call: the projected
+  verb always returns the seam. A sub-builder that is only configured at registration is the
+  builder template's configure callback instead: owner decision 34 (2026-10-09) moved Web's
+  `AddAuthentication` → `AuthenticationBuilder` to `builder.Services.AddAuthentication(auth =>
+  auth.AddCookie())`, and `AddErrorHandling` and `AddContentSerialization` the same way.
 - **Ordering matters** (`IWebApplicationPipelineBuilder` `Use*`/`Map*`): out of scope by design.
 - **The glue is a real library** (own options types, tests, docs): make it a real package.
 

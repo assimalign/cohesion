@@ -56,6 +56,102 @@ public class QuicMultiplexedConnectionTests
             ConnectionSecurity.Tls));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - ApplicationProtocol: Should report the protocol ALPN selected on both peers")]
+    public async Task ApplicationProtocol_OnEstablishedPair_ShouldReportNegotiatedProtocol()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+
+        // Assert — the QUIC handshake is a TLS 1.3 handshake (RFC 9001), so both peers expose it.
+        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
+        pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - TlsProtocol and CipherSuite: Should report the TLS 1.3 session on both peers")]
+    public async Task TlsProtocolAndCipherSuite_OnEstablishedPair_ShouldReportTls13Session()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        ITlsConnectionInfo server = pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
+        ITlsConnectionInfo client = pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
+
+        // Assert
+        server.TlsProtocol.ShouldBe(SslProtocols.Tls13);
+        client.TlsProtocol.ShouldBe(SslProtocols.Tls13);
+        server.CipherSuite.ShouldNotBe(default);
+        server.CipherSuite.ShouldBe(client.CipherSuite);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - RemoteCertificate: Should report each peer's certificate to the other")]
+    public async Task RemoteCertificate_WithClientCertificate_ShouldReportPeerCertificates()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the server requests a client certificate and accepts the test one.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        using X509Certificate2 clientCertificate = QuicTestCertificate.CreateClient();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(
+            certificate,
+            cancellation.Token,
+            listener =>
+            {
+                listener.ServerAuthenticationOptions.ClientCertificateRequired = true;
+                listener.ServerAuthenticationOptions.RemoteCertificateValidationCallback = static (_, _, _, _) => true;
+            },
+            client =>
+            {
+                client.ClientAuthenticationOptions.ClientCertificates = new X509CertificateCollection { clientCertificate };
+                client.ClientAuthenticationOptions.LocalCertificateSelectionCallback = (_, _, _, _, _) => clientCertificate;
+            });
+
+        // Assert
+        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
+        pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(certificate.Thumbprint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - RemoteCertificate: Should be null on the server when the client presents none")]
+    public async Task RemoteCertificate_WithoutClientCertificate_ShouldBeNullOnServer()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+
+        // Assert
+        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldBeNull();
+    }
+
     [Fact]
     public async Task OpenStreamAsync_Bidirectional_ShouldEchoAcrossPeers()
     {
@@ -268,6 +364,328 @@ public class QuicMultiplexedConnectionTests
         endOfStream.Buffer.IsEmpty.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream ConnectionClosed: A peer aborting the stream should signal the other end without a read or write")]
+    public async Task StreamConnectionClosed_OnPeerAbort_ShouldFire()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        await using Connection clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+
+        // A freshly opened QUIC stream is not visible to the peer until data is flushed on it.
+        await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
+
+        await using Connection serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await ReadBytesAsync(serverStream.Input, 1, cancellation.Token);
+
+        TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = serverStream.ConnectionClosed.Register(() => closed.TrySetResult());
+
+        // Act — RESET_STREAM and STOP_SENDING from the client.
+        clientStream.Abort();
+
+        // Assert
+        try
+        {
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (TimeoutException)
+        {
+            throw new ShouldAssertException("The server stream's ConnectionClosed did not fire after the peer aborted the stream.");
+        }
+    }
+
+    // Sentinel defaults for the code-carrying tests, so an assertion proves the caller's code reached the
+    // peer rather than a coincidental default.
+    private const long sentinelStreamErrorCode = 0x33;
+    private const long sentinelCloseErrorCode = 0x22;
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortRead: Should send STOP_SENDING with the caller's code")]
+    public async Task AbortRead_WithErrorCode_ShouldSendStopSendingWithTheCode()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act
+            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x42);
+
+            // Assert — the client's sending direction is stopped with the code, and the server's own
+            // stream keeps its lifecycle: aborting one direction is not the stream ending.
+            QuicException exception = await WaitForClientWriteFailureAsync(clientStream, cancellation.Token);
+
+            exception.QuicError.ShouldBe(QuicError.StreamAborted);
+            exception.ApplicationErrorCode.ShouldBe(0x42);
+            serverStream.State.ShouldBe(ConnectionState.Open);
+            serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortRead: Later reads should fail even when the pipe still holds received octets")]
+    public async Task AbortRead_WithBufferedOctets_ShouldFailLaterReads()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the server's pipe holds octets it received but the holder has not examined, so a read
+        // could be answered from the buffer without touching the QUIC stream.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            await clientStream.Output.WriteAsync(new byte[] { 2, 3, 4, 5 }, cancellation.Token);
+            await BufferWithoutExaminingAsync(serverStream.Input, 4, cancellation.Token);
+
+            // Act
+            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x42);
+
+            // Assert — the contract: every later read fails, buffered octets included, as on the in-memory driver.
+            QuicException read = await Should.ThrowAsync<QuicException>(
+                async () => await serverStream.Input.ReadAsync(cancellation.Token));
+            read.QuicError.ShouldBe(QuicError.OperationAborted);
+            Should.Throw<QuicException>(() => serverStream.Input.TryRead(out _));
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortWrite: Should send RESET_STREAM with the caller's code")]
+    public async Task AbortWrite_WithErrorCode_ShouldSendResetStreamWithTheCode()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act
+            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x43);
+
+            // Assert — the client's read sees the server's sending direction reset with the code.
+            QuicException exception = await Should.ThrowAsync<QuicException>(
+                async () => await clientStream.Input.ReadAsync(cancellation.Token));
+
+            exception.QuicError.ShouldBe(QuicError.StreamAborted);
+            exception.ApplicationErrorCode.ShouldBe(0x43);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortRead: Should keep the receiving direction's code when the stream is later aborted")]
+    public async Task Abort_AfterAbortRead_ShouldKeepTheReadDirectionCode()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act — the reset an HTTP/3 server sends: both directions with the code, then the lifecycle abort.
+            IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!;
+            abort.AbortWrite(0x10e);
+            abort.AbortRead(0x10e);
+            serverStream.Abort();
+
+            // Assert — both directions carry the code; the default never reaches the wire.
+            QuicException read = await Should.ThrowAsync<QuicException>(
+                async () => await clientStream.Input.ReadAsync(cancellation.Token));
+            QuicException write = await WaitForClientWriteFailureAsync(clientStream, cancellation.Token);
+
+            read.ApplicationErrorCode.ShouldBe(0x10e);
+            write.ApplicationErrorCode.ShouldBe(0x10e);
+            serverStream.State.ShouldBe(ConnectionState.Aborted);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream AbortRead: A response completed after stopping the request should still reach the peer whole")]
+    public async Task AbortRead_ThenCompleteOutput_ShouldDeliverTheResponseAndItsFin()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the RFC 9114 §4.1 pattern: the server stops the rest of the request with a code, then
+        // sends its whole response and ends its side gracefully.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        byte[] response = [9, 8, 7];
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act
+            serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortRead(0x100);
+            await serverStream.Output.WriteAsync(response, cancellation.Token);
+            await serverStream.Output.CompleteAsync();
+
+            // Assert — the whole response and the FIN, then the stop with the caller's code, not the default.
+            byte[] received = await ReadBytesAsync(clientStream.Input, response.Length, cancellation.Token);
+            ReadResult end = await clientStream.Input.ReadAsync(cancellation.Token);
+            QuicException write = await WaitForClientWriteFailureAsync(clientStream, cancellation.Token);
+
+            received.ShouldBe(response);
+            end.IsCompleted.ShouldBeTrue();
+            end.Buffer.IsEmpty.ShouldBeTrue();
+            write.QuicError.ShouldBe(QuicError.StreamAborted);
+            write.ApplicationErrorCode.ShouldBe(0x100);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Stream abort: A code outside the QUIC range should be rejected")]
+    [InlineData(-1L)]
+    [InlineData(1L << 62)]
+    public async Task AbortReadAndWrite_WithCodeOutOfRange_ShouldThrowArgumentOutOfRange(long errorCode)
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!;
+
+            // Act / Assert
+            Should.Throw<ArgumentOutOfRangeException>(() => abort.AbortRead(errorCode));
+            Should.Throw<ArgumentOutOfRangeException>(() => abort.AbortWrite(errorCode));
+            Should.Throw<ArgumentOutOfRangeException>(() => pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionAbort>()!.Abort(errorCode));
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Connection Abort: Should close the connection with the caller's code")]
+    public async Task Abort_WithErrorCode_ShouldCloseTheConnectionWithTheCode()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act — an HTTP/3 connection error, H3_FRAME_UNEXPECTED; the later disposal must not replace it.
+            pair.Server.ShouldBeAssignableTo<IMultiplexedConnectionAbort>()!.Abort(0x105, new InvalidOperationException("frame unexpected"));
+            await pair.Server.DisposeAsync();
+
+            // Assert
+            QuicException exception = await WaitForClientWriteFailureAsync(clientStream, cancellation.Token);
+
+            exception.QuicError.ShouldBe(QuicError.ConnectionAborted);
+            exception.ApplicationErrorCode.ShouldBe(0x105);
+            pair.Server.State.ShouldBe(ConnectionState.Aborted);
+            pair.Server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Connection Abort: Without a code should close with the configured default")]
+    public async Task Abort_WithoutErrorCode_ShouldCloseWithTheDefaultCode()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act
+            pair.Server.Abort(new InvalidOperationException("no code"));
+
+            // Assert
+            QuicException exception = await WaitForClientWriteFailureAsync(clientStream, cancellation.Token);
+
+            exception.QuicError.ShouldBe(QuicError.ConnectionAborted);
+            exception.ApplicationErrorCode.ShouldBe(sentinelCloseErrorCode);
+        }
+    }
+
+    private static void WithSentinelCodes(QuicConnectionListenerOptions options)
+    {
+        options.DefaultStreamErrorCode = sentinelStreamErrorCode;
+        options.DefaultCloseErrorCode = sentinelCloseErrorCode;
+    }
+
+    /// <summary>
+    /// Opens a bidirectional stream from the client and accepts it on the server, which sees a QUIC stream only
+    /// once data is flushed on it; the server has read the one octet that announced it.
+    /// </summary>
+    private static async Task<(Connection Client, Connection Server)> OpenAcceptedStreamAsync(LoopbackPair pair, CancellationToken cancellationToken)
+    {
+        Connection clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken);
+        await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellationToken);
+
+        Connection serverStream = await pair.Server.AcceptStreamAsync(cancellationToken);
+        await ReadBytesAsync(serverStream.Input, 1, cancellationToken);
+
+        return (clientStream, serverStream);
+    }
+
     /// <summary>
     /// Writes on the supplied stream until the peer's teardown signal surfaces, returning the
     /// <see cref="QuicException"/> that carries it.
@@ -285,6 +703,31 @@ public class QuicMultiplexedConnectionTests
             {
                 return exception;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads until the pipe holds at least <paramref name="count"/> octets, then hands them back unconsumed and
+    /// unexamined, so the pipe's next read can return them without reading the stream.
+    /// </summary>
+    private static async Task BufferWithoutExaminingAsync(PipeReader reader, int count, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            ReadResult result = await reader.ReadAsync(cancellationToken);
+
+            if (result.Buffer.Length >= count)
+            {
+                reader.AdvanceTo(result.Buffer.Start);
+                return;
+            }
+
+            if (result.IsCompleted)
+            {
+                throw new InvalidOperationException($"The stream completed before {count} bytes were received.");
+            }
+
+            reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
         }
     }
 
@@ -330,7 +773,8 @@ public class QuicMultiplexedConnectionTests
         public static async Task<LoopbackPair> CreateAsync(
             X509Certificate2 certificate,
             CancellationToken cancellationToken,
-            Action<QuicConnectionListenerOptions>? configureListener = null)
+            Action<QuicConnectionListenerOptions>? configureListener = null,
+            Action<QuicConnectionFactoryOptions>? configureClient = null)
         {
             SslApplicationProtocol applicationProtocol = new("cohesion-test");
 
@@ -360,6 +804,8 @@ public class QuicMultiplexedConnectionTests
                         EnabledSslProtocols = SslProtocols.Tls13,
                         RemoteCertificateValidationCallback = static (_, _, _, _) => true
                     };
+
+                    configureClient?.Invoke(options);
                 });
 
                 MultiplexedConnection client = await factory.ConnectAsync(listener.EndPoint, cancellationToken);

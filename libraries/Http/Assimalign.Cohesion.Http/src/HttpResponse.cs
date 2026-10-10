@@ -29,11 +29,20 @@ public abstract class HttpResponse : IHttpResponse
     /// <summary>
     /// Gets the response trailer section (RFC 9110 §6.5). Defaults to the
     /// shared unsupported (empty, read-only) collection; transports that emit
-    /// trailers override this with a supported collection.
+    /// trailers override this with a supported collection (see
+    /// <see cref="IHttpResponse.Trailers"/>).
     /// </summary>
     public virtual HttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the context of the exchange this response belongs to.
+    /// </summary>
+    /// <remarks>
+    /// The back-reference is fixed when the response is constructed: the owning context constructs
+    /// its request and response and passes itself to each (see <see cref="HttpRequest.HttpContext"/>),
+    /// so an implementation stores the context in a read-only field and it can never be observed
+    /// unset or re-parented.
+    /// </remarks>
     public abstract HttpContext HttpContext { get; }
 
     /// <inheritdoc />

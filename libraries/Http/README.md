@@ -14,16 +14,17 @@ packages whose dependencies go beyond the root are drawn.
 ```mermaid
 flowchart LR
     Root["Http — area root"]
-    Core["Assimalign.Cohesion.Core — L1"]
     Conn["Assimalign.Cohesion.Connections — L1"]
     Cookies["Http.Cookies"]
     Forms["Http.Forms"]
     Antiforgery["Http.Antiforgery"]
     Upgrade["Http.ProtocolUpgrade"]
+    Ext["Http.ExtendedConnect"]
+    WebSockets["Http.WebSockets"]
     Streaming["Http.Streaming"]
     Sse["Http.ServerSentEvents"]
     HttpConn["Http.Connections"]
-    Root --> Core
+    Tls["Http.Tls"]
     Cookies --> Root
     Forms --> Root
     Streaming --> Root
@@ -32,16 +33,24 @@ flowchart LR
     Antiforgery --> Forms
     Upgrade --> Root
     Upgrade --> Cookies
+    Ext --> Root
+    WebSockets --> Root
+    WebSockets --> Upgrade
+    WebSockets --> Ext
     Sse --> Root
     Sse --> Streaming
     HttpConn --> Root
     HttpConn --> Conn
+    Tls --> Root
+    Tls --> Conn
 ```
 
-The seven packages not drawn — `Http.ClientFactory`, `Http.DigestFields`, `Http.ExtendedConnect`,
-`Http.Forwarded`, `Http.InterimResponses`, `Http.RequestLimits`, and `Http.Sessions` — each
-reference the root `Assimalign.Cohesion.Http` and nothing else, so they would add seven nodes and
-seven identical arrows without adding information. The full reference graph for every Cohesion
+The six packages not drawn — `Http.ClientFactory`, `Http.DigestFields`, `Http.Forwarded`,
+`Http.InterimResponses`, `Http.RequestLimits`, and `Http.Sessions` — each reference the root
+`Assimalign.Cohesion.Http` and nothing else, so they would add six nodes and six identical arrows
+without adding information. `Http.ExtendedConnect` references only the root too; it is drawn
+because `Http.WebSockets` references it. The root's own reference to `Assimalign.Cohesion.Core` is
+stated under [Layering](#layering) rather than drawn. The full reference graph for every Cohesion
 assembly is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## The per-concern packaging rule
@@ -60,8 +69,11 @@ concern and belongs there.
 ## Layering
 
 In the repo's L1/L2/L3 model (see [docs/programs/DELIVERY_ROADMAP.md](../../docs/programs/DELIVERY_ROADMAP.md)),
-this area is **L1 — foundation**. It sits on `Assimalign.Cohesion.Core` and, for
-`Http.Connections`, on `Assimalign.Cohesion.Connections`. It references no `Assimalign.Cohesion.Hosting*`
+this area is **L1 — foundation**. It sits on `Assimalign.Cohesion.Core`, which the root
+`Assimalign.Cohesion.Http` references, and, for
+`Http.Connections` and `Http.Tls`, on `Assimalign.Cohesion.Connections`: the transport publishes a
+connection's TLS handshake as that library's `ITlsConnectionInfo` facet, and `Http.Tls` reads it,
+so neither of the two references the other. It references no `Assimalign.Cohesion.Hosting*`
 library and no resource area, and it never will: hosting composition, dependency injection, and
 configuration binding are `*.Hosting` concerns one layer up.
 
@@ -69,4 +81,5 @@ configuration binding are `*.Hosting` concerns one layer up.
 
 Per-project `docs/OVERVIEW.md`, `docs/DESIGN.md`, and `docs/Assembly/` live beside each project's
 `src/`. Start at [Assimalign.Cohesion.Http/docs/DESIGN.md](Assimalign.Cohesion.Http/docs/DESIGN.md)
-for the root abstractions and the feature-collection model.
+for the root abstractions and the feature-collection model. Decisions that span more than one package
+(server WebSockets, trailers) are in [docs/libraries/Http/DECISIONS.md](../../docs/libraries/Http/DECISIONS.md).

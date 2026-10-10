@@ -7,33 +7,64 @@ using System.Net;
 using System.Net.Quic;
 using System.Runtime.Versioning;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
-internal sealed class Http3ConnectionContext : HttpConnectionContext
+internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 {
+    // RFC 9114 §7.2.4 / RFC 9218 §7.2 — the peer's SETTINGS frame and its control-stream PRIORITY_UPDATE
+    // frames are read whole before they are applied. Both carry a handful of varints, so a declared
+    // length beyond this bound is refused rather than buffered.
+    private const int maxControlFramePayloadSize = 16 * 1024;
+
     private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
+    // The QUIC handshake's facts, published on every request stream's connection info as the
+    // ITlsConnectionInfo facet; null when the connection does not report them (see HttpTlsConnectionInfo).
+    private readonly ITlsConnectionInfo? _tls;
     private readonly Http3QPackOptions _qpackOptions;
     private readonly Http3PeerSettings _peerSettings = new();
+    // Cancelled when the receive enumeration tears down — the consumer ended it, or a connection error
+    // was raised. Only work that exists to feed the enumeration observes it: the accept loop and the
+    // head reads of requests not yet dispatched. Everything an exchange still needs after the
+    // enumeration ends — its request-body reads, trailer decodes, the QPACK encoder drain that feeds
+    // them, the control-stream drain — lives until the connection itself closes
+    // (IMultiplexedConnection.ConnectionClosed) instead. Deliberately never disposed: exchanges outlive
+    // the enumeration, and a disposed source can no longer be read or linked.
     private readonly CancellationTokenSource _teardownSource = new();
     private readonly QPackDecoderState? _decoderState;
-    // Serializes writes to the single outbound QPACK decoder stream. Two producers
-    // share it once the dynamic table is enabled: the encoder-stream drain (Insert
-    // Count Increment) and the accept loop (Section Acknowledgment / Stream
-    // Cancellation, keyed on the request stream ID). A PipeWriter tolerates no
-    // concurrent writers, so every decoder instruction goes out under this gate.
+    // Serializes writes to the single outbound QPACK decoder stream. Several producers share it once
+    // the dynamic table is enabled: the encoder-stream drain (Insert Count Increment) and every request
+    // stream's processing (Section Acknowledgment / Stream Cancellation, keyed on the request stream
+    // ID). A PipeWriter tolerates no concurrent writers, so every decoder instruction goes out under
+    // this gate. Never disposed: request bodies write through it after the enumeration ends.
     private readonly SemaphoreSlim _decoderWriteGate = new(1, 1);
+    // Requests whose HEADERS have decoded, in the order they became ready; the receive enumeration
+    // yields from here. Unbounded on purpose: each entry is a request head the peer already holds a
+    // QUIC stream open for, so QUIC's concurrent-stream limit bounds it, and a request body is never
+    // buffered here (it is read lazily by Http3RequestBodyStream).
+    private readonly Channel<Http3Context> _readyContexts = Channel.CreateUnbounded<Http3Context>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    // Accepted streams whose processing is still running, plus one reference held by the accept loop
+    // itself. Whoever brings it to zero completes _streamWorkDrained, after which the accept loop
+    // completes the ready-context channel — so no context is published after the enumeration ends.
+    private int _pendingStreamWork = 1;
+    private readonly TaskCompletionSource _streamWorkDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // The first connection error raised on this connection (Interlocked one-shot).
+    private Http3ConnectionException? _connectionError;
     private IConnection? _controlStream;
     private IConnection? _decoderStream;
-    private Task? _peerControlDrainTask;
-    private Task? _qpackEncoderDrainTask;
-    private bool _controlStreamReceived;
-    private bool _qpackEncoderStreamReceived;
-    private bool _qpackDecoderStreamReceived;
+    private Task? _acceptLoopTask;
+    // Interlocked one-shot latches: unidirectional streams are typed concurrently, so "at most one
+    // control / QPACK encoder / QPACK decoder stream" (RFC 9114 §6.2.1, RFC 9204 §4.2) is enforced
+    // atomically.
+    private int _controlStreamReceived;
+    private int _qpackEncoderStreamReceived;
+    private int _qpackDecoderStreamReceived;
     // RFC 9114 §5.2 — the number of client-initiated bidirectional request
     // streams this connection has accepted. At teardown the GOAWAY announces
     // the lowest stream ID the server will NOT process; with QUIC's
@@ -43,14 +74,23 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     // are rejected. Counted at accept — not at dispatch — so a malformed
     // stream the server touched and dropped is still inside the boundary and
     // the client will not retry a request whose side effects may have run.
-    // Mutated with Interlocked from the receive loop; read by the dispose path.
+    // Mutated with Interlocked from the accept loop; read by the dispose path.
     private int _processedRequestStreamCount;
     // Guards single GOAWAY emission across the receive-loop teardown and the
     // connection dispose path (Interlocked one-shot latch).
     private int _goAwaySent;
+    // RFC 9114 §5.2 — a host's graceful close (BeginGracefulClose): one-shot, then the GOAWAY it
+    // announces. The announcement waits on _acceptStopped, completed once the accept loop can accept
+    // no further stream, so the boundary it carries counts every request stream ever accepted.
+    private int _gracefulCloseStarted;
+    private Task? _gracefulCloseAnnouncement;
+    private readonly TaskCompletionSource _acceptStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    // The number of features each exchange is expected to carry; its feature collection is sized
+    // for them when the request stream's context is created.
+    private readonly int _featureCapacity;
     // RFC 9218 §7.2 — the effective priority of request streams the peer has
     // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
     // engine's observable priority state; response ordering across streams is
@@ -59,6 +99,23 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private readonly Dictionary<long, HttpPriority> _requestStreamPriorities = new();
     private readonly object _priorityLock = new();
     private volatile bool _pushPriorityUpdateRejected;
+
+    // #1085 — the keep-alive deadline. The connection is idle while no request stream is in flight: none
+    // is having its head read, and no exchange built from one is still running. _activeRequestStreams
+    // counts them (a stream from acceptance until its head yields no exchange, or until its exchange
+    // ends); _idleSince is when the receive loop started or the last exchange ended, whichever is later,
+    // so a stream that never became an exchange does not move it. The timer, armed at zero for what is
+    // left and re-checked when it fires, closes the connection gracefully once it has been idle for
+    // KeepAliveTimeout. Guarded by
+    // _keepAliveLock; the timer is created when the receive loop starts and disposed when it ends.
+    // TimeProvider.System in production, as on HTTP/1.1.
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
+    private readonly Lock _keepAliveLock = new();
+    private TimeSpan _keepAliveTimeout;
+    private ITimer? _keepAliveTimer;
+    private int _activeRequestStreams;
+    private long _idleSince;
+    private bool _keepAliveStopped;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
@@ -70,19 +127,25 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         Http3ConnectionListenerOptions.Http3Limits limits,
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
+        int featureCapacity,
         Http3QPackOptions qpackOptions)
     {
         _connection = connection;
         _isSecure = isSecure;
+        _tls = connection as ITlsConnectionInfo;
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
-        _qpackOptions = qpackOptions;
+        _featureCapacity = featureCapacity;
+        // A copy, not the listener's live instance: the SETTINGS written when the receive loop starts, the
+        // decoder state, and the static-only decode must all use the values this connection advertises,
+        // even if the host changes the listener's options after the connection opens.
+        _qpackOptions = qpackOptions.Snapshot();
 
         // The dynamic table (and its encoder/decoder instruction streams) is
         // opt-in: with QPACK_MAX_TABLE_CAPACITY = 0 the decoder state is never
         // created and the transport stays on the static-only path.
-        _decoderState = qpackOptions.DynamicTableEnabled ? new QPackDecoderState(qpackOptions) : null;
+        _decoderState = _qpackOptions.DynamicTableEnabled ? new QPackDecoderState(_qpackOptions) : null;
     }
 
     public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
@@ -129,31 +192,102 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// (RFC 9114 §6.2.1). That control stream stays open for the connection's
     /// lifetime — it is a critical stream — and is torn down connection-first
     /// (see <see cref="ShutdownAsync"/>). SETTINGS emission is best-effort: if
-    /// the QUIC connection is already gone, the accept loop below observes the
-    /// same failure and terminates.
+    /// the QUIC connection is already gone, the accept loop observes the same
+    /// failure and terminates.
     /// </para>
     /// <para>
-    /// Failure handling is split between two scopes. Per-stream failures —
-    /// truncated frames, malformed QPACK, varint overflow, a per-stream
-    /// <see cref="IOException"/> — let the loop continue accepting more
-    /// inbound streams on the same QUIC connection (HTTP/3 has no
-    /// connection-level header table to corrupt, so a bad request on one
-    /// stream is harmless to the others). Connection-terminating failures —
-    /// the QUIC connection itself going away
-    /// (<see cref="QuicException"/> or a contract-level
-    /// <see cref="ConnectionException"/>), the multiplexed connection being
-    /// disposed, or cancellation — exit the enumerable cleanly so the
-    /// listener stays alive for the next peer.
+    /// Inbound streams are processed concurrently. A background accept loop
+    /// accepts each QUIC stream and hands it straight to processing of its own:
+    /// a request stream is read only up to its HEADERS frame, QPACK-decoded, and
+    /// published here as a context whose body is read lazily
+    /// (<see cref="Http3RequestBodyStream"/>); a unidirectional stream is typed
+    /// and, for the control and QPACK encoder streams, drained in the
+    /// background. The accept loop never waits on a stream's contents, so a
+    /// request whose HEADERS (or QPACK insertions) are still in flight, or whose
+    /// body is still arriving, holds back no other stream. Contexts are yielded
+    /// in the order their heads become ready.
+    /// </para>
+    /// <para>
+    /// Failures are scoped per RFC 9114 §8. A stream error — a malformed request
+    /// (<c>H3_MESSAGE_ERROR</c>), an oversized HEADERS frame
+    /// (<c>H3_FRAME_ERROR</c>), a stream that ends without a request
+    /// (<c>H3_REQUEST_INCOMPLETE</c>) — resets that stream and the connection
+    /// keeps serving. A connection error — a truncated frame
+    /// (<c>H3_FRAME_ERROR</c>), an invalid frame sequence or a prohibited frame
+    /// (<c>H3_FRAME_UNEXPECTED</c>), a control-stream violation, a QPACK failure
+    /// — aborts the connection; the enumeration ends after the contexts already
+    /// published. The QUIC connection going away, disposal, cancellation, or a
+    /// graceful close (<see cref="BeginGracefulClose"/>) end the enumeration
+    /// cleanly. An unexpected exception (a programmer error, such
+    /// as a request hook throwing something other than
+    /// <see cref="HttpRequestRejectedException"/>) is not masked: it surfaces from
+    /// the enumeration.
     /// </para>
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         try
         {
+            // #1085 — the connection is idle until its first request stream arrives.
+            StartKeepAlive();
+
             // RFC 9114 §6.2.1 — each peer MUST open a control stream and send
             // SETTINGS as its first frame. Do this before (and independently
             // of) accepting request streams.
             await SendControlStreamSettingsAsync(cancellationToken).ConfigureAwait(false);
+
+            _acceptLoopTask ??= RunAcceptLoopAsync(cancellationToken);
+
+            while (await TryReadReadyContextAsync(cancellationToken).ConfigureAwait(false) is { } context)
+            {
+                yield return context;
+            }
+        }
+        finally
+        {
+            await ShutdownAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Waits for the next ready request context. Returns <see langword="null"/> once the accept loop has
+    /// completed the channel, or when the consumer's token is cancelled; a fault the accept loop
+    /// forwarded through the channel is rethrown.
+    /// </summary>
+    private async ValueTask<Http3Context?> TryReadReadyContextAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await _readyContexts.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (_readyContexts.Reader.TryRead(out Http3Context? context))
+                {
+                    return context;
+                }
+            }
+
+            return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The connection's accept loop. Accepts inbound QUIC streams until the connection ends, handing
+    /// each to its own processing without waiting on it; once acceptance stops it waits for every
+    /// started stream to finish its head processing, then completes the ready-context channel.
+    /// </summary>
+    private async Task RunAcceptLoopAsync(CancellationToken receiveToken)
+    {
+        Exception? fault = null;
+
+        try
+        {
+            using CancellationTokenSource acceptCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
+            CancellationToken cancellationToken = acceptCancellation.Token;
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -161,67 +295,79 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
                 if (accept.TerminateConnection)
                 {
-                    yield break;
+                    break;
                 }
-                if (accept.StreamConnection is null)
+
+                if (accept.StreamConnection is not { } streamConnection)
                 {
                     // Non-terminating accept failure is not expected, but guard
                     // anyway: skip and try the next inbound.
                     continue;
                 }
 
-                IConnection streamConnection = accept.StreamConnection;
+                Interlocked.Increment(ref _pendingStreamWork);
 
                 // RFC 9114 §6 — a bidirectional stream is a request stream; the
                 // peer's unidirectional streams carry a type prefix (control,
                 // QPACK encoder/decoder, push) and are demultiplexed separately.
-                if (streamConnection.Direction != ConnectionDirection.Bidirectional)
+                // Neither is awaited here: each runs synchronously only until it
+                // needs octets that have not arrived, then continues on its own.
+                if (streamConnection.Direction == ConnectionDirection.Bidirectional)
                 {
-                    if (await TryHandleUnidirectionalStreamAsync(streamConnection, cancellationToken).ConfigureAwait(false))
-                    {
-                        // A control-stream protocol violation — duplicate control
-                        // or QPACK stream, missing/!SETTINGS first frame, or a
-                        // client-created push stream — is a connection error
-                        // (RFC 9114 §6.2). Terminate the connection.
-                        yield break;
-                    }
+                    // RFC 9114 §5.2 — this bidirectional stream is now an accepted
+                    // request stream; advance the boundary the teardown GOAWAY
+                    // announces so it falls inside "may have been processed" whether
+                    // it yields a context or is reset as malformed. The same
+                    // client-bidi numbering law the GOAWAY boundary is derived from
+                    // (RFC 9000 §2.1: IDs 0, 4, 8, … assigned in order, and a frame
+                    // for a higher-numbered stream implicitly opens the lower ones
+                    // first — §3.2 — so streams of a type surface in ascending order)
+                    // also yields this stream's own wire ID: the k-th accepted
+                    // request stream is stream 4(k−1). That ID keys the QPACK
+                    // Section Acknowledgment / Stream Cancellation decoder
+                    // instructions (RFC 9204 §4.4); capturing it off the same
+                    // increment keeps the two derivations from ever drifting apart.
+                    long requestStreamId = 4L * (Interlocked.Increment(ref _processedRequestStreamCount) - 1);
 
-                    continue;
+                    // #1085 — the connection is busy until this stream's head yields no exchange, or
+                    // the exchange it yields ends.
+                    BeginRequestStream();
+                    _ = ProcessRequestStreamAsync(streamConnection, requestStreamId, receiveToken);
                 }
-
-                // RFC 9114 §5.2 — this bidirectional stream is now an accepted
-                // request stream; advance the boundary the teardown GOAWAY
-                // announces so it falls inside "may have been processed" whether
-                // it yields a context or is dropped as malformed below. The same
-                // client-bidi numbering law the GOAWAY boundary is derived from
-                // (RFC 9000 §2.1: IDs 0, 4, 8, … assigned in order, and a frame
-                // for a higher-numbered stream implicitly opens the lower ones
-                // first — §3.2 — so streams of a type surface in ascending order)
-                // also yields this stream's own wire ID: the k-th accepted
-                // request stream is stream 4(k−1). That ID keys the QPACK
-                // Section Acknowledgment / Stream Cancellation decoder
-                // instructions (RFC 9204 §4.4); capturing it off the same
-                // increment keeps the two derivations from ever drifting apart.
-                long requestStreamId = 4L * (Interlocked.Increment(ref _processedRequestStreamCount) - 1);
-
-                RequestReadOutcome outcome = await TryReadRequestAsync(streamConnection, requestStreamId, cancellationToken).ConfigureAwait(false);
-
-                if (outcome.TerminateConnection)
+                else
                 {
-                    // A QPACK connection error (RFC 9204 §2.2) corrupts shared
-                    // dynamic-table state and cannot be isolated to one stream.
-                    yield break;
-                }
-
-                if (outcome.Context is not null)
-                {
-                    yield return outcome.Context;
+                    _ = ProcessUnidirectionalStreamAsync(streamConnection, receiveToken);
                 }
             }
+
+            // No stream is accepted after this point, so the request-stream count is final; a
+            // graceful close waits for it before it announces its GOAWAY boundary.
+            _acceptStopped.TrySetResult();
+
+            // Release the loop's own reference, then wait for every stream it started: a head still
+            // being read may yet publish a context, so the channel stays open until they are done.
+            EndStreamWork();
+            await _streamWorkDrained.Task.ConfigureAwait(false);
+        }
+        // Not swallowed: an unexpected fault (a programmer error) is forwarded to the consumer through
+        // the channel, and the enumeration rethrows it.
+        catch (Exception exception)
+        {
+            fault = exception;
         }
         finally
         {
-            await ShutdownAsync().ConfigureAwait(false);
+            // Also when a fault ended the loop: nothing accepts afterwards.
+            _acceptStopped.TrySetResult();
+            _readyContexts.Writer.TryComplete(fault);
+        }
+    }
+
+    private void EndStreamWork()
+    {
+        if (Interlocked.Decrement(ref _pendingStreamWork) == 0)
+        {
+            _streamWorkDrained.TrySetResult();
         }
     }
 
@@ -323,41 +469,57 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Tears the connection context down when the receive enumerable completes:
-    /// signals the inbound control-stream drain to stop and waits for it to
-    /// finish. The outbound control stream is deliberately not completed here —
-    /// teardown stays connection-first, so the multiplexed connection's own
-    /// disposal (via <see cref="Http3Connection.DisposeAsync"/>) closes the QUIC
-    /// connection before releasing its streams, and a peer never observes
-    /// <c>H3_CLOSED_CRITICAL_STREAM</c> ahead of <c>CONNECTION_CLOSE</c>.
+    /// Ends the receive side when the enumeration completes: signals teardown (stopping the accept loop
+    /// and any head read still in flight), waits for the accept loop to finish, and rejects the requests
+    /// that were assembled but never handed to the consumer.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Exchanges already handed out keep running — the server may dispatch each on its own task — so
+    /// nothing they still need is torn down here: request-body reads, trailer decodes, the decoder-stream
+    /// gate, and the background control-stream and QPACK encoder drains all live until the connection
+    /// itself closes (<see cref="IMultiplexedConnection.ConnectionClosed"/>). The drains end on their
+    /// own then, and swallow their own failures, so nothing awaits them.
+    /// </para>
+    /// <para>
+    /// The outbound control stream is deliberately not completed here — teardown stays
+    /// connection-first, so the multiplexed connection's own disposal (via
+    /// <see cref="Http3Connection.DisposeAsync"/>) closes the QUIC connection before releasing its
+    /// streams, and a peer never observes <c>H3_CLOSED_CRITICAL_STREAM</c> ahead of
+    /// <c>CONNECTION_CLOSE</c>.
+    /// </para>
+    /// </remarks>
     private async Task ShutdownAsync()
     {
+        // The enumeration has ended, so there is nothing left for an idle close to end.
+        StopKeepAlive();
+
         if (!_teardownSource.IsCancellationRequested)
         {
             _teardownSource.Cancel();
         }
 
-        if (_peerControlDrainTask is not null)
+        if (_acceptLoopTask is not null)
         {
-            // The drain swallows its own failures, so awaiting it here cannot
-            // throw; it just lets the background loop unwind before teardown
-            // completes.
-            await _peerControlDrainTask.ConfigureAwait(false);
+            // The loop never faults — it forwards any failure through the channel — and it completes the
+            // channel only after every stream it accepted has finished its head processing.
+            await _acceptLoopTask.ConfigureAwait(false);
         }
 
-        if (_qpackEncoderDrainTask is not null)
+        // Requests assembled but never handed to the consumer (it stopped enumerating first) will never
+        // be processed. RFC 9114 §4.1.1 — reject them with H3_REQUEST_REJECTED so the peer may retry.
+        while (_readyContexts.Reader.TryRead(out Http3Context? undispatched))
         {
-            // Same contract as the control-stream drain: it absorbs its own
-            // failures, so awaiting it just lets the background loop unwind.
-            await _qpackEncoderDrainTask.ConfigureAwait(false);
+            await RejectUndispatchedAsync(undispatched).ConfigureAwait(false);
         }
-
-        // Both decoder-stream producers have unwound (the accept loop has exited and
-        // the encoder drain has been awaited above), so no write is in flight.
-        _decoderWriteGate.Dispose();
-        _teardownSource.Dispose();
     }
+
+    /// <summary>
+    /// Gets the token signalled when the QUIC connection itself closes or aborts. Request-body reads
+    /// observe it so a body read outliving the receive enumeration still ends — with a clean stream
+    /// error — when the connection goes away.
+    /// </summary>
+    internal CancellationToken ConnectionClosed => _connection.ConnectionClosed;
 
     /// <summary>
     /// Emits the server's <c>GOAWAY</c> frame on the outbound control stream
@@ -372,9 +534,10 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// <returns>A task that completes once the GOAWAY has been written (or skipped).</returns>
     /// <remarks>
     /// <para>
-    /// One-shot: repeated calls after the first are no-ops. When the receive loop
-    /// never ran (no control stream was opened) there is nothing to announce and
-    /// the call returns without writing.
+    /// One-shot: repeated calls after the first write are no-ops, so the announced
+    /// boundary never grows (RFC 9114 §5.2). When the receive loop has not run (no
+    /// control stream was opened) there is nothing to announce yet: the call
+    /// returns without writing and leaves the one-shot to a later call.
     /// </para>
     /// <para>
     /// Best-effort, like the SETTINGS emission: writing GOAWAY requires a live
@@ -385,17 +548,17 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// </remarks>
     internal async Task SendGoAwayAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref _goAwaySent, 1) == 1)
-        {
-            return;
-        }
-
-        IConnection? controlStream = _controlStream;
+        IConnection? controlStream = Volatile.Read(ref _controlStream);
         if (controlStream is null)
         {
             // The server never opened its control stream (the receive loop did
             // not run), so it advertised no SETTINGS and has no critical stream
             // to carry GOAWAY. The QUIC close alone tears the connection down.
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _goAwaySent, 1) == 1)
+        {
             return;
         }
 
@@ -425,15 +588,340 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// RFC 9114 §5.2. Signals teardown, which stops the accept loop: no request stream is accepted from
+    /// here on, and a request whose head was still arriving is reset with <c>H3_REQUEST_REJECTED</c>
+    /// (the peer may retry it). Once the accept loop has stopped, the <c>GOAWAY</c> is written in the
+    /// background, carrying the first stream the connection did not accept — the same boundary the
+    /// teardown GOAWAY carries, so exactly one is ever sent. The receive enumeration ends after the
+    /// requests already published; the exchanges it yielded keep their request bodies and response
+    /// streams until they finish.
+    /// </para>
+    /// <para>
+    /// A request stream the peer opens after this point is not accepted. It is closed with the QUIC
+    /// connection; the GOAWAY tells the peer it was not processed.
+    /// </para>
+    /// </remarks>
+    public override void BeginGracefulClose()
+    {
+        if (Interlocked.Exchange(ref _gracefulCloseStarted, 1) == 1)
+        {
+            return;
+        }
+
+        _teardownSource.Cancel();
+        Volatile.Write(ref _gracefulCloseAnnouncement, AnnounceGracefulCloseAsync());
+    }
+
+    /// <summary>
+    /// Finishes a graceful close as the connection is disposed: waits for the GOAWAY a host's
+    /// <see cref="BeginGracefulClose"/> started, then writes the GOAWAY if none has been written yet.
+    /// Never faults.
+    /// </summary>
+    internal async Task CompleteGracefulCloseAsync()
+    {
+        if (Volatile.Read(ref _acceptLoopTask) is null)
+        {
+            // The receive enumeration never started, and nothing starts it during disposal, so no stream
+            // will be accepted: the announcement must not wait for an accept loop that will never run.
+            _acceptStopped.TrySetResult();
+        }
+
+        if (Volatile.Read(ref _gracefulCloseAnnouncement) is { } announcement)
+        {
+            await announcement.ConfigureAwait(false);
+        }
+
+        await SendGoAwayAsync().ConfigureAwait(false);
+    }
+
+    private async Task AnnounceGracefulCloseAsync()
+    {
+        // Off the caller's thread: a host begins the graceful close of all its connections from one stop
+        // signal, and no connection's write may hold up the others.
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+
+        // The accept loop observes the teardown signal; once it has stopped, the accepted-stream count
+        // the GOAWAY boundary is derived from is final.
+        await _acceptStopped.Task.ConfigureAwait(false);
+        await SendGoAwayAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts the keep-alive deadline when the receive loop starts (#1085): the connection is idle until
+    /// its first request stream arrives. Nothing is armed for an infinite
+    /// <see cref="HttpConnectionListenerLimits.KeepAliveTimeout"/>.
+    /// </summary>
+    private void StartKeepAlive()
+    {
+        TimeSpan keepAliveTimeout = _limits.KeepAliveTimeout;
+        if (keepAliveTimeout == Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+
+        lock (_keepAliveLock)
+        {
+            if (_keepAliveTimer is not null || _keepAliveStopped)
+            {
+                return;
+            }
+
+            // The deadline is read once, as HTTP/2 reads it when its frame pump starts.
+            _keepAliveTimeout = keepAliveTimeout;
+            _idleSince = _timeProvider.GetTimestamp();
+            _keepAliveTimer = _timeProvider.CreateTimer(
+                static state => ((Http3ConnectionContext)state!).OnKeepAliveTimer(),
+                this,
+                _activeRequestStreams == 0 ? _keepAliveTimeout : Timeout.InfiniteTimeSpan,
+                Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <summary>
+    /// Stops the keep-alive deadline for good: the receive enumeration has ended, or an idle close began.
+    /// </summary>
+    private void StopKeepAlive()
+    {
+        ITimer? timer;
+
+        lock (_keepAliveLock)
+        {
+            _keepAliveStopped = true;
+            timer = _keepAliveTimer;
+            _keepAliveTimer = null;
+        }
+
+        timer?.Dispose();
+    }
+
+    /// <summary>
+    /// Counts an accepted request stream as in flight, so the connection is not idle (#1085).
+    /// </summary>
+    private void BeginRequestStream()
+    {
+        lock (_keepAliveLock)
+        {
+            if (_activeRequestStreams++ == 0)
+            {
+                _keepAliveTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends a request stream's time in flight (#1085): its head yielded no exchange, or its exchange
+    /// ended. The keep-alive deadline runs from the later of the connection's start and the end of its
+    /// last exchange, so only an exchange's end moves it: a stream that never became one — reset for a
+    /// head that timed out or was malformed, answered <c>431</c>, or rejected by a request-parse
+    /// interceptor — cannot keep an idle connection open. The last stream to end arms the deadline for
+    /// what is left of it, at once when nothing is.
+    /// </summary>
+    /// <param name="exchangeEnded">Whether the stream's exchange ended, rather than its head yielding none.</param>
+    private void EndRequestStream(bool exchangeEnded)
+    {
+        lock (_keepAliveLock)
+        {
+            if (exchangeEnded)
+            {
+                _idleSince = _timeProvider.GetTimestamp();
+            }
+
+            if (--_activeRequestStreams == 0 && _keepAliveTimer is not null && !_keepAliveStopped)
+            {
+                TimeSpan remaining = _keepAliveTimeout - _timeProvider.GetElapsedTime(_idleSince);
+                _keepAliveTimer.Change(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends <paramref name="context"/>'s exchange on this connection: its <c>SendAsync</c> returned or
+    /// threw, or it was disposed. A <c>SendAsync</c> that refused the head or a buffered trailer section
+    /// (#1183) does not call this: nothing reached the wire and the response has not started, so the
+    /// exchange stays running, and its request stream keeps the connection busy, until the caller
+    /// finalizes it again or disposes it. Idempotent per exchange.
+    /// </summary>
+    /// <param name="context">The exchange that ended.</param>
+    internal void EndExchange(Http3Context context)
+    {
+        if (context.TryEndExchange())
+        {
+            EndRequestStream(exchangeEnded: true);
+        }
+    }
+
+    /// <summary>
+    /// Closes the connection once it has been idle for <see cref="HttpConnectionListenerLimits.KeepAliveTimeout"/>
+    /// (#1085). RFC 9114 §5.2 — the server closes gracefully: <see cref="BeginGracefulClose"/> stops
+    /// accepting, writes the <c>GOAWAY</c> that tells the peer no request stream beyond it was processed,
+    /// and ends the receive enumeration, after which the host disposes the connection, which closes the
+    /// QUIC connection with <c>H3_NO_ERROR</c>. A timer that fires after the connection became busy, or
+    /// that a later idle period re-armed, changes nothing. Unlike QUIC's own idle timeout, which any
+    /// packet resets, this deadline is not moved by PING or other connection-level traffic.
+    /// </summary>
+    private void OnKeepAliveTimer()
+    {
+        lock (_keepAliveLock)
+        {
+            if (_keepAliveStopped || _keepAliveTimer is null || _activeRequestStreams > 0)
+            {
+                return;
+            }
+
+            TimeSpan remaining = _keepAliveTimeout - _timeProvider.GetElapsedTime(_idleSince);
+            if (remaining > TimeSpan.Zero)
+            {
+                _keepAliveTimer.Change(remaining, Timeout.InfiniteTimeSpan);
+                return;
+            }
+
+            _keepAliveStopped = true;
+        }
+
+        BeginGracefulClose();
+    }
+
+    /// <summary>
+    /// Raises a connection error (RFC 9114 §8): records it (the first one wins), signals teardown so the
+    /// accept loop and every head read in flight stop, and aborts the multiplexed connection with the
+    /// error as the reason — which signals <see cref="ConnectionClosed"/>, ending the drains, any blocked
+    /// QPACK decode, and every request-body read still in flight. The enumeration ends after the contexts
+    /// already published. Called from any stream's processing and from request-body reads; idempotent.
+    /// </summary>
+    /// <remarks>
+    /// The connection closes with the error's RFC 9114 §8.1 / RFC 9204 §6 code wherever the driver can
+    /// carry one (<see cref="IMultiplexedConnectionAbort"/>, which the QUIC driver implements); a driver
+    /// without it closes with its own default.
+    /// </remarks>
+    /// <param name="error">The connection error, carrying the code the connection is closed with.</param>
+    internal void AbortConnection(Http3ConnectionException error)
+    {
+        if (Interlocked.CompareExchange(ref _connectionError, error, null) is not null)
+        {
+            return;
+        }
+
+        _teardownSource.Cancel();
+
+        if (_connection is IMultiplexedConnectionAbort coded)
+        {
+            coded.Abort((long)error.ErrorCode, error);
+        }
+        else
+        {
+            _connection.Abort(error);
+        }
+    }
+
+    /// <summary>
+    /// Resets one request stream with a stream error (RFC 9114 §8) — both directions, carrying
+    /// <paramref name="reason"/> — leaving the connection and its other streams intact. When the dynamic
+    /// table is enabled and the stream is abandoned before its end, a Stream Cancellation is emitted too
+    /// (RFC 9204 §4.4.2): a field section the server never decoded (an unread trailer section, an
+    /// oversized HEADERS frame) will never be acknowledged, and the peer encoder must release its
+    /// references.
+    /// </summary>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="requestStreamId">The request stream's wire ID.</param>
+    /// <param name="reason">The stream error, carrying the RFC 9114 §8.1 code.</param>
+    /// <param name="abandonsReading">Whether the stream still had unread octets.</param>
+    internal void ResetRequestStream(IConnection streamConnection, long requestStreamId, Http3StreamException reason, bool abandonsReading)
+    {
+        if (abandonsReading && _decoderState is not null)
+        {
+            _ = TrySendStreamCancellationAsync(requestStreamId);
+        }
+
+        ResetStream(streamConnection, reason);
+    }
+
+    /// <summary>
+    /// Resets a request stream in both directions with the stream error's RFC 9114 §8.1 code
+    /// (<c>RESET_STREAM</c> and <c>STOP_SENDING</c>), then aborts it with the error as the reason, which
+    /// ends the stream's lifecycle and fires the exchange's <c>RequestCancelled</c>. The code reaches the
+    /// wire wherever the stream can carry one (<see cref="IMultiplexedStreamAbort"/>, which the QUIC and
+    /// in-memory drivers implement); on a stream without it the abort alone resets the stream, with the
+    /// driver's default code.
+    /// </summary>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="reason">The stream error, carrying the code.</param>
+    internal static void ResetStream(IConnection streamConnection, Http3StreamException reason)
+    {
+        if (streamConnection is IMultiplexedStreamAbort coded)
+        {
+            coded.AbortWrite((long)reason.ErrorCode);
+            coded.AbortRead((long)reason.ErrorCode);
+        }
+
+        streamConnection.Abort(reason);
+    }
+
+    /// <summary>
+    /// Stops reading a request stream with <paramref name="errorCode"/> (<c>STOP_SENDING</c>), leaving the
+    /// response direction and the stream's lifecycle alone. Has no effect on a stream that cannot carry a
+    /// code, whose driver stops it with its default code when its input is completed.
+    /// </summary>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="errorCode">The RFC 9114 §8.1 code the peer receives.</param>
+    internal static void StopReadingWithCode(IConnection streamConnection, Http3ErrorCode errorCode)
+    {
+        if (streamConnection is IMultiplexedStreamAbort coded)
+        {
+            coded.AbortRead((long)errorCode);
+        }
+    }
+
+    /// <summary>
+    /// Processes one peer-initiated unidirectional stream on its own, off the accept loop, and turns a
+    /// connection-level violation into a connection error.
+    /// </summary>
+    private async Task ProcessUnidirectionalStreamAsync(IConnection streamConnection, CancellationToken receiveToken)
+    {
+        try
+        {
+            using CancellationTokenSource streamCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
+
+            Http3ConnectionException? violation = await TryHandleUnidirectionalStreamAsync(
+                streamConnection,
+                streamCancellation.Token).ConfigureAwait(false);
+
+            if (violation is not null)
+            {
+                AbortConnection(violation);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Teardown before the stream's opening octets arrived — nothing to process.
+        }
+        // Not swallowed: an unexpected fault (a programmer error) is forwarded to the consumer through
+        // the channel, and the enumeration rethrows it.
+        catch (Exception exception)
+        {
+            _readyContexts.Writer.TryComplete(exception);
+        }
+        finally
+        {
+            EndStreamWork();
+        }
+    }
+
     /// <summary>
     /// Demultiplexes a peer-initiated unidirectional stream by its RFC 9114
-    /// §6.2 stream-type prefix. Returns <see langword="true"/> when the stream
-    /// is a connection-level protocol violation that must terminate the
-    /// connection (duplicate control / QPACK stream, missing or non-SETTINGS
-    /// first control frame, or a client-created push stream); otherwise
-    /// <see langword="false"/>.
+    /// §6.2 stream-type prefix. Returns the connection error when the stream is
+    /// a connection-level protocol violation — a duplicate control or QPACK
+    /// stream (<c>H3_STREAM_CREATION_ERROR</c>), a missing or non-SETTINGS first
+    /// control frame (<c>H3_MISSING_SETTINGS</c>), a malformed or oversized
+    /// SETTINGS frame (<c>H3_FRAME_ERROR</c>), or a client-created push stream
+    /// (<c>H3_STREAM_CREATION_ERROR</c>); otherwise <see langword="null"/>.
     /// </summary>
-    private async Task<bool> TryHandleUnidirectionalStreamAsync(IConnection streamConnection, CancellationToken cancellationToken)
+    private async Task<Http3ConnectionException?> TryHandleUnidirectionalStreamAsync(
+        IConnection streamConnection,
+        CancellationToken cancellationToken)
     {
         // RFC 9114 §6.2 — read directly off the stream connection's PipeReader
         // rather than the Stream adapter. Unidirectional streams are processed
@@ -452,12 +940,15 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             // The stream type could not be read — RFC 9114 §6.2 permits
             // abandoning an unparseable unidirectional stream without
             // affecting the connection.
-            return false;
+            await AbandonUnidirectionalStreamAsync(streamConnection).ConfigureAwait(false);
+            return null;
         }
 
         if (streamType is null)
         {
-            return false;
+            // The stream ended before its type: nothing to process, so it is released.
+            await AbandonUnidirectionalStreamAsync(streamConnection).ConfigureAwait(false);
+            return null;
         }
 
         switch (streamType.Value)
@@ -471,39 +962,77 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 // instructions to process, so accepting it is sufficient. With the
                 // table enabled, drain it in the background so its Set Capacity /
                 // Insert / Duplicate instructions populate the dynamic table while
-                // the accept loop keeps serving requests.
-                if (_qpackEncoderStreamReceived)
+                // requests keep being served.
+                if (Interlocked.Exchange(ref _qpackEncoderStreamReceived, 1) == 1)
                 {
-                    return true;
+                    return new Http3ConnectionException(
+                        Http3ErrorCode.StreamCreationError,
+                        "The peer opened a second QPACK encoder stream (RFC 9204 §4.2).");
                 }
-
-                _qpackEncoderStreamReceived = true;
 
                 if (_decoderState is not null)
                 {
-                    _qpackEncoderDrainTask = DrainQPackEncoderStreamAsync(reader, cancellationToken);
+                    // Connection-lived: a request body read after the enumeration ends may still wait on
+                    // insertions this drain applies. The drain never faults, so it is not awaited.
+                    _ = DrainQPackEncoderStreamAsync(reader);
                 }
 
-                return false;
+                return null;
 
             case Http3StreamType.QPackDecoder:
-                if (_qpackDecoderStreamReceived)
+                if (Interlocked.Exchange(ref _qpackDecoderStreamReceived, 1) == 1)
                 {
-                    return true;
+                    return new Http3ConnectionException(
+                        Http3ErrorCode.StreamCreationError,
+                        "The peer opened a second QPACK decoder stream (RFC 9204 §4.2).");
                 }
 
-                _qpackDecoderStreamReceived = true;
-                return false;
+                return null;
 
             case Http3StreamType.Push:
                 // RFC 9114 §6.2.2 — a client MUST NOT create a push stream;
                 // treat it as H3_STREAM_CREATION_ERROR.
-                return true;
+                return new Http3ConnectionException(
+                    Http3ErrorCode.StreamCreationError,
+                    "A client opened a push stream (RFC 9114 §6.2.2).");
 
             default:
-                // RFC 9114 §6.2 — unknown unidirectional stream types are not
-                // an error; the recipient may abandon them.
-                return false;
+                // RFC 9114 §6.2 — an unknown or reserved stream type is not an
+                // error, but its recipient MUST abort reading it or discard its
+                // data, and SHOULD abort with H3_STREAM_CREATION_ERROR.
+                await AbandonUnidirectionalStreamAsync(streamConnection).ConfigureAwait(false);
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Abandons a peer-initiated unidirectional stream the server will not read — an unknown or reserved
+    /// stream type, or one whose type could not be read (RFC 9114 §6.2): reading is aborted with
+    /// <c>STOP_SENDING(H3_STREAM_CREATION_ERROR)</c>, the code the RFC recommends, and the stream is
+    /// released, so it no longer holds one of the peer's unidirectional-stream credits or the data in its
+    /// flow-control window until the connection closes. On a stream that cannot carry a code the release
+    /// alone stops it, with the driver's default code. Best-effort: a stream already gone has nothing left
+    /// to release.
+    /// </summary>
+    /// <param name="streamConnection">The unidirectional stream.</param>
+    /// <returns>A task that completes once the stream is released.</returns>
+    private static async Task AbandonUnidirectionalStreamAsync(IConnection streamConnection)
+    {
+        StopReadingWithCode(streamConnection, Http3ErrorCode.StreamCreationError);
+
+        try
+        {
+            await streamConnection.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the stream was released with its connection.
+        }
+        catch (ConnectionException)
+        {
+        }
+        catch (Exception exception) when (IsWireLevelFailure(exception))
+        {
         }
     }
 
@@ -511,23 +1040,25 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// Reads and applies the peer's control stream. Enforces a single control
     /// stream and that its first frame is SETTINGS (RFC 9114 §6.2.1 / §7.2.4),
     /// then hands the stream to a background drain for the connection lifetime.
-    /// Returns <see langword="true"/> on a protocol violation.
+    /// Returns the connection error on a protocol violation.
     /// </summary>
-    private async Task<bool> TryHandleControlStreamAsync(PipeReader reader, CancellationToken cancellationToken)
+    private async Task<Http3ConnectionException?> TryHandleControlStreamAsync(
+        PipeReader reader,
+        CancellationToken cancellationToken)
     {
-        if (_controlStreamReceived)
+        if (Interlocked.Exchange(ref _controlStreamReceived, 1) == 1)
         {
             // RFC 9114 §6.2.1 — only one control stream per peer.
-            return true;
+            return new Http3ConnectionException(
+                Http3ErrorCode.StreamCreationError,
+                "The peer opened a second control stream (RFC 9114 §6.2.1).");
         }
-
-        _controlStreamReceived = true;
 
         try
         {
             // RFC 9114 §6.2.1 / §7.2.4 — the first frame on the control stream
-            // MUST be SETTINGS. Read and apply it synchronously so a missing or
-            // non-SETTINGS opening frame terminates the connection inline.
+            // MUST be SETTINGS. Read and apply it before draining the rest so a
+            // missing or non-SETTINGS opening frame terminates the connection.
             long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
             long? frameLength = frameType is null
                 ? null
@@ -535,27 +1066,37 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
             if (frameType is null || frameLength is null || frameType.Value != (long)Http3FrameType.Settings)
             {
-                // Missing or non-SETTINGS first frame — H3_MISSING_SETTINGS.
-                return true;
+                return new Http3ConnectionException(
+                    Http3ErrorCode.MissingSettings,
+                    "The peer's control stream did not open with a SETTINGS frame (RFC 9114 §6.2.1).");
             }
 
-            byte[] payload = await ReadExactAsync(reader, checked((int)frameLength.Value), cancellationToken).ConfigureAwait(false);
+            if (frameLength.Value > maxControlFramePayloadSize)
+            {
+                return new Http3ConnectionException(
+                    Http3ErrorCode.FrameError,
+                    $"The peer's SETTINGS frame declares {frameLength.Value} octets, beyond the {maxControlFramePayloadSize}-octet bound.");
+            }
+
+            byte[] payload = await ReadExactAsync(reader, (int)frameLength.Value, cancellationToken).ConfigureAwait(false);
             ApplySettings(payload);
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
             // The control stream is critical; a read/parse failure on the
-            // mandatory SETTINGS frame is a connection error
-            // (H3_FRAME_ERROR / H3_CLOSED_CRITICAL_STREAM).
-            return true;
+            // mandatory SETTINGS frame is a connection error (RFC 9114 §7.1).
+            return new Http3ConnectionException(
+                Http3ErrorCode.FrameError,
+                "The peer's SETTINGS frame was truncated or malformed (RFC 9114 §7.1).",
+                ex);
         }
 
         // RFC 9114 §6.2.1 — the control stream stays open for the connection
         // lifetime. Drain any post-SETTINGS frames on a background task so they
-        // cannot accumulate unread in the pipe and so the accept loop is never
-        // blocked waiting on the long-lived control stream.
-        _peerControlDrainTask = DrainPeerControlStreamAsync(reader, cancellationToken);
-        return false;
+        // cannot accumulate unread in the pipe. Connection-lived, and it never
+        // faults, so it is not awaited.
+        _ = DrainPeerControlStreamAsync(reader);
+        return null;
     }
 
     /// <summary>
@@ -566,15 +1107,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// (the server issues no pushes) and stops the drain. GOAWAY (§7.2.6) and
     /// MAX_PUSH_ID (§7.2.7) are read but inert in this subset, and every other
     /// frame is discarded. Processing prevents unread control frames from
-    /// accumulating in the pipe. The loop stops on end-of-stream, connection
-    /// teardown, or a per-stream parse failure, and never throws into the receive
-    /// loop.
+    /// accumulating in the pipe. The loop runs for the connection's lifetime —
+    /// not the receive enumeration's — and stops on end-of-stream, the connection
+    /// closing, or a per-stream parse failure; it never throws.
     /// </summary>
-    private async Task DrainPeerControlStreamAsync(PipeReader reader, CancellationToken receiveToken)
+    private async Task DrainPeerControlStreamAsync(PipeReader reader)
     {
-        using CancellationTokenSource linked =
-            CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
-        CancellationToken cancellationToken = linked.Token;
+        CancellationToken cancellationToken = _connection.ConnectionClosed;
 
         try
         {
@@ -597,6 +1136,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
                 if (frameType.Value == (long)Http3FrameType.PriorityUpdateRequest)
                 {
+                    if (length > maxControlFramePayloadSize)
+                    {
+                        // An oversized PRIORITY_UPDATE is malformed: stop draining, exactly as for any
+                        // other malformed post-SETTINGS frame (below).
+                        break;
+                    }
+
                     // RFC 9218 §7.2 — read the payload (Prioritized Element ID +
                     // Priority Field Value) and apply it to the referenced stream.
                     byte[] priorityPayload = await ReadExactAsync(reader, length, cancellationToken).ConfigureAwait(false);
@@ -626,13 +1172,21 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
         catch (OperationCanceledException)
         {
-            // Connection teardown, or the receive token firing — stop draining.
+            // The connection closed — stop draining.
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
             // A malformed post-SETTINGS control frame. Strict HTTP/3 would treat
             // this as a connection error; in this parse-and-discard subset the
             // drain stops and connection teardown closes the QUIC connection.
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the stream was released with its connection.
+        }
+        catch (ConnectionException)
+        {
+            // The in-memory driver's abort of the stream underneath the drain.
         }
     }
 
@@ -644,13 +1198,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// applied insertions. A malformed instruction or table violation is a
     /// connection error (§2.2): it aborts the connection so the accept loop
     /// observes the failure and terminates. Runs only when the dynamic table is
-    /// enabled.
+    /// enabled, and for the connection's lifetime — not the receive
+    /// enumeration's — because an exchange still reading its body after the
+    /// enumeration ends may be waiting on insertions (a trailer section that
+    /// references the dynamic table). It never throws.
     /// </summary>
-    private async Task DrainQPackEncoderStreamAsync(PipeReader reader, CancellationToken receiveToken)
+    private async Task DrainQPackEncoderStreamAsync(PipeReader reader)
     {
-        using CancellationTokenSource linked =
-            CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
-        CancellationToken cancellationToken = linked.Token;
+        CancellationToken cancellationToken = _connection.ConnectionClosed;
 
         try
         {
@@ -696,32 +1251,34 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
         catch (OperationCanceledException)
         {
-            // Connection teardown or the receive token firing — stop draining.
+            // The connection closed — stop draining.
         }
         catch (QPackException ex)
         {
-            // A connection-level QPACK error: signal teardown so any request
-            // stream currently blocked on pending insertions unblocks, then abort
-            // so the accept loop's next AcceptStreamAsync observes the failure and
-            // terminates the connection.
-            if (!_teardownSource.IsCancellationRequested)
-            {
-                _teardownSource.Cancel();
-            }
-
-            _connection.Abort(ex);
+            // A connection-level QPACK error (RFC 9204 §2.2 / §6): the abort closes the connection, which
+            // releases any request stream blocked on pending insertions and ends the accept loop.
+            AbortConnection(new Http3ConnectionException(ex.ErrorCode, ex.Message, ex));
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
             // A wire failure on the encoder stream; teardown closes the connection.
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the encoder or decoder stream was released with its
+            // connection.
+        }
+        catch (ConnectionException)
+        {
+            // The in-memory driver's abort of a stream underneath the drain.
         }
     }
 
     /// <summary>
     /// Writes a QPACK decoder-stream instruction (Insert Count Increment, or —
     /// with a stream ID — Section Acknowledgment / Stream Cancellation) to the
-    /// server's outbound decoder stream. The encoder-stream drain and the accept
-    /// loop both emit instructions here, so the write is serialized by
+    /// server's outbound decoder stream. The encoder-stream drain and the request
+    /// streams all emit instructions here, so the write is serialized by
     /// <see cref="_decoderWriteGate"/> — a <see cref="PipeWriter"/> tolerates no
     /// concurrent writers.
     /// </summary>
@@ -744,13 +1301,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Emits a QPACK Stream Cancellation (RFC 9204 §4.4.2) for a request stream that
-    /// referenced the dynamic table but was abandoned before its field section could
-    /// be acknowledged, letting the peer encoder reclaim the outstanding references
-    /// (RFC 9204 §2.2.2.2). Best-effort: the stream is being abandoned — usually
-    /// because connection teardown cancelled the decode — so a detached token is used
-    /// to still attempt the write, and a decoder-stream that is already gone is
-    /// swallowed rather than surfaced.
+    /// Emits a QPACK Stream Cancellation (RFC 9204 §4.4.2) for a request stream whose
+    /// field sections will not all be acknowledged — a decode abandoned before completion, a
+    /// stream reset, or reading abandoned before the stream's end — letting the peer encoder
+    /// reclaim the outstanding references (RFC 9204 §2.2.2.2). Best-effort: the stream is being
+    /// abandoned, often because connection teardown cancelled it, so a detached token is used to
+    /// still attempt the write, and a decoder stream that is already gone is swallowed rather than
+    /// surfaced.
     /// </summary>
     /// <param name="streamId">The abandoned request stream identifier.</param>
     private async Task TrySendStreamCancellationAsync(long streamId)
@@ -761,7 +1318,11 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 QPackDecoderInstructionEncoder.StreamCancellation(streamId),
                 CancellationToken.None).ConfigureAwait(false);
         }
-        catch (ObjectDisposedException)
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the decoder stream was released or completed underneath.
+        }
+        catch (ConnectionException)
         {
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
@@ -821,7 +1382,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// <summary>
     /// Reads exactly <paramref name="length"/> bytes off the pipe, buffering
     /// across reads. Throws <see cref="EndOfStreamException"/> when the stream
-    /// ends first.
+    /// ends first. Callers bound <paramref name="length"/> before calling.
     /// </summary>
     private static async Task<byte[]> ReadExactAsync(PipeReader reader, int length, CancellationToken cancellationToken)
     {
@@ -846,7 +1407,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             if (result.IsCompleted)
             {
                 reader.AdvanceTo(buffer.End);
-                throw new EndOfStreamException("The HTTP/3 control SETTINGS frame was truncated.");
+                throw new EndOfStreamException("An HTTP/3 control frame was truncated.");
             }
 
             reader.AdvanceTo(buffer.Start, buffer.End);
@@ -889,7 +1450,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// Accepts the next inbound QUIC stream on this multiplexed connection.
     /// QUIC-level failures (peer aborted the connection, the multiplexed
     /// connection was disposed) and cancellation signal connection
-    /// termination so the receive loop exits without throwing into the
+    /// termination so the accept loop exits without throwing into the
     /// caller's <c>await foreach</c>.
     /// </summary>
     private async Task<StreamAcceptOutcome> TryAcceptInboundAsync(CancellationToken cancellationToken)
@@ -929,51 +1490,413 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Reads a single request off the supplied QUIC stream. Any per-stream
-    /// failure — truncated frames, malformed QPACK literal, overflow in a
-    /// QUIC varint, an I/O error on this stream alone — is absorbed and
-    /// returns <see langword="null"/>, signalling the caller to drop this
-    /// stream and keep accepting more on the same QUIC connection.
-    /// <paramref name="requestStreamId"/> is the stream's wire ID, derived at
-    /// accept from the client-bidi numbering law (see <see cref="ReceiveAsync"/>).
+    /// Reads one request stream up to its HEADERS frame and publishes the resulting exchange to the
+    /// receive enumeration. Runs concurrently with the accept loop and with every other stream.
+    /// Expected failures are handled inside <see cref="ReadRequestHeadAsync"/>; an unexpected one is
+    /// forwarded to the enumeration rather than swallowed.
     /// </summary>
-    private async Task<RequestReadOutcome> TryReadRequestAsync(IConnection streamConnection, long requestStreamId, CancellationToken cancellationToken)
+    private async Task ProcessRequestStreamAsync(IConnection streamConnection, long requestStreamId, CancellationToken receiveToken)
     {
+        Http3Context? context = null;
+
         try
         {
-            return new RequestReadOutcome(await ReadRequestAsync(streamConnection, requestStreamId, cancellationToken).ConfigureAwait(false), terminate: false);
+            context = await ReadRequestHeadAsync(streamConnection, requestStreamId, receiveToken).ConfigureAwait(false);
+
+            if (context is not null && !_readyContexts.Writer.TryWrite(context))
+            {
+                // The channel is already complete (the enumeration faulted), so nothing will ever
+                // dispatch this request.
+                await RejectUndispatchedAsync(context).ConfigureAwait(false);
+            }
         }
-        catch (QPackException)
+        // Not swallowed: an unexpected fault (a programmer error — for example a request hook that
+        // throws something other than HttpRequestRejectedException) is forwarded to the consumer, whose
+        // enumeration rethrows it, exactly as when request heads were read inline. The stream can no
+        // longer be answered, so it is reset.
+        catch (Exception exception)
         {
-            // A QPACK decompression / instruction failure is a connection error
-            // (RFC 9204 §2.2): the shared dynamic table cannot be trusted, so the
-            // connection terminates rather than dropping just this stream.
-            return new RequestReadOutcome(context: null, terminate: true);
+            ResetStream(streamConnection, new Http3StreamException(Http3ErrorCode.InternalError, "The request stream failed unexpectedly.", exception));
+            _readyContexts.Writer.TryComplete(exception);
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Cancellation during a per-stream read is treated as
-            // per-stream — the outer loop check on cancellationToken will
-            // break out at the top of the next iteration if the cancel
-            // applies to the whole connection.
-            return new RequestReadOutcome(context: null, terminate: false);
-        }
-        catch (Exception ex) when (IsPerStreamFailure(ex))
-        {
-            return new RequestReadOutcome(context: null, terminate: false);
+            // #1085 — a stream whose head yielded no exchange is no longer in flight; one that yielded an
+            // exchange is, until the exchange ends (EndExchange). Only the end of an exchange moves the
+            // keep-alive deadline.
+            if (context is null)
+            {
+                EndRequestStream(exchangeEnded: false);
+            }
+
+            EndStreamWork();
         }
     }
 
-    private readonly struct RequestReadOutcome
+    /// <summary>
+    /// Reads a request stream up to its HEADERS frame (RFC 9114 §4.1), decodes the field section, and
+    /// builds the exchange — without waiting for any of the request body, which
+    /// <see cref="Http3RequestBodyStream"/> reads lazily. Handles every expected failure itself and
+    /// returns <see langword="null"/> when the stream yields no exchange: a stream error resets the
+    /// stream, a connection error aborts the connection.
+    /// </summary>
+    private async Task<Http3Context?> ReadRequestHeadAsync(IConnection streamConnection, long requestStreamId, CancellationToken receiveToken)
     {
-        public RequestReadOutcome(Http3Context? context, bool terminate)
+        // The head read — and a request hook that reads the body before dispatch — observes connection
+        // teardown, so a stream whose HEADERS never arrive cannot hold up the accept loop's drain.
+        using CancellationTokenSource headCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
+        CancellationToken cancellationToken = headCancellation.Token;
+        Http3RequestStreamReader reader = new(streamConnection.Input);
+
+        // #1085 — the request head must arrive, and decode, within RequestHeadersTimeout of the stream's
+        // acceptance — which QUIC makes the arrival of its first octets. The deadline is disarmed once the
+        // field section has decoded; a deadline that fired by then still rejects the request.
+        bool headersTimed = _limits.RequestHeadersTimeout != Timeout.InfiniteTimeSpan;
+        if (headersTimed)
         {
-            Context = context;
-            TerminateConnection = terminate;
+            headCancellation.CancelAfter(_limits.RequestHeadersTimeout);
         }
 
-        public Http3Context? Context { get; }
-        public bool TerminateConnection { get; }
+        try
+        {
+            byte[]? fieldSection = await reader.ReadHeaderSectionAsync(_limits.MaxRequestHeadersFrameSize, cancellationToken).ConfigureAwait(false);
+
+            if (fieldSection is null)
+            {
+                // RFC 9114 §8.1 — the stream ended cleanly without a request head.
+                ResetRequestStream(
+                    streamConnection,
+                    requestStreamId,
+                    new Http3StreamException(Http3ErrorCode.RequestIncomplete, "The HTTP/3 request stream ended before its HEADERS frame."),
+                    abandonsReading: false);
+                return null;
+            }
+
+            List<(string Name, string Value)> fields = await DecodeFieldSectionAsync(fieldSection, requestStreamId, cancellationToken).ConfigureAwait(false);
+
+            if (headersTimed)
+            {
+                headCancellation.CancelAfter(Timeout.InfiniteTimeSpan);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            return await CreateContextAsync(streamConnection, reader, requestStreamId, fields, receiveToken, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Http3StreamException exception)
+        {
+            // RFC 9114 §4.1.2 / §7.1 — a malformed request head or an oversized HEADERS frame is a
+            // stream error: reset this stream; the connection keeps serving its other streams.
+            ResetRequestStream(streamConnection, requestStreamId, exception, abandonsReading: !reader.IsCompleted);
+            return null;
+        }
+        catch (Http3LimitExceededException exception)
+        {
+            // RFC 9114 §4.2.2 — the request head decodes past SETTINGS_MAX_FIELD_SECTION_SIZE. The decoder
+            // stopped at the field that crossed it, and the request never became an exchange, so the
+            // transport answers 431 itself. The reader sits just past the HEADERS frame, so what follows is
+            // refused like any unread request (STOP_SENDING unless its FIN is already buffered); the connection keeps serving its other streams.
+            Http3RequestBodyStream remainder = new(
+                this,
+                reader,
+                streamConnection,
+                requestStreamId,
+                new HttpTrailerCollection(isSupported: true),
+                declaredContentLength: null,
+                isTunnel: false,
+                fallbackCap: null,
+                maxHeadersFrameSize: _limits.MaxRequestHeadersFrameSize,
+                cancellationToken);
+            await AnswerRejectedRequestAsync(streamConnection, remainder, requestStreamId, exception.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Http3ConnectionException exception)
+        {
+            AbortConnection(exception);
+            return null;
+        }
+        catch (QPackException exception)
+        {
+            // RFC 9204 §2.2 — a QPACK decompression failure corrupts shared dynamic-table state and cannot
+            // be isolated to one stream: a connection error.
+            AbortConnection(new Http3ConnectionException(exception.ErrorCode, exception.Message, exception));
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            // Teardown (or the consumer's cancellation) before the request was dispatched, or a head that
+            // did not arrive within RequestHeadersTimeout (#1085): it was never processed, so RFC 9114
+            // §4.1.1 H3_REQUEST_REJECTED tells the peer it may retry it.
+            bool timedOut = !receiveToken.IsCancellationRequested && !_teardownSource.IsCancellationRequested;
+            ResetRequestStream(
+                streamConnection,
+                requestStreamId,
+                new Http3StreamException(
+                    Http3ErrorCode.RequestRejected,
+                    timedOut
+                        ? "The HTTP/3 request head did not arrive within the request-headers timeout."
+                        : "The connection stopped before the request was dispatched."),
+                abandonsReading: !reader.IsCompleted);
+            return null;
+        }
+        catch (Exception exception) when (IsRequestStreamFailure(exception))
+        {
+            // The request stream itself failed — reset by the peer, or torn down with its connection —
+            // before its head was complete.
+            ResetRequestStream(
+                streamConnection,
+                requestStreamId,
+                new Http3StreamException(Http3ErrorCode.RequestIncomplete, "The HTTP/3 request stream failed before its request head was complete.", exception),
+                abandonsReading: !reader.IsCompleted);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Builds the exchange for a decoded request head: validates the field section, attaches the lazy
+    /// request body, runs the request-parse interceptors, and wires the response side.
+    /// </summary>
+    private async Task<Http3Context?> CreateContextAsync(
+        IConnection streamConnection,
+        Http3RequestStreamReader reader,
+        long requestStreamId,
+        List<(string Name, string Value)> fields,
+        CancellationToken receiveToken,
+        CancellationToken headToken)
+    {
+        HttpScheme fallbackScheme = _isSecure ? HttpScheme.Https : HttpScheme.Http;
+        HttpTrailerCollection trailers = new(isSupported: true);
+        TransportHttpRequestHead requestHead;
+        long? contentLength;
+
+        try
+        {
+            requestHead = Http3HeaderCodec.BuildRequestHead(fields, fallbackScheme, trailers, out contentLength);
+        }
+        catch (InvalidDataException exception)
+        {
+            // RFC 9114 §4.1.2 — a malformed request is a stream error of type H3_MESSAGE_ERROR.
+            throw new Http3StreamException(Http3ErrorCode.MessageError, exception.Message, exception);
+        }
+
+        // RFC 9110 §9.3.6 / RFC 9114 §4.4 — a CONNECT's DATA frames are tunnel octets, not a message body.
+        bool isConnect = requestHead.Method == HttpMethod.Connect;
+        Http3RequestBodyStream body = new(
+            this,
+            reader,
+            streamConnection,
+            requestStreamId,
+            trailers,
+            contentLength,
+            isConnect,
+            _limits.MaxRequestBodySize,
+            maxHeadersFrameSize: _limits.MaxRequestHeadersFrameSize,
+            headToken,
+            _limits.MinRequestBodyDataRate,
+            _timeProvider);
+        requestHead = requestHead with { Body = body };
+
+        HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);
+
+        if (_requestInterceptors.Length > 0 || _responseInterceptors.Length > 0)
+        {
+            // Interceptor hooks are application code. The seam contract makes the parse-path hooks
+            // CPU-only, but a hook that blocks anyway (one that reads the whole body before dispatch, say)
+            // must stall only its own stream, never the accept loop, so the hooks run on a thread-pool
+            // thread instead of inline on the loop.
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        }
+
+        // Request-parse interceptor phase — the HTTP/3 analogue of the HTTP/1.1 invocation point,
+        // run as the request head is assembled. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
+        // tunnel traffic, so its body hooks are skipped (head hooks still run). The hook-populated
+        // feature collection and the (possibly wrapped) body flow into the exchange through the
+        // Http3Context constructor; zero interceptors keeps the pre-seam fast path. The returned cap
+        // is not used here: the lazy body freezes and enforces the knob at its first read.
+        HttpRequestInterceptionResult interception;
+        try
+        {
+            interception = await HttpRequestInterceptorPipeline.InterceptAsync(
+                _requestInterceptors,
+                HttpVersion.Http30,
+                requestHead,
+                connectionInfo,
+                _limits.MaxRequestBodySize,
+                isConnect,
+                _featureCapacity).ConfigureAwait(false);
+        }
+        catch (HttpRequestRejectedException)
+        {
+            // A request-parse interceptor refused this request before it was dispatched (the pipeline
+            // already disposed the partial body-wrapper chain and hook-attached features). RFC 9114
+            // §4.1.1 — the server refused it without application processing, so the stream is reset with
+            // H3_REQUEST_REJECTED rather than answered with the h1-style status response. The QUIC
+            // connection and its other streams are unaffected.
+            ResetRequestStream(
+                streamConnection,
+                requestStreamId,
+                new Http3StreamException(Http3ErrorCode.RequestRejected, "A request interceptor rejected the request."),
+                abandonsReading: !reader.IsCompleted);
+            return null;
+        }
+        catch (Http3LimitExceededException exception)
+        {
+            // A request hook read the body before dispatch and the body was rejected: over the cap (413),
+            // below the minimum data rate (408), or with a trailer section over the field-section limit
+            // (431). The request never became an exchange, so the transport answers the rejection itself
+            // and then stops reading the request stream.
+            await AnswerRejectedRequestAsync(streamConnection, body, requestStreamId, exception.StatusCode, headToken).ConfigureAwait(false);
+            return null;
+        }
+
+        Http3Context context = new(
+            requestHead with { Body = interception.Body },
+            connectionInfo,
+            receiveToken,
+            streamConnection,
+            requestStreamId,
+            body,
+            _featureCapacity,
+            interception.Features)
+        {
+            AddedResponseInterceptors = interception.ResponseInterceptors,
+            Connection = this,
+        };
+        body.AttachOwner(context);
+
+        // RFC 9218 §4 — the request's Priority header sets the effective priority.
+        // Parsing is tolerant: a malformed value leaves the default (urgency 3,
+        // non-incremental) in place.
+        if (requestHead.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
+            && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
+        {
+            context.EffectivePriority = headerPriority;
+        }
+
+        // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
+        // provides backpressure) and the exchange control to registered response interceptors so
+        // feature packages (streaming / SSE, interim responses) can wrap them — without this
+        // transport depending on any of those packages. The control's interim writes emit an
+        // additional HEADERS frame on this request stream ahead of the final one (RFC 9114 §4.1);
+        // its abort resets this stream, leaving the QUIC connection's other streams intact.
+        IHttpExchangeInterceptor[] responseInterceptors = context.ResolveResponseInterceptors(_responseInterceptors);
+
+        if (responseInterceptors.Length > 0)
+        {
+            context.RunResponseInterceptors(
+                responseInterceptors,
+                new Http3ResponseBodyStream(context),
+                new Http3ExchangeControl(this, context));
+        }
+
+        return context;
+    }
+
+    /// <summary>
+    /// Decodes one QPACK field section received on a request stream — its header section, or its trailer
+    /// section — static-only or against the dynamic table. With the dynamic table, a section that
+    /// referenced it is acknowledged on the decoder stream once decoded (RFC 9204 §4.4.1), and a section
+    /// whose decode was abandoned is cancelled (RFC 9204 §4.4.2), both keyed on
+    /// <paramref name="requestStreamId"/>.
+    /// </summary>
+    /// <param name="fieldSection">The encoded field section (a HEADERS frame payload).</param>
+    /// <param name="requestStreamId">The request stream's wire ID.</param>
+    /// <param name="cancellationToken">A token to cancel the decode (including a blocked wait).</param>
+    /// <returns>The decoded field lines, in wire order.</returns>
+    /// <exception cref="Http3StreamException">
+    /// Thrown (<c>H3_MESSAGE_ERROR</c>) when the encoding is malformed but the shared decoder state is
+    /// intact — the stream is reset and the connection survives.
+    /// </exception>
+    /// <exception cref="Http3LimitExceededException">
+    /// Thrown (<c>431</c>) when the decoded section exceeds <see cref="Http3QPackOptions.MaxFieldSectionSize"/>
+    /// (RFC 9114 §4.2.2). The decoder stops at the field that crosses it; the caller answers or resets
+    /// the stream, and the connection survives.
+    /// </exception>
+    /// <exception cref="QPackException">Thrown on a QPACK connection error (RFC 9204 §2.2).</exception>
+    internal async ValueTask<List<(string Name, string Value)>> DecodeFieldSectionAsync(
+        byte[] fieldSection,
+        long requestStreamId,
+        CancellationToken cancellationToken)
+    {
+        if (_decoderState is null)
+        {
+            try
+            {
+                // Static-only QPACK decode (dynamic table disabled): the field section resolves against
+                // the static table or literals only, and a malformed encoding cannot corrupt state shared
+                // with other streams — it is isolated to this stream.
+                return QPackFieldSectionDecoder.Decode(fieldSection, _qpackOptions.MaxFieldSectionSize);
+            }
+            catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
+            {
+                throw new Http3StreamException(Http3ErrorCode.MessageError, "The HTTP/3 field section could not be decoded.", exception);
+            }
+        }
+
+        // Parse the field section prefix up front, from a single insert-count snapshot, so the "references
+        // the dynamic table" decision is known even if the decode is later abandoned — a referencing
+        // stream reset before it is acknowledged owes a Stream Cancellation (RFC 9204 §2.2.2.2).
+        QPackFieldSectionPrefix prefix;
+        try
+        {
+            prefix = _decoderState.ReadPrefix(fieldSection);
+        }
+        catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
+        {
+            throw new Http3StreamException(Http3ErrorCode.MessageError, "The HTTP/3 field section prefix could not be decoded.", exception);
+        }
+
+        bool referencedDynamicTable = prefix.RequiredInsertCount > 0;
+        bool decodeCompleted = false;
+
+        // Resolving against the dynamic table may block (within the blocked-stream budget) until the
+        // referenced insertions arrive (RFC 9204 §2.1.2). The wait is linked to the connection closing, so
+        // an encoder-stream abort or the connection going away releases a blocked stream instead of hanging
+        // it — and to nothing shorter: a trailer section decoded after the receive enumeration ended still
+        // waits for insertions the (connection-lived) encoder drain applies. A request head's own token
+        // additionally carries the enumeration's teardown.
+        using CancellationTokenSource decodeCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _connection.ConnectionClosed);
+
+        try
+        {
+            QPackDecodeResult decode;
+            try
+            {
+                decode = await _decoderState.DecodeRequestAsync(fieldSection, prefix, decodeCancellation.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
+            {
+                throw new Http3StreamException(Http3ErrorCode.MessageError, "The HTTP/3 field section could not be decoded.", exception);
+            }
+
+            decodeCompleted = true;
+
+            // RFC 9204 §4.4.1 — a field section that referenced the dynamic table is acknowledged on the
+            // decoder stream so the peer encoder can advance its Known Received Count (§2.1.1) and evict
+            // acknowledged entries. Emitted as soon as the section decodes — ahead of HTTP-layer
+            // validation and interceptors — so a request later reset as malformed or refused has still
+            // had its section acknowledged (the decode itself succeeded, which is what the
+            // acknowledgment attests to).
+            if (referencedDynamicTable)
+            {
+                await SendDecoderInstructionAsync(
+                    QPackDecoderInstructionEncoder.SectionAcknowledgment(requestStreamId),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            return decode.Fields;
+        }
+        finally
+        {
+            // The section referenced the dynamic table but the decode did not complete (a decompression
+            // failure or teardown cancelled it), so no Section Acknowledgment went out: tell the peer
+            // encoder to reclaim the outstanding references (RFC 9204 §2.2.2.2 / §4.4.2).
+            if (referencedDynamicTable && !decodeCompleted)
+            {
+                await TrySendStreamCancellationAsync(requestStreamId).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>
@@ -991,10 +1914,10 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Per-stream parse failures from the HTTP/3 frame reader and the
-    /// QPACK literal decoder. These do not invalidate the QUIC connection
-    /// — the offending stream is dropped and the receive loop keeps
-    /// accepting subsequent streams.
+    /// Per-stream parse and read failures on a unidirectional stream — the frame
+    /// reader, the settings and control-frame parsers, a per-stream
+    /// <see cref="IOException"/>. These do not invalidate the QUIC connection by
+    /// themselves; the callers decide the scope (the control stream is critical).
     /// </summary>
     private static bool IsPerStreamFailure(Exception exception)
     {
@@ -1005,6 +1928,32 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             or ArgumentOutOfRangeException
             or IndexOutOfRangeException
             or IOException;
+    }
+
+    /// <summary>
+    /// A request stream failing underneath its head read: a wire failure (<see cref="IOException"/>,
+    /// which includes the QUIC driver's <see cref="QuicException"/>), the in-memory driver's peer abort
+    /// (<see cref="ConnectionException"/>), or a stream disposed with its connection.
+    /// </summary>
+    private static bool IsRequestStreamFailure(Exception exception)
+    {
+        return exception is IOException
+            or ConnectionException
+            or ObjectDisposedException;
+    }
+
+    /// <summary>
+    /// A malformed QPACK encoding the decoder reports without corrupting shared state: the static-only
+    /// decoder's failures, and a truncated section on the dynamic path. A
+    /// <see cref="QPackException"/> — a connection error — is deliberately not among them.
+    /// </summary>
+    private static bool IsFieldSectionDecodeFailure(Exception exception)
+    {
+        return exception is InvalidDataException
+            or OverflowException
+            or IndexOutOfRangeException
+            or ArgumentOutOfRangeException
+            or NotSupportedException;
     }
 
     private readonly struct StreamAcceptOutcome
@@ -1019,6 +1968,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         public bool TerminateConnection { get; }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The exchange ends when this call returns or throws, whatever it wrote: from then on its request
+    /// stream no longer keeps the connection from going idle (#1085). The one exception is a head or
+    /// buffered trailer section the encoder refused (#1183): nothing reached the wire and the response
+    /// has not started, so the exchange stays running, and its request stream keeps the connection busy,
+    /// until the caller finalizes it again or disposes it — as HTTP/2 keeps the stream's slot.
+    /// </remarks>
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         if (context is not Http3Context http3Context)
@@ -1026,12 +1983,51 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
-        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        bool headRefused = false;
+
+        try
+        {
+            await SendCoreAsync(http3Context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpInvalidResponseFieldException) when (!http3Context.HasFinalResponseStarted)
+        {
+            headRefused = true;
+            throw;
+        }
+        finally
+        {
+            if (!headRefused)
+            {
+                EndExchange(http3Context);
+            }
+        }
+    }
+
+    private async ValueTask SendCoreAsync(Http3Context http3Context, CancellationToken cancellationToken)
+    {
+        Http3RequestBodyStream requestBody = http3Context.RequestBody;
+
+        // The transport already reset this request stream — a stream error surfaced while the request
+        // body was read — so there is no stream left to answer on.
+        if (requestBody.IsReset)
+        {
+            return;
+        }
+
+        // An accepted extended CONNECT tunnel already sent the exchange's only head; end the tunnel
+        // rather than write a response (RFC 9220).
+        if (http3Context.Tunnel is { } tunnel)
+        {
+            await FinishTunnelAsync(http3Context, tunnel, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // The exchange was aborted (IHttpContext.Cancel / CancelAsync — the
         // directive is Abort). RFC 9114 §4.1 — reset the request stream instead of writing a
         // response; the QUIC connection and its other streams are unaffected.
         if (http3Context.CancelRequested)
         {
-            http3Context.StreamConnection.Abort();
+            CancelRequestStream(http3Context);
             return;
         }
 
@@ -1040,9 +2036,20 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         // instead of writing a buffered response.
         if (http3Context.ResponseBodySink is { HasStarted: true } sink)
         {
-            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
-            await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            await FinishStreamedResponseAsync(http3Context, sink, cancellationToken).ConfigureAwait(false);
             return;
+        }
+
+        // RFC 9110 §15.5.14 — the request body exceeded the body-size cap (or, §15.5.9, it arrived below
+        // the minimum data rate, #1085; or, RFC 9114 §4.2.2, its trailer section exceeded
+        // SETTINGS_MAX_FIELD_SECTION_SIZE) and the final response head has not been committed, so the
+        // exchange is answered 413 Content Too Large (or 408 Request Timeout, or 431 Request Header Fields
+        // Too Large), whatever the application staged from a request it never fully received — unless it
+        // answered that status itself, whose representation is kept. The BeforeResponseHead hooks run
+        // after this replacement, so a field one of them adds can still have the head refused (#1183).
+        if (requestBody.RejectedStatusCode is { } rejectedStatus && http3Context.Response.StatusCode != rejectedStatus)
+        {
+            await ReplaceWithStatusOnlyResponseAsync(http3Context, rejectedStatus).ConfigureAwait(false);
         }
 
         // The final response head is about to be committed on the buffered path — the last
@@ -1052,7 +2059,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
         if (http3Context.CancelRequested)
         {
-            http3Context.StreamConnection.Abort();
+            CancelRequestStream(http3Context);
             return;
         }
 
@@ -1060,8 +2067,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         // then already on the wire) — finalize that response rather than writing a second one.
         if (http3Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
         {
-            await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
-            await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            await FinishStreamedResponseAsync(http3Context, hookStartedSink, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1070,31 +2076,240 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         // rejection is unconditional.
         HttpInterimResponseRules.EnsureFinalStatusCode(http3Context.Response.StatusCode);
 
+        Stream stream = http3Context.StreamConnection.AsStream();
+        byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
+
+        // RFC 9110 §9.3.2 — a response to HEAD carries the header section a GET would but never
+        // content: no DATA frame. A Content-Length the application set is preserved; one is synthesized
+        // only from a body the handler actually produced (the GET representation's length). An empty
+        // HEAD body gets none, because RFC 9110 §8.6 forbids a Content-Length that differs from what GET
+        // would send, and the transport cannot know it — the choice the HTTP/2 path makes too.
+        //
+        // The trailer section and the head are encoded before the commit point. A field that either
+        // section cannot carry (#1183, RFC 9114 §4.2) throws here, with nothing on the wire and the
+        // response unstarted, so the caller can still send another response. The trailers go first: the
+        // encoder is static-only, so the order changes no octet, and the head's encode, which adds a
+        // synthesized content-length and withdraws it when the head is refused, is then the last thing
+        // that can fail, so a refused trailer section never leaves that length behind for a replacement.
+        bool isHead = http3Context.Request.Method == HttpMethod.Head;
+
+        // RFC 9114 §4.1 — staged trailers follow the content as a HEADERS frame, before the FIN that
+        // ends the response. A response to HEAD carries none, as on HTTP/2.
+        byte[]? trailerBlock = !isHead && http3Context.Response.StagedTrailers is { } trailers
+            ? Http3HeaderCodec.EncodeTrailers(trailers)
+            : null;
+
+        byte[] headerBlock = isHead && bodyBytes.Length == 0
+            ? Http3HeaderCodec.EncodeResponseHeaders(http3Context)
+            : Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
+
         // Commit point: from here the final response is on the wire, so the exchange control's
         // probes must report the response as started (no more interim writes).
         http3Context.MarkFinalResponseStarted();
 
-        Stream stream = http3Context.StreamConnection.AsStream();
-        byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
-        byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
-
         await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
 
-        if (bodyBytes.Length > 0)
+        if (bodyBytes.Length > 0 && !isHead)
         {
             await WriteFrameAsync(stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
         }
 
+        if (trailerBlock is not null)
+        {
+            await WriteFrameAsync(stream, Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
+        }
+
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+        // RFC 9114 §4.1 — the complete response is flushed, so the rest of an unread request is refused
+        // with STOP_SENDING(H3_NO_ERROR). It goes out before the FIN: on the QUIC driver, ending the
+        // response releases the stream, which would stop an unread request with the default code instead.
+        requestBody.RefuseRemainder();
 
         // RFC 9114 §4.1 — an HTTP/3 response body is delimited by the request stream's end, so the
         // response is not complete on the wire until the server ends its write side. End it now, with
         // the response fully flushed: a real .NET HTTP/3 client stays in ReadResponseContentAsync until
         // this FIN arrives, and if the stream is left dangling until connection teardown the client
         // surfaces the teardown as H3_CLOSED_CRITICAL_STREAM (0x104) instead of completing the response.
-        CompleteResponseStreamWrites(http3Context);
+        CompleteResponseStreamWrites(http3Context.StreamConnection);
+        StopReadingRequestStream(requestBody, http3Context.StreamId);
 
         await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Finishes a response the application, or a hook, started through the raw sink: its head is on the
+    /// wire, so it is completed with the stream's FIN — unless the transport rejected the request body
+    /// (#1084).
+    /// </summary>
+    /// <remarks>
+    /// A body over the size cap (RFC 9110 §15.5.14), below the minimum data rate (§15.5.9, #1085), or with
+    /// a trailer section over the field-section limit is answered with its status while the head is
+    /// uncommitted. Once a streamed head is on the wire no status can follow it, and the response cannot
+    /// be whole without the request the server refused to receive, so the stream is reset with
+    /// <c>H3_REQUEST_CANCELLED</c> rather than completed: RFC 9114 §4.1.1 — processing began, so never
+    /// <c>H3_REQUEST_REJECTED</c>. HTTP/2 resets the stream with <c>CANCEL</c> in the same case. A
+    /// streamed response that carries the rejection status itself is complete, and is finished like any
+    /// other.
+    /// </remarks>
+    private async ValueTask FinishStreamedResponseAsync(Http3Context http3Context, HttpResponseBodyStream sink, CancellationToken cancellationToken)
+    {
+        Http3RequestBodyStream requestBody = http3Context.RequestBody;
+
+        if (requestBody.RejectedStatusCode is { } rejectedStatus && http3Context.Response.StatusCode != rejectedStatus)
+        {
+            CancelRequestStream(http3Context);
+            return;
+        }
+
+        requestBody.RefuseRemainder();
+        await CompleteStreamedResponseAsync(http3Context, sink, cancellationToken).ConfigureAwait(false);
+        StopReadingRequestStream(requestBody, http3Context.StreamId);
+        await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Resets an exchange the application cancelled. RFC 9114 §4.1.1 — the application saw the request,
+    /// so the server abandons a response after processing began: <c>H3_REQUEST_CANCELLED</c>, never
+    /// <c>H3_REQUEST_REJECTED</c> (which would promise the peer the request was not processed).
+    /// </summary>
+    private void CancelRequestStream(Http3Context http3Context)
+    {
+        Http3RequestBodyStream requestBody = http3Context.RequestBody;
+        bool abandonsReading = !requestBody.IsCompleted;
+        requestBody.MarkReset();
+
+        ResetRequestStream(
+            http3Context.StreamConnection,
+            http3Context.StreamId,
+            new Http3StreamException(Http3ErrorCode.RequestCancelled, "The exchange was cancelled."),
+            abandonsReading);
+    }
+
+    /// <summary>
+    /// Completes a streamed response through its sink: the staged trailer section, if any, then the FIN.
+    /// A trailer field the section cannot carry (#1183) is refused before its HEADERS frame is written,
+    /// but the head and the body are already out, so the response can be neither completed nor replaced:
+    /// the request stream is reset with <c>H3_INTERNAL_ERROR</c> (RFC 9114 §8.1), and the peer never sees
+    /// a FIN on a response that lost its trailers. The refusal then propagates.
+    /// </summary>
+    private async Task CompleteStreamedResponseAsync(Http3Context http3Context, HttpResponseBodyStream sink, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            Http3RequestBodyStream requestBody = http3Context.RequestBody;
+            bool abandonsReading = !requestBody.IsCompleted;
+            requestBody.MarkReset();
+
+            ResetRequestStream(
+                http3Context.StreamConnection,
+                http3Context.StreamId,
+                new Http3StreamException(Http3ErrorCode.InternalError, "The response's trailer section could not be sent."),
+                abandonsReading);
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Stops reading a request stream once its complete response is on the wire (RFC 9114 §4.1): an
+    /// unread remainder of the request is refused with <c>STOP_SENDING(H3_NO_ERROR)</c>, if
+    /// <see cref="Http3RequestBodyStream.RefuseRemainder"/> has not already refused it, and the stream's
+    /// input is released. With the dynamic table enabled, abandoning the stream before its end also emits
+    /// a Stream Cancellation (RFC 9204 §4.4.2), since a trailer section left unread will never be
+    /// acknowledged.
+    /// </summary>
+    private void StopReadingRequestStream(Http3RequestBodyStream requestBody, long requestStreamId)
+    {
+        if (!requestBody.IsCompleted && _decoderState is not null)
+        {
+            _ = TrySendStreamCancellationAsync(requestStreamId);
+        }
+
+        requestBody.StopReading();
+    }
+
+    /// <summary>
+    /// Replaces the application's staged (uncommitted) response with a bodyless one carrying
+    /// <paramref name="statusCode"/>: the headers and trailers are cleared and the staged body is
+    /// released.
+    /// </summary>
+    private static async ValueTask ReplaceWithStatusOnlyResponseAsync(Http3Context http3Context, HttpStatusCode statusCode)
+    {
+        TransportHttpResponse response = http3Context.Response;
+        Stream staged = response.Body;
+
+        response.StatusCode = statusCode;
+        response.Headers.Clear();
+        response.StagedTrailers?.Clear();
+        response.Body = new MemoryStream();
+
+        // The exchange disposes only the body it ends up holding, so release the one it no longer holds.
+        await staged.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Answers a request that was refused before it became an exchange with a bodyless final response,
+    /// ends the response direction, and stops reading the request stream (RFC 9114 §4.1). Best-effort:
+    /// a peer that is already gone leaves nothing to answer.
+    /// </summary>
+    private async Task AnswerRejectedRequestAsync(
+        IConnection streamConnection,
+        Http3RequestBodyStream requestBody,
+        long requestStreamId,
+        HttpStatusCode statusCode,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Stream stream = streamConnection.AsStream();
+            byte[] headerBlock = Http3HeaderCodec.EncodeStatusOnlyResponseHeaders(statusCode);
+
+            await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            requestBody.RefuseRemainder();
+            CompleteResponseStreamWrites(streamConnection);
+        }
+        catch (OperationCanceledException)
+        {
+            // Teardown while answering: the connection is going away.
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the stream was released underneath.
+        }
+        catch (ConnectionException)
+        {
+        }
+        catch (Exception exception) when (IsWireLevelFailure(exception))
+        {
+        }
+
+        StopReadingRequestStream(requestBody, requestStreamId);
+    }
+
+    /// <summary>
+    /// Rejects a request that was assembled but will never be handed to the application — the consumer
+    /// stopped enumerating first. RFC 9114 §4.1.1 — it was not processed, so the stream is reset with
+    /// <c>H3_REQUEST_REJECTED</c> (the peer may retry it) and the exchange is disposed.
+    /// </summary>
+    private async Task RejectUndispatchedAsync(Http3Context context)
+    {
+        Http3RequestBodyStream requestBody = context.RequestBody;
+        bool abandonsReading = !requestBody.IsCompleted;
+        requestBody.MarkReset();
+
+        ResetRequestStream(
+            context.StreamConnection,
+            context.StreamId,
+            new Http3StreamException(Http3ErrorCode.RequestRejected, "The connection stopped before the request was dispatched."),
+            abandonsReading);
+
+        await context.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1104,12 +2319,12 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// documented half-close signal. Best-effort: the response bytes are already flushed to the
     /// transport, so a teardown race that disposes the stream underneath the completion is benign.
     /// </summary>
-    /// <param name="http3Context">The exchange whose request-stream write side is ended.</param>
-    private static void CompleteResponseStreamWrites(Http3Context http3Context)
+    /// <param name="streamConnection">The request stream whose write side is ended.</param>
+    private static void CompleteResponseStreamWrites(IConnection streamConnection)
     {
         try
         {
-            http3Context.StreamConnection.Output.Complete();
+            streamConnection.Output.Complete();
         }
         catch (InvalidOperationException)
         {
@@ -1148,173 +2363,6 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<Http3Context?> ReadRequestAsync(IConnection streamConnection, long requestStreamId, CancellationToken cancellationToken)
-    {
-        Stream stream = streamConnection.AsStream();
-        using MemoryStream requestBuffer = new();
-        await stream.CopyToAsync(requestBuffer, cancellationToken).ConfigureAwait(false);
-
-        byte[] requestBytes = requestBuffer.ToArray();
-        byte[]? headerBlock = null;
-        using MemoryStream body = new();
-        int index = 0;
-
-        while (index < requestBytes.Length)
-        {
-            long frameType = QuicVariableLengthInteger.Decode(requestBytes, ref index);
-            long frameLength = QuicVariableLengthInteger.Decode(requestBytes, ref index);
-            byte[] payload = requestBytes.AsSpan(index, checked((int)frameLength)).ToArray();
-            index += checked((int)frameLength);
-
-            switch ((Http3FrameType)frameType)
-            {
-                case Http3FrameType.Headers:
-                    headerBlock = payload;
-                    break;
-                case Http3FrameType.Data:
-                    await body.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
-                    break;
-            }
-        }
-
-        if (headerBlock is null)
-        {
-            return null;
-        }
-
-        byte[] bodyBytes = body.ToArray();
-        HttpScheme fallbackScheme = _isSecure ? HttpScheme.Https : HttpScheme.Http;
-        string? extendedConnectProtocol;
-        Http3Request request;
-
-        if (_decoderState is not null)
-        {
-            // Dynamic QPACK path: resolve against the connection dynamic table,
-            // blocking (within the blocked-stream budget) until the referenced
-            // insertions arrive (RFC 9204 §2.1.2), then apply the shared HTTP/3
-            // field-section validation. The wait is linked to connection teardown
-            // so an encoder-stream abort or graceful stop releases a blocked
-            // stream instead of hanging it.
-            using CancellationTokenSource decodeCancellation =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _teardownSource.Token);
-
-            // Parse the field section prefix up front, from a single insert-count
-            // snapshot, so the "references the dynamic table" decision is known even
-            // if the decode is later abandoned — a referencing stream reset before it
-            // is acknowledged owes a Stream Cancellation (RFC 9204 §2.2.2.2). The
-            // requestStreamId keying both instructions was derived at accept from the
-            // client-bidi numbering law (see ReceiveAsync).
-            QPackFieldSectionPrefix prefix = _decoderState.ReadPrefix(headerBlock);
-            bool referencedDynamicTable = prefix.RequiredInsertCount > 0;
-            bool decodeCompleted = false;
-
-            try
-            {
-                QPackDecodeResult decode = await _decoderState.DecodeRequestAsync(headerBlock, prefix, decodeCancellation.Token).ConfigureAwait(false);
-                decodeCompleted = true;
-
-                // RFC 9204 §4.4.1 — a field section that referenced the dynamic table
-                // is acknowledged on the decoder stream so the peer encoder can advance
-                // its Known Received Count (§2.1.1) and safely evict acknowledged
-                // entries. Emitted as soon as the section decodes — ahead of HTTP-layer
-                // validation and interceptors — so a request later dropped as malformed
-                // or refused has still had its QPACK section acknowledged (the decode
-                // itself succeeded, which is what the acknowledgment attests to).
-                if (referencedDynamicTable)
-                {
-                    await SendDecoderInstructionAsync(
-                        QPackDecoderInstructionEncoder.SectionAcknowledgment(requestStreamId),
-                        decodeCancellation.Token).ConfigureAwait(false);
-                }
-
-                request = Http3HeaderCodec.BuildRequest(decode.Fields, fallbackScheme, bodyBytes, out extendedConnectProtocol);
-            }
-            finally
-            {
-                // The section referenced the dynamic table but the decode did not
-                // complete (a decompression failure or connection teardown cancelled
-                // it), so no Section Acknowledgment went out: tell the peer encoder to
-                // reclaim the outstanding references (RFC 9204 §2.2.2.2 / §4.4.2).
-                if (referencedDynamicTable && !decodeCompleted)
-                {
-                    await TrySendStreamCancellationAsync(requestStreamId).ConfigureAwait(false);
-                }
-            }
-        }
-        else
-        {
-            request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, fallbackScheme, bodyBytes, out extendedConnectProtocol);
-        }
-
-        Http3Response response = new();
-        HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
-
-        // Request-parse interceptor phase — the HTTP/3 analogue of the HTTP/1.1 invocation point,
-        // run as the request head is assembled. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
-        // tunnel traffic, so its body hooks are skipped (head hooks still run). The hook-populated
-        // feature collection flows into the exchange through the Http3Context features parameter;
-        // zero interceptors keeps the pre-seam fast path.
-        bool isConnect = request.Method == HttpMethod.Connect;
-        HttpFeatureCollection? features;
-        try
-        {
-            features = await HttpRequestInterceptorPipeline.InvokeAsync(
-                _requestInterceptors,
-                HttpVersion.Http30,
-                request,
-                connectionInfo,
-                _limits.MaxRequestBodySize,
-                isConnect).ConfigureAwait(false);
-        }
-        catch (HttpRequestRejectedException)
-        {
-            // A request-parse interceptor refused this request (the pipeline already disposed the
-            // partial body-wrapper chain and hook-attached features before surfacing). RFC 9114
-            // §4.1 — abort the request stream (the ideal wire code is H3_REQUEST_REJECTED; the
-            // IConnection abort contract resets with the transport's default stream error code)
-            // rather than writing the h1-style status response. The QUIC connection and its other
-            // streams are unaffected, so the caller drops just this stream and keeps serving.
-            streamConnection.Abort();
-            return null;
-        }
-
-        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection, features);
-
-        // RFC 9218 §4 — the request's Priority header sets the effective priority.
-        // Parsing is tolerant: a malformed value leaves the default (urgency 3,
-        // non-incremental) in place.
-        if (request.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
-            && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
-        {
-            context.EffectivePriority = headerPriority;
-        }
-
-        // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
-        // provides backpressure) and the exchange control to registered response interceptors so
-        // feature packages (streaming / SSE, interim responses) can wrap them — without this
-        // transport depending on any of those packages. The control's interim writes emit an
-        // additional HEADERS frame on this request stream ahead of the final one (RFC 9114 §4.1);
-        // its abort resets this stream, leaving the QUIC connection's other streams intact.
-        if (_responseInterceptors.Length > 0)
-        {
-            context.RunResponseInterceptors(
-                _responseInterceptors,
-                new Http3ResponseBodyStream(context),
-                new Http3ExchangeControl(this, context));
-        }
-
-        // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically
-        // so a higher layer (Assimalign.Cohesion.Http.ExtendedConnect) can model
-        // extended CONNECT without the transport interpreting it. Same Items key
-        // convention as the HTTP/2 transport.
-        if (extendedConnectProtocol is not null)
-        {
-            context.Items[TransportItemKeys.Protocol] = extendedConnectProtocol;
-        }
-
-        return context;
-    }
-
     private static async Task WriteFrameAsync(Stream stream, Http3FrameType frameType, byte[] payload, CancellationToken cancellationToken)
     {
         QuicVariableLengthInteger.Write(stream, (long)frameType);
@@ -1325,6 +2373,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             await stream.WriteAsync(payload, 0, payload.Length, cancellationToken).ConfigureAwait(false);
         }
     }
+
     private static async Task<byte[]> ReadBodyAsync(Stream body, CancellationToken cancellationToken)
     {
         if (body is MemoryStream memoryStream)

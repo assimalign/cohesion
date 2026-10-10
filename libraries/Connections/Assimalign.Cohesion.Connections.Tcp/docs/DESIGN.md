@@ -28,6 +28,22 @@ live in the compiled-in `DuplexPipePair` and never surface on the connection con
 pool block size, IO-queue schedulers, read/write buffer thresholds) comes from
 `SocketPipeOptionsFactory` and is shared per listener across its connections.
 
+### Socket operations are their own value-task sources
+
+The pump loops await reusable socket operations (`SocketPipeAsyncArgs`, the receiver and the pooled
+senders) that implement `IValueTaskSource` themselves, so a steady-state receive or send allocates
+nothing. The awaiter and the socket completion race: either can run first, and both can run at once.
+The awaiter publishes its continuation's state and then the continuation itself through a
+compare-exchange; the completion path reads the state only after it has observed the continuation,
+with acquire reads. A continuation is therefore always scheduled with its own state and exactly once.
+
+The opposite order (#1093) read the state before the continuation. A completion that read a null
+state and then lost the race to a registration scheduled that continuation with null. An async
+method's continuation is the runtime's state-machine callback, which rejects any other state with "An
+unexpected state object was encountered" on a thread-pool thread, where the exception ends the process.
+`SocketPipeAsyncArgsTests` races the two paths 50,000 times; before the fix about one in seven
+thousand continuations received the wrong state.
+
 ## Endpoint Handling (the bind switch)
 
 `TcpConnectionListener.BindAsync` acquires the endpoint explicitly and is idempotent while the listener
@@ -103,6 +119,67 @@ transport security) are identical for both families — only the protocol identi
 - The listener tracks live accepted connections and disposes them on `DisposeAsync`, then disposes its
   per-IO-queue pipe options. Disposal also releases the listening endpoint and is terminal; restart uses
   a newly constructed listener.
+- **No client is left connected to nothing when the listener stops.** On Windows an accept is an
+  `AcceptEx` into a socket created before the call, and the OS can attach an incoming client to that
+  socket before the accept completes. If the accept is cancelled, or the listening socket closes, at that
+  moment, .NET reports the failure without closing the socket it created, and the client waits on a
+  connection nobody owns until a finalizer runs. A request sent while a host shut down waited out its
+  whole timeout this way (#1093). On Windows the listener therefore accepts into a socket it creates
+  itself and disposes it on every path that does not return it; Unix accepts with `accept(2)` after the
+  connection is queued, so nothing is attached early. The regression test races 100 cancelled accepts
+  against connecting clients; before the fix about 40 of them were left open.
+- **A client that resets before the accept costs only its own connection.** A client can connect and
+  reset (RST) while its connection waits in the accept queue. Windows then fails that accept with
+  `ConnectionReset`. BSD-derived stacks, and Linux in some cases, fail it with `ConnectionAborted`;
+  Linux usually returns the connection anyway, already reset. `AcceptAsync` treats those two errors as
+  the queued connection's own, raises `AcceptSkipped`, and accepts the next connection. This is the
+  `IConnectionListener.AcceptAsync` contract: a failure that belongs to one inbound connection never
+  escapes, because a consumer such as the HTTP accept loop treats whatever escapes as the listener's
+  end. Until #1308 the error escaped, and one reset stopped an HTTP endpoint. Neither error can recur
+  without a new connection, so the retry cannot spin.
+- **On Linux, a network error pending on a queued connection is skipped the same way.** Linux
+  `accept(2)` passes network errors already pending on the new socket back as the accept's error, and
+  its manual says to retry them like `EAGAIN`. `ENETDOWN`, `ENETUNREACH`, `EHOSTDOWN`, `EHOSTUNREACH`,
+  `ENOPROTOOPT` and `EOPNOTSUPP` arrive as `NetworkDown`, `NetworkUnreachable`, `HostDown`,
+  `HostUnreachable`, `ProtocolOption` and `OperationNotSupported`, and raise `AcceptSkipped`. On
+  Windows the same values mean the listening socket failed, so there they still escape. `EOPNOTSUPP`
+  also means a listening socket that is not a stream socket, which can never accept, so the skip
+  applies only to a stream listener; otherwise an inherited datagram descriptor would spin. The other
+  two errors the manual lists, `EPROTO` and `ENONET`, are not skipped: .NET reports them as the generic
+  `SocketError.SocketError`, which they share with `ENOMEM`, so they are backed off instead (see
+  *Classification works from `SocketError` alone*, below). #1312's acceptance criterion asks for all
+  eight to be skipped; these two are the recorded exception.
+- **An accepted socket that cannot be set up costs only its own connection.** After the accept, the
+  listener reads the socket's local endpoint, sets `TCP_NODELAY` on a TCP socket, and wraps it in a
+  connection. Those calls can fail for the one connection: on macOS, setting `TCP_NODELAY` fails with
+  `EINVAL` once the client has reset the connection, and a client can reset right after the accept. A
+  `SocketException` there closes the socket, which nothing else owns yet, raises
+  `AcceptedConnectionDropped`, and accepts the next connection; any other exception closes the socket
+  and escapes. Only the accept call itself sits inside the accept-error filters above. They once covered
+  the set-up as well, so a set-up error that matched one was skipped without closing the socket, and one
+  that matched none stopped the listener.
+- **Running out of descriptors or buffers waits and retries (#1312).** `TooManyOpenSockets`
+  (`EMFILE`/`ENFILE`, `WSAEMFILE`) and `NoBufferSpaceAvailable` (`ENOBUFS`, `WSAENOBUFS`) are transient:
+  the endpoint is healthy again once connections close. Before #1312 they escaped, so a client that held
+  enough connections open stopped the endpoint until the host restarted. Retrying at once would spin
+  for as long as the exhaustion lasts, which is the known problem with retrying every accept error. So
+  `AcceptAsync` waits and retries, on the schedule Go's `net/http` server uses: 5 ms, doubling with each
+  consecutive failure, at most 1 s. The schedule belongs to one `AcceptAsync` call, so it starts over
+  after every successful accept. The wait links the caller's token to the listener's disposal, so
+  cancelling or disposing ends it at once, and the call then throws `OperationCanceledException` or
+  `ObjectDisposedException` as it would have without the wait. Each wait raises `AcceptBackoff`, at most
+  once a second per listener, with the number of waits it held back since the previous report, so
+  sustained or flapping exhaustion cannot flood a trace.
+- **Classification works from `SocketError` alone.** On Unix, .NET maps the native `errno` through a
+  fixed table, discards it, and reports any value outside the table as the generic
+  `SocketError.SocketError`. `ENOMEM` and Linux's `ENOSR` arrive that way, and so do `EPROTO` and `ENONET`,
+  two of the pending network errors above. The value cannot tell them apart, so on Unix the generic value
+  is backed off for a stream listener: that never spins while memory is short, and it costs a
+  misclassified network error one short wait. Windows reports Winsock codes, each of which has its own `SocketError`, so there the generic
+  value escapes. `TcpAcceptErrors` holds the classification and `TcpAcceptBackoff` the schedule and the
+  report limit; an internal constructor replaces the accept so tests can fail it with errors a real
+  socket cannot be made to report on demand.
+- Every other accept error leaves the listening socket unable to accept, and escapes.
 
 ## Diagnostics
 
@@ -126,6 +203,9 @@ category.
 | 7 | `ConnectionResumed` | Verbose | `connectionId` |
 | 8 | `ConnectionReset` | Verbose | `connectionId` |
 | 9 | `ConnectionError` | Error | `connectionId`, `operation` (`receiving`/`sending`), `exceptionType`, `exceptionMessage` |
+| 10 | `AcceptSkipped` | Verbose | `listenerId`, `socketError` (`ConnectionReset`/`ConnectionAborted`, and on Linux a pending network error): a queued connection that failed before the accept |
+| 11 | `AcceptBackoff` | Warning | `listenerId`, `socketError`, `delayMilliseconds`, `unreportedBackoffs`: an accept failed and is retried after the delay. `socketError` names the cause: `TooManyOpenSockets` (out of descriptors), `NoBufferSpaceAvailable` (out of buffers), or, on Unix, `SocketError`, an `errno` .NET does not name, which is `ENOMEM`, `ENOSR`, `EPROTO` or `ENONET`; the message names no cause of its own. At most one per listener per second; `unreportedBackoffs` counts the waits held back since the previous report |
+| 12 | `AcceptedConnectionDropped` | Verbose | `listenerId`, `socketError`: the listener closed a socket it had accepted because setting it up failed, typically because the client reset it right after the accept |
 
 Counters: `current-connections`, `total-connections`, and `connections-per-second`.
 

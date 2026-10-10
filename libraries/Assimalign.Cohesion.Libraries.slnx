@@ -924,6 +924,28 @@
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Streaming/tests/">
 		<Project Path="Http/Assimalign.Cohesion.Http.Streaming/tests/Assimalign.Cohesion.Http.Streaming.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Tls/" />
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Tls/docs/">
+		<File Path="Http/Assimalign.Cohesion.Http.Tls/docs/DESIGN.md" />
+		<File Path="Http/Assimalign.Cohesion.Http.Tls/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Tls/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Tls/src/Assimalign.Cohesion.Http.Tls.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Tls/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Tls/tests/Assimalign.Cohesion.Http.Tls.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.WebSockets/" />
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.WebSockets/docs/">
+		<File Path="Http/Assimalign.Cohesion.Http.WebSockets/docs/DESIGN.md" />
+		<File Path="Http/Assimalign.Cohesion.Http.WebSockets/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.WebSockets/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.WebSockets/src/Assimalign.Cohesion.Http.WebSockets.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.WebSockets/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.WebSockets/tests/Assimalign.Cohesion.Http.WebSockets.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/IdentityModel/">
 		<File Path="IdentityModel/Directory.Build.props" />
 		<File Path="IdentityModel/README.md" />

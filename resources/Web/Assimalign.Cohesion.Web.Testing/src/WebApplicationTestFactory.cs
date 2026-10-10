@@ -146,7 +146,10 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
         _listener = new InMemoryConnectionListener();
         _connectionFactory = _listener.CreateFactory();
 
-        Builder = WebApplication.CreateBuilder();
+        Builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ContentRootPath = options.ContentRootPath,
+        });
         Builder.Server.UseServer(listenerOptions =>
         {
             if (_options.Protocol == WebApplicationTestProtocol.Http2)
@@ -162,7 +165,7 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
 
     /// <summary>
     /// Gets the application builder, for service/configuration registration before the
-    /// application is built (for example <c>Builder.AddRouting()</c> or additional
+    /// application is built (for example <c>Builder.Services.AddRouting()</c> or additional
     /// <c>Builder.Server.UseServer(...)</c> listener configuration).
     /// </summary>
     public WebApplicationBuilder Builder { get; }
@@ -279,9 +282,16 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
     }
 
     /// <summary>
-    /// Stops the server when started (draining in-flight connections), disposes the
-    /// application, and tears down the in-memory listener. Disposal is idempotent.
+    /// Stops the server when started, disposes the application, and tears down the in-memory
+    /// listener. Disposal is idempotent.
     /// </summary>
+    /// <remarks>
+    /// Disposal is teardown, not a graceful drain: the server stops with a drain budget that has
+    /// already run out, so a request still in flight is cancelled
+    /// (<see cref="Assimalign.Cohesion.Http.IHttpContext.RequestCancelled"/>) and its connection
+    /// aborted instead of being waited for. Call <see cref="StopAsync"/> first when a test needs its
+    /// in-flight requests to finish.
+    /// </remarks>
     /// <returns>A task that completes when the factory has fully torn down.</returns>
     public async ValueTask DisposeAsync()
     {
@@ -302,9 +312,11 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
 
         if (server is not null)
         {
-            // Graceful stop: stops accepting, drains in-flight connections, and disposes
-            // the HTTP connection listener (which releases the transport listener).
-            await server.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            // Stops accepting, cancels the requests still in flight, and disposes the HTTP
+            // connection listener (which releases the transport listener). A lame-duck drain with
+            // no budget would wait for every in-flight request, and a handler parked until its
+            // request is cancelled would hold disposal open forever.
+            await server.StopAsync(new CancellationToken(canceled: true)).ConfigureAwait(false);
         }
 
         if (application is not null)

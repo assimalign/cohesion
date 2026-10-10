@@ -24,6 +24,13 @@ namespace Assimalign.Cohesion.Web.Sessions;
 /// <see cref="IHttpSessionStore"/> adapter through the store overload; nothing
 /// else in the pipeline changes.
 /// </para>
+/// <para>
+/// The session-id cookie carries <c>Secure</c> whenever the effective scheme
+/// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>) is HTTPS. Behind a
+/// TLS-terminating proxy, register <c>UseForwardedHeaders</c> ahead of
+/// <c>UseSessions</c> so the proxy's <c>https</c> is known when the cookie is
+/// established; without it the transport-derived scheme decides.
+/// </para>
 /// </remarks>
 public static class SessionPipelineExtensions
 {

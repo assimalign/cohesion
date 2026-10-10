@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.SecurityHeaders</RootNamespace>
+		<Description>Browser security headers for the Cohesion Web pipeline. UseSecurityHeaders emits safe defaults on every response (X-Content-Type-Options: nosniff; clickjacking protection through Content-Security-Policy frame-ancestors 'none' plus X-Frame-Options: DENY; Referrer-Policy: strict-origin-when-cross-origin) and opt-in Content-Security-Policy (enforced and report-only, built from a validating directive builder with a per-request nonce exposed through ISecurityHeadersFeature), Permissions-Policy, Cross-Origin-Opener-Policy, Cross-Origin-Embedder-Policy and Cross-Origin-Resource-Policy. Endpoints adjust, replace or disable the policy through sealed routing metadata. Headers are staged when the response head commits, so they reach responses written before routing and by error handling, and a header the application set itself is never overwritten unless the policy says so.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- IHttpResponseStreamingFeature is how a streamed response commits its head. The middleware
+		     stages the headers just before that commit and reads HasStarted as the response-started
+		     signal, the same wire-commit truth ErrorHandling, RequestTimeouts and RateLimiting read.
+		     Outside the Web area, so unconstrained by the hosting-isolation rule. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+</Project>

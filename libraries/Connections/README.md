@@ -52,7 +52,7 @@ deliberately no transport abstraction — see the naming rule and full design ra
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, and the guided abstract bases. Also carries `ListenerId` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
+| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, `ITlsConnectionInfo` (what a TLS handshake negotiated: ALPN protocol, TLS version, cipher suite, peer certificate), `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` (aborts that carry an application error code per stream direction and on the connection close), and the guided abstract bases. Also carries `ListenerId` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
 | `Assimalign.Cohesion.Connections.Tcp` | Reliable, ordered, single-stream socket driver (`TcpConnectionListener` / `TcpConnectionFactory`). Serves both TCP over IP and Unix domain sockets (with socket-file lifecycle and honest protocol stamping), plus socket-activation descriptor hand-off. |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Reliable, ordered, single-stream named-pipe driver (`NamedPipeConnectionListener` / `NamedPipeConnectionFactory`) for Windows-native local IPC with ACL/filesystem access control; the peer of the `Tcp` driver's Unix domain socket path. |
 | `Assimalign.Cohesion.Connections.Udp` | Message-oriented UDP datagram driver (`UdpConnectionFactory` → `IDatagramConnection`). |
@@ -85,8 +85,10 @@ Each driver reports its own lifecycle through an internal event source named for
 (`current-connections` and friends). None of it is public API. Enable a driver by name in
 `dotnet-trace` or `dotnet-counters`, or forward every driver into an application's logging with
 `Assimalign.Cohesion.Logging.EventSource`, under the category prefix `Assimalign.Cohesion.Connections`.
-The contracts library, `Security`, and `InMemory` raise no events of their own. The convention is
-`.claude/rules/event-source.md`; the consumer reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
+The contracts library raises one event of its own, under its assembly name: a layered listener (for
+example a TLS listener) reporting a connection it closed because the connection's upgrade failed.
+`Security` and `InMemory` raise none. The convention is `.claude/rules/event-source.md`; the consumer
+reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
 
 ## Further Reading
 

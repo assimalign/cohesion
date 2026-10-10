@@ -7,15 +7,19 @@ internal sealed class Http1Context : TransportHttpContext
 {
     private readonly Http1RequestBodyStream _requestBody;
 
+    // Volatile: a graceful close clears it from the thread that began the close while the exchange's
+    // own thread reads it to frame the response head (Http1ConnectionContext.BeginGracefulClose).
+    private volatile bool _keepAlive;
+
     public Http1Context(
-        Http1Request request,
-        Http1Response response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         bool keepAlive,
         Http1RequestBodyStream requestBody,
+        int featureCapacity,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, featureCapacity, features)
     {
         KeepAlive = keepAlive;
         _requestBody = requestBody;
@@ -24,7 +28,16 @@ internal sealed class Http1Context : TransportHttpContext
         requestBody.SetOwner(this);
     }
 
-    public bool KeepAlive { get; set; }
+    /// <summary>
+    /// Whether the connection carries another request after this exchange. When it is
+    /// <see langword="false"/> as the response head is committed, the head carries
+    /// <c>Connection: close</c> (RFC 9112 §9.6).
+    /// </summary>
+    public bool KeepAlive
+    {
+        get => _keepAlive;
+        set => _keepAlive = value;
+    }
 
     /// <summary>
     /// Whether the response for this exchange was finalized out-of-band — the connection was
@@ -37,19 +50,33 @@ internal sealed class Http1Context : TransportHttpContext
     public bool ResponseFinalized { get; set; }
 
     /// <summary>
-    /// HTTP/1.1 is the one version whose exchange can be handed off (it owns its whole
-    /// connection), so a finalized-out-of-band exchange reports
-    /// <see cref="HttpExchangeDirective.TakeOver"/>; otherwise the base's abort/continue
-    /// derivation applies.
+    /// HTTP/1.1 is the one version whose exchange can hand off its whole connection, so a
+    /// finalized-out-of-band exchange reports <see cref="HttpExchangeDirective.TakeOver"/>;
+    /// otherwise the base's abort/continue derivation applies.
     /// </summary>
     internal override HttpExchangeDirective ExchangeDirective =>
         ResponseFinalized ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
 
     /// <summary>
+    /// The status the transport answers this exchange with because reading its request body after
+    /// dispatch failed on the client's side, or <see langword="null"/> when it did not: <c>400</c> for a
+    /// malformed chunked framing or trailer section (RFC 9112 §5.1, #1333), the latched limit
+    /// status for a body over the size cap (<c>413</c>) or below the minimum data rate (<c>408</c>,
+    /// #1339), or for a trailer section over the header-section bounds (<c>431</c>, #1375), and
+    /// <c>400</c> for a body the peer cut short by closing the connection (RFC 9112 §8, #1340). The
+    /// rejection replaces a response that has not started, and the connection closes.
+    /// </summary>
+    public HttpStatusCode? RequestBodyRejectedStatusCode =>
+        _requestBody.IsMalformed || _requestBody.IsIncomplete
+            ? HttpStatusCode.BadRequest
+            : _requestBody.RejectedStatusCode;
+
+    /// <summary>
     /// Consumes and discards any request body the application did not read, so the connection
     /// realigns on the next request's framing before a keep-alive reuse. Enforces the same body-size
-    /// cap and minimum data rate as a normal read; a violation, a malformed body, or a wire failure
-    /// returns <see langword="false"/> so the caller closes the connection instead of reusing it.
+    /// cap and minimum data rate as a normal read; a violation, a malformed body, an earlier read that
+    /// stopped inside the chunked framing, or a wire failure returns <see langword="false"/> so the
+    /// caller closes the connection instead of reusing it.
     /// </summary>
     /// <param name="cancellationToken">The ambient connection token.</param>
     /// <returns><see langword="true"/> when the body drained and the connection realigned; otherwise <see langword="false"/>.</returns>

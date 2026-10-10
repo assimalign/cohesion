@@ -31,10 +31,11 @@ both backed by an `IHttpFormFeature` stored in `IHttpContext.Features`.
 | `IHttpFormFileCollection` | Collection of uploaded files |
 | `HttpFormCollection` | Default in-memory implementation |
 | `HttpFormFile` | Default in-memory / spill-to-disk file implementation |
-| `HttpFormFileCollection` | Default in-memory file collection |
+| `HttpFormFileCollection` | Default in-memory file collection; keeps every part of a multiple-file field |
 | `IHttpFormFeature` | Per-exchange parsed-form state stored in `IHttpContext.Features` |
 | `HttpFormFeature` | Default feature: streaming urlencoded + multipart parser (public, `sealed`) |
 | `HttpFormOptions` | Per-parse limits (value/key/section sizes, spill threshold, boundary length) |
+| `HttpFormLimitExceededException` | The cause (`InnerException`) of the `InvalidDataException` a parse throws when a body exceeds a limit, so a caller can answer 413 rather than 400 |
 | `HttpContextFormExtensions` | `request.Form` extension property + `context.ReadFormAsync(...)` extension method |
 
 ## Usage

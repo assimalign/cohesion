@@ -1,53 +1,60 @@
-using System;
 using System.IO;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
-internal abstract class TransportHttpResponse : HttpResponse
+/// <summary>
+/// The response of a transport exchange, on every HTTP version: a <c>200</c> with an empty header
+/// collection and a buffered body until the application sets them.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Only the owning <see cref="TransportHttpContext"/> constructs one, passing itself, so
+/// <see cref="HttpContext"/> is assigned once, at construction, and is never observed unset.
+/// </para>
+/// <para>
+/// <see cref="Trailers"/> is supported on HTTP/2 and HTTP/3, where the send path writes the staged
+/// fields as a trailing HEADERS frame (RFC 9113 §8.1, RFC 9114 §4.1), and unsupported on HTTP/1.1
+/// (decision 18) and for a CONNECT exchange, whose stream becomes a DATA-only tunnel (RFC 9113 §8.5,
+/// RFC 9114 §4.4). The collection is created on first access, so a response that never touches it
+/// allocates nothing for it.
+/// </para>
+/// </remarks>
+internal sealed class TransportHttpResponse : HttpResponse
 {
-    private HttpContext? _httpContext;
+    private readonly bool _supportsTrailers;
+    private HttpTrailerCollection? _trailers;
 
-    protected TransportHttpResponse()
+    public TransportHttpResponse(TransportHttpContext context, bool supportsTrailers)
     {
+        HttpContext = context;
         StatusCode = HttpStatusCode.Ok;
         Headers = new HttpHeaderCollection();
         Body = new MemoryStream();
+        _supportsTrailers = supportsTrailers;
     }
 
     public override HttpStatusCode StatusCode { get; set; }
 
     public override HttpHeaderCollection Headers { get; }
 
-    public override HttpContext HttpContext => _httpContext
-        ?? throw new InvalidOperationException(
-            "The HttpContext back-reference has not been attached. " +
-            "TransportHttpContext attaches the back-reference as the last step of its construction; " +
-            "if you see this exception the response was used before that wire-up completed.");
+    /// <summary>
+    /// Gets the response trailer section. On HTTP/2 and HTTP/3 it is a supported collection whose
+    /// fields go out after the body; adding a pseudo-header, a connection-specific field, or a field
+    /// RFC 9110 §6.5.1 prohibits in trailers throws <see cref="System.ArgumentException"/>. On HTTP/1.1,
+    /// and for a CONNECT exchange, it is <see cref="HttpTrailerCollection.Unsupported"/>.
+    /// </summary>
+    public override HttpTrailerCollection Trailers => _supportsTrailers
+        ? _trailers ??= new HttpTrailerCollection(new TransportHttpTrailerFields(), isSupported: true)
+        : HttpTrailerCollection.Unsupported;
+
+    public override HttpContext HttpContext { get; }
 
     public override Stream Body { get; set; }
 
     /// <summary>
-    /// Wires the owning <see cref="HttpContext"/> as the back-reference for this response.
-    /// Called from <see cref="TransportHttpContext"/>'s constructor after the response has been
-    /// assigned to <see cref="HttpContext.Response"/>. Idempotent within a single exchange &#8211;
-    /// re-attaching the same context is a no-op; attaching a different one is rejected because
-    /// the response-to-context relationship is fixed for the response's lifetime.
+    /// The trailer fields the application staged, or <see langword="null"/> when it staged none — the
+    /// collection was never touched, or is empty. The send path writes a trailing HEADERS frame only
+    /// for a non-null value, so a response without trailers goes out exactly as it did before.
     /// </summary>
-    internal void AttachContext(HttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        if (_httpContext is null)
-        {
-            _httpContext = context;
-            return;
-        }
-
-        if (!ReferenceEquals(_httpContext, context))
-        {
-            throw new InvalidOperationException(
-                "The response is already attached to a different HttpContext. " +
-                "A TransportHttpResponse belongs to a single exchange and cannot be re-parented.");
-        }
-    }
+    internal HttpTrailerCollection? StagedTrailers => _trailers is { Count: > 0 } trailers ? trailers : null;
 }

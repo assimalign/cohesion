@@ -163,8 +163,8 @@ public sealed class HttpFormFeature : IHttpFormFeature
                 // RFC 2046 §5.1.1 boundaries are bounded to 70 characters; a
                 // wildly long boundary is either malformed or an attempt to
                 // grow the look-ahead buffer unboundedly. Reject it up front.
-                throw new InvalidDataException(
-                    $"Multipart boundary length limit {_options.MultipartBoundaryLengthLimit} exceeded.");
+                string message = $"Multipart boundary length limit {_options.MultipartBoundaryLengthLimit} exceeded.";
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
             }
 
             await ReadMultipartAsync(request.Body, boundary, form, cancellationToken).ConfigureAwait(false);
@@ -225,7 +225,12 @@ public sealed class HttpFormFeature : IHttpFormFeature
                 continue;
             }
 
-            if (fileName is not null)
+            // A part is a file only when it names one. A browser sends an optional
+            // <input type="file"> left empty as filename="" with an empty body
+            // (WHATWG HTML, multipart/form-data encoding), so an empty name is no
+            // file: it is read as a value, as ASP.NET Core's IsFileDisposition
+            // rule does, rather than failing the whole form.
+            if (!string.IsNullOrEmpty(fileName))
             {
                 HttpFormFile file = await ReadFileSectionAsync(section, name, fileName, cancellationToken).ConfigureAwait(false);
                 form.Add(file);

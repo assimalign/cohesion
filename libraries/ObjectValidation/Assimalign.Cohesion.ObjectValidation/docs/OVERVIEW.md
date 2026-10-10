@@ -16,7 +16,16 @@ Implements a fluent validation engine built from validators, profiles, rules, an
 
 - Validator coordinates profile execution and produces ValidationResult objects.
 - ValidationProfile and descriptor types capture the fluent rule configuration model.
-- ValidationOptions control execution behavior such as stop-on-first-failure and throw-on-failure.
+- ValidationOptions control which failures are reported and whether a failure throws. Members are
+  evaluated in the order they are declared and each member's rules in the order they are chained. With the
+  defaults, every failing member is reported, each with the errors of its first failing rule:
+  `ValidationMode.Stop` stops at the first failing member, and `ContinueThroughValidationChain` runs every
+  rule of a member (see [DESIGN.md](DESIGN.md), "Which Failures Are Reported").
+- The pattern rules bound what a request body can cost. `EmailAddress` runs in linear time and fails an
+  address over the RFC 5321 sizes. `Matches` runs the caller's pattern in linear time when the non-backtracking
+  engine supports it. Otherwise each match gets one second, per element under `RuleForEach`, so N strings can
+  cost N seconds. A match that runs out fails the rule, and an invalid pattern throws where the profile declares
+  it (see [DESIGN.md](DESIGN.md), "Pattern Rules on Untrusted Input").
 
 ## Key Types
 

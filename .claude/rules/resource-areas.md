@@ -16,11 +16,24 @@ composition root that integrates DI, configuration, logging, and transports.
 > other, but never the exact `<Area>.Hosting` runtime module. Exemptions name individual
 > assemblies; an exemption for the runtime does not waive the rest of the hosting family.
 >
-> **COHRES002** — The hosting module may reference no library in its own area except the area
-> root, `Assimalign.Cohesion.<Area>`, and its own hosting family (`<Area>.Hosting.<Suffix>`). The shared framework (`App.<Area>`, via `Sdk.<Area>`)
-> delivers the family to applications, so the runtime needs no compile-time knowledge of the
-> features it hosts. Builder verbs ship with their feature package and compose against the area
-> root's abstractions.
+> **COHRES002** — The exact hosting module may reference any library in its own area **except**:
+> `<Area>.Testing`, which references the hosting module, so the reverse reference is a cycle;
+> `<Area>.ApplicationModel`, which the realization-plan design keeps the runtime off (generated
+> code in the consumer executable joins the declarative plane to the runtime; COHAM001 bounds the
+> other direction); `<Area>.ApplicationModel.Orchestration`, the gateway-side provider package
+> that R8 (owner decisions of 2026-09-25) makes opt-in, NuGet-only, and never an `App.<Area>`
+> member, so a runtime reference would force it into every framework that carries the module
+> (the Orchestration rules below bound the other direction); the framework producers
+> `<Area>.Refs` and `<Area>.Runtime`, packaging shells that themselves reference the hosting
+> module; and test, example, sample, and fixture projects, which are harnesses. The two
+> ApplicationModel exclusions hold by any route: the module's resolved closure may carry neither.
+> Owner decision 2026-10-09 ("allow the Hosting project tobe [sic] able reference all `Web.*`
+> projects, or more generically all the `<Area>.*` projects"; the exclusions follow from earlier
+> decisions); until then the module could reference only the area root,
+> `Assimalign.Cohesion.<Area>`, and its own hosting family (`<Area>.Hosting.<Suffix>`). The
+> permission is not a reason to reference features: each reference lands its closure in every
+> framework that carries the module (the `<Area>.Hosting` bullet under "What every area is
+> expected to provide").
 >
 > **COHRES003** — No shipped project under `resources/**` may resolve an
 > `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. Gateway orchestration belongs outside
@@ -85,13 +98,20 @@ in the same file applies everywhere, see `general-rules.md`). Violations fail th
   transitive) and the resolved assembly closure after `ResolveAssemblyReferences` (which also
   catches `<Reference>`+`HintPath` and package-delivered DLLs). Exact-module and hosting-family
   candidates are checked separately, with exact assembly-name exemptions applied to each.
-- `COHRES002` constrains the hosting module's **direct** references only, excluding its own
-  hosting-family prefix from that set: same-area assemblies
-  legitimately arrive in its resolved closure transitively through the sanctioned area-root
-  reference (e.g. `Assimalign.Cohesion.Database` aggregates its child roots — `Database.Types`/
-  `Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance` — so
-  `Database.Hosting → Database` pulls them all in — that is the root's own composition, not a
-  hosting violation).
+- `COHRES002` rejects only its excluded categories, in two layers. The first checks the hosting
+  module's **direct** references (the evaluation-time snapshot, taken before NuGet adds transitive
+  project references) against every category. A reference is same-area when its name carries the
+  `Assimalign.Cohesion.<Area>.` prefix or its project lives under `resources/<Area>/`. `Testing`,
+  `ApplicationModel`, `ApplicationModel.Orchestration`, `Refs`, and `Runtime` are matched by exact
+  name; a harness is a referenced project with a `tests/`, `examples/`, `samples/`, or `fixtures/`
+  segment in its path below the repository root. The second checks the module's resolved assembly
+  closure after `ResolveAssemblyReferences` for `<Area>.ApplicationModel` and
+  `<Area>.ApplicationModel.Orchestration` only, because no rule on an intermediate library stops
+  either: an Orchestration package resolves no `Hosting*` assembly, so COHRES004 lets a root or
+  feature the module references take it, and COHRES004 exempts the hosting family, so a
+  `<Area>.Hosting.<Suffix>` integration could take either package. The other categories are
+  checked on direct references only: a route to `Testing` or a producer is a cycle, and a route to
+  a harness through another library is not checked.
 - `COHAM001`, `COHRES003`, and `COHRES004` are checked in two layers: the direct/transitive
   project-reference graph, then the resolved assembly closure after `ResolveAssemblyReferences`.
   The latter also catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error
@@ -131,7 +151,10 @@ semicolon-delimited, in its own csproj:
 ```
 
 - The exemption is **per-assembly and per-project**: it waives `COHRES001` for a listed hosting
-  assembly, or `COHRES002` for a listed same-area assembly, in the declaring project only.
+  assembly, or `COHRES002` for a listed same-area assembly, in the declaring project only. Since
+  2026-10-09 COHRES002 rejects only its excluded categories, so a COHRES002 exemption can only name
+  a `Testing`, ApplicationModel, framework-producer, or harness project — every one of which
+  signals a design problem rather than a missing permission.
 - Setting the property is itself the deviation marker at the point of use — always pair it with
   a comment stating the rationale, and surface it in the change summary.
 - **Exactly one standing exemption holder is permitted per area:**
@@ -146,8 +169,10 @@ semicolon-delimited, in its own csproj:
   the plain host directly or its area's runtime module `Assimalign.Cohesion.<Area>.Hosting`;
   `COHAM001` enforces the complete resolved-assembly boundary as each project opts in.
 - Do not use the property to route around design pressure: if a feature library "needs" hosting,
-  the missing piece is almost always a seam on the area root (that is how the Web area moved its
-  authentication builder verbs out of `Web.Hosting`).
+  the missing piece is almost always a seam on the area root or a component integration (that is
+  how the Web area moved its authentication builder verbs out of `Web.Hosting`; since owner
+  decision 34 of 2026-10-09 they ship as the `builder.Services.AddAuthentication(...)` component
+  integration).
 
 ## The resource instance is the SDK consumer's project
 
@@ -250,6 +275,17 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   it. Registration-time duplicate checks read `Services.Container`, never a second collection.
   Precedents: `IWebApplicationBuilder.AddFeature/AddServer` → `IHttpFeature`/`IWebApplicationServer`;
   `ISchedulerApplicationBuilder.AddJob/AddScheduleProvider` → `IScheduleJob`/`IScheduleProvider`.
+  `AddFeature` is Web's raw feature path; the Web feature packages' own registration verbs are
+  component integrations that register the same `IHttpFeature` singleton directly on `Services`
+  (owner decision 34, 2026-10-09).
+- **Validate what the container cannot.** `ValidateOnBuild` cannot see the lifetime a factory or
+  instance registration implies for a consumer, so a module whose aggregate has a lifetime
+  contract checks the descriptors itself in `Build`, before `MakeReadOnly`, and names the
+  offending registration. Precedent (owner decision 35, 2026-10-09): `WebApplicationBuilder.Build`
+  rejects a scoped or transient `IHttpFeature` registration, a registration under a contract
+  derived from `IHttpFeature`, and a disposable `IHttpFeature` instance or implementation type;
+  the pipeline build, which resolves the aggregate, rejects a disposable feature a factory
+  registration produced.
 - **The service type is the lifecycle phase; registration order is the order within a phase.**
   A single-phase area registers everything as `IHostService` and places its own services by
   *when* they register: telemetry in the builder constructor (first), hard-wired endpoints in
@@ -307,14 +343,21 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   the ambient `Assimalign.Cohesion.Hosting.Resources.ResourceContext` and the registered default
   control plane, otherwise it behaves as a plain application — see
   `docs/DEVELOPER_EXPERIENCE_DESIGN.md` §2/§4.2). Feature/model registration verbs ship with
-  their feature package as `extension(I<Area>ApplicationBuilder)` members and compose against
-  the root builder — never against the hosting module — so a feature or model registers itself
-  on any composition surface without knowing the hosting layer. Registration stays
-  dependency-free (values and options objects; no container, no configuration binding).
-  Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)`
-  (`Web.Hosting`) + `AddAuthentication` (`Web.Authentication`); `IDatabaseApplicationBuilder`
-  (Database root) + `DatabaseApplication.CreateBuilder(args)` (`Database.Hosting`) +
-  `AddSql` (`Database.Sql`, with nested engine server factories). The root application exposes `Context`, `StartAsync`,
+  their feature package — never in the hosting module — so a feature or model registers itself
+  without knowing the hosting layer. They take one of two forms:
+  `extension(I<Area>ApplicationBuilder)` members that compose against the root builder, or
+  component integrations (`component-integration.md`) that the generator projects onto the
+  hosting builder's `Services` (`IServiceProviderBuilder`), as other .NET hosting models register
+  features. Either way the package stays dependency-free: it composes values and options objects
+  and references no container and no configuration binding. Precedents:
+  `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)` (`Web.Hosting`) +
+  `builder.Services.AddAuthentication(auth => auth.AddCookie(...))` (`Web.Authentication`, a
+  component integration; owner decisions 34 and 35 of 2026-10-09 moved the eight Web feature
+  registration verbs there and made every `IHttpFeature` registration a singleton that
+  `Web.Hosting` enforces at `Build`; `IWebApplicationBuilder.AddFeature` stays the raw path);
+  `IDatabaseApplicationBuilder` (Database root) + `DatabaseApplication.CreateBuilder(args)`
+  (`Database.Hosting`) + `AddSql` (`Database.Sql`, an `extension(IDatabaseApplicationBuilder)`
+  member with nested engine server factories). The root application exposes `Context`, `StartAsync`,
   and `StopAsync`; its builder exposes area verbs and `Build()`. Background-work
   registration (`AddService`) is a concrete-builder verb in `<Area>.Hosting`, absent
   from the root contract; no area-owned service abstraction is introduced. This pattern
@@ -322,13 +365,21 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   In every area, `CreateBuilder` returns the public concrete builder, and its `Build()`
   returns the public concrete `Host<TContext>` application (Web, Database, and all 16 fillers).
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing the area root, its own hosting
-  family and non-area infrastructure. Roots and feature libraries reference no
-  `Assimalign.Cohesion.Hosting*` library. Enabled-resource implementations consume the plain lifecycle host,
-  `Assimalign.Cohesion.Hosting.Resources`, and `Assimalign.Cohesion.Hosting.Health` without
-  referencing their area's ApplicationModel package. **If the hosting module ever appears to need a same-area dependency
-  beyond the root and its own hosting family, that is an architecture revisit — surface it to the user — not a case for
-  the exemption property or for pushing the dependency's types into the root.** It composes through
-  its container ("Hosting composition — DI is the dependency control", above).
+  family, the same-area libraries the runtime itself needs, and non-area infrastructure. Roots and
+  feature libraries reference no `Assimalign.Cohesion.Hosting*` library. Enabled-resource
+  implementations consume the plain lifecycle host, `Assimalign.Cohesion.Hosting.Resources`, and
+  `Assimalign.Cohesion.Hosting.Health` without referencing their area's ApplicationModel package.
+  **The module may reference any library in its own area except COHRES002's exclusions** (owner
+  decision 2026-10-09), so runtime machinery that belongs in its own package — a server, a router
+  the host drives — no longer has to be pushed into the root or routed through an exemption.
+  **Reference only what the runtime needs:** each library the module references lands, with its
+  closure, in every framework that carries the module — its own `App.<Area>`, plus every area
+  framework that carries it privately (`Web.Hosting` is a private member of all 17 other area
+  frameworks, so one new `Web.Hosting` reference is a framework-membership change in each of them).
+  Feature registration never needs the module to reference the feature: the feature's verbs ship
+  with the feature, as root-builder extensions or as component integrations on `Services` (Web,
+  owner decision 34). It composes through its container ("Hosting composition — DI is the dependency
+  control", above).
 - `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
   manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the
   area's default-control-plane contract/factory. Its direct Cohesion references are
@@ -416,12 +467,13 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   consumer's real `Program.cs` under a test-scoped ambient resource context. When present, this
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
 - `Assimalign.Cohesion.<Area>.<Feature>` — feature libraries; builder verbs ship here, not in
-  hosting.
+  hosting (registration verbs may be component integrations on `Services`, as Web's are).
 - `Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` — the producers of
   the area's `App.<Area>` shared framework, named for the area while their assembly and package
   names keep the `App` segment (`Assimalign.Cohesion.App.<Area>.Refs` / `Assimalign.Cohesion.App.<Area>`,
   packages `Assimalign.Cohesion.App.<Area>.Ref` / `.Runtime.<rid>`). They compile nothing and are
-  exempt from COHRES001/002/004 by exact identity (above). Both names are reserved in every area;
+  exempt from COHRES001/002/004 by exact identity (above), and COHRES002 rejects a hosting-module
+  reference to either. Both names are reserved in every area;
   the naming convention is `build-system.md`, "Framework producer projects". The Runtime
   producer's folder holds the framework's hand-curated member list in its `Directory.Build.props`,
   which the Refs producer's own `Directory.Build.props` imports (`build-system.md`, "Framework

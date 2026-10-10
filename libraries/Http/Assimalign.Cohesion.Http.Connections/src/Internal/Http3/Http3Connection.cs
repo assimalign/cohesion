@@ -13,6 +13,7 @@ internal sealed class Http3Connection : HttpConnection
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly int _featureCapacity;
     private readonly Http3QPackOptions _qpackOptions;
     private Http3ConnectionContext? _openContext;
 
@@ -26,6 +27,7 @@ internal sealed class Http3Connection : HttpConnection
         Http3ConnectionListenerOptions.Http3Limits limits,
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
+        int featureCapacity,
         Http3QPackOptions qpackOptions)
         : base(isSecure)
     {
@@ -33,6 +35,7 @@ internal sealed class Http3Connection : HttpConnection
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
         _qpackOptions = qpackOptions;
     }
 
@@ -59,7 +62,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _qpackOptions);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _qpackOptions);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
@@ -75,10 +78,11 @@ internal sealed class Http3Connection : HttpConnection
         // emission lives here in the HTTP/3 layer; the connection-first close
         // ordering (bidirectional streams drained, then CONNECTION_CLOSE, then
         // the critical unidirectional streams released) stays in the QUIC
-        // driver's DisposeAsync. Emission is best-effort and precedes it.
+        // driver's DisposeAsync. Emission is best-effort and precedes it. When a host began a graceful
+        // close earlier, its GOAWAY is the one sent, and the close is complete once it is written.
         if (_openContext is not null)
         {
-            await _openContext.SendGoAwayAsync().ConfigureAwait(false);
+            await _openContext.CompleteGracefulCloseAsync().ConfigureAwait(false);
         }
 
         await _connection.DisposeAsync().ConfigureAwait(false);

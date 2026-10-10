@@ -41,6 +41,16 @@ matching `FileSystemErrorCode`:
 | `FileNotFoundException` | `NotFound` |
 | `DirectoryNotFoundException` | `NotFound` |
 | `IOException` with conflict HResult | `Conflict` |
+| A path that resolves outside the root (raised before any `System.IO` call) | `PathOutsideRoot` |
+
+## Root containment
+
+Every path-taking member resolves its path to a full host path and refuses
+anything that is not the root or under it on a segment boundary, before
+touching the disk. `..` that climbs out, a sibling directory that merely shares
+the root's name as a prefix (`public2/` beside `public/`), and absolute paths
+elsewhere are all refused with `PathOutsideRoot`. Links inside the root are
+followed. Rules and rationale: `docs/DESIGN.md`, "Root containment".
 
 ## Auto-create semantics
 

@@ -86,6 +86,38 @@ internal static class HttpProtocolPayloadFactory
     }
 
     /// <summary>
+    /// Builds one complete HTTP/3 frame (RFC 9114 §7.1): the type and payload length as QUIC
+    /// variable-length integers, then the payload. Used to drive request streams frame by frame —
+    /// DATA chunks, trailing HEADERS, frames of unknown or prohibited type.
+    /// </summary>
+    public static byte[] CreateHttp3Frame(long frameType, byte[] payload)
+    {
+        using MemoryStream buffer = new();
+        WriteHttp3Frame(buffer, frameType, payload);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Builds only an HTTP/3 frame header — the type and a declared payload length — with no payload
+    /// octets. Used to drive malformed-length cases: a frame the stream ends inside of, or a frame
+    /// longer than a configured limit.
+    /// </summary>
+    public static byte[] CreateHttp3FrameHeader(long frameType, long payloadLength)
+    {
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, frameType);
+        WriteQuicInteger(buffer, payloadLength);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Builds a HEADERS frame whose field section carries the supplied field lines verbatim (literal
+    /// names and values, RFC 9204 §4.5.6) — a trailer section when sent after the request's DATA.
+    /// </summary>
+    public static byte[] CreateHttp3HeadersFrame(params (string Name, string Value)[] fields)
+        => CreateHttp3RequestRaw(fields);
+
+    /// <summary>
     /// Builds the bytes a peer would send on its HTTP/3 control stream: the
     /// control stream-type prefix (0x00) followed by a SETTINGS frame carrying
     /// the supplied identifier/value pairs.
@@ -442,7 +474,7 @@ internal static class HttpProtocolPayloadFactory
         // field lines, name references, or literals).
         Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach ((string name, string value) in QPackFieldSectionDecoder.Decode(headerBlock))
+        foreach ((string name, string value) in QPackFieldSectionDecoder.Decode(headerBlock, long.MaxValue))
         {
             headers[name] = value;
         }
@@ -469,6 +501,8 @@ internal static class HttpProtocolPayloadFactory
         return buffer.ToArray();
     }
 
+    // RFC 7541 Appendix A — the whole HPACK static table, so a field the server names by its static
+    // index (transfer-encoding is 57) decodes rather than failing the helper.
     private static (string Name, string Value) GetHttp2StaticHeader(int index) => index switch
     {
         1 => (":authority", string.Empty),
@@ -485,15 +519,54 @@ internal static class HttpProtocolPayloadFactory
         12 => (":status", "400"),
         13 => (":status", "404"),
         14 => (":status", "500"),
+        15 => ("accept-charset", string.Empty),
+        16 => ("accept-encoding", "gzip, deflate"),
+        17 => ("accept-language", string.Empty),
+        18 => ("accept-ranges", string.Empty),
+        19 => ("accept", string.Empty),
+        20 => ("access-control-allow-origin", string.Empty),
+        21 => ("age", string.Empty),
+        22 => ("allow", string.Empty),
+        23 => ("authorization", string.Empty),
+        24 => ("cache-control", string.Empty),
+        25 => ("content-disposition", string.Empty),
+        26 => ("content-encoding", string.Empty),
+        27 => ("content-language", string.Empty),
         28 => ("content-length", string.Empty),
+        29 => ("content-location", string.Empty),
+        30 => ("content-range", string.Empty),
         31 => ("content-type", string.Empty),
         32 => ("cookie", string.Empty),
+        33 => ("date", string.Empty),
+        34 => ("etag", string.Empty),
+        35 => ("expect", string.Empty),
+        36 => ("expires", string.Empty),
+        37 => ("from", string.Empty),
         38 => ("host", string.Empty),
+        39 => ("if-match", string.Empty),
+        40 => ("if-modified-since", string.Empty),
+        41 => ("if-none-match", string.Empty),
+        42 => ("if-range", string.Empty),
+        43 => ("if-unmodified-since", string.Empty),
+        44 => ("last-modified", string.Empty),
         45 => ("link", string.Empty),
         46 => ("location", string.Empty),
+        47 => ("max-forwards", string.Empty),
+        48 => ("proxy-authenticate", string.Empty),
+        49 => ("proxy-authorization", string.Empty),
+        50 => ("range", string.Empty),
+        51 => ("referer", string.Empty),
+        52 => ("refresh", string.Empty),
+        53 => ("retry-after", string.Empty),
         54 => ("server", string.Empty),
         55 => ("set-cookie", string.Empty),
-        _ => throw new InvalidOperationException($"The test helper does not support the HPACK static index '{index}'.")
+        56 => ("strict-transport-security", string.Empty),
+        57 => ("transfer-encoding", string.Empty),
+        58 => ("user-agent", string.Empty),
+        59 => ("vary", string.Empty),
+        60 => ("via", string.Empty),
+        61 => ("www-authenticate", string.Empty),
+        _ => throw new InvalidOperationException($"The test helper does not support the HPACK index '{index}' (dynamic-table references are not decoded).")
     };
 
     private static string GetHttp2StaticHeaderName(int index) => GetHttp2StaticHeader(index).Name;
@@ -592,13 +665,13 @@ internal static class HttpProtocolPayloadFactory
 
     private static void WriteHttp2MethodHeader(Stream stream, string method)
     {
-        if (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(method, "GET", StringComparison.Ordinal))
         {
             WriteHttp2IndexedHeader(stream, 2);
             return;
         }
 
-        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(method, "POST", StringComparison.Ordinal))
         {
             WriteHttp2IndexedHeader(stream, 3);
             return;

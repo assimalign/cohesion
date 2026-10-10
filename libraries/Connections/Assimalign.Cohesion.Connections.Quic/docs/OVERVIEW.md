@@ -14,7 +14,12 @@ as every other transport.
   accepts inbound QUIC connections.
 - `QuicConnectionFactory` — client-side: dials outbound QUIC connections.
 - `QuicMultiplexedConnection` — one QUIC connection; accepts and opens
-  streams, each surfaced as a `Connection`.
+  streams, each surfaced as a `Connection`, and reports its TLS 1.3
+  handshake (ALPN protocol, cipher suite, peer certificate) through the
+  contracts' `ITlsConnectionInfo`. It and its streams carry the caller's
+  QUIC application error codes through the contracts'
+  `IMultiplexedConnectionAbort` (`CONNECTION_CLOSE`) and
+  `IMultiplexedStreamAbort` (`STOP_SENDING`, `RESET_STREAM`).
 - Options types covering endpoint, TLS/ALPN, stream limits, pipe buffer
   sizes, and default QUIC application error codes (defaulting to the
   HTTP/3 codes, matching the default ALPN).
@@ -48,4 +53,13 @@ await listener.BindAsync(cancellationToken);
 // CreateAsync(options, cancellationToken) remains available as construct-and-bind shorthand.
 IMultiplexedConnection connection = await listener.AcceptAsync(cancellationToken);
 IConnection stream = await connection.AcceptStreamAsync(cancellationToken);
+
+// Refuse the rest of the peer's data with a code of the protocol's choosing (STOP_SENDING),
+// then end this side gracefully.
+if (stream is IMultiplexedStreamAbort abort)
+{
+    abort.AbortRead(0x100); // H3_NO_ERROR
+}
+
+await stream.Output.CompleteAsync();
 ```

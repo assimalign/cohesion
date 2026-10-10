@@ -8,12 +8,12 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 public class HttpMethodTests
 {
-    [Theory]
-    [InlineData("get", "GET")]
-    [InlineData("pOSt", "POST")]
-    [InlineData("PUT", "PUT")]
-    [InlineData("COnnECT", "CONNECT")]
-    public void Constructor_MixedCaseInput_ShouldNormalizeToUpperInvariant(string value, string expected)
+    [Theory(DisplayName = "Cohesion Test [Http] - Constructor: Should keep the token's case, because methods are case-sensitive (RFC 9110 §9.1)")]
+    [InlineData("get")]
+    [InlineData("pOSt")]
+    [InlineData("PUT")]
+    [InlineData("COnnECT")]
+    public void Constructor_MixedCaseInput_ShouldKeepTheTokenAsGiven(string value)
     {
         // Arrange
         HttpMethod method = value;
@@ -22,20 +22,93 @@ public class HttpMethodTests
         string actual = method.Value;
 
         // Assert
-        actual.ShouldBe(expected);
+        actual.ShouldBe(value);
     }
 
-    [Fact]
-    public void GetCanonicalizedValue_StandardMethod_ShouldReturnEqualValue()
+    [Theory(DisplayName = "Cohesion Test [Http] - Equals: Should compare tokens byte for byte (RFC 9110 §9.1)")]
+    [InlineData("get", "GET")]
+    [InlineData("Post", "POST")]
+    [InlineData("head", "HEAD")]
+    [InlineData("connect", "CONNECT")]
+    [InlineData("patch", "PATCH")]
+    public void Equals_SameTokenInAnotherCase_ShouldNotBeEqual(string value, string standard)
     {
         // Arrange
-        const string method = "get";
+        HttpMethod method = new(value);
+        HttpMethod canonical = HttpMethod.GetCanonicalizedValue(standard);
 
         // Act
-        HttpMethod actual = HttpMethod.GetCanonicalizedValue(method);
+        bool equal = method.Equals(canonical);
 
         // Assert
-        actual.ShouldBe(HttpMethod.Get);
+        equal.ShouldBeFalse();
+        (method == canonical).ShouldBeFalse();
+        (method != canonical).ShouldBeTrue();
+        method.Equals((object)canonical).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - Equals: The same token should be equal, with the same hash code")]
+    public void Equals_SameToken_ShouldBeEqualWithTheSameHashCode()
+    {
+        // Arrange
+        HttpMethod built = new("PROPFIND");
+        HttpMethod parsed = HttpMethod.GetCanonicalizedValue("PROPFIND");
+        HttpMethod get = new("GET");
+
+        // Act
+        bool equal = built.Equals(parsed);
+
+        // Assert
+        equal.ShouldBeTrue();
+        built.GetHashCode().ShouldBe(parsed.GetHashCode());
+        get.ShouldBe(HttpMethod.Get);
+        get.GetHashCode().ShouldBe(HttpMethod.Get.GetHashCode());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - GetCanonicalizedValue: An exact standard token should return the shared standard instance")]
+    public void GetCanonicalizedValue_StandardMethod_ShouldReturnTheStandardInstance()
+    {
+        // Arrange
+        HttpMethod[] standards =
+        [
+            HttpMethod.Get, HttpMethod.Head, HttpMethod.Post, HttpMethod.Put, HttpMethod.Delete,
+            HttpMethod.Connect, HttpMethod.Options, HttpMethod.Trace, HttpMethod.Patch, HttpMethod.Query,
+        ];
+
+        foreach (HttpMethod standard in standards)
+        {
+            // A fresh copy of the token, as a transport hands it over.
+            string token = new(standard.Value.AsSpan());
+
+            // Act
+            HttpMethod actual = HttpMethod.GetCanonicalizedValue(token);
+
+            // Assert — the standard instance, not a new method built from the input.
+            actual.ShouldBe(standard);
+            actual.Value.ShouldBeSameAs(standard.Value);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - GetCanonicalizedValue: A standard method in another case should be an unknown method")]
+    [InlineData("get")]
+    [InlineData("Get")]
+    [InlineData("head")]
+    [InlineData("post")]
+    [InlineData("connect")]
+    [InlineData("options")]
+    [InlineData("query")]
+    public void GetCanonicalizedValue_StandardMethodInAnotherCase_ShouldReturnUnknownMethod(string token)
+    {
+        // Act
+        HttpMethod actual = HttpMethod.GetCanonicalizedValue(token);
+
+        // Assert
+        actual.Value.ShouldBe(token);
+        actual.ShouldNotBe(HttpMethod.GetCanonicalizedValue(token.ToUpperInvariant()));
+        actual.IsSafe.ShouldBeFalse();
+        actual.IsIdempotent.ShouldBeFalse();
+        actual.IsCacheable.ShouldBeFalse();
+        actual.CacheKeyIncludesContent.ShouldBeFalse();
     }
 
     [Fact]
@@ -62,11 +135,11 @@ public class HttpMethodTests
         query.ShouldBe(new HttpMethod("QUERY"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http] - GetCanonicalizedValue: Should canonicalize 'query' to HttpMethod.Query")]
+    [Fact(DisplayName = "Cohesion Test [Http] - GetCanonicalizedValue: Should canonicalize 'QUERY' to HttpMethod.Query")]
     public void GetCanonicalizedValue_QueryToken_ShouldReturnCanonicalQuery()
     {
         // Act — mirrors the behavior of the other nine registered methods.
-        HttpMethod actual = HttpMethod.GetCanonicalizedValue("query");
+        HttpMethod actual = HttpMethod.GetCanonicalizedValue("QUERY");
 
         // Assert
         actual.ShouldBe(HttpMethod.Query);

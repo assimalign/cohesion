@@ -25,7 +25,11 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// <para>
 /// HTTPS handling is BREACH-cautious: over an <c>https</c> request the middleware does nothing unless
 /// <see cref="ResponseCompressionOptions.EnableForHttps"/> is set, so the response is served
-/// uncompressed and carries no <c>Vary: Accept-Encoding</c> it would not otherwise need.
+/// uncompressed and carries no <c>Vary: Accept-Encoding</c> it would not otherwise need. "Over
+/// <c>https</c>" is the effective scheme (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>):
+/// BREACH attacks the TLS leg the client sees, so a response a trusted TLS-terminating proxy relays
+/// over TLS is guarded even though the app-facing hop is plaintext. Without the forwarded-headers
+/// middleware the effective scheme is the transport-derived one.
 /// </para>
 /// </remarks>
 internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
@@ -49,8 +53,9 @@ internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
-        // BREACH (CVE-2013-3587): do not compress dynamic content over HTTPS unless opted in.
-        if (context.Request.Scheme == HttpScheme.Https && !_options.EnableForHttps)
+        // BREACH (CVE-2013-3587): do not compress dynamic content over HTTPS unless opted in. The
+        // effective scheme is the client-facing one, so TLS terminated at a trusted proxy counts.
+        if (context.EffectiveScheme == HttpScheme.Https && !_options.EnableForHttps)
         {
             await next.Invoke(context).ConfigureAwait(false);
             return;

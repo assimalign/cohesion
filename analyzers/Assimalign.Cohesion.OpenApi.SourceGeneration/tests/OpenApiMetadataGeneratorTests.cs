@@ -1,16 +1,10 @@
-using System;
 using System.Collections.Immutable;
-using System.IO;
 using System.Linq;
 
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 
 using Shouldly;
 using Xunit;
-
-using Assimalign.Cohesion.OpenApi;
-using Assimalign.Cohesion.OpenApi.Attributes;
 
 namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Tests;
 
@@ -18,28 +12,8 @@ public class OpenApiMetadataGeneratorTests
 {
     private static (string GeneratedSource, ImmutableArray<Diagnostic> GeneratorDiagnostics, ImmutableArray<Diagnostic> CompilationErrors) Run(string source)
     {
-        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Where(path => path.Length > 0)
-            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
-            .Append(MetadataReference.CreateFromFile(typeof(OpenApiOperationAttribute).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(OperationType).Assembly.Location))
-            .ToList();
-
-        var compilation = CSharpCompilation.Create(
-            "GeneratorTests",
-            [CSharpSyntaxTree.ParseText(source)],
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new OpenApiMetadataGenerator());
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
-
-        var runResult = driver.GetRunResult();
-        var generated = runResult.GeneratedTrees.Length > 0 ? runResult.GeneratedTrees[0].ToString() : string.Empty;
-        var compileErrors = output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToImmutableArray();
-
-        return (generated, runResult.Diagnostics, compileErrors);
+        var run = OpenApiGeneratorHarness.Run("GeneratorTests", source);
+        return (run.GeneratedSource, run.GeneratorDiagnostics, run.Errors);
     }
 
     private const string ValidApi = """
@@ -67,15 +41,20 @@ public class OpenApiMetadataGeneratorTests
         }
         """;
 
-    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Generator: a valid API emits the registry and compiles")]
-    public void Generator_ValidApi_EmitsRegistry()
+    [Fact(DisplayName = "Cohesion Test [OpenApi.SourceGeneration] - Generator: a valid API emits an advertised provider and an internal registry that compile")]
+    public void Generator_ValidApi_EmitsAdvertisedProviderAndInternalRegistry()
     {
+        // Act
         var (generated, generatorDiagnostics, compileErrors) = Run(ValidApi);
 
+        // Assert
         generatorDiagnostics.ShouldBeEmpty();
         compileErrors.ShouldBeEmpty(compileErrors.Length == 0 ? "" : string.Join("; ", compileErrors.Select(d => d.GetMessage())));
 
-        generated.ShouldContain("class OpenApiMetadataRegistry", Case.Sensitive);
+        generated.ShouldContain("[assembly: global::Assimalign.Cohesion.OpenApi.Attributes.OpenApiMetadataProviderAttribute(typeof(global::Assimalign.Cohesion.OpenApi.Generated.OpenApiMetadataProvider_GeneratorTests))]", Case.Sensitive);
+        generated.ShouldContain("public sealed class OpenApiMetadataProvider_GeneratorTests : global::Assimalign.Cohesion.OpenApi.Attributes.IOpenApiMetadataProvider", Case.Sensitive);
+        generated.ShouldContain("internal static class OpenApiMetadataRegistry", Case.Sensitive);
+        generated.ShouldNotContain("public static class OpenApiMetadataRegistry", Case.Sensitive);
         generated.ShouldContain("Path = \"/pets/{id}\"", Case.Sensitive);
         generated.ShouldContain("OperationId = \"getPet\"", Case.Sensitive);
         generated.ShouldContain("#/components/schemas/Pet", Case.Sensitive);

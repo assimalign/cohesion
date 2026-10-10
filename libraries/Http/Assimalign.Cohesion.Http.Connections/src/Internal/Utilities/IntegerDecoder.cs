@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal struct IntegerDecoder
 {
+    private const string IntegerOverflowMessage = "The HPACK integer exceeded the 31 bits this decoder accepts (RFC 7541 §5.1).";
+
     private int _i;
     private int _m;
 
@@ -73,7 +75,7 @@ internal struct IntegerDecoder
         //   if (_m + additionalBitsRequired > 31)
         if (BitOperations.LeadingZeroCount((uint)b) <= _m)
         {
-            throw new HPackDecodingException("");// SR.net_http_hpack_bad_integer);
+            throw new HPackDecodingException(IntegerOverflowMessage);
         }
 
         _i += ((b & 0x7f) << _m);
@@ -81,7 +83,7 @@ internal struct IntegerDecoder
         // If the addition overflowed, the result will be negative.
         if (_i < 0)
         {
-            throw new HPackDecodingException("");// SR.net_http_hpack_bad_integer);
+            throw new HPackDecodingException(IntegerOverflowMessage);
         }
 
         _m += 7;
@@ -91,7 +93,7 @@ internal struct IntegerDecoder
             if (b == 0 && _m / 7 > 1)
             {
                 // Do not accept overlong encodings.
-                throw new HPackDecodingException("");// SR.net_http_hpack_bad_integer);
+                throw new HPackDecodingException("The HPACK integer had an overlong encoding: its last octet was zero (RFC 7541 §5.1).");
             }
 
             result = _i;

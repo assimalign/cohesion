@@ -1,10 +1,14 @@
 using System;
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Compression.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
 
@@ -160,6 +164,46 @@ public class RequestDecompressionTests
         response.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - Request: a malformed chunked framing under a coded body is the transport's client fault, not relabeled as malformed content")]
+    public async Task UseRequestDecompression_MalformedChunkedFraming_ShouldPassTheTransportFailureThrough()
+    {
+        // Arrange — "zz" is not a chunk size (RFC 9112 §7.1): the transport body under the gzip decoder
+        // throws InvalidDataException, latches 400, and answers the exchange itself (#1333, #1340).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        Exception? observed = null;
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
+        factory.Application.UseRequestDecompression();
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await context.Request.Body.CopyToAsync(Stream.Null, context.RequestCancelled);
+            }
+            catch (Exception exception)
+            {
+                observed = exception;
+                throw;
+            }
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        // Act
+        string response = await ExchangeRawAsync(
+            transport,
+            "POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nabc\r\n0\r\n\r\n",
+            cancellationToken);
+
+        // Assert — the handler sees the transport's own exception, which a body binder maps like any
+        // other malformed body, and the wire carries the transport's 400.
+        observed.ShouldBeOfType<InvalidDataException>();
+        response.ShouldStartWith("HTTP/1.1 400");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Compression] - Request: a body with no Content-Encoding passes through untouched")]
     public async Task UseRequestDecompression_NoContentEncoding_PassesThrough()
     {
@@ -176,6 +220,34 @@ public class RequestDecompressionTests
 
         // Assert
         echoed.ShouldBe(original);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="request"/> on one raw connection to <paramref name="transport"/> and reads
+    /// until the server closes the connection, returning everything it wrote.
+    /// </summary>
+    private static async Task<string> ExchangeRawAsync(InMemoryConnectionListener transport, string request, CancellationToken cancellationToken)
+    {
+        await using Connection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        Stream stream = connection.AsStream();
+
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+
+        StringBuilder received = new();
+        byte[] buffer = new byte[1024];
+
+        while (true)
+        {
+            int read = await stream.ReadAsync(buffer, cancellationToken);
+
+            if (read == 0)
+            {
+                return received.ToString();
+            }
+
+            received.Append(Encoding.ASCII.GetString(buffer, 0, read));
+        }
     }
 
     private static void EchoBody(WebApplicationTestFactory factory)

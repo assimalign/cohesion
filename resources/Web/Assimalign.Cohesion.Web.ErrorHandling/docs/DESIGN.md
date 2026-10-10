@@ -8,7 +8,8 @@ pipeline: as exceptions. This package is the seam that turns them back into resp
 the application, not by whichever feature happened to throw.
 
 The package carries two layers. The **`OnError` hook** (#864) is the composition surface —
-`AddErrorHandling().OnError(...)` registers the handler chain and the terminal problem+json default.
+`builder.Services.AddErrorHandling(errors => errors.OnError(...))` registers the handler chain and the
+terminal problem+json default.
 The **pipeline exception boundary** (#881) is the consumer: `UseErrorHandling()` installs the
 middleware that catches faults escaping downstream, publishes them as an `IHttpExceptionFeature`,
 and dispatches through the hook; `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal
@@ -38,12 +39,24 @@ presentation out of feature libraries (no feature invents its own error payload)
   application into one mega-handler; event-style multicast has no answer to "who writes the
   response". Registration order = consultation order means *specific handlers register first* —
   the same mental model as exception `catch` clauses.
-- **`AddErrorHandling().OnError(...)`, not `builder.OnError(...)` directly.** A root-level
-  `OnError` verb would read as repeatable subscription (`+=`), but with name-keyed features each
-  root call would compose a fresh hook that silently replaces the previous one — dropping
-  earlier handlers with no diagnostic. Keeping `OnError` on the returned
-  `ErrorHandlingBuilder` (the `AddAuthentication` idiom) makes repetition safe where it is safe
-  and impossible where it is not.
+- **`AddErrorHandling(errors => errors.OnError(...))`, not `builder.OnError(...)` directly.** A
+  root-level `OnError` verb would read as repeatable subscription (`+=`), but with name-keyed
+  features each root call would compose a fresh hook that silently replaces the previous one —
+  dropping earlier handlers with no diagnostic. Keeping `OnError` on the `ErrorHandlingBuilder` the
+  callback receives (the `AddAuthentication` idiom) makes repetition safe where it is safe and
+  impossible where it is not.
+- **A component integration on `builder.Services` (owner decisions 34 and 35, 2026-10-09, #1380).**
+  The package declares `[assembly: ComponentIntegration]` over `ErrorHandlingBuilder.Build`
+  (`src/Properties/ComponentIntegrations.cs`); the generator projects the builder template onto
+  `IServiceProviderBuilder` in the application's compilation, so the package takes no
+  dependency-injection reference. The template constructs the builder (public, parameterless), runs
+  the callback, calls `Build()`, and registers the hook as an `IHttpFeature` singleton, the only
+  lifetime `Web.Hosting` accepts. `Build()` hands the feature a snapshot of the handlers, so the
+  chain is immutable and the request path takes no lock; until #1380 the verb was an
+  `extension(IWebApplicationBuilder)` member that returned the builder, and the feature read a
+  copy-on-write array the builder kept mutating. A composition surface without a container
+  registers `new ErrorHandlingBuilder().OnError(...).Build()` through
+  `IWebApplicationBuilder.AddFeature`.
 - **Global granularity, not per-feature.** One hook per application. Per-feature error hooks
   would re-scatter error presentation into the features — the exact thing the seam exists to
   centralize. A handler that wants feature-specific behavior branches on the exception type,
@@ -72,8 +85,8 @@ Three layers, outermost last:
    response.
 3. **The server's exception isolation (#762, `Web.Hosting`)** — infrastructure protection: an
    exception that escapes even the boundary (or a fault in the boundary/handlers themselves)
-   must not kill the connection loop. The server cannot invoke this hook — the hosting-isolation
-   rule forbids it from referencing this package — and that is by design: its catch is about
+   must not kill the connection loop. The server does not invoke this hook — it does not reference
+   this package (the hosting-isolation rule forbade it until 2026-10-09) — and that is by design: its catch is about
    connection survival, not response shaping, and produces no application payload.
 
 `HandleAsync` assumes an **unstarted response**; a boundary that buffers or wraps enforces
@@ -116,6 +129,35 @@ becomes "suppress the diagnostic hook the boundary exposes". A throwing `OnExcep
 observation must never defeat response rendering — whereas a throwing `IErrorHandler` propagates; the
 distinction is deliberate (an observer only watches; a handler owns the response).
 
+### Client faults are outcomes, not faults (#1340)
+
+A request body that breaks its framing (a malformed chunk size or trailer section) or a configured
+limit (the body-size cap, the minimum data rate, the trailer-section bounds), or that the client cuts
+short by closing the connection before the body is complete, fails the application's read with an
+`InvalidDataException` or an `IOException` (an `EndOfStreamException` for a body cut short). That
+exception is the transport's answer to the client's bytes: the transport latches a `400`, `413`, `408`
+or `431`, sends it in place of any
+response that has not started, and closes the connection. Before #1340 the boundary treated it as a
+fault like any other: `OnException` ran and a `500` problem was staged, which the transport then
+replaced. Any client could make the application's fault observer fire at will.
+
+The server reports such an exchange through `IWebClientFaultFeature` (`Web.Server`; the default Web
+server installs it on an HTTP/1.1 request with a body). When the feature reports a status the boundary:
+
+- still publishes `IHttpExceptionFeature`, so a reader can see what the read threw;
+- skips `OnException`, as `SuppressDiagnosticsCallback` would, without the application writing a
+  predicate for it;
+- skips the `OnError` handlers and the terminal, because a client fault is an outcome on the line drawn
+  above, and stages the transport's status with no headers and an empty body. The transport then keeps
+  that response, since its status is the one it sends, and every reader downstream of the boundary (the
+  HTTP access log, the server's telemetry) sees the status that reaches the wire;
+- still aborts a started response, as for any other fault.
+
+The classification is by exchange state, not by exception type, so it survives a reader that wraps the
+read's exception. A custom server that does not install the feature leaves the boundary as it was. The
+reference to `Web.Server` is a feature-to-feature one the Web dependency rule allows; the package is
+already an `App.Web` member.
+
 ## Status-code pages and the 404 terminal (#881)
 
 `UseStatusCodePages()` installs `StatusCodePagesMiddleware`, which runs after `next` and upgrades a
@@ -127,10 +169,14 @@ a head already committed.
 Its motivating source is the **pipeline's bodyless 404 terminal**. The silent `Task.CompletedTask`
 terminal in `WebApplication.Build` (which returned an empty `200` for any unhandled request) now sets a
 bodyless `404 Not Found` when the response reaches it untouched (still `200`, no body, no `Content-Type`,
-no `Location`). That terminal lives in **`Web.Hosting`** and must stay payload-free: the resource
-hosting-isolation rule (COHRES002) forbids the runtime module from referencing `Web.ProblemDetails` (or
-this package), so the runtime can only set the status — this package's opt-in status-code-pages middleware
-is what turns it into problem+json. A middleware that deliberately produces an empty `200` must be
+no `Location`). That terminal is **`Web.Routing`'s `WebApplicationTerminal`** (it lived in
+`Web.Hosting`, then in the Web root (#1056), until #1379 moved it beside `IWebEndpointFeature`, the
+endpoint it runs). `Web.Hosting`'s application pipeline and every `Map`/`MapWhen` branch end in it,
+and it stays payload-free: neither `Web.Hosting` nor `Web.Routing` references `Web.ProblemDetails` (or
+this package). The resource hosting-isolation rule (COHRES002) forbade the runtime that reference when
+this was designed, and since the 2026-10-09 relaxation the reference would still ship in every
+framework that carries the module. So the terminal can only set the status — this package's opt-in
+status-code-pages middleware is what turns it into problem+json. A middleware that deliberately produces an empty `200` must be
 terminal (not chain to `next`); a bodyless-`200` fall-through is read as unhandled.
 
 ## Homing under the hosting-isolation rule
@@ -138,8 +184,9 @@ terminal (not chain to `next`); a bodyless-`200` fall-through is read as unhandl
 The issue posed the choice: an area-root seam or a feature package. The default handler decides
 it — it renders `Web.ProblemDetails`, and the area root must not reference feature packages, so
 a root-homed hook would either lose its default or invert the dependency direction. This is a
-feature package referencing `Http`, `Web`, and `Web.ProblemDetails`; `Web.Hosting` references
-none of it (COHRES001/002), and applications receive it through the `App.Web` shared framework.
+feature package referencing `Http`, `Http.Streaming`, `Web`, `Web.ProblemDetails` and `Web.Server`
+(for `IWebClientFaultFeature`, #1340); `Web.Hosting` references
+none of it (COHRES002 forbade that until 2026-10-09), and applications receive it through the `App.Web` shared framework.
 The #881 boundary middleware — a pipeline feature, not runtime code — consumes it as an ordinary
 cross-feature reference.
 

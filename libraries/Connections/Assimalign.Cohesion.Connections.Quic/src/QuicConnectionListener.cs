@@ -148,6 +148,14 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>System.Net.Quic</c> runs each inbound connection's handshake in the background and reports a
+    /// handshake that fails (a client certificate the policy refuses, a handshake that times out, an
+    /// error from the connection-options callback) from the next accept, while the listener stays usable.
+    /// Such a failure belongs to that one connection, which <c>System.Net.Quic</c> has already disposed: it
+    /// is reported through the <c>Assimalign.Cohesion.Connections.Quic</c> event source and this method
+    /// goes on to the next connection, so one client can never stop the listener.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
     public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
     {
@@ -167,7 +175,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
             _lifecycleLock.Release();
         }
 
-        QuicConnection connection = await listener.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
+        QuicConnection connection = await AcceptEstablishedConnectionAsync(listener, cancellationToken).ConfigureAwait(false);
         StreamPipeOptionsContext streamOptions = _options.CreateStreamOptions();
 
         try
@@ -184,6 +192,39 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
             streamOptions.Dispose();
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private async ValueTask<QuicConnection> AcceptEstablishedConnectionAsync(QuicListener listener, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                return await listener.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ObjectDisposedException)
+            {
+                // The QUIC listener reports its own disposal this way and only this way; every later
+                // accept would throw it again, so it ends the accept rather than being skipped.
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // Anything else is one inbound connection's failed handshake (AuthenticationException or
+                // QuicException, per QuicListener.AcceptConnectionAsync), and System.Net.Quic has already
+                // disposed that connection while the listener keeps listening. It must not end this
+                // listener's accept (#1304): report it and accept the next connection. A handshake that
+                // disposal aborted is not reported; the next accept observes the disposal and ends.
+                if (!Volatile.Read(ref _isDisposed))
+                {
+                    QuicConnectionEventSource.Log.HandshakeFailed(_listenerId, exception);
+                }
+            }
         }
     }
 

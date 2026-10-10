@@ -34,7 +34,7 @@ public class ContentNegotiationPipelineTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddJsonSerialization(TestJsonContext.Default);
+        factory.Builder.Services.AddJsonSerialization(TestJsonContext.Default);
 
         factory.Application.Use(async (context, next) =>
         {
@@ -67,7 +67,7 @@ public class ContentNegotiationPipelineTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddJsonSerialization(TestJsonContext.Default);
+        factory.Builder.Services.AddJsonSerialization(TestJsonContext.Default);
 
         factory.Application.Use(async (context, next) =>
         {
@@ -98,7 +98,7 @@ public class ContentNegotiationPipelineTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddJsonSerialization(TestJsonContext.Default);
+        factory.Builder.Services.AddJsonSerialization(TestJsonContext.Default);
 
         factory.Application.Use(async (context, next) =>
         {
@@ -128,7 +128,7 @@ public class ContentNegotiationPipelineTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddJsonSerialization(TestJsonContext.Default);
+        factory.Builder.Services.AddJsonSerialization(TestJsonContext.Default);
 
         factory.Application.Use(async (context, next) =>
         {

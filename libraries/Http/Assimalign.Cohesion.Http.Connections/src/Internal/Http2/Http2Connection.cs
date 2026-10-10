@@ -12,16 +12,18 @@ internal sealed class Http2Connection : HttpConnection
     private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly int _featureCapacity;
     private readonly string? _altSvcHeaderValue;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
+    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(isSecure)
     {
         _connection = connection;
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
+        _featureCapacity = featureCapacity;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -40,7 +42,7 @@ internal sealed class Http2Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _context ??= new Http2ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _altSvcHeaderValue);
+        return _context ??= new Http2ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _altSvcHeaderValue);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

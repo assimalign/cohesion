@@ -2,7 +2,10 @@ using System;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Quic;
+using System.Net.Security;
 using System.Runtime.Versioning;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,6 +17,9 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// A QUIC connection that multiplexes independent streams, each surfaced as a <see cref="Connection"/>.
 /// </summary>
 /// <remarks>
+/// QUIC carries TLS 1.3 in its own handshake (RFC 9001), so the connection reports what that
+/// handshake negotiated through <see cref="ITlsConnectionInfo"/>, captured when the connection is
+/// produced (a QUIC connection is accepted or established only after its handshake completes).
 /// The connection owns a single shared set of stream pipe options — one memory pool per
 /// connection, not per stream — from which every accepted or opened stream creates its pipes.
 /// Disposing the connection completes live bidirectional streams (delivering any in-flight
@@ -22,12 +28,21 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// control channels in multiplexed protocols — HTTP/3 treats its control and QPACK streams as
 /// critical (RFC 9114 §6.2.1) — so the connection close must reach the peer before any
 /// stream-level teardown signal for them.
+/// <para>
+/// The connection and its streams carry application error codes: <see cref="Abort(long, Exception)"/>
+/// closes the connection with the caller's code (<see cref="IMultiplexedConnectionAbort"/>), and every
+/// stream implements <see cref="IMultiplexedStreamAbort"/>. <see cref="Abort(Exception)"/> and
+/// <see cref="DisposeAsync"/> close with the configured default close code.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class QuicMultiplexedConnection : MultiplexedConnection
+public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo, IMultiplexedConnectionAbort
 {
+    // RFC 9000 §16 — an application error code is a variable-length integer.
+    private const long maxApplicationErrorCode = (1L << 62) - 1;
+
     private readonly QuicConnection _connection;
     private readonly long _defaultStreamErrorCode;
     private readonly long _defaultCloseErrorCode;
@@ -56,6 +71,10 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         _streamOptions = streamOptions;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
+        ApplicationProtocol = connection.NegotiatedApplicationProtocol;
+        TlsProtocol = connection.SslProtocol;
+        CipherSuite = connection.NegotiatedCipherSuite;
+        RemoteCertificate = TakeRemoteCertificate(connection);
         _state = ConnectionState.Open;
 
         QuicConnectionEventSource.Log.ConnectionOpened(Id, listenerId, LocalEndPoint, RemoteEndPoint);
@@ -78,6 +97,23 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         IsOrdered: true,
         IsMultiplexed: true,
         ConnectionSecurity.Tls);
+
+    /// <inheritdoc />
+    /// <remarks>QUIC requires ALPN (RFC 9001 §8.1), so an established connection always reports one.</remarks>
+    public SslApplicationProtocol ApplicationProtocol { get; }
+
+    /// <inheritdoc />
+    /// <remarks>QUIC carries TLS 1.3 (RFC 9001 §4), so this is <see cref="SslProtocols.Tls13"/>.</remarks>
+    public SslProtocols TlsProtocol { get; }
+
+    /// <inheritdoc />
+    public TlsCipherSuite CipherSuite { get; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The connection owns the certificate and disposes it when the connection is disposed.
+    /// </remarks>
+    public X509Certificate2? RemoteCertificate { get; }
 
     /// <inheritdoc />
     public override ConnectionState State => _state;
@@ -120,24 +156,22 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The connection closes with the configured default close code; <see cref="Abort(long, Exception)"/>
+    /// chooses the code.
+    /// </remarks>
     public override void Abort(Exception? reason = null)
     {
-        lock (_stateLock)
-        {
-            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
-            {
-                return;
-            }
+        AbortCore(_defaultCloseErrorCode);
+    }
 
-            _state = ConnectionState.Aborted;
-        }
+    /// <inheritdoc />
+    public void Abort(long errorCode, Exception? reason = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
 
-        // Abort is synchronous while closing a QUIC connection is asynchronous; fire and forget
-        // the close, which observes its own faults so nothing surfaces as unobserved.
-        _ = CloseConnectionAsync();
-
-        CancelConnectionClosedToken();
-        ReportClosed();
+        AbortCore(errorCode);
     }
 
     /// <inheritdoc />
@@ -176,7 +210,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
             }
         }
 
-        await CloseConnectionAsync().ConfigureAwait(false);
+        await CloseConnectionAsync(_defaultCloseErrorCode).ConfigureAwait(false);
 
         // The connection is closed; disposing the remaining (unidirectional) streams releases
         // their pipes and handles without putting stream-level frames on the wire.
@@ -186,6 +220,10 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         }
 
         await _connection.DisposeAsync().ConfigureAwait(false);
+
+        // Reading QuicConnection.RemoteCertificate handed its ownership to this connection (see
+        // TakeRemoteCertificate), so the certificate is released here, with the connection.
+        RemoteCertificate?.Dispose();
 
         CancelConnectionClosedToken();
         ReportClosed();
@@ -200,6 +238,30 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
             {
                 _state = ConnectionState.Closed;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads the certificate the peer presented. Reading <see cref="QuicConnection.RemoteCertificate"/>
+    /// hands its ownership to the caller (a <see cref="QuicConnection"/> no longer disposes a
+    /// certificate it has exposed), so this connection disposes it. The platform surfaces an
+    /// <see cref="X509Certificate2"/>; any other instance is copied and released.
+    /// </summary>
+    private static X509Certificate2? TakeRemoteCertificate(QuicConnection connection)
+    {
+        X509Certificate? certificate = connection.RemoteCertificate;
+        if (certificate is null or X509Certificate2)
+        {
+            return (X509Certificate2?)certificate;
+        }
+
+        try
+        {
+            return X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
+        }
+        finally
+        {
+            certificate.Dispose();
         }
     }
 
@@ -236,11 +298,33 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         _streams.TryRemove(stream.Id, out _);
     }
 
-    private async Task CloseConnectionAsync()
+    // The first abort or disposal decides the close: QuicConnection.CloseAsync sends CONNECTION_CLOSE once,
+    // and a later call has no effect on the wire.
+    private void AbortCore(long errorCode)
+    {
+        lock (_stateLock)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                return;
+            }
+
+            _state = ConnectionState.Aborted;
+        }
+
+        // Abort is synchronous while closing a QUIC connection is asynchronous; fire and forget
+        // the close, which observes its own faults so nothing surfaces as unobserved.
+        _ = CloseConnectionAsync(errorCode);
+
+        CancelConnectionClosedToken();
+        ReportClosed();
+    }
+
+    private async Task CloseConnectionAsync(long errorCode)
     {
         try
         {
-            await _connection.CloseAsync(_defaultCloseErrorCode).ConfigureAwait(false);
+            await _connection.CloseAsync(errorCode).ConfigureAwait(false);
         }
         catch (ObjectDisposedException)
         {

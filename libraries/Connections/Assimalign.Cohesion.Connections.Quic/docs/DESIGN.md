@@ -24,8 +24,8 @@ correct for the protocols that run over it.
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes. Both default ALPN to HTTP/3 (see "Error model"). |
-| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. |
-| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. |
+| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts") and `IMultiplexedConnectionAbort` (see "Application error codes"). |
+| `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Implements `IMultiplexedStreamAbort`. |
 
 `QuicMultiplexedConnection` and the listener/factory are `public sealed`
 concretes (not interface-first `internal` implementations) because they
@@ -52,6 +52,21 @@ it, then immediately fall back to the `IMultiplexedConnection` /
   stream's `Output` is the graceful write-side close: the pipe flushes
   remaining bytes and disposes the `QuicStream`, which sends FIN and
   waits for the peer to acknowledge delivery.
+
+## Handshake facts
+
+QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating
+connection in the contracts' sense. `QuicMultiplexedConnection` implements `ITlsConnectionInfo` and
+reports what that handshake negotiated: the ALPN application protocol, the TLS version (always
+TLS 1.3), the cipher suite, and the peer's certificate (the client's on a server-side connection,
+present when the listener's `ServerAuthenticationOptions` requested one). The values are captured
+when the connection is wrapped, after `System.Net.Quic` has completed the handshake, and are the
+same on every stream of the connection; the streams themselves do not implement the facet. The
+driver reads the values and never branches on them, so it stays free of protocol semantics.
+
+Reading `QuicConnection.RemoteCertificate` hands the certificate's ownership to the reader (a
+`QuicConnection` no longer disposes a certificate it has exposed), so `QuicMultiplexedConnection`
+disposes the peer certificate after it has disposed the QUIC connection.
 
 ## Lifecycle and teardown
 
@@ -83,7 +98,23 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
 - **`Abort` (immediate)** — synchronous; fires the connection close
   (fire-and-forget, observing its own faults) and cancels
   `ConnectionClosed`. In-flight data may be discarded; that is the
-  contract of abort.
+  contract of abort. `Abort(Exception?)` closes with
+  `DefaultCloseErrorCode`; `Abort(long errorCode, Exception?)`
+  (`IMultiplexedConnectionAbort`) closes with the caller's code. The
+  first abort or disposal decides the close: `QuicConnection` sends one
+  `CONNECTION_CLOSE`, and a later close request has no effect on the wire.
+
+A stream's `ConnectionClosed` fires on its own `Abort` and `DisposeAsync`,
+and also when the stream ends underneath it (#1329): the stream watches
+`QuicStream.ReadsClosed` and `WritesClosed` and signals when either faults
+with anything but `QuicError.OperationAborted`, that is, a peer
+`RESET_STREAM` or `STOP_SENDING` (`StreamAborted`) or the loss of the
+connection. Faults from this end's own operations (`OperationAborted`)
+and a half that ends cleanly signal nothing. The check runs on the thread
+pool, never on the QUIC event thread that completed the task. A consumer
+learns that the peer abandoned the stream without reading or writing,
+which is how an HTTP/3 server fires `RequestCancelled` for a request the
+client cancelled.
 
 Stream and connection dispose are idempotent, and each stream untracks
 itself from the owning connection through a dispose callback, so
@@ -96,6 +127,23 @@ is routine for streams released after their owning connection closed.
 
 ## Error model
 
+- **A failed inbound handshake never ends the accept (#1304).** `System.Net.Quic` runs each inbound
+  connection's handshake in the background and reports one that fails from the next
+  `QuicListener.AcceptConnectionAsync`, as an `AuthenticationException` or a `QuicException` (a client
+  certificate the policy refuses, a handshake that exceeds its timeout, an error from the
+  connection-options callback), while the listener stays usable and the failed connection is already
+  disposed. `QuicConnectionListener.AcceptAsync` treats every such exception as that one connection's:
+  it reports `HandshakeFailed` (see "Diagnostics") and accepts the next connection, as the contracts'
+  `AcceptAsync` requires. Only `ObjectDisposedException` (the listener's disposal, which every later
+  accept would report again) and the caller's own cancellation leave `AcceptAsync`. Before #1304 the
+  exception left `AcceptAsync`, so a single client without a required certificate stopped the HTTP/3
+  endpoint and, through the HTTP listener's fatal accept handling, every other endpoint of the server.
+  Kestrel's QUIC transport makes the same call.
+- **Pending handshakes are bounded by `Backlog`.** It becomes `QuicListenerOptions.ListenBacklog`,
+  which counts connections whose handshake is in progress plus those waiting to be accepted;
+  `System.Net.Quic` refuses new connections beyond it. The handshake timeout is
+  `System.Net.Quic`'s default (10 seconds). `TlsServerOptions.HandshakeTimeout` and
+  `MaxConcurrentHandshakes` belong to the TCP TLS layer and do not apply here.
 - Contract-level failures surface through the area's
   `ConnectionException` family where the contracts demand it; raw
   `QuicException` / `SocketException` pass through on driver-specific
@@ -109,7 +157,55 @@ is routine for streams released after their owning connection closed.
   follow the same default so the out-of-the-box configuration is
   self-consistent and RFC-honest on the wire. A listener or factory
   serving a different ALPN protocol overrides the codes alongside
-  `ApplicationProtocols`.
+  `ApplicationProtocols`. The defaults apply only where the caller gives
+  no code (see "Application error codes"): the stream default on a
+  stream's `Abort(Exception?)`, its disposal, and the completion of its
+  `Input` or `Output`; the close default on the connection's
+  `Abort(Exception?)` and disposal. The options' XML docs say the same.
+
+## Application error codes
+
+The driver implements the contracts library's two code-carrying facets
+(#1080), so a protocol chooses the code each abort puts on the wire:
+
+| Call | `System.Net.Quic` call | Frame |
+| --- | --- | --- |
+| stream `AbortRead(errorCode)` | `QuicStream.Abort(QuicAbortDirection.Read, errorCode)` | `STOP_SENDING` |
+| stream `AbortWrite(errorCode)` | `QuicStream.Abort(QuicAbortDirection.Write, errorCode)` | `RESET_STREAM` |
+| connection `Abort(errorCode, reason)` | `QuicConnection.CloseAsync(errorCode)` | `CONNECTION_CLOSE` |
+
+- **A direction ends once.** `QuicStream.Abort` skips a direction that
+  has already ended (read to its end, completed, or aborted), so a stream
+  `Abort(Exception?)` or disposal after a coded abort sends the default
+  code only for a direction still open. That is how the HTTP/3 transport
+  resets with a code: both directions, then `Abort(reason)`.
+- **A half abort is not the stream ending.** It changes no `State` and
+  does not fire the stream's `ConnectionClosed`: the `ReadsClosed` or
+  `WritesClosed` fault it causes is `OperationAborted`, which the
+  peer-closure watch ignores (see "Lifecycle and teardown").
+- **After `AbortRead`, every read fails.** The contract says so, and the
+  in-memory driver does it, but the pipe `PipeReader.Create` builds over
+  the `QuicStream` returns octets it has buffered and the holder has not
+  examined without reading the stream. So a readable stream's `Input` is
+  a thin delegating reader that checks a flag `AbortRead` sets before the
+  stream is aborted, and fails `ReadAsync`, `TryRead`, and
+  `ReadAtLeastAsync` with `QuicException(OperationAborted)`, the error
+  `QuicStream` gives a read the abort overtakes. A read already waiting
+  on the stream fails in `QuicStream` itself. Everything else passes
+  through, so a read costs one flag check.
+- **Aborting a stream that has ended does nothing.** A disposed stream,
+  or one whose connection is gone, has nothing to tell the peer, so the
+  driver swallows `ObjectDisposedException` and `QuicException` there. A
+  code outside 0 to 2^62 - 1 throws `ArgumentOutOfRangeException` before
+  the stream is touched.
+- **Abort the read direction before completing `Output` on an unread
+  stream.** Completing either pipe disposes the `QuicStream`
+  (`leaveOpen: false`), and the disposal stops a read direction that is
+  still open with `DefaultStreamErrorCode`. A protocol that ends its
+  sending direction while the peer is still sending therefore calls
+  `AbortRead` with its own code first. #1330 separates the two
+  directions, so that completing `Output` sends the FIN and leaves
+  reading open.
 
 ## Diagnostics
 
@@ -127,6 +223,7 @@ repository EventSource convention (`.claude/rules/event-source.md`). Tools enabl
 | 4 | `ConnectionClosed` | Informational | `connectionId` |
 | 5 | `StreamOpened` | Verbose | `streamId`, `connectionId`, `direction` |
 | 6 | `StreamClosed` | Verbose | `streamId` |
+| 7 | `HandshakeFailed` | Warning | `listenerId`, `exceptionType`, `exceptionMessage` — an inbound connection whose handshake failed, which the listener dropped |
 
 Counters: `current-connections`, `total-connections`, `connections-per-second`, `current-streams`,
 and `streams-per-second`.
@@ -141,6 +238,10 @@ and `streams-per-second`.
   different async flows, which EventSource's activity tracking would mis-nest.
 - TLS handshake events come from the runtime's own `System.Net.Security` and `System.Net.Quic`
   sources; forward them by adding those prefixes to the forwarder.
+- `HandshakeFailed` is the one handshake event this driver raises, because dropping the connection
+  is its decision. It is a warning (the connection is lost, the listener recovered) and carries the
+  exception's type and message, never a certificate or key material. A dropped connection never
+  reports `ConnectionOpened`: `System.Net.Quic` disposed it before this driver wrapped it.
 
 ## AOT posture
 

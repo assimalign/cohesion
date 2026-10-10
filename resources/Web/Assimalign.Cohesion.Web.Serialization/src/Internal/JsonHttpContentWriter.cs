@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading;
@@ -34,6 +35,17 @@ internal sealed class JsonHttpContentWriter : IHttpContentWriter
         ArgumentNullException.ThrowIfNull(type);
         return _options.TryGetTypeInfo(type, out _);
     }
+
+    /// <summary>
+    /// Resolves the contract this writer serializes <paramref name="type"/> with, from the frozen
+    /// options the JSON pair was registered with. Backs the public
+    /// <c>IHttpContentSerializationFeature.TryGetJsonTypeInfo</c> seam.
+    /// </summary>
+    /// <param name="type">The declared CLR type.</param>
+    /// <param name="typeInfo">The contract, when the registered resolver covers the type.</param>
+    /// <returns><see langword="true"/> when the registered resolver covers the type.</returns>
+    internal bool TryGetTypeInfo(Type type, [NotNullWhen(true)] out JsonTypeInfo? typeInfo)
+        => _options.TryGetTypeInfo(type, out typeInfo);
 
     /// <inheritdoc />
     public async Task WriteAsync(IHttpResponse response, object? value, Type type, HttpMediaType contentType, CancellationToken cancellationToken = default)

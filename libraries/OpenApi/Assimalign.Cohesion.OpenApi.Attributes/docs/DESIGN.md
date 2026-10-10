@@ -20,7 +20,8 @@ Web, ApiManager, or any other consumer can adopt them without dragging in unrela
    requirement. They are pure data carriers with no behavior.
 2. **Metadata** (`src/Metadata/`) — flat, immutable `required`/`init` records
    (`OpenApiOperationMetadata`, `OpenApiSchemaMetadata`, …). Deliberately simpler than the rich model:
-   references are strings, types are enums, nothing nests a model object. This is what a source
+   references are strings, types are enums, nothing nests a model object except the optional
+   pass-through `Schema` runtime producers set (see "Pass-through schemas"). This is what a source
    generator can emit as plain object initializers.
 3. **Mapper** (`OpenApiAttributeMapper`) — maps attribute instances to metadata, applying the rules and
    reporting invalid combinations as `OpenApiMetadataDiagnostic` values.
@@ -33,6 +34,31 @@ mapper or the source generator over Roslyn symbols) and the *emission* side (met
 independently, and the source generator emits simple data rather than reconstructing the full model
 graph in generated code. The metadata is the stable seam #542 asks to "lock down before the source
 generator depends on it."
+
+## Pass-through schemas (#152)
+
+The flat vocabulary is the attributes' vocabulary, and it cannot say what a serialization contract
+says: an array of a component, a dictionary, an enum, a nullable reference, a nested inline object. A
+producer that already holds a complete schema therefore passes it through instead of flattening it:
+`OpenApiParameterMetadata`, `OpenApiRequestBodyMetadata`, `OpenApiResponseMetadata` and
+`OpenApiSchemaMetadata` each have an optional `Schema` (`OpenApiSchema?`). When it is set, generation
+places that model schema as it is and ignores the flat type, format, reference or property fields beside
+it.
+
+This is the one place the metadata holds a model object, and it is deliberately narrow:
+
+- **Only runtime producers set it.** The Web OpenAPI adapter (`Assimalign.Cohesion.Web.OpenApi`) derives
+  schemas from System.Text.Json contracts with `JsonSchemaExporter`. The attribute mapper and the source
+  generator never set it, so their output, and the plain object initializers the generator emits, are
+  unchanged.
+- **It is optional and additive.** Existing producers and consumers compile and behave as before.
+- **It keeps one assembler.** The schema still reaches the document through the description provider
+  and the generator; the producer does not patch a generated document afterwards, which would split
+  document assembly across packages (the alternative the adapter's DESIGN rejects).
+
+A producer that passes schemas through writes them for the line it targets, since the model's writer
+adapts nullability and the 3.1 vocabulary per line but cannot know a producer's intent: the Web adapter
+builds its source per document line.
 
 ## AOT and source-generator friendliness
 
@@ -64,6 +90,42 @@ The mapper corrects or flags these combinations (codes in `OpenApiMetadataDiagno
 `<IsAotCompatible>true</IsAotCompatible>` (inherited). The mapper performs no member reflection; the
 only reflection in the test suite (reading attributes off a sample type) is test-only. Runtime
 discovery in an application is the source generator's job (feature .06).
+
+## The provider contract: metadata across assemblies
+
+An application's annotated endpoints are usually spread over several assemblies, and each assembly's
+metadata is generated in that assembly's own compile. Two public, hand-written types carry it across:
+
+- `IOpenApiMetadataProvider` (`src/Abstractions/`) — the operations, schemas, tags, and security schemes
+  one assembly contributes.
+- `OpenApiMetadataProviderAttribute` (`src/Attributes/`) — `[assembly: OpenApiMetadataProvider(typeof(T))]`
+  advertises a provider type to every compilation that references the assembly.
+
+The source generator implements the interface once per annotated assembly and applies the attribute for
+that implementation. In each referencing compilation it reads the advertised attributes from metadata at
+compile time and emits an internal `OpenApiMetadataRegistry` that constructs every provider directly, so
+nothing is discovered at run time and trimming keeps each provider. The attribute is not generator-only:
+an assembly can advertise a hand-written provider the same way, under the rules in the attribute's XML
+documentation.
+
+The contract lives here, not in a package of its own, because the generator ships here: every
+compilation that runs the generator references this package, so the code it emits always compiles
+against the contract. Why composition has this shape, and the alternatives rejected (module
+initializers, hand composition, the former fixed public registry), are recorded in the generator's
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+("Composing metadata across assemblies").
+
+## The package carries the source generator
+
+The project declares `CohesionAnalyzerReference` for `Assimalign.Cohesion.OpenApi.SourceGeneration`,
+so the generator DLL ships in this package at `analyzers/dotnet/cs/` and runs in every project that
+references the package, directly or through `OpenApi.Generation` or `OpenApi.Integration`. Shipping the
+two together means the generator cannot version apart from what its output compiles against, the
+metadata records and the provider contract: renaming or reshaping one of them is a change to the
+generator's emitted code in the same package. Why this package is the carrier, and the alternatives
+rejected, are recorded in the generator's
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+("Delivery").
 
 ## Non-goals
 

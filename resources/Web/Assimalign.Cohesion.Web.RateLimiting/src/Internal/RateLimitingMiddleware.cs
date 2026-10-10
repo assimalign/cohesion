@@ -1,34 +1,48 @@
 using System;
 using System.Globalization;
+using System.Threading;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.RateLimiting.Internal;
 
 /// <summary>
-/// The rate-limiting middleware: acquires the global limiter's lease up-front (with the limiter's full
-/// queueing semantics) for every request, then hands downstream a context that gates matched endpoints
-/// against their per-endpoint policy at the route-match seam. A rejection at either point is answered
-/// with the configured status (429 by default) and a <c>Retry-After</c> header from the lease metadata,
-/// with an optional <see cref="RateLimitingOptions.OnRejected"/> hook that may own the response.
+/// The rate-limiting middleware: acquires the global limiter's lease for every request, then the
+/// published endpoint's own policy, both asynchronously with the limiter's full queueing semantics. A
+/// rejection at either gate is answered with the configured status (429 by default) and a
+/// <c>Retry-After</c> header from the lease metadata, with an optional
+/// <see cref="RateLimitingOptions.OnRejected"/> hook that may own the response, and the rest of the
+/// pipeline (the endpoint included) does not run.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The global limiter and any per-endpoint policy are additive — both must grant a lease — because the
-/// global lease is acquired before routing identifies the endpoint, so it cannot be retroactively
-/// skipped. Acquired leases are held for the whole request and released when the middleware disposes the
-/// feature, which is the lifetime a concurrency limiter requires.
+/// The endpoint policy comes from the route match <c>UseRouting</c> publishes before this middleware
+/// runs, so the middleware belongs after <c>UseRouting</c>. Once it has applied the endpoint's policy
+/// (or found none) it acknowledges the endpoint. Registered ahead of <c>UseRouting</c> it sees no
+/// endpoint and acknowledges none, and routing's dispatch then fails an endpoint whose
+/// <see cref="RateLimitingMetadata"/> names a policy rather than running it without the limit
+/// (<see cref="IRouteMiddlewareMetadata"/>). The global limiter needs no endpoint and applies in either
+/// position.
 /// </para>
 /// <para>
-/// The per-endpoint gate raises a <see cref="RateLimiterRejectedSignal"/> from the synchronous route-match
-/// publication; this middleware catches it (the signal never escapes) and writes the rejection before the
-/// handler runs.
+/// The global limiter and the endpoint policy are additive: both must grant a lease. Acquired leases are
+/// held for the whole request and released, endpoint before global, when the middleware disposes the
+/// feature after the downstream pipeline completes, which is the lifetime a concurrency limiter
+/// requires. The candidate endpoint of a CORS preflight never runs for the preflight, so its policy is
+/// neither applied nor acknowledged.
 /// </para>
 /// </remarks>
 internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
 {
+    /// <summary>
+    /// The pipeline verb the middleware acknowledges on the endpoint, and the one
+    /// <see cref="RateLimitingMetadata.RequiredMiddleware"/> names.
+    /// </summary>
+    internal const string Verb = "UseRateLimiting";
+
     private readonly RateLimitingOptions _options;
 
     public RateLimitingMiddleware(RateLimitingOptions options)
@@ -44,24 +58,30 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
         {
             context.Features.Set<IRateLimitingFeature>(feature);
 
-            if (_options.GlobalPolicy is { } global && !await TryAcquireGlobalAsync(context, global, feature).ConfigureAwait(false))
+            if (_options.GlobalPolicy is { } global
+                && !await TryAcquireAsync(context, global, policyName: null, feature).ConfigureAwait(false))
             {
-                // Global limiter rejected the request; the response has been written.
+                // The global limiter rejected the request; the response has been written.
                 return;
             }
 
-            try
+            if (context.GetRouteMatch() is { IsPreflight: false } endpoint)
             {
-                await next.Invoke(new RateLimitingHttpContext(context, feature, _options)).ConfigureAwait(false);
-            }
-            catch (RateLimiterRejectedSignal signal)
-            {
-                using (signal.Lease)
+                if (endpoint.Metadata.GetMetadata<RateLimitingMetadata>() is { IsDisabled: false } metadata
+                    && !await TryAcquireAsync(context, ResolvePolicy(metadata), metadata.PolicyName, feature).ConfigureAwait(false))
                 {
-                    _options.OnDecision?.Invoke(new RateLimitingDecision(signal.PolicyName, false, signal.RetryAfter));
-                    await RejectAsync(context, signal.Lease, signal.PolicyName, signal.RetryAfter).ConfigureAwait(false);
+                    // The endpoint policy rejected the request; the response has been written and the
+                    // endpoint does not run.
+                    return;
                 }
+
+                // Acknowledge every endpoint this middleware processed, with or without a policy of its
+                // own: routing checks each metadata item that names this middleware, including a
+                // group-level policy that a last-wins endpoint override replaced.
+                context.AcknowledgeEndpointMiddleware(Verb);
             }
+
+            await next.Invoke(context).ConfigureAwait(false);
         }
         finally
         {
@@ -72,7 +92,9 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
         }
     }
 
-    private async Task<bool> TryAcquireGlobalAsync(IHttpContext context, RateLimitingPolicy policy, RateLimitingFeature feature)
+    // Acquires a lease from the policy, waiting in the limiter's queue when it has one. An admitted
+    // lease is held on the feature until the request completes; a rejection is answered here.
+    private async Task<bool> TryAcquireAsync(IHttpContext context, RateLimitingPolicy policy, string? policyName, RateLimitingFeature feature)
     {
         RateLimitLease lease = await policy.Limiter
             .AcquireAsync(context, policy.PermitCount, context.RequestCancelled)
@@ -81,27 +103,44 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
         if (lease.IsAcquired)
         {
             feature.TrackLease(lease);
-            feature.RecordAdmitted(null);
-            _options.OnDecision?.Invoke(new RateLimitingDecision(null, true, null));
+            feature.RecordAdmitted(policyName);
+            _options.OnDecision?.Invoke(new RateLimitingDecision(policyName, true, null));
             return true;
         }
 
         using (lease)
         {
             TimeSpan? retryAfter = RateLimitingLeaseReader.GetRetryAfter(lease);
-            feature.RecordRejected(null, retryAfter);
-            _options.OnDecision?.Invoke(new RateLimitingDecision(null, false, retryAfter));
-            await RejectAsync(context, lease, policyName: null, retryAfter).ConfigureAwait(false);
+            feature.RecordRejected(policyName, retryAfter);
+            _options.OnDecision?.Invoke(new RateLimitingDecision(policyName, false, retryAfter));
+            await RejectAsync(context, lease, policyName, retryAfter).ConfigureAwait(false);
         }
 
         return false;
     }
 
+    private RateLimitingPolicy ResolvePolicy(RateLimitingMetadata metadata)
+    {
+        if (metadata.Policy is { } inline)
+        {
+            return inline;
+        }
+
+        if (_options.TryGetPolicy(metadata.PolicyName!, out RateLimitingPolicy? named) && named is not null)
+        {
+            return named;
+        }
+
+        throw new InvalidOperationException(
+            $"No rate limiting policy named '{metadata.PolicyName}' has been registered. " +
+            "Register it with options.AddPolicy(name, policy) in UseRateLimiting.");
+    }
+
     private async Task RejectAsync(IHttpContext context, RateLimitLease lease, string? policyName, TimeSpan? retryAfter)
     {
-        // If a downstream stage already committed the response head, the status can no longer be set —
-        // abort the exchange at the protocol layer instead. Global rejection is pre-next so this never
-        // trips there; the guard covers the per-endpoint seam.
+        // Both gates run before next, so the head is normally still writable here. A middleware ahead of
+        // this one may already have committed it, though, and then the status can no longer be set:
+        // abort the exchange at the protocol layer instead.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
         {
             await context.CancelAsync().ConfigureAwait(false);
@@ -127,7 +166,7 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
 
             // The request token may be cancelled; the rejection write must not observe it or the answer
             // would cancel itself.
-            await onRejected.Invoke(rejection, System.Threading.CancellationToken.None).ConfigureAwait(false);
+            await onRejected.Invoke(rejection, CancellationToken.None).ConfigureAwait(false);
         }
     }
 }

@@ -107,17 +107,36 @@ wire truth is never destroyed, "what did the transport actually see" stays answe
 (no `X-Original-*` header shuffling), and the resolution is observable
 (`TrustedHopCount`) rather than implicit.
 
-## Ordering contract — first position
+## Ordering contract — ahead of every identity consumer
 
 Forwarded-headers resolution must run **before anything that consumes client
-identity**: CORS, authentication, cookie policy, redirect-generating middleware, rate
-limiting, access logging. Middleware execution follows registration order, so
-`UseForwardedHeaders(...)` must be the first `Use` call on the pipeline. Until the
-repo-wide middleware-ordering rules land (#26/#145), this contract is documentation +
-XML docs on the verb; when those rules introduce enforceable ordering constraints, this
-middleware is the canonical "must be first" case and should be annotated accordingly.
+identity on the way in**: host filtering, HTTPS redirection, CORS, authentication,
+cookie policy, redirect-generating middleware, rate limiting. Middleware execution
+follows registration order, so `UseForwardedHeaders(...)` must run ahead of every such
+consumer. Only middleware that reads no client identity on the way in may precede it:
+`UseHttpLogging`, which reads on the way out (see below), and `UseSecurityHeaders`,
+which reads none. The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) gives the full sequence.
+Until the repo-wide middleware-ordering rules land (#26/#145),
+this contract is documentation + XML docs on the verb; when those rules introduce
+enforceable ordering constraints, this middleware is the canonical "must precede its consumers" case
+and should be annotated accordingly.
 (Sequenced behind #26/#145 by design — do not invent a one-off enforcement mechanism
 here.)
+
+The Web feature libraries that consume the effective view (#1050, owner decision 3 in
+`docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4) read it at one of two points, which is
+what the ordering contract protects:
+
+- **Before `next`** — `Web.HttpsPolicy` redirection, `Web.HostFiltering`,
+  `Web.Routing`'s host-constrained route selection (`RequireHost`, #1077),
+  `Web.Compression`'s BREACH guard, `Web.Caching`'s primary key, `Web.RateLimiting`'s
+  client-address partition, and the `Secure` decisions of `Web.Sessions` and
+  `Web.Authentication.Cookie` (taken when the cookie is issued). These must run after
+  this middleware.
+- **After `next` returns** — `Web.HttpsPolicy`'s HSTS emission and
+  `Web.Diagnostics`' access-log entry. The feature stays on the exchange once attached,
+  so these honor the forwarded identity even when registered ahead of this middleware,
+  which is why `UseHttpLogging` can keep its own first position.
 
 ## AOT posture
 
@@ -130,8 +149,9 @@ objects — no reflection, no runtime codegen, no dynamic serialization
 - **Producing forwarding headers.** Header *injection* belongs to the LoadBalancer
   resource's data plane when it is implemented, not to the consumer middleware.
 - **Host allowlisting.** The shape check on forwarded hosts prevents smuggling; deciding
-  which hosts are acceptable for redirects/links is a consumer policy (a future
-  host-filtering concern), not identity resolution.
+  which hosts are acceptable for redirects/links is a consumer policy, not identity
+  resolution. `Web.HostFiltering` is that consumer: registered after this middleware, it
+  validates the effective host against its allowlist (#1050).
 - **Vendor headers** (`X-Real-IP`, `X-Forwarded-Port`, …) and custom header names. The
   scope is RFC 7239 plus the ubiquitous trio, mirroring the #770 primitives' scope.
 - **De-obfuscating RFC 7239 identifiers.** An obfuscated node ends the walk; reversing

@@ -63,8 +63,8 @@ public static class HttpResponseSerializationExtensions
             else
             {
                 throw new HttpContentSerializationException(
-                    "The content-serialization registry has no writers. Register a format at builder " +
-                    "time (e.g. AddJsonSerialization) before writing typed content.");
+                    "The content-serialization registry has no writers. Register a format with " +
+                    "builder.Services.AddJsonSerialization(...) before writing typed content.");
             }
 
             return writer.WriteAsync(response, value, typeof(T), target, cancellationToken);

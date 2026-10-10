@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.WebSockets.Tests</RootNamespace>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- Test-only: a route group's authorization policy guards a MapWebSocket endpoint. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
+		<!-- Test-only: the end-to-end suite serves the policy from the real runtime over loopback
+		     TCP (HTTP/1.1, HTTP/2) and the in-memory multiplexed driver (HTTP/3). Tests are exempt
+		     from the hosting-isolation rule (COHRES001); the library is not. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+</Project>

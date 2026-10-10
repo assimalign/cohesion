@@ -24,7 +24,9 @@ public static class HttpContextRoutingExtensions
     {
         /// <summary>
         /// Stores the matched route and route values on the current HTTP context
-        /// as an <see cref="IRouteMatchFeature"/>. Replaces any previously stored match.
+        /// as an <see cref="IRouteMatchFeature"/>, and selects the route as the exchange's
+        /// endpoint (<see cref="IWebEndpointFeature"/>): the pipeline's terminal runs its handler.
+        /// Replaces any previously selected endpoint.
         /// </summary>
         /// <param name="route">The matched route.</param>
         /// <param name="values">The matched route values.</param>
@@ -35,10 +37,38 @@ public static class HttpContextRoutingExtensions
             ArgumentNullException.ThrowIfNull(route);
             ArgumentNullException.ThrowIfNull(values);
 
-            // Replace-on-set: the feature collection is name-keyed, and every RouteMatchFeature
-            // reports the same stable Name (nameof(IRouteMatchFeature)), so re-routing overwrites
-            // the prior match in the same slot rather than accumulating stale entries.
+            // Replace-on-set: the feature collection is name-keyed, and every endpoint publication
+            // (a RouteMatchFeature, or routing's 405 endpoint) reports the same stable Name
+            // (nameof(IWebEndpointFeature)), so re-routing overwrites the prior endpoint in the same
+            // slot rather than accumulating stale entries.
             context.Features.Set<IRouteMatchFeature>(new RouteMatchFeature(route, values));
+        }
+
+        /// <summary>
+        /// Records that <paramref name="middleware"/> processed the endpoint selected for the current
+        /// request, satisfying every endpoint-metadata item whose
+        /// <see cref="IRouteMiddlewareMetadata.RequiredMiddleware"/> names it.
+        /// </summary>
+        /// <remarks>
+        /// A middleware that applies endpoint policies calls this once it has applied them (or found
+        /// that none apply) and before it calls <c>next</c>. When the endpoint is dispatched, metadata
+        /// that names a middleware the request never acknowledged fails the request instead of running
+        /// the endpoint without its policy (see <see cref="IRouteMiddlewareMetadata"/>). The call has
+        /// no effect when no route is selected, or when the selected match was not published by
+        /// routing.
+        /// </remarks>
+        /// <param name="middleware">The pipeline verb of the middleware, for example <c>UseRateLimiting</c>.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="middleware"/> is <see langword="null"/> or empty.</exception>
+        public void AcknowledgeEndpointMiddleware(string middleware)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentException.ThrowIfNullOrEmpty(middleware);
+
+            if (context.Features.Get<IRouteMatchFeature>() is RouteMatchFeature match)
+            {
+                match.Acknowledge(middleware);
+            }
         }
 
         /// <summary>
@@ -115,8 +145,8 @@ public static class HttpContextRoutingExtensions
         /// <returns>The application's <see cref="ILinkGenerator"/>.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <exception cref="InvalidOperationException">
-        /// Routing has not been registered on the application (call <c>AddRouting</c> on the web
-        /// application builder).
+        /// Routing has not been registered on the application (call
+        /// <c>builder.Services.AddRouting</c>).
         /// </exception>
         public ILinkGenerator GetLinkGenerator()
         {
@@ -124,7 +154,7 @@ public static class HttpContextRoutingExtensions
 
             IRouterFeature feature = context.Features.Get<IRouterFeature>()
                 ?? throw new InvalidOperationException(
-                    "Routing has not been registered. Call AddRouting() on the web application builder before generating links.");
+                    "Routing has not been registered. Call builder.Services.AddRouting() before generating links.");
 
             return feature.Router.LinkGenerator;
         }

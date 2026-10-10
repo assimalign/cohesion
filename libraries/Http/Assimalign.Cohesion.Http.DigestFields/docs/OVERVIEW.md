@@ -17,15 +17,16 @@ request verifier.
   parse but never used (RFC 9530 §5).
 - **Server verification:** `HttpDigestFields.CreateContentDigestVerifier()` returns an
   `IHttpExchangeInterceptor` the composition root registers on its listener; it verifies an inbound
-  `Content-Digest` against the request body. On HTTP/1.1 and HTTP/3 verification is eager and a
-  mismatch is rejected with `400 Bad Request` before dispatch; on HTTP/2 (whose body streams in
-  under flow control after dispatch) it is lazy — the body is hashed incrementally as the
-  application reads, and a mismatch surfaces as `HttpContentDigestMismatchException` on the
-  terminal body read, after which the application aborts the exchange (`IHttpContext.Cancel` →
-  `RST_STREAM`). A malformed field is a pre-dispatch `400` on every protocol.
+  `Content-Digest` against the request body. On HTTP/1.1 verification is eager and a mismatch is
+  rejected with `400 Bad Request` before dispatch; on HTTP/2 and HTTP/3 (whose bodies stream in
+  after dispatch) it is lazy — the body is hashed incrementally as the application reads, and a
+  mismatch surfaces as `HttpContentDigestMismatchException` on the terminal body read, after which
+  the application aborts the exchange (`IHttpContext.Cancel` → `RST_STREAM` on HTTP/2, a stream
+  reset on HTTP/3). A malformed field is a pre-dispatch `400` on every protocol.
 - **Response stamping:** `IHttpResponse.SetContentDigest(...)` computes and stamps `Content-Digest`,
   honoring the request's `Want-Content-Digest` preference ordering; `HttpContentDigester` is the
-  incremental "hash as you write" primitive for the trailer-borne streamed case.
+  incremental "hash as you write" primitive for the trailer-borne streamed case: its field can be
+  staged on `Response.Trailers`, which HTTP/2 and HTTP/3 send (HTTP/1.1 has no response trailers).
 
 Usage:
 

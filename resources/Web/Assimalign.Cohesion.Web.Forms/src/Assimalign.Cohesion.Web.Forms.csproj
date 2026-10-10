@@ -4,6 +4,12 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- Feature to feature: an unreadable form is answered with the problem+json payload the rest of
+		     the area writes (#1210). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<!-- IHttpResponseStreamingFeature.HasStarted: a rejection after the head was committed aborts
+		     the exchange instead of writing into another response. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
 </Project>

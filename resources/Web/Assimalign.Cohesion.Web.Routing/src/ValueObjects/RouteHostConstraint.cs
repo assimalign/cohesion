@@ -137,7 +137,10 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
     /// <summary>
     /// Determines whether the supplied request host satisfies the constraint.
     /// </summary>
-    /// <param name="host">The request host to test, as produced by <c>IHttpRequest.Host</c>.</param>
+    /// <param name="host">
+    /// The request host to test. <see cref="Router"/> passes the effective host: the host a trusted proxy
+    /// forwarded, otherwise <c>IHttpRequest.Host</c>.
+    /// </param>
     /// <returns><see langword="true"/> when the host satisfies the constraint; otherwise <see langword="false"/>.</returns>
     public bool IsMatch(HttpHost host)
     {
@@ -149,7 +152,10 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
             return false;
         }
 
-        ReadOnlySpan<char> value = host.Value.AsSpan().Trim();
+        // SP and HTAB only (RFC 9110 §5.6.3), the trim HttpHost.TryGetComponents applies, so host
+        // selection here and allowlist validation there read "api.test\xA0" as the same host: not
+        // api.test. A Unicode trim would also strip a no-break space or a next-line character.
+        ReadOnlySpan<char> value = host.Value.AsSpan().Trim(" \t");
 
         if (!HttpHost.TrySplitHostPort(value, out ReadOnlySpan<char> name, out ReadOnlySpan<char> portText, out bool hasPort))
         {

@@ -53,9 +53,13 @@ to a separate implementation step.
 ## Error model
 
 Every provider raises `FileSystemException` with one of the explicit codes
-in `FileSystemErrorCode`. The base class has `[DoesNotReturn]` static helpers
-(`ThrowFileNotFound`, `ThrowReadOnly`, etc.) so providers don't construct
-exceptions inline.
+in `FileSystemErrorCode`. `[DoesNotReturn]` static helpers
+(`ThrowFileNotFound`, `ThrowReadOnly`, etc.) keep providers from constructing
+exceptions inline. The original helpers are declared on the exception type. New
+ones are static extension members in `FileSystemExceptionExtensions`, following
+the repository rule against throw-helper types: `ThrowPathOutsideRoot` is the
+first. Both are called the same way (`FileSystemException.ThrowPathOutsideRoot(path)`),
+so the older helpers can move to the extension container without changing callers.
 
 Handle I/O also exposes the BCL argument, access, cancellation, and disposal exceptions.
 In particular, unsupported durable flush raises `NotSupportedException` as required by the
@@ -70,7 +74,11 @@ handle contract; it is not wrapped as a generic file-system error.
 | `NotEnoughSpace` | Write would exceed the configured quota. |
 | `PathTooLong` | The OS reported `PathTooLongException`. |
 | `PathInUse` | Another handle holds an incompatible share. |
+| `PathOutsideRoot` | The path resolves outside the provider's root; raised before the backing store is touched (see *Root containment*). |
 | `Other` | Catch-all; should be paired with a wrapped inner exception. |
+
+`PathOutsideRoot` was appended after `ReadOnly`, so every earlier code keeps its numeric value;
+`FileSystemExceptionTests` pins the ordinals.
 
 ## Factory and lifecycle
 
@@ -111,18 +119,94 @@ bug in Aggregate before any consumer code shipped.
 
 - Uses `/` as the separator on every OS.
 - Optional leading `/` marks an absolute path.
-- `Merge` performs `..`-aware joining with normalization.
+- `Parse` admits `..` only at the start of a relative path; an interior `..` is an
+  `ArgumentException` at conversion time.
+- `Merge` navigates: it joins a relative path onto a base, returns a path that already lies
+  under the base on a segment boundary, and applies leading `..` segments, which may climb
+  above the base but never above its root (drive, leading `/`, or UNC share).
 - `GetSegments`, `GetFileName`, `GetDirectoryName` return strongly-typed parts.
 
-Providers normalize incoming paths into absolute form using `Merge` against
-their root before any further work.
+`Merge` is not a containment primitive, and no provider uses it to resolve incoming paths.
+
+## Root containment
+
+A provider rooted somewhere confines every path-taking operation to that root; the table below
+says which providers do so today. The rule, in the order it runs:
+
+1. **Resolve.** An empty path is the root. A relative path is taken from the root. A rooted path
+   names a location in the provider's namespace and is used as given. `.` and `..` segments are
+   resolved, so `../public/index.html` from a root of `/srv/public` is back inside.
+2. **Check.** The resolved path must equal the root or lie under it on a segment boundary:
+   `/srv/public2/x` does not lie under `/srv/public`. Anything else throws
+   `FileSystemException` with `FileSystemErrorCode.PathOutsideRoot`.
+3. **Use.** Only the checked path reaches the backing store, rebuilt from the root's own text,
+   so nothing outside the root is read, created, changed, or even probed for existence.
+   `Exists` throws too; it does not answer `false`, because an answer about a location outside
+   the root is still an answer about that location.
+
+Copy and move resolve both ends before either is touched.
+
+| Provider | Containment | How "resolve" works | Comparison |
+|----------|-------------|---------------------|------------|
+| Physical | Enforced (#1180) | `Path.GetFullPath` — the host's own normalization, so the check runs on exactly the string `System.IO` opens. A rooted path must be fully qualified. | Ordinal ignore-case on Windows and Apple platforms, ordinal elsewhere |
+| InMemory | Enforced (#1180) | Lexical `.`/`..` resolution beneath the namespace root; `..` at the namespace root stays there, as `/..` is `/` on every host | Ordinal, ignore-case when `IgnoreCase` is set |
+| IsolatedStorage | Not yet | Merges onto `/` and hands the rest to `IsolatedStorageFile`, which does not confine `..` | — |
+| Aggregate | Delegates | Routes by mount prefix on segment boundaries; the mounted provider confines its own paths | Ordinal |
+
+The physical provider's link policy and Windows specifics are in its own `docs/DESIGN.md`.
+
+### Why containment lives in each provider, not in `FileSystemPath`
+
+**Decision:** `Merge` stays a navigation helper, its bugs fixed, and each provider owns the
+containment check for its own namespace. Recorded for #1180.
+
+- **`Merge` keeps navigating.** It is public API with callers that rely on climbing above the
+  base: `IFileSystemDirectory.Exists` and `CreateSubdirectory` (the `FileSystemExtensions`
+  members) merge a caller's `../sibling` onto a subdirectory's path, which is legitimate as long
+  as the provider then keeps the result inside its root, and Core's own tests pin
+  `Merge("C:/users/path1/path2", "../../johndoe")`. Making `Merge` refuse to leave its base
+  would break that navigation for every caller to fix a problem only providers have.
+- **`Merge`'s own bugs are fixed regardless.** Its prefix test now requires a segment boundary
+  and is ordinal (a culture-aware match can succeed across ignorable characters with a matched
+  length that does not line up with a separator, so it cannot decide a boundary); it honors
+  `ignoreCase`, which it used to ignore. A leading `..` can no longer remove the base's root —
+  it used to, so `Merge("/srv/public", "../../../x")` returned the relative path `x` — and a
+  merged path keeps its root exactly instead of doubling it into a UNC-shaped `//srv/...`. Only
+  an exact `..` segment counts as a parent reference, so `..config` is an ordinary name.
+- **Rejected: a containment flag on `Merge`, or a public lexical `TryResolveWithin` on
+  `FileSystemPath`.** A lexical check in a platform-neutral path type is the wrong primitive for
+  host paths. Windows maps a final `NUL` segment to the `\\.\NUL` device and trims trailing dots
+  and spaces, so a path that is lexically under the root can open something that is not. Only the host's normalization (`Path.GetFullPath`) answers "what will actually be
+  opened", and that belongs in the provider that opens it. A public lexical API in Core would
+  invite every consumer to treat it as sufficient for physical paths.
+- **Rejected: returning `false` from `Exists` for an outside path.** See step 3 above; it also
+  makes a refused path indistinguishable from a missing one, which hides misuse.
+
+### Consumers
+
+`FileSystemPath.Merge` (including the `+` operator, which calls it): the in-memory provider's
+entry paths and tree walks, which merge one plain segment at a time (unchanged),
+`IsolatedStoragePathHelper.ToAbsolute` (merges onto `/`; a leading `..` now throws
+`ArgumentException` where it used to resolve to the store root), `FileSystemExtensions`
+(`Exists` and `CreateSubdirectory` on a directory: in-root `..` navigation keeps working — and
+now works on Unix too, where the doubled `//` root used to make the provider reject it — while the
+provider refuses whatever leaves its root), and `FileSystemConfigurationProvider`, which merges a
+relative file name onto the root for its watch glob (unchanged).
+
+`PhysicalFileSystem` path members: `Web.StaticFiles` (gates its own request paths and passes
+mount-relative paths; it also catches `FileSystemException`, so a refusal is a 404),
+`Web.Hosting` and `Database.Hosting` (read-only content roots for `appsettings*.json`),
+`Database.Storage` (roots a provider at a file's own directory and passes the bare file name), and
+`Configuration.FileSystem`. None passes a path that leaves its root, so none changes behavior.
 
 ## Adding a new provider
 
 1. Create `Assimalign.Cohesion.FileSystem.<Name>/src/` and `tests/` under
    `libraries/FileSystem/`.
 2. Implement `IFileSystem` (typically using helper types in `Internal/` for
-   the directory / file / info wrappers).
+   the directory / file / info wrappers). Route every path-taking member through
+   one containment check that follows *Root containment*, and test escapes
+   against every member, as the physical and in-memory containment tests do.
 3. Add a `FileSystemFactoryBuilder` extension named `Add<Name>FileSystem`.
 4. Create `tests/<Name>FileSystemStandardTests.cs` inheriting
    `FileSystemStandardTests`, plus any provider-specific tests in a

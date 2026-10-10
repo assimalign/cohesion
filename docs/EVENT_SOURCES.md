@@ -66,15 +66,33 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 
 | Event source (= assembly) | Events | Counters | Reference |
 | --- | --- | --- | --- |
-| `Assimalign.Cohesion.Connections.Tcp` | Listener bound/closed; connection opened/closed; peer end-of-stream, back-pressure pause/resume, reset (Verbose); connection error | `current-connections`, `total-connections`, `connections-per-second` | [Tcp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Connections.Quic` | Listener bound/closed; connection opened/closed; stream opened/closed (Verbose) | `current-connections`, `total-connections`, `connections-per-second`, `current-streams`, `streams-per-second` | [Quic DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Connections` | Upgrade failed: a layered listener (a TLS listener, for example) closed a connection whose upgrade failed or timed out, and kept accepting | `current-upgrades`, `failed-upgrades` | [Connections DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections/docs/DESIGN.md#the-layered-listeners-event-source) |
+| `Assimalign.Cohesion.Connections.Tcp` | Listener bound/closed; queued connection skipped because its client reset it, or on Linux a network error was pending on it, before the accept (Verbose); accept backed off for want of descriptors or buffers, or on Unix for an error .NET does not name (Warning, at most once a second per listener); accepted connection closed because its socket could not be set up (Verbose); connection opened/closed; peer end-of-stream, back-pressure pause/resume, reset (Verbose); connection error | `current-connections`, `total-connections`, `connections-per-second` | [Tcp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Connections.Quic` | Listener bound/closed; connection opened/closed; stream opened/closed (Verbose); inbound handshake failed and dropped | `current-connections`, `total-connections`, `connections-per-second`, `current-streams`, `streams-per-second` | [Quic DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Listener bound/closed; connection opened/closed | `current-connections`, `total-connections`, `connections-per-second` | [NamedPipes DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Connections.Udp` | Datagram connection opened (bind or connect)/closed | `current-connections`, `total-connections` | [Udp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.DependencyInjection` | Provider built; call site built, service resolved, scope disposed, provider descriptors, resolver compiled (Verbose); resolver compilation failed | none | [DependencyInjection DESIGN.md](../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md#diagnostics) |
 
-Deliberately not instrumented: `Assimalign.Cohesion.Connections` (contracts; it performs no network
-operations of its own), `Connections.InMemory` (a test driver), and `Connections.Security` (TLS
-handshakes are already reported by the runtime's `System.Net.Security` source).
+Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
+handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
+fails on a TLS-layered listener is reported by `Assimalign.Cohesion.Connections`, which owns the
+listener that closes the connection), and
+`Http.Connections` (requests are traced and measured by the Web server below, and connections are
+counted by the drivers above; its empty placeholder source was deleted, see its
+[DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics)).
+
+## Traces and metrics
+
+Where a library emits OpenTelemetry traces and metrics, it does so through the BCL's
+`System.Diagnostics.ActivitySource` and `System.Diagnostics.Metrics.Meter`, and the naming rule is
+the same: both are named for the assembly that emits them, so one name enables both. Subscribe in
+process with an `ActivityListener` and a `MeterListener` (an OpenTelemetry SDK registers the same
+names); out of process, `dotnet-counters` reads a meter by name. The forwarder above handles event
+sources only.
+
+| Assembly (= `ActivitySource` and `Meter`) | Traces | Metrics | Reference |
+| --- | --- | --- | --- |
+| `Assimalign.Cohesion.Web.Hosting` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Web.Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064) |
 
 ## Not yet conforming
 
@@ -86,4 +104,3 @@ not build tooling against them.
 | `Assimalign.Cohesion.Resilience` | `AssimalignCohesionResilience` | Concatenated name; public constructor; no events. | #1038 |
 | `Assimalign.Cohesion.Resilience.Retry` | *(empty)* | Empty name; an event method that writes nothing. | #1038 |
 | `Assimalign.Cohesion.Resilience.Timeout` | `Assimalign.Cohesion.Resilience.TimeoutResilienceEventSource` | Type name in the source name; no events. | #1038 |
-| `Assimalign.Cohesion.Http.Connections` | `Assimalign.Cohesion.Http.Connections` | Correct name, but an empty placeholder with no events. | #1039 |

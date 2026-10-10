@@ -138,6 +138,20 @@ public class InMemoryConnectionPairTests
             async () => await server.Input.ReadAsync(cancellation.Token));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Pair: A peer abort should not signal the other end's ConnectionClosed")]
+    public void Abort_OnClient_ShouldNotSignalServerConnectionClosed()
+    {
+        // Arrange — a byte-stream pair keeps its closed token local; only a multiplexed stream's ends
+        // signal each other (see InMemoryMultiplexedConnectionTests).
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
+
+        // Act
+        client.Abort();
+
+        // Assert
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Pair: Disposing one end should complete the peer read")]
     public async Task DisposeAsync_OnClient_ShouldCompletePeerRead()
     {

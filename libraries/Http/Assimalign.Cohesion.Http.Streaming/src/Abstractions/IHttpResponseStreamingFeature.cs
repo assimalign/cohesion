@@ -55,6 +55,14 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the header write.</param>
     /// <returns>A task that completes when the head has been flushed to the transport.</returns>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
+    /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
+    /// before any of it is written, so nothing was written and the exchange's response has not started
+    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
+    /// still be answered with another response.
+    /// </exception>
     ValueTask StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -65,6 +73,14 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// <param name="cancellationToken">A token to cancel the write.</param>
     /// <returns>A task that completes when the bytes have been handed to the transport.</returns>
     /// <exception cref="InvalidOperationException">The response has already been completed.</exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
+    /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
+    /// before any of it is written, so nothing was written and the exchange's response has not started
+    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
+    /// still be answered with another response.
+    /// </exception>
     ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -74,6 +90,14 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// <param name="cancellationToken">A token to cancel the flush.</param>
     /// <returns>A task that completes when the buffered bytes have been flushed.</returns>
     /// <exception cref="InvalidOperationException">The response has already been completed.</exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
+    /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
+    /// before any of it is written, so nothing was written and the exchange's response has not started
+    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
+    /// still be answered with another response.
+    /// </exception>
     ValueTask FlushAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -85,5 +109,13 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the completion.</param>
     /// <returns>A task that completes when the body has been flushed.</returns>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
+    /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
+    /// before any of it is written, so nothing was written and the exchange's response has not started
+    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
+    /// still be answered with another response.
+    /// </exception>
     ValueTask CompleteAsync(CancellationToken cancellationToken = default);
 }

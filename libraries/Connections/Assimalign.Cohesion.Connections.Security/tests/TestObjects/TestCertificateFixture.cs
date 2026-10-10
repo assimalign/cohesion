@@ -5,21 +5,32 @@ using System.Security.Cryptography.X509Certificates;
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
-/// An xUnit class fixture that creates a single ephemeral self-signed RSA certificate
-/// (CN/SAN <c>localhost</c>, server-authentication EKU) shared by every test in the class.
+/// An xUnit class fixture that creates the ephemeral self-signed RSA certificates shared by every test
+/// in the class: a server certificate (CN/SAN <c>localhost</c>, server-authentication EKU) and a client
+/// certificate (CN <c>cohesion-client</c>, client-authentication EKU) for mutual TLS.
 /// </summary>
 public sealed class TestCertificateFixture : IDisposable
 {
+    private const string serverAuthentication = "1.3.6.1.5.5.7.3.1";
+    private const string clientAuthentication = "1.3.6.1.5.5.7.3.2";
+
     public TestCertificateFixture()
     {
-        Certificate = CreateSelfSignedCertificate("localhost");
+        Certificate = CreateSelfSignedCertificate("localhost", serverAuthentication);
+        ClientCertificate = CreateSelfSignedCertificate("cohesion-client", clientAuthentication);
     }
 
     public X509Certificate2 Certificate { get; }
 
-    public void Dispose() => Certificate.Dispose();
+    public X509Certificate2 ClientCertificate { get; }
 
-    private static X509Certificate2 CreateSelfSignedCertificate(string host)
+    public void Dispose()
+    {
+        Certificate.Dispose();
+        ClientCertificate.Dispose();
+    }
+
+    private static X509Certificate2 CreateSelfSignedCertificate(string host, string extendedKeyUsage)
     {
         using RSA rsa = RSA.Create(2048);
         CertificateRequest request = new($"CN={host}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -28,7 +39,7 @@ public sealed class TestCertificateFixture : IDisposable
         sanBuilder.AddDnsName(host);
         request.CertificateExtensions.Add(sanBuilder.Build());
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, critical: false));
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], critical: false));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid(extendedKeyUsage)], critical: false));
 
         using X509Certificate2 ephemeral = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(10));
 

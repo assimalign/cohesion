@@ -5,6 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+    <!-- The stop route defers the stop until the 202 is written, through the server's
+         IWebResponseCompletionFeature (owner decision 33, #1379). -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

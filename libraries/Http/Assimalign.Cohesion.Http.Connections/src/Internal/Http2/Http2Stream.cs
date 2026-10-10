@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
@@ -9,8 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Server-side HTTP/2 stream — tracks the RFC 9113 §5.1 lifecycle state
-/// plus the accumulating header block and the streaming body pipe fed from
-/// the peer's DATA frames.
+/// plus the accumulating header block (the request head, then any trailer
+/// section) and the streaming body pipe fed from the peer's DATA frames.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,6 +37,30 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal sealed class Http2Stream
 {
+    // _responseOwner values. RFC 9113 §8.1 — a stream carries exactly one final response, written
+    // either by the application or, when the transport rejects the request itself (413 or 408), by the
+    // transport. A transport claim stores the status the transport answers with, a 4xx and so never
+    // one of these two values, which keeps the claim and its status a single atomic write.
+    private const int responseOwnerNone = 0;
+    private const int responseOwnerApplication = 1;
+
+    // _exchangeState values. RFC 9113 §5.1.2 / CVE-2023-44487 — the exchange dispatched on this stream
+    // keeps the stream's slot against SETTINGS_MAX_CONCURRENT_STREAMS while it runs, even after the
+    // stream leaves the stream table.
+    // none      — never dispatched, or ended (its SendAsync returned or threw, or it was disposed). A
+    //             SendAsync that refused the head or a buffered trailer section (#1183) does not end
+    //             it: nothing reached the wire, so the exchange stays running, slot included, until
+    //             the caller finalizes it again or disposes it;
+    // running   — dispatched to the host, and the stream still holds its slot through the table;
+    // finishing — the send path completed the response and only its cleanup remains, so a removal
+    //             gives the slot back at once;
+    // retired   — the stream left the table while the exchange ran, and holds one of the connection's
+    //             retired-exchange slots until the exchange ends.
+    private const int exchangeNone = 0;
+    private const int exchangeRunning = 1;
+    private const int exchangeFinishing = 2;
+    private const int exchangeRetired = 3;
+
     private readonly MemoryStream _headerBlock;
     // RFC 9113 §6.10 / §10.5.1 — cap the raw header-block bytes accumulated across a HEADERS frame
     // and its CONTINUATION frames. Without this bound a CONTINUATION flood — an endless run of
@@ -74,6 +100,49 @@ internal sealed class Http2Stream
     //     decrement). Interlocked because the pump, the request handler, and
     //     the graceful-close path race for the transitions.
     private int _exchangeAccounting;
+
+    // RFC 9113 §5.4.2 — set once the stream has been reset in either direction (RST_STREAM received
+    // from the peer, or emitted locally). No further frame may be sent on a reset stream, so response
+    // writers read this to abandon an in-flight response, and a writer parked on send-window credit
+    // is woken to observe it. Written under _stateLock, read lock-free by the writer threads.
+    private volatile bool _reset;
+
+    // Who owns this stream's final response (the responseOwner* constants, or the transport's status):
+    // the application claims it when its buffered send or streaming head commit starts the final
+    // response; the transport claims it only to answer a request it rejects itself. The frame pump, the
+    // body reader and the application race for the claim, so it is taken with Interlocked.
+    private int _responseOwner;
+
+    // Set once the END_STREAM completing the application's final response is on the wire.
+    private volatile bool _responseCompleted;
+
+    // The exchange* constants. The pump begins the exchange at dispatch, the send path, a removal and
+    // the end of the exchange race for the later transitions, so they are taken with Interlocked; the
+    // connection changes its retired-slot count under its synchronization root.
+    private int _exchangeState;
+
+    // RFC 9110 §15.5.14 — the effective request-body cap frozen at dispatch (null = unbounded; always
+    // null for CONNECT, whose post-head octets are tunnel traffic, not a message body), the running
+    // total of de-padded DATA octets received, and whether the cap has been crossed. Pump-only state:
+    // the frame pump is the single writer and the single reader.
+    private long? _maxRequestBodySize;
+    private long _requestBodyReceived;
+    private bool _requestBodyRejected;
+
+    // RFC 9113 §8.1 — the request's trailer section: a second field block, opened by a HEADERS frame
+    // that carries END_STREAM once the head is in, and closed by END_HEADERS. It accumulates in
+    // _headerBlock, which the head's decode emptied, and the frame pump decodes it as soon as it is
+    // complete (ReceiveTrailers). Pump-only state.
+    private bool _receivingTrailers;
+    private bool _trailerBlockCompleted;
+    // Whether the request is a CONNECT, whose stream carries only DATA after the head (RFC 9113 §8.5).
+    // Set at dispatch; pump-only.
+    private bool _isConnect;
+    // The validated trailer fields. The pump writes them before it completes the body pipe; the body
+    // reader reads them after it observes that completion, and copies them into _requestTrailers.
+    private HttpHeaderCollection? _receivedTrailers;
+    // The request's trailer collection, created at dispatch and filled when the body is read to its end.
+    private HttpTrailerCollection? _requestTrailers;
 
     /// <summary>
     /// Send-side flow-control window — the number of DATA octets we
@@ -175,6 +244,12 @@ internal sealed class Http2Stream
     public bool IsHeadReady => HeadersCompleted && !ContextDispatched && State != Http2StreamState.Closed;
 
     /// <summary>
+    /// Whether the request's trailer section has been received in full (END_HEADERS) and waits to be
+    /// decoded by <see cref="ReceiveTrailers"/>.
+    /// </summary>
+    public bool IsTrailerBlockReady => _receivingTrailers && _trailerBlockCompleted;
+
+    /// <summary>
     /// Marks this stream as counted toward the connection's in-flight exchange
     /// total for the RFC 9113 §6.8 graceful-close drain. Called by the pump,
     /// paired with the connection-level increment, immediately before the
@@ -184,6 +259,14 @@ internal sealed class Http2Stream
     {
         Interlocked.CompareExchange(ref _exchangeAccounting, 1, 0);
     }
+
+    /// <summary>
+    /// Gets a value indicating whether the pump handed this stream's exchange to the host
+    /// (<see cref="MarkExchangeCounted"/>). A stream refused, reset for a malformed head, or rejected by a
+    /// request-parse interceptor never was, and its end does not restart the connection's keep-alive
+    /// deadline (#1085).
+    /// </summary>
+    public bool WasDispatched => Volatile.Read(ref _exchangeAccounting) != 0;
 
     /// <summary>
     /// Atomically claims the single "exchange complete" accounting slot for this
@@ -197,6 +280,148 @@ internal sealed class Http2Stream
     public bool TryClaimExchangeAccounting()
     {
         return Interlocked.CompareExchange(ref _exchangeAccounting, 2, 1) == 1;
+    }
+
+    /// <summary>
+    /// Marks the exchange dispatched on this stream as running, so the stream keeps its slot against
+    /// <c>SETTINGS_MAX_CONCURRENT_STREAMS</c> until the exchange ends, even after it leaves the stream
+    /// table (RFC 9113 §5.1.2). Called by the frame pump as it hands the exchange to the host; only the
+    /// pump can remove the stream before then, and the pump is the caller.
+    /// </summary>
+    public void BeginExchange()
+    {
+        Volatile.Write(ref _exchangeState, exchangeRunning);
+    }
+
+    /// <summary>
+    /// Marks a running exchange as finishing: the send path completed its response, and only the
+    /// stream's cleanup remains before <c>SendAsync</c> returns. A removal from then on gives the slot
+    /// back at once, since the peer saw <c>END_STREAM</c> and no handler is left running for the stream.
+    /// A no-op for an exchange that already left the table, or never ran.
+    /// </summary>
+    public void FinishExchange()
+    {
+        Interlocked.CompareExchange(ref _exchangeState, exchangeFinishing, exchangeRunning);
+    }
+
+    /// <summary>
+    /// Retires a running exchange as its stream leaves the stream table: the stream keeps a slot
+    /// outside the table until the exchange ends (CVE-2023-44487). The caller counts the slot under the
+    /// connection's synchronization root.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the exchange was running and now holds a retired slot;
+    /// <see langword="false"/> when it is finishing, ended, or never ran.
+    /// </returns>
+    public bool TryRetireExchange()
+    {
+        return Interlocked.CompareExchange(ref _exchangeState, exchangeRetired, exchangeRunning) == exchangeRunning;
+    }
+
+    /// <summary>
+    /// Ends the exchange: its <c>SendAsync</c> returned or threw, or its context was disposed.
+    /// Idempotent. A <c>SendAsync</c> that refused the head or a buffered trailer section (#1183) does
+    /// not end it: nothing reached the wire and the response has not started, so the exchange stays
+    /// running, slot included, until the caller finalizes it again or disposes it.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the exchange held a retired slot, which the caller gives back under
+    /// the connection's synchronization root; otherwise <see langword="false"/>.
+    /// </returns>
+    public bool EndExchange()
+    {
+        return Interlocked.Exchange(ref _exchangeState, exchangeNone) == exchangeRetired;
+    }
+
+    /// <summary>
+    /// Whether the stream has been reset in either direction — an inbound <c>RST_STREAM</c> or one
+    /// the server emitted. RFC 9113 §5.4.2: no further frame may be sent for a reset stream, so a
+    /// response writer that observes this abandons whatever it has not yet written.
+    /// </summary>
+    public bool IsReset => _reset;
+
+    /// <summary>
+    /// Whether the request head declared a <c>content-length</c> larger than the stream's frozen
+    /// request-body cap. Decided when the context is created, so the transport can reject the request
+    /// with <c>413</c> before a single body octet is read (RFC 9110 §15.5.14).
+    /// </summary>
+    public bool IsDeclaredBodyOverLimit { get; private set; }
+
+    /// <summary>
+    /// Whether the stream's final response has been claimed, by the application or by the transport.
+    /// Once it has, an interim (<c>1xx</c>) response can no longer precede it.
+    /// </summary>
+    public bool IsResponseClaimed => Volatile.Read(ref _responseOwner) != responseOwnerNone;
+
+    /// <summary>
+    /// Whether the transport claimed the stream's final response to answer a request it rejected
+    /// itself (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>). The application's response
+    /// for such an exchange is never written.
+    /// </summary>
+    public bool IsAnsweredByTransport => Volatile.Read(ref _responseOwner) > responseOwnerApplication;
+
+    /// <summary>
+    /// The status the transport answers the stream with when it claimed the final response itself
+    /// (<see cref="TryClaimResponseForRejection"/>), or <see langword="null"/> when it did not. Set with
+    /// the claim, so it is never missing once <see cref="IsAnsweredByTransport"/> is <see langword="true"/>.
+    /// </summary>
+    public HttpStatusCode? TransportResponseStatusCode
+    {
+        get
+        {
+            int owner = Volatile.Read(ref _responseOwner);
+
+            return owner > responseOwnerApplication ? new HttpStatusCode(owner) : null;
+        }
+    }
+
+    /// <summary>
+    /// Whether the <c>END_STREAM</c> completing the application's final response has been written.
+    /// </summary>
+    public bool IsResponseCompleted => _responseCompleted;
+
+    /// <summary>
+    /// Whether the application may still write frames for its final response: the application owns
+    /// the response, has not completed it, and the stream has not been reset.
+    /// </summary>
+    public bool CanWriteResponse =>
+        !_reset && !_responseCompleted && Volatile.Read(ref _responseOwner) == responseOwnerApplication;
+
+    /// <summary>
+    /// Claims the stream's final response for the application — called by the buffered send path and
+    /// by the streaming head commit immediately before the final response's HEADERS are written.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the application now owns the final response;
+    /// <see langword="false"/> when the transport already answered the stream itself (a rejected
+    /// request body), in which case that answer stands and the application writes nothing.
+    /// </returns>
+    public bool TryClaimResponse()
+    {
+        return Interlocked.CompareExchange(ref _responseOwner, responseOwnerApplication, responseOwnerNone) == responseOwnerNone;
+    }
+
+    /// <summary>
+    /// Claims the stream's final response for the transport, to answer a request it rejects itself
+    /// with <paramref name="statusCode"/> (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>).
+    /// </summary>
+    /// <param name="statusCode">The status the transport answers with; a <c>4xx</c>.</param>
+    /// <returns>
+    /// <see langword="true"/> when the transport now owns the final response;
+    /// <see langword="false"/> when the application already started its own, or the transport already
+    /// answered the stream.
+    /// </returns>
+    public bool TryClaimResponseForRejection(HttpStatusCode statusCode)
+    {
+        return Interlocked.CompareExchange(ref _responseOwner, statusCode.Value, responseOwnerNone) == responseOwnerNone;
+    }
+
+    /// <summary>
+    /// Records that the <c>END_STREAM</c> completing the application's final response is on the wire.
+    /// </summary>
+    public void CompleteResponse()
+    {
+        _responseCompleted = true;
     }
 
     /// <summary>
@@ -219,6 +444,11 @@ internal sealed class Http2Stream
     /// block, applies the RFC 9113 §5.1 state transition driven by HEADERS, and
     /// returns when the header block has been fully assembled.
     /// </summary>
+    /// <remarks>
+    /// A HEADERS frame that arrives once the head is in opens the trailer section (RFC 9113 §8.1).
+    /// Its block is decoded on its own once complete (<see cref="ReceiveTrailers"/>), and the request
+    /// body ends only then, so a reader that reaches the end of the body finds the section validated.
+    /// </remarks>
     /// <param name="payload">The decoded payload bytes (no padding / no priority data).</param>
     /// <param name="endHeaders">Whether the inbound frame carried the END_HEADERS flag.</param>
     /// <param name="endStream">
@@ -232,6 +462,8 @@ internal sealed class Http2Stream
     /// </exception>
     public void ReceiveHeaders(ReadOnlySpan<byte> payload, bool endHeaders, bool endStream)
     {
+        bool opensTrailers = false;
+
         lock (_stateLock)
         {
             // RFC 9113 §5.1 — HEADERS is legal in:
@@ -259,6 +491,14 @@ internal sealed class Http2Stream
                     State = State == Http2StreamState.Open
                         ? Http2StreamState.HalfClosedRemote
                         : Http2StreamState.Closed;
+                    opensTrailers = true;
+                    break;
+                case Http2StreamState.Closed when _reset:
+                    // RFC 9113 §5.1 — the server reset this stream between the pump finding it and
+                    // this frame (a peer's reset removes the stream before any later frame is read).
+                    // The peer sent the frame before it saw the reset: its block is still decoded
+                    // (RFC 9113 §4.3), and ReceiveTrailers then ignores it.
+                    opensTrailers = true;
                     break;
                 case Http2StreamState.HalfClosedRemote:
                 case Http2StreamState.Closed:
@@ -268,14 +508,20 @@ internal sealed class Http2Stream
             }
         }
 
+        if (opensTrailers)
+        {
+            _receivingTrailers = true;
+        }
+
         AppendHeaderBytes(payload);
 
         if (endHeaders)
         {
-            HeadersCompleted = true;
+            CompleteHeaderBlock();
         }
 
-        if (endStream)
+        // The trailer section ends the input when ReceiveTrailers has decoded it, not here.
+        if (endStream && !opensTrailers)
         {
             InputCompleted = true;
             CompleteBody();
@@ -296,10 +542,12 @@ internal sealed class Http2Stream
         // CONTINUATION is only legal mid-header-block on a stream that has
         // already received its leading HEADERS frame. The connection-level
         // continuation tracking guards the cross-stream rule; here we just
-        // assert that the stream itself is in a sane state.
+        // assert that the stream itself is in a sane state. A trailing HEADERS
+        // frame closes a stream whose response is already complete, and the
+        // CONTINUATION frames of that trailer section still belong to it.
         lock (_stateLock)
         {
-            if (State == Http2StreamState.Idle || State == Http2StreamState.Closed)
+            if (State == Http2StreamState.Idle || (State == Http2StreamState.Closed && !_receivingTrailers))
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
@@ -311,13 +559,107 @@ internal sealed class Http2Stream
 
         if (endHeaders)
         {
+            CompleteHeaderBlock();
+        }
+    }
+
+    /// <summary>
+    /// Decodes the completed trailer section with the connection's HPACK decoder, validates it, and
+    /// ends the request input. The frame pump calls this as soon as END_HEADERS completes the section,
+    /// in frame order and whether or not the application ever reads it: HPACK is stateful, so every
+    /// field block must be decoded or the decoder falls out of step for every later request on the
+    /// connection (RFC 9113 §4.3).
+    /// </summary>
+    /// <remarks>
+    /// The whole block is decoded before any field is judged, so a malformed section still leaves the
+    /// decoder in step and costs only this stream. A valid section is published to the request's
+    /// trailer collection when the body is read to its end (<see cref="PublishTrailers"/>). A section
+    /// that was still arriving when the server reset the stream is decoded and otherwise ignored
+    /// (RFC 9113 §5.1).
+    /// </remarks>
+    /// <param name="decoder">The connection's HPACK decoder.</param>
+    /// <exception cref="HPackDecodingException">
+    /// The block is not valid HPACK, or its decoded list exceeds the advertised
+    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>. The caller maps it to a connection error.
+    /// </exception>
+    /// <exception cref="Http2StreamException">
+    /// The section is malformed (RFC 9113 §8.1.1) — a pseudo-header field, a connection-specific field,
+    /// a field prohibited in trailers, an uppercase name, or any trailer section after a CONNECT head
+    /// (RFC 9113 §8.5): a stream error of type <c>PROTOCOL_ERROR</c>. The body pipe fails first, so the
+    /// reader never mistakes the request for a complete one.
+    /// </exception>
+    public void ReceiveTrailers(HPackDecoder decoder)
+    {
+        _receivingTrailers = false;
+
+        List<(string Name, string Value)> fields = decoder.DecodeFieldLines(
+            new ReadOnlySpan<byte>(_headerBlock.GetBuffer(), 0, (int)_headerBlock.Length));
+        _headerBlock.SetLength(0);
+
+        // RFC 9113 §5.1 — the server reset the stream while the section was arriving. Decoding it was
+        // the only work left; nobody reads the request any more, so it is neither judged nor published.
+        if (_reset)
+        {
+            return;
+        }
+
+        HttpHeaderCollection trailers = new();
+        InputCompleted = true;
+
+        try
+        {
+            if (_isConnect)
+            {
+                throw new InvalidDataException(
+                    $"HTTP/2 stream {StreamId} carried a trailer section after a CONNECT head; a CONNECT stream carries only DATA (RFC 9113 §8.5).");
+            }
+
+            HttpTrailerFieldRules.AddReceivedFields(fields, trailers, "HTTP/2");
+        }
+        catch (InvalidDataException exception)
+        {
+            FailBody(new IOException(exception.Message, exception));
+            throw new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, exception.Message);
+        }
+
+        Volatile.Write(ref _receivedTrailers, trailers);
+        CompleteBody();
+    }
+
+    private void CompleteHeaderBlock()
+    {
+        if (_receivingTrailers)
+        {
+            _trailerBlockCompleted = true;
+        }
+        else
+        {
             HeadersCompleted = true;
         }
     }
 
     /// <summary>
+    /// Copies the validated trailer section into the request's trailer collection. The request body
+    /// calls this once, when its reader reaches the clean end of the body — where HTTP/1.1 and HTTP/3
+    /// surface trailers too — so the collection is filled on the reader's own thread, after the frame
+    /// pump completed the body pipe.
+    /// </summary>
+    private void PublishTrailers()
+    {
+        if (Volatile.Read(ref _receivedTrailers) is not { } received || _requestTrailers is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in received)
+        {
+            _requestTrailers[field.Key] = field.Value;
+        }
+    }
+
+    /// <summary>
     /// Queues an inbound DATA payload onto the body pipe and applies the END_STREAM
-    /// transition.
+    /// transition, enforcing the stream's request-body cap on receipt.
     /// </summary>
     /// <param name="data">The de-padded application data.</param>
     /// <param name="flowControlLength">
@@ -325,6 +667,14 @@ internal sealed class Http2Stream
     /// credit back to the peer once the application consumes this chunk.
     /// </param>
     /// <param name="endStream">Whether the frame carried END_STREAM.</param>
+    /// <returns>
+    /// <see langword="true"/> when the payload was delivered to the body pipe;
+    /// <see langword="false"/> when the request content has crossed the stream's body-size cap
+    /// (RFC 9110 §15.5.14). The crossing frame, and any later one, is not delivered: the body pipe is
+    /// failed instead, so the reader drains the octets received below the cap and then observes an
+    /// <see cref="IOException"/>. The caller answers the violation on the wire. The frame's
+    /// flow-control cost stays consumed; the caller's stream removal reclaims it.
+    /// </returns>
     /// <exception cref="Http2StreamException">
     /// Thrown when DATA is received on a stream that has already had its remote
     /// half closed (STREAM_CLOSED — RFC 9113 §5.1).
@@ -333,7 +683,7 @@ internal sealed class Http2Stream
     /// Thrown when DATA is received on a stream in <see cref="Http2StreamState.Idle"/>
     /// (no HEADERS yet) — that is a PROTOCOL_ERROR connection-level fault.
     /// </exception>
-    public void ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream)
+    public bool ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream)
     {
         lock (_stateLock)
         {
@@ -368,6 +718,27 @@ internal sealed class Http2Stream
             }
         }
 
+        // RFC 9110 §15.5.14 — the request content is capped on receipt, against the de-padded octets
+        // (padding is framing, not content). Enforcing here rather than on the reader's pace means the
+        // cap bounds what the peer may push even when the handler never reads the body.
+        if (_requestBodyRejected)
+        {
+            return false;
+        }
+
+        if (_maxRequestBodySize is { } limit)
+        {
+            _requestBodyReceived += data.Length;
+
+            if (_requestBodyReceived > limit)
+            {
+                _requestBodyRejected = true;
+                FailBody(new IOException(
+                    $"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large)."));
+                return false;
+            }
+        }
+
         if (!data.IsEmpty || flowControlLength > 0)
         {
             _bodyChannel.Writer.TryWrite(new Http2DataChunk(data, flowControlLength));
@@ -377,6 +748,8 @@ internal sealed class Http2Stream
         {
             CompleteBody();
         }
+
+        return true;
     }
 
     /// <summary>
@@ -403,10 +776,10 @@ internal sealed class Http2Stream
 
             State = Http2StreamState.Closed;
             InputCompleted = true;
+            _reset = true;
         }
 
-        CompleteBody();
-        TryFireAbort();
+        CutOffBody($"The HTTP/2 stream {StreamId} was reset before its request body ended.");
     }
 
     /// <summary>
@@ -439,9 +812,19 @@ internal sealed class Http2Stream
         {
             State = Http2StreamState.Closed;
             InputCompleted = true;
+            _reset = true;
         }
 
-        CompleteBody();
+        CutOffBody($"The HTTP/2 stream {StreamId} was reset before its request body ended.");
+    }
+
+    /// <summary>
+    /// Fires <see cref="RequestAborted"/> for an exchange the transport ended without a reset — its
+    /// own <c>413</c> or <c>408</c> completed a stream the peer had already half-closed — so a handler
+    /// still running learns its request is over. Idempotent.
+    /// </summary>
+    public void AbortRequest()
+    {
         TryFireAbort();
     }
 
@@ -472,8 +855,8 @@ internal sealed class Http2Stream
     /// <summary>
     /// Aborts the request when the connection tears down (wire failure, connection
     /// error, or cooperative shutdown) while the body is still incoming. Fires
-    /// <see cref="RequestAborted"/> and completes the body pipe so a handler parked
-    /// reading the body observes cancellation — not a clean end-of-stream, which
+    /// <see cref="RequestAborted"/> and fails the body pipe so a handler parked
+    /// reading the body observes the abort — not a clean end-of-stream, which
     /// would let it mistake a truncated body for a complete one.
     /// </summary>
     /// <returns>
@@ -485,18 +868,43 @@ internal sealed class Http2Stream
     /// </returns>
     public bool AbortOnShutdown()
     {
-        CompleteBody();
-
         // Only a body that was still incoming is truncated. A fully-received body
         // (END_STREAM already observed) is complete and buffered; the handler must
         // still be able to read it, so do NOT fire the abort for it.
         if (!InputCompleted)
         {
-            TryFireAbort();
+            CutOffBody($"The HTTP/2 connection closed before the request body on stream {StreamId} ended.");
             return true;
         }
 
+        CompleteBody();
         return false;
+    }
+
+    /// <summary>
+    /// Aborts the exchange because the host stopped waiting for the connection — it cancelled the
+    /// receive enumeration, or the graceful close's bounded drain ran out. Unlike
+    /// <see cref="AbortOnShutdown"/>, a fully received request is aborted too, since nothing waits for
+    /// its response any longer: fires <see cref="RequestAborted"/> and fails a body pipe that had not
+    /// ended. Idempotent.
+    /// </summary>
+    public void AbortOnCancellation()
+    {
+        CutOffBody($"The HTTP/2 exchange on stream {StreamId} was abandoned before its request body ended.");
+    }
+
+    /// <summary>
+    /// Ends a request whose body was cut off before its END_STREAM (RFC 9113 §8.1): fires the abort
+    /// first, then fails the body pipe with an <see cref="IOException"/> instead of completing it. A
+    /// reader that wakes on the pipe therefore never reads a clean end of the body, whichever signal
+    /// reaches it first, and the trailer section is never published (#1327). A body that already
+    /// ended keeps its clean end: the pipe's one-shot latch makes the failure a no-op.
+    /// </summary>
+    /// <param name="reason">Why the body was cut off.</param>
+    private void CutOffBody(string reason)
+    {
+        TryFireAbort();
+        FailBody(new IOException(reason));
     }
 
     private void CompleteBody()
@@ -506,6 +914,19 @@ internal sealed class Http2Stream
         if (Interlocked.Exchange(ref _bodyCompleted, 1) == 0)
         {
             _bodyChannel.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>
+    /// Completes the body pipe with <paramref name="error"/>: the reader still drains every chunk
+    /// already delivered, then its next read throws <paramref name="error"/>. Shares
+    /// <see cref="CompleteBody"/>'s one-shot latch, so a body that already completed is unaffected.
+    /// </summary>
+    private void FailBody(Exception error)
+    {
+        if (Interlocked.Exchange(ref _bodyCompleted, 1) == 0)
+        {
+            _bodyChannel.Writer.TryComplete(error);
         }
     }
 
@@ -566,45 +987,91 @@ internal sealed class Http2Stream
     /// <param name="decoder">The connection's HPACK decoder.</param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="fallbackScheme">The connection scheme used when the request omits <c>:scheme</c>.</param>
-    /// <param name="connectionAborted">The connection-teardown token linked into the request's abort token.</param>
     /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
+    /// <param name="featureCapacity">The number of features the exchange is expected to carry; its feature collection is sized for it.</param>
+    /// <param name="requestBodyDataRate">
+    /// The connection's minimum request-body data rate, or <see langword="null"/> when none is configured.
+    /// A CONNECT, whose DATA is tunnel traffic rather than a request body, is never held to it.
+    /// </param>
     /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when a request-parse interceptor rejects the request.
+    /// </exception>
+    /// <exception cref="Http2StreamException">
+    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> for a malformed request, reset per stream
+    /// (RFC 9113 §8.1.1): a decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3), a
+    /// pseudo-header field that is repeated, a required one that is missing, an empty <c>:path</c>
+    /// (RFC 9113 §8.3.1), a <c>:path</c> that does not decode to a legal path, or a head that
+    /// violates the extended CONNECT rules of RFC 8441 §4 (an empty <c>:protocol</c>, a
+    /// <c>:protocol</c> on a method other than <c>CONNECT</c>, or an extended CONNECT missing
+    /// <c>:scheme</c>, <c>:path</c>, or <c>:authority</c>).
+    /// </exception>
+    /// <exception cref="HPackDecodingException">
+    /// The block is not valid HPACK, or its decoded list exceeds the advertised
+    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>. The caller maps it to a connection error.
     /// </exception>
     public async ValueTask<Http2Context> CreateContextAsync(
         HPackDecoder decoder,
         HttpConnectionInfo connectionInfo,
         HttpScheme fallbackScheme,
-        CancellationToken connectionAborted,
         Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
         IHttpExchangeInterceptor[] interceptors,
-        long? maxRequestBodySize)
+        long? maxRequestBodySize,
+        int featureCapacity,
+        Http2RequestBodyDataRate? requestBodyDataRate = null)
     {
         if (!HeadersCompleted)
         {
             throw new InvalidOperationException("The HTTP/2 stream is not ready to create a request context.");
         }
 
-        // RFC 9113 §5.4.2 — RequestAborted fires when either the connection
-        // is being torn down (connectionAborted token) OR this specific
-        // stream is reset (our internal _abortedSource via RequestAborted).
-        // Link them so the application sees a single token that fires on
-        // either condition.
-        CancellationToken requestAborted = connectionAborted == default
-            ? RequestAborted
-            : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
+        // RFC 9113 §5.4.2 — the exchange is aborted through this stream's own token alone: the stream
+        // fires it when it is reset, and the frame pump fires it for every exchange still in flight
+        // when the connection stops (AbortOnShutdown / AbortOnCancellation). No connection-scoped
+        // token is linked in (#1307): a linked source per exchange would stay registered on the
+        // connection's token for the connection's life, one per exchange the connection served.
+        CancellationToken requestAborted = RequestAborted;
 
-        HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
+        // RFC 9113 §4.3 — the whole block is decoded before any field is judged. A block HPACK cannot
+        // decode propagates as an HPackDecodingException, which the connection maps to
+        // COMPRESSION_ERROR. A decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3) is not a
+        // decompression failure: it makes the request malformed, a stream error (RFC 9113 §8.1.1,
+        // #1332). The block is fully decoded by then, so the HPACK state is intact and the connection
+        // keeps serving its other streams.
+        HPackDecodedHeaders decodedHeaders;
+        try
+        {
+            decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
+        }
+        catch (InvalidDataException exception)
+        {
+            throw CreateMalformedRequestError($"carries a malformed field section: {exception.Message}");
+        }
+        finally
+        {
+            // A trailer section that follows the body is a field block of its own: it accumulates
+            // from an empty block, under its own size bound (ReceiveHeaders, ReceiveTrailers).
+            _headerBlock.SetLength(0);
+        }
+
+        // RFC 9113 §8.3 — a repeated pseudo-header field makes the request malformed. The block is fully
+        // decoded, so this is a stream error (RFC 9113 §8.1.1), as are the §8.3.1 checks below.
+        if (decodedHeaders.RepeatedPseudoHeader is { } repeatedPseudoHeader)
+        {
+            throw CreateMalformedRequestError($"repeats the '{repeatedPseudoHeader}' pseudo-header field (RFC 9113 §8.3)");
+        }
 
         // RFC 8441 §4 / RFC 9220 — validate extended CONNECT before materializing
-        // the request: the :protocol pseudo-header is only valid on a CONNECT, and
-        // an extended CONNECT MUST also carry :scheme, :path, and :authority. A
-        // violation is a malformed request, which RFC 9113 §8.1.1 treats as a
-        // connection-level PROTOCOL_ERROR (GOAWAY). The cross-field rule is shared
-        // with HTTP/3 via HttpFieldNormalization so both versions reject the same set.
+        // the request: a present :protocol must name a protocol (RFC 9110 §5.6.2, so
+        // never empty), it is only valid on a CONNECT, and an extended CONNECT MUST
+        // also carry :scheme, :path, and :authority. A violation is a malformed
+        // request, which RFC 9113 §8.1.1 treats as a stream error of type
+        // PROTOCOL_ERROR, the same as the §8.3.1 checks below; the connection keeps
+        // serving its other streams (HTTP/3 drops the stream with H3_MESSAGE_ERROR).
+        // The cross-field rule is shared with HTTP/3 via HttpFieldNormalization so
+        // both versions reject the same set.
         string? extendedConnectViolation = HttpFieldNormalization.ValidateExtendedConnect(
             decodedHeaders.Method,
             decodedHeaders.Scheme,
@@ -613,14 +1080,82 @@ internal sealed class Http2Stream
             decodedHeaders.Protocol);
         if (extendedConnectViolation is not null)
         {
-            throw new Http2ConnectionException(Http2ErrorCode.ProtocolError, extendedConnectViolation);
+            throw new Http2StreamException(
+                StreamId,
+                Http2ErrorCode.ProtocolError,
+                $"The HTTP/2 request on stream {StreamId} is malformed: {extendedConnectViolation}");
         }
+
+        // RFC 9113 §8.3.1 — every request carries :method, and every request but a CONNECT carries
+        // :scheme and :path, with a :path that is never empty (OPTIONS for the server as a whole uses
+        // "*"). A classic CONNECT carries only :method and :authority (RFC 9113 §8.5); an extended
+        // CONNECT was held to RFC 8441 §4 above. Nothing is defaulted: a request without its
+        // pseudo-header fields is malformed, not a GET of "/". The stream is reset before the request
+        // reaches the application, and the connection keeps serving its other streams.
+        if (decodedHeaders.Path is { Length: 0 })
+        {
+            throw CreateMalformedRequestError("carries an empty ':path' pseudo-header field (RFC 9113 §8.3.1)");
+        }
+
+        if (decodedHeaders.Method is not { } methodValue)
+        {
+            throw CreateMalformedRequestError("is missing the ':method' pseudo-header field (RFC 9113 §8.3.1)");
+        }
+
+        if (!string.Equals(methodValue, HttpMethod.Connect.Value, StringComparison.Ordinal))
+        {
+            if (decodedHeaders.Scheme is null)
+            {
+                throw CreateMalformedRequestError("is missing the ':scheme' pseudo-header field (RFC 9113 §8.3.1)");
+            }
+
+            if (decodedHeaders.Path is null)
+            {
+                throw CreateMalformedRequestError("is missing the ':path' pseudo-header field (RFC 9113 §8.3.1)");
+            }
+        }
+
+        // RFC 3986 §2.4 — the :path is percent-decoded through the same HttpPath.FromUriComponent
+        // decode HTTP/1.1 and HTTP/3 use. A :path whose decoded form is not a legal path — a decoded
+        // space, control character, '?', '#', or NUL, or no leading '/' — makes the request malformed,
+        // which RFC 9113 §8.1.1 / §8.3.1 require to be a stream error of type PROTOCOL_ERROR. The
+        // header block has been fully decoded, so the connection's HPACK state is intact: only this
+        // stream is reset and the connection keeps serving its other streams. The decode semantics
+        // themselves are unchanged (h1/h2/h3 parity); only the failure's scope is.
+        //
+        // Only a classic CONNECT arrives here without a :path; its target is the root, as for the
+        // authority-form request-target of HTTP/1.1.
+        HttpQueryCollection query;
+        HttpPath path;
+        try
+        {
+            query = ParseQuery(decodedHeaders.Path ?? "/", out path);
+        }
+        catch (Exception exception) when (exception is HttpException or InvalidOperationException)
+        {
+            throw new Http2StreamException(
+                StreamId,
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 stream {StreamId} carried a malformed :path: {exception.Message}");
+        }
+
+        HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
+        bool isConnect = method == HttpMethod.Connect;
 
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
-        // bounded by the advertised receive window and paced by the reader.
-        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted);
-        HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
+        // bounded by the advertised receive window and paced by the reader. RFC 9110
+        // §6.5 — the trailer collection is supported and starts empty; the body fills
+        // it when its reader reaches the end (PublishTrailers). A request body is held
+        // to the minimum data rate; a CONNECT's DATA is tunnel traffic, which may idle.
+        _requestTrailers = new HttpTrailerCollection(isSupported: true);
+        Http2RequestBodyStream body = new(
+            _bodyChannel.Reader,
+            onBodyConsumed,
+            StreamId,
+            requestAborted,
+            PublishTrailers,
+            isConnect ? null : requestBodyDataRate);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
@@ -629,15 +1164,19 @@ internal sealed class Http2Stream
             ? fallbackScheme
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
-        HttpMethod method = HttpMethod.GetCanonicalizedValue(decodedHeaders.Method ?? HttpMethod.Get.Value);
-        Http2Request request = new(
+        // RFC 8441 §4 — :protocol is non-null only on a valid extended CONNECT (validated above). The
+        // request-parse interceptors read it, so a feature package can offer the tunnel, and the exchange
+        // keeps it, so its control can accept one.
+        TransportHttpRequestHead requestHead = new(
             host,
             path,
             method,
             scheme,
             query,
             decodedHeaders.Headers,
-            body);
+            body,
+            _requestTrailers,
+            decodedHeaders.Protocol);
 
         // RFC 9218 §4 / §8 — the request's Priority header initialises the
         // effective priority. Parsing is tolerant: a malformed header value is
@@ -651,28 +1190,71 @@ internal sealed class Http2Stream
 
         // Request-parse interceptor phase. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
         // tunnel traffic rather than a message body, so body hooks are skipped for it (head hooks
-        // still run). The hook-populated feature collection flows into the exchange through the
-        // Http2Context features parameter; zero interceptors keeps the pre-seam fast path.
-        bool isConnect = method == HttpMethod.Connect;
-        HttpFeatureCollection? features = await HttpRequestInterceptorPipeline.InvokeAsync(
+        // still run). The hook-populated feature collection and the (possibly wrapped) body flow
+        // into the exchange through the Http2Context constructor; zero interceptors keeps the
+        // pre-seam fast path.
+        _isConnect = isConnect;
+        HttpRequestInterceptionResult interception = await HttpRequestInterceptorPipeline.InterceptAsync(
             interceptors,
             HttpVersion.Http20,
-            request,
+            requestHead,
             connectionInfo,
             maxRequestBodySize,
-            isConnect).ConfigureAwait(false);
+            isConnect,
+            featureCapacity).ConfigureAwait(false);
 
-        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, features);
+        // RFC 9110 §15.5.14 — arm the request-body cap. The pipeline froze the knob after the head
+        // hooks, so the value is final for the exchange (an IHttpMaxRequestBodySizeFeature is
+        // read-only from dispatch on HTTP/2). ReceiveData enforces it on receipt; a declared
+        // content-length over it is flagged here so the connection rejects the request before a
+        // single body octet is read. A CONNECT tunnel carries no message body, so it is uncapped.
+        _maxRequestBodySize = isConnect ? null : interception.MaxRequestBodySize;
+        IsDeclaredBodyOverLimit = _maxRequestBodySize is { } limit
+            && TryGetDeclaredContentLength(decodedHeaders.Headers, out long declaredLength)
+            && declaredLength > limit;
 
-        // Surface the :protocol pseudo-header (RFC 8441) generically so a
-        // higher layer (the Assimalign.Cohesion.Http.ExtendedConnect package)
-        // can model extended CONNECT without the transport knowing about it.
-        if (decodedHeaders.Protocol is not null)
+        // An accepted extended CONNECT tunnel reads the peer's DATA from the transport's own body stream.
+        Http2Context context = new(
+            this,
+            requestHead with { Body = interception.Body },
+            connectionInfo,
+            requestAborted,
+            featureCapacity,
+            interception.Features)
         {
-            context.Items[Internal.TransportItemKeys.Protocol] = decodedHeaders.Protocol;
-        }
+            RequestBody = body,
+            AddedResponseInterceptors = interception.ResponseInterceptors,
+        };
 
         return context;
+    }
+
+    /// <summary>
+    /// Reads a single, well-formed <c>content-length</c> value (RFC 9110 §8.6: a non-negative decimal
+    /// integer). An absent, repeated, or unparsable field yields <see langword="false"/>: the
+    /// declaration is then simply not used for the early rejection, and the receipt-side running total
+    /// still enforces the cap.
+    /// </summary>
+    private static bool TryGetDeclaredContentLength(HttpHeaderCollection headers, out long contentLength)
+    {
+        contentLength = 0;
+
+        return headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue value)
+            && value.Count == 1
+            && long.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out contentLength);
+    }
+
+    /// <summary>
+    /// The stream error for a malformed request head (RFC 9113 §8.1.1): <c>PROTOCOL_ERROR</c> on this
+    /// stream alone, which the frame pump's stream-error handler sends as an <c>RST_STREAM</c>.
+    /// </summary>
+    /// <param name="reason">What is wrong with the head, phrased to follow "the request on stream N".</param>
+    private Http2StreamException CreateMalformedRequestError(string reason)
+    {
+        return new Http2StreamException(
+            StreamId,
+            Http2ErrorCode.ProtocolError,
+            $"The HTTP/2 request on stream {StreamId} {reason}.");
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

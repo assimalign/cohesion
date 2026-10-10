@@ -6,6 +6,9 @@
 
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+    <!-- Test-only: the real forwarded-headers middleware runs ahead of UseRouting to simulate a
+         trusted proxy that rewrites Host (#1077). -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="Shouldly" />

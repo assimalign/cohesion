@@ -22,11 +22,15 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// second response on the wire.
 /// </para>
 /// <para>
-/// Acceptance claims the connection first (<see cref="IHttpExchangeControl.TakeOver"/> — from
-/// that point the transport suppresses its own response and ends keep-alive), then writes the
+/// Acceptance encodes the head first, checking every field line against the field syntax (#1183): a
+/// name that is not a token, or a value holding CR, LF, NUL, or another control character but HTAB,
+/// throws an <see cref="HttpException"/> with <see cref="HttpErrorCode.InvalidResponseField"/> before
+/// the connection is claimed, so nothing is written and the exchange can still be answered with an
+/// ordinary response. It then claims the connection (<see cref="IHttpExchangeControl.TakeOver"/> — from
+/// that point the transport suppresses its own response and ends keep-alive) and writes the
 /// status line and the connection-specific response headers (<c>Connection: Upgrade</c> +
 /// <c>Upgrade: &lt;protocol&gt;</c> for an upgrade) directly to the surrendered raw stream.
-/// <c>Content-Length</c> / <c>Transfer-Encoding</c> are scrubbed unconditionally — RFC 9112 §9.9
+/// <c>Content-Length</c> / <c>Transfer-Encoding</c> are scrubbed unconditionally — RFC 9112 §6.3, RFC 9110 §15.2.2
 /// (a 101 has no body framing) and RFC 9110 §9.3.6 (a successful CONNECT response must not
 /// include them) — so the tunnel never starts with stale framing metadata. Any other response
 /// headers and cookies the application set before accepting are emitted with the transition
@@ -92,14 +96,34 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
             _ => throw new InvalidOperationException($"Cannot accept a protocol upgrade of kind '{Kind}'."),
         };
 
+        // Encode the head before claiming the connection (#1183): a field it cannot carry is refused
+        // while the exchange still belongs to the transport, with nothing written and the response
+        // headers as the application staged them, so the exchange can still be answered with an
+        // ordinary response. The accept is spent either way.
+        byte[] head = EncodeHead(status);
+
         // Claim the connection before writing: from here the transport suppresses its own
         // response for the exchange and ends keep-alive, so even a cancelled or failed head
         // write cannot be followed by a second HTTP response on a desynchronized stream.
         Stream stream = _control.TakeOver();
 
+        // The live headers now record the head that is sent.
+        ApplyTransitionFields();
+
+        await stream.WriteAsync(head, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        return stream;
+    }
+
+    /// <summary>
+    /// Applies the transition's field rules to the live response headers, so the exchange reflects
+    /// the head <see cref="EncodeHead"/> encoded.
+    /// </summary>
+    private void ApplyTransitionFields()
+    {
         // RFC 9110 §9.3.6 — a successful CONNECT response MUST NOT include Content-Length or
         // Transfer-Encoding; the tunnel carries opaque octets. A 101 is body-less by definition
-        // (RFC 9112 §9.9), so the same scrub applies. Strip both unconditionally.
+        // (RFC 9112 §6.3, RFC 9110 §15.2.2), so the same scrub applies. Strip both unconditionally.
         foreach (HttpHeaderKey key in _forbiddenResponseHeaders)
         {
             _responseHeaders.Remove(key);
@@ -126,12 +150,19 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
                 _responseHeaders.Remove(HttpHeaderKey.Connection);
                 break;
         }
-
-        await WriteHeadAsync(stream, status, cancellationToken).ConfigureAwait(false);
-        return stream;
     }
 
-    private async ValueTask WriteHeadAsync(Stream stream, HttpStatusCode status, CancellationToken cancellationToken)
+    /// <summary>
+    /// Encodes the transition head — the status line, the application's response fields under the
+    /// rules <see cref="ApplyTransitionFields"/> applies, the response cookies, and the blank line —
+    /// without changing the live headers. Each field line is checked against the field syntax before
+    /// it is encoded (RFC 9110 §5.1, §5.5).
+    /// </summary>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpErrorCode.InvalidResponseField"/>: a field name is not a token, or a value holds
+    /// a control character other than HTAB.
+    /// </exception>
+    private byte[] EncodeHead(HttpStatusCode status)
     {
         StringBuilder builder = new();
         // HttpStatusCode has an implicit conversion to int, which would steer overload
@@ -139,12 +170,30 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         // stringify to preserve "101 Switching Protocols" / "200 Ok" on the status line.
         builder.Append("HTTP/1.1 ").Append(status.ToString()).Append("\r\n");
 
+        bool replacesUpgrade = Kind == HttpProtocolUpgradeKind.Upgrade && !string.IsNullOrEmpty(Protocol);
+
         foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in _responseHeaders)
         {
-            builder.Append(header.Key.ToString())
-                .Append(": ")
-                .Append(header.Value.ToString())
-                .Append("\r\n");
+            // The fields ApplyTransitionFields removes or replaces are not the application's to send.
+            if (header.Key == HttpHeaderKey.ContentLength
+                || header.Key == HttpHeaderKey.TransferEncoding
+                || header.Key == HttpHeaderKey.Connection
+                || (replacesUpgrade && header.Key == HttpHeaderKey.Upgrade))
+            {
+                continue;
+            }
+
+            AppendFieldLine(builder, header.Key, header.Value.ToString());
+        }
+
+        if (Kind == HttpProtocolUpgradeKind.Upgrade)
+        {
+            AppendFieldLine(builder, HttpHeaderKey.Connection, "Upgrade");
+
+            if (replacesUpgrade)
+            {
+                AppendFieldLine(builder, HttpHeaderKey.Upgrade, Protocol!);
+            }
         }
 
         // RFC 6265 §3 — each Set-Cookie value MUST be emitted on its own line. The cookie
@@ -155,17 +204,39 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         {
             foreach (HttpCookie cookie in cookieFeature.Cookies)
             {
-                builder.Append(HttpHeaderKey.SetCookie.ToString())
-                    .Append(": ")
-                    .Append(cookie.ToString())
-                    .Append("\r\n");
+                AppendFieldLine(builder, HttpHeaderKey.SetCookie, cookie.ToString());
             }
         }
 
         builder.Append("\r\n");
 
-        byte[] bytes = Encoding.ASCII.GetBytes(builder.ToString());
-        await stream.WriteAsync(bytes.AsMemory(0, bytes.Length), cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        return Encoding.ASCII.GetBytes(builder.ToString());
+    }
+
+    /// <summary>
+    /// Appends one field line once its name is a token and its value holds no control character
+    /// other than HTAB: CR or LF would end the line early and start a field, or a response, of the
+    /// value's own (CWE-113), and the transport's head writers refuse the same characters.
+    /// </summary>
+    private static void AppendFieldLine(StringBuilder builder, HttpHeaderKey key, string value)
+    {
+        string name = key.Value ?? string.Empty;
+
+        if (!HttpFieldNormalization.IsValidFieldName(name))
+        {
+            // Not quoted: whatever makes the name invalid may be CR, LF, or NUL.
+            throw new HttpInvalidResponseFieldException(
+                "RFC 9110 §5.1: a response field name is not a token. The transition response was not sent.");
+        }
+
+        int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(value);
+
+        if (invalid >= 0)
+        {
+            throw new HttpInvalidResponseFieldException(
+                $"RFC 9110 §5.5: the value of the response field '{name}' holds the control character 0x{(int)value[invalid]:X2} at index {invalid}; a field value holds no control character but HTAB. The transition response was not sent.");
+        }
+
+        builder.Append(name).Append(": ").Append(value).Append("\r\n");
     }
 }

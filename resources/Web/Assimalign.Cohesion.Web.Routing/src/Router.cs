@@ -21,7 +21,9 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// are evaluated ahead of unconstrained ones, and registration order breaks the remaining ties. This means a
 /// literal segment always wins over a parameter segment regardless of the order the routes were registered.
 /// A candidate whose host constraints the request host does not satisfy is skipped entirely — it neither
-/// matches nor contributes to a 405 — so the request falls through to other candidates. Method handling
+/// matches nor contributes to a 405 — so the request falls through to other candidates. The request host is
+/// the effective host (<see cref="HttpContextForwardedExtensions.EffectiveHost"/>): the host a trusted proxy
+/// forwarded when the forwarded-headers middleware ran ahead of routing, otherwise the wire host. Method handling
 /// follows RFC 9110: a path that matches with an unacceptable method yields
 /// <see cref="RouteMatchStatus.MethodNotAllowed"/> (405) with the acceptable methods, and a <c>HEAD</c>
 /// request is served by a matching <c>GET</c> route when <c>HEAD</c> is not explicitly mapped.
@@ -30,6 +32,7 @@ public sealed class Router : IRouter
 {
     private readonly IReadOnlyList<IRouterRoute> _routes;
     private readonly Candidate[] _ordered;
+    private readonly bool _hasHostConstraints;
 
     /// <summary>
     /// Creates a new router from the supplied route collection.
@@ -46,6 +49,7 @@ public sealed class Router : IRouter
 
         _routes = routes.ToImmutableList();
         _ordered = BuildCandidates(_routes);
+        _hasHostConstraints = Array.Exists(_ordered, candidate => candidate.Hosts is not null);
         LinkGenerator = new RouterLinkGenerator(_routes);
     }
 
@@ -115,8 +119,20 @@ public sealed class Router : IRouter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        HttpMethod method = context.Request.Method;
-        HttpHost host = context.Request.Host;
+        return Match(context, context.Request.Method);
+    }
+
+    /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    public RouteMatch Match(IHttpContext context, HttpMethod method)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        // Host constraints select on the host the client addressed: behind a trusted proxy that rewrites
+        // Host, the forwarded host, never the upstream name the proxy dialed (#1077). Without an
+        // IHttpForwardedFeature it is the wire host. A router without host-constrained candidates never
+        // reads it, so it pays no feature lookup.
+        HttpHost host = _hasHostConstraints ? context.EffectiveHost : default;
         List<HttpMethod>? allowed = null;
 
         for (int i = 0; i < _ordered.Length; i++)
@@ -139,6 +155,13 @@ public sealed class Router : IRouter
             if (AcceptsMethod(candidate.Route, method))
             {
                 return RouteMatch.Matched(candidate.Route, values);
+            }
+
+            // A fallback route (MapFallback) never turns an unmatched path into a 405: it only answers the
+            // methods it accepts, and anything else stays a 404.
+            if (candidate.IsFallback)
+            {
+                continue;
             }
 
             // Path matched but the method did not — remember the acceptable methods in case no
@@ -313,23 +336,27 @@ public sealed class Router : IRouter
                 hosts = null;
             }
 
-            ordered[i] = new Candidate(routes[i], hosts);
-            keys[i] = new PrecedenceKey(routes[i].InboundPrecedence, hosts is null ? 1 : 0, i);
+            // Fallback routes (MapFallback) are evaluated after every other route, whatever their precedence.
+            bool isFallback = routes[i].Metadata.GetMetadata<RouteFallbackMetadata>() is not null;
+
+            ordered[i] = new Candidate(routes[i], hosts, isFallback);
+            keys[i] = new PrecedenceKey(isFallback ? 1 : 0, routes[i].InboundPrecedence, hosts is null ? 1 : 0, i);
         }
 
-        // Sort by precedence ascending (more specific first), host-constrained candidates ahead of
-        // unconstrained ones within equal precedence, registration index breaking the remaining
-        // ties so the ordering is deterministic and stable.
+        // Sort fallback routes last, then by precedence ascending (more specific first), host-constrained
+        // candidates ahead of unconstrained ones within equal precedence, registration index breaking the
+        // remaining ties so the ordering is deterministic and stable.
         Array.Sort(keys, ordered);
         return ordered;
     }
 
     private readonly struct Candidate
     {
-        public Candidate(IRouterRoute route, IReadOnlyList<RouteHostConstraint>? hosts)
+        public Candidate(IRouterRoute route, IReadOnlyList<RouteHostConstraint>? hosts, bool isFallback)
         {
             Route = route;
             Hosts = hosts;
+            IsFallback = isFallback;
         }
 
         public IRouterRoute Route { get; }
@@ -337,16 +364,22 @@ public sealed class Router : IRouter
         // Host constraints resolved from the route's metadata, or null when the route is
         // host-unconstrained.
         public IReadOnlyList<RouteHostConstraint>? Hosts { get; }
+
+        // Whether the route is a fallback (MapFallback): evaluated last, never part of a 405.
+        public bool IsFallback { get; }
     }
 
     private readonly struct PrecedenceKey : IComparable<PrecedenceKey>
     {
-        public PrecedenceKey(decimal precedence, int hostRank, int index)
+        public PrecedenceKey(int fallbackRank, decimal precedence, int hostRank, int index)
         {
+            FallbackRank = fallbackRank;
             Precedence = precedence;
             HostRank = hostRank;
             Index = index;
         }
+
+        public int FallbackRank { get; }
 
         public decimal Precedence { get; }
 
@@ -356,7 +389,13 @@ public sealed class Router : IRouter
 
         public int CompareTo(PrecedenceKey other)
         {
-            int result = Precedence.CompareTo(other.Precedence);
+            int result = FallbackRank.CompareTo(other.FallbackRank);
+            if (result != 0)
+            {
+                return result;
+            }
+
+            result = Precedence.CompareTo(other.Precedence);
             if (result != 0)
             {
                 return result;

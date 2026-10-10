@@ -179,6 +179,28 @@ raises. Events 7 and 8 carry the `ServiceProviderInitialized` keyword (`0x1`).
   the convention (issue #1037). The descriptor dump moved from `Informational` to `Verbose` at the
   same time, so forwarding at `Information` does not log every registration.
 
+## NativeAOT compatibility checks
+
+The Web NativeAOT guard (`resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`,
+#1052) surfaced the call-site factory's trim/AOT diagnostics as ILC errors. They are resolved the
+way the upstream container resolves them:
+
+- `ServiceDescriptor.ImplementationType` carries
+  `[DynamicallyAccessedMembers(PublicConstructors)]`, matching the constructor parameter it is
+  assigned from, so the constructors the factory selects survive trimming (IL2072).
+- `ServiceProvider.VerifyAotCompatibility` is `!RuntimeFeature.IsDynamicCodeSupported`. While it
+  holds, the call-site factory rejects an `IEnumerable<T>` whose `T` is a value type, and an
+  open-generic closure over a value-type argument, with an `InvalidOperationException` at
+  call-site construction. Code for those instantiations may not exist without dynamic code.
+- The remaining `MakeGenericType`/`MakeArrayType` sites (`CreateOpenGeneric`,
+  `EnumerableCallSite.ServiceType`/`ImplementationType`) carry `UnconditionalSuppressMessage`
+  (IL3050) whose justification is that check: only reference-type instantiations, which share
+  canonical code, are ever created under NativeAOT.
+
+Hosting modules register factories and instances only (`resource-areas.md`), so none of them relies
+on value-type enumerables or open generics; the checks turn a latent native crash into a
+descriptive startup failure for anyone who does.
+
 ## Layout Example
 
 ```text

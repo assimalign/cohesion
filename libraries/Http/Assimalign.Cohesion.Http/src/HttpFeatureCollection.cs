@@ -118,6 +118,81 @@ public class HttpFeatureCollection : IHttpFeatureCollection
         return true;
     }
 
+    /// <summary>
+    /// Returns the first feature implementing <typeparamref name="TFeature"/> in enumeration order, or
+    /// <see langword="null"/>, without allocating. The type-keyed helpers in
+    /// <see cref="HttpFeatureCollectionExtensions"/> call this for an exact <see cref="HttpFeatureCollection"/>,
+    /// where <c>OfType&lt;TFeature&gt;().FirstOrDefault()</c> would allocate two enumerators per lookup.
+    /// </summary>
+    /// <remarks>
+    /// The walk visits what <see cref="GetEnumerator"/> yields, in the same order: each level's local
+    /// features through the dictionary's struct enumerator, then its defaults with every name a level
+    /// above installs skipped. A defaults source of any other type is enumerated through its own
+    /// enumerator, which keeps that source's order and allocates as before.
+    /// </remarks>
+    internal TFeature? GetFeature<TFeature>() where TFeature : class, IHttpFeature
+    {
+        HttpFeatureCollection level = this;
+
+        while (true)
+        {
+            if (level._features is not null)
+            {
+                foreach (IHttpFeature feature in level._features.Values)
+                {
+                    if (feature is TFeature match && !IsShadowedAbove(level, feature.Name))
+                    {
+                        return match;
+                    }
+                }
+            }
+
+            IHttpFeatureCollection? defaults = level._defaults;
+
+            if (defaults is null)
+            {
+                return null;
+            }
+
+            if (defaults.GetType() != typeof(HttpFeatureCollection))
+            {
+                foreach (IHttpFeature fallback in defaults)
+                {
+                    if (fallback is TFeature match && !IsShadowedAbove(defaults, fallback.Name))
+                    {
+                        return match;
+                    }
+                }
+
+                return null;
+            }
+
+            level = (HttpFeatureCollection)defaults;
+        }
+    }
+
+    /// <summary>
+    /// Whether a collection between this one and <paramref name="level"/> (exclusive) installs
+    /// <paramref name="name"/> locally, which hides <paramref name="level"/>'s same-named feature from
+    /// enumeration.
+    /// </summary>
+    private bool IsShadowedAbove(IHttpFeatureCollection level, string name)
+    {
+        IHttpFeatureCollection? current = this;
+
+        while (!ReferenceEquals(current, level) && current is HttpFeatureCollection collection)
+        {
+            if (collection._features is not null && collection._features.ContainsKey(name))
+            {
+                return true;
+            }
+
+            current = collection._defaults;
+        }
+
+        return false;
+    }
+
     /// <inheritdoc />
     public IEnumerator<IHttpFeature> GetEnumerator()
     {

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.OpenApi</RootNamespace>
+		<Description>OpenAPI documents for Cohesion Web applications, generated from endpoint metadata rather than runtime reflection. A Web adapter implements the OpenApi.Integration endpoint-source contract over the application's route table: paths and operations from the routes, parameters and responses from the source-generated endpoint descriptions, request and response schemas from the application's source-generated System.Text.Json contracts (JsonSchemaExporter), tags, summaries and exclusion from the Web.Api convention verbs, and security requirements from each endpoint's effective Web.Authorization policy (fallback and named policies included). AddOpenApi registers the document options; MapOpenApi serves the document as JSON or YAML (OpenAPI 3.0, 3.1 or 3.2), built once and cached with a strong ETag. NativeAOT- and trimming-safe. Shipped as a NuGet package, not as a member of the App.Web shared framework.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Integration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+	</ItemGroup>
+</Project>

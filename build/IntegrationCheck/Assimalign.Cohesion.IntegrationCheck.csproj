@@ -7,6 +7,15 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ClientFactory" />
+		<!-- Owner decision 34 (#1380): the Web feature packages' builder.Services.Add<Feature> verbs. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
 	</ItemGroup>

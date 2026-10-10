@@ -60,7 +60,37 @@ internal sealed class Http3LoopbackServer : IAsyncDisposable
     /// <param name="handler">The per-request response handler.</param>
     /// <param name="cancellationToken">A token that cancels the initial QUIC bind.</param>
     /// <returns>The started server harness.</returns>
-    public static async Task<Http3LoopbackServer> StartAsync(Func<IHttpContext, Task> handler, CancellationToken cancellationToken)
+    public static Task<Http3LoopbackServer> StartAsync(Func<IHttpContext, Task> handler, CancellationToken cancellationToken)
+        => StartAsync(handler, configure: null, cancellationToken);
+
+    /// <summary>
+    /// Binds a loopback HTTP/3 listener with a configured HTTP/3 registration (limits, QPACK) and
+    /// starts serving.
+    /// </summary>
+    /// <param name="handler">The per-request response handler.</param>
+    /// <param name="configure">Configures the HTTP/3 registration, or <see langword="null"/> for the defaults.</param>
+    /// <param name="cancellationToken">A token that cancels the initial QUIC bind.</param>
+    /// <returns>The started server harness.</returns>
+    public static Task<Http3LoopbackServer> StartAsync(
+        Func<IHttpContext, Task> handler,
+        Action<Http3ConnectionListenerOptions>? configure,
+        CancellationToken cancellationToken)
+        => StartAsync(handler, configure, configureListener: null, cancellationToken);
+
+    /// <summary>
+    /// Binds a loopback HTTP/3 listener with a configured HTTP/3 registration and configured listener
+    /// options (interceptors), and starts serving.
+    /// </summary>
+    /// <param name="handler">The per-request response handler.</param>
+    /// <param name="configure">Configures the HTTP/3 registration, or <see langword="null"/> for the defaults.</param>
+    /// <param name="configureListener">Configures the listener options (interceptors), or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">A token that cancels the initial QUIC bind.</param>
+    /// <returns>The started server harness.</returns>
+    public static async Task<Http3LoopbackServer> StartAsync(
+        Func<IHttpContext, Task> handler,
+        Action<Http3ConnectionListenerOptions>? configure,
+        Action<HttpConnectionListenerOptions>? configureListener,
+        CancellationToken cancellationToken)
     {
         int port = AllocateUdpPort();
         X509Certificate2 certificate = CreateCertificate();
@@ -72,7 +102,11 @@ internal sealed class Http3LoopbackServer : IAsyncDisposable
             transport.ServerAuthenticationOptions.ApplicationProtocols = new List<SslApplicationProtocol> { SslApplicationProtocol.Http3 };
         }, cancellationToken).ConfigureAwait(false);
 
-        HttpConnectionListener listener = HttpConnectionListener.Create(options => options.UseHttp3(quicListener));
+        HttpConnectionListener listener = HttpConnectionListener.Create(options =>
+        {
+            options.UseHttp3(quicListener, configure ?? (static _ => { }));
+            configureListener?.Invoke(options);
+        });
 
         return new Http3LoopbackServer(listener, certificate, port, handler);
     }

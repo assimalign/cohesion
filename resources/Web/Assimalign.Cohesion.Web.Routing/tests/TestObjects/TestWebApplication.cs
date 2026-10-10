@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
 
 /// <summary>
-/// A minimal in-process web-application double that supports the real <c>AddRouting</c> /
+/// A minimal in-process web-application double that supports the real routing feature and the
 /// <c>UseRouting</c> / <c>Map</c> extension methods end-to-end. It mirrors the production wiring that
 /// matters for routing: features registered at build time are seeded onto each request's
 /// <see cref="IHttpContext.Features"/> collection (as <c>WebApplication.Init</c> does), and the
@@ -51,6 +51,18 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
 
     public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
 
+    /// <summary>
+    /// Registers routing the way <c>builder.Services.AddRouting()</c> does: the feature
+    /// <see cref="RoutingComponents.CreateFeature"/> creates, through the raw <see cref="AddFeature(IHttpFeature)"/>
+    /// path. The verb itself is projected only into compilations that reference dependency injection,
+    /// which this double composes without.
+    /// </summary>
+    public TestWebApplication AddRouting()
+    {
+        AddFeature(RoutingComponents.CreateFeature());
+        return this;
+    }
+
     IWebApplication IWebApplicationBuilder.Build() => this;
 
     // IWebApplicationPipelineBuilder -------------------------------------------------------------
@@ -70,7 +82,11 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
 
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
-        WebApplicationMiddleware pipeline = _ => Task.CompletedTask;
+        // The terminal honors the root endpoint contract as WebApplication's does: it runs the endpoint
+        // UseRouting published (IWebEndpointFeature); an unhandled request completes untouched.
+        WebApplicationMiddleware pipeline = context => context.Features.Get<IWebEndpointFeature>() is { } endpoint
+            ? endpoint.Endpoint.Invoke(context)
+            : Task.CompletedTask;
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
             pipeline = _middleware[i].Invoke(pipeline);
@@ -109,6 +125,8 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
         public TestWebApplicationContext(IEnumerable<IHttpFeature> features) => _features = features;
 
         public FileSystemPath? ContentRootPath => null;
+
+        public FileSystemPath? WebRootPath => null;
 
         public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
 

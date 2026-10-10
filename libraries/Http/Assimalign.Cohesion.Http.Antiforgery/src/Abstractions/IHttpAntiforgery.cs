@@ -1,10 +1,19 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http;
 
+/// <summary>
+/// Mints and validates the signed double-submit token pair that protects state-changing requests from
+/// cross-site request forgery: a cookie token stored on the client and a request token the client echoes
+/// in a form field or header.
+/// </summary>
+/// <remarks>
+/// Create one service per application with <see cref="HttpAntiforgery.Create(HttpAntiforgeryOptions)"/>;
+/// it is stateless and safe to share. The Web pipeline integration (<c>AddAntiforgery</c> /
+/// <c>UseAntiforgery</c> in <c>Assimalign.Cohesion.Web.Antiforgery</c>) registers it for every exchange
+/// and validates protected endpoints.
+/// </remarks>
 public interface IHttpAntiforgery
 {
     /// <summary>
@@ -12,7 +21,7 @@ public interface IHttpAntiforgery
     /// in the response. This operation also sets the "Cache-control" and "Pragma" headers to "no-cache" and
     /// the "X-Frame-Options" header to "SAMEORIGIN".
     /// </summary>
-    /// <param name="httpContext">The <see cref="HttpContext"/> associated with the current request.</param>
+    /// <param name="httpContext">The <see cref="IHttpContext"/> associated with the current request.</param>
     /// <returns>An <see cref="HttpAntiforgeryTokenSet" /> with tokens for the response.</returns>
     /// <remarks>
     /// This method has a side effect:
@@ -24,7 +33,7 @@ public interface IHttpAntiforgery
     /// Generates an <see cref="HttpAntiforgeryTokenSet"/> for this request.
     /// </summary>
     /// <param name="httpContext">The <see cref="IHttpContext"/> associated with the current request.</param>
-    /// <returns>The <see cref="AntiforgeryTokenSet"/> for this request.</returns>
+    /// <returns>The <see cref="HttpAntiforgeryTokenSet"/> for this request.</returns>
     /// <remarks>
     /// Unlike <see cref="GetAndStoreTokens(IHttpContext)"/>, this method has no side effect. The caller
     /// is responsible for setting the response cookie and injecting the returned

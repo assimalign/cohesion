@@ -33,6 +33,13 @@ public sealed class ResponseCompressionOptions
     /// secret through compressed-length observation. Enable only when the responses this pipeline
     /// serves do not mix secrets with attacker-controlled input.
     /// </summary>
+    /// <remarks>
+    /// A request counts as <c>https</c> when its effective scheme is HTTPS: a direct TLS connection, or
+    /// TLS terminated at a trusted proxy that the forwarded-headers middleware
+    /// (<c>UseForwardedHeaders</c>, registered ahead of <c>UseResponseCompression</c>) resolved. Behind
+    /// a TLS-terminating proxy without that middleware the application sees <c>http</c>, and responses
+    /// are compressed.
+    /// </remarks>
     public bool EnableForHttps { get; set; }
 
     /// <summary>

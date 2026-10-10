@@ -1,32 +1,94 @@
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// Marks the current exchange as an HTTP/2 or HTTP/3 <em>extended CONNECT</em>
-/// request (RFC 8441 / RFC 9220) and exposes the requested protocol.
+/// The <em>extended CONNECT</em> capability of the current exchange (RFC 8441 for HTTP/2, RFC 9220
+/// for HTTP/3): the protocol the client asked to bootstrap, and the accept call that turns the
+/// exchange's stream into a duplex tunnel for it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// An extended CONNECT request is a <c>CONNECT</c> request that additionally
-/// carries the <c>:protocol</c> pseudo-header — the mechanism a client uses to
-/// bootstrap another protocol (most commonly WebSocket, <c>:protocol =
-/// websocket</c>) over a single HTTP/2 or HTTP/3 stream. The feature is surfaced
-/// by the <see cref="HttpExtendedConnectExtensions"/> members when a request is
-/// an extended CONNECT; ordinary requests do not carry it.
+/// An extended CONNECT is a <c>CONNECT</c> request that also carries the <c>:protocol</c>
+/// pseudo-header, plus <c>:scheme</c>, <c>:path</c>, and <c>:authority</c>. A client uses it to run
+/// another protocol over one HTTP/2 or HTTP/3 stream; WebSocket (<c>:protocol = websocket</c>) is
+/// the common case. The interceptor <see cref="HttpExtendedConnect.CreateInterceptor"/> produces
+/// installs this feature on every exchange the HTTP/2 or HTTP/3 server transport validated as an
+/// extended CONNECT and on no other exchange, so the interceptor must be registered on the listener;
+/// the Web host registers it by default. The feature remains only if the transport's exchange
+/// control can still accept the tunnel when the exchange's response phase begins; otherwise the
+/// interceptor's <see cref="IHttpExchangeInterceptor.BeforeResponse"/> hook removes it. Read the
+/// feature as <c>context.ExtendedConnect</c> (<see cref="HttpExtendedConnectExtensions"/>).
 /// </para>
 /// <para>
-/// This contract intentionally exposes only the requested protocol — it does not
-/// surrender a tunnel stream. This package recognizes and models extended
-/// CONNECT (so an application can detect it and respond deterministically) but
-/// does not ship a WebSocket framing surface; see <c>docs/DESIGN.md</c> for the
-/// scope decision.
+/// <see cref="AcceptAsync"/> answers the request with <c>200</c> and surrenders the stream:
+/// </para>
+/// <list type="bullet">
+/// <item><description>The response head carries the headers the application set on
+/// <see cref="IHttpContext.Response"/> before accepting, with the fields a tunnel cannot carry
+/// removed: <c>Content-Length</c> and <c>Transfer-Encoding</c> (RFC 9110 §9.3.6) and the
+/// connection-specific fields (RFC 9113 §8.2.2, RFC 9114 §4.2). Any status the application set is
+/// replaced by <c>200</c>, and a body it wrote to the response is discarded.</description></item>
+/// <item><description>Reads return the client's <c>DATA</c> as it arrives and return 0 once the
+/// client ends its side (HTTP/2 <c>END_STREAM</c>, HTTP/3 FIN).</description></item>
+/// <item><description>Writes go out as <c>DATA</c> at once, unbuffered and paced by the peer's flow
+/// control: a write completes when its octets are on the wire, and waits while the peer's windows
+/// are exhausted.</description></item>
+/// <item><description>Disposing the stream ends the server's side (HTTP/2 <c>END_STREAM</c>, HTTP/3
+/// FIN). The client may still send until it ends its own side.</description></item>
+/// <item><description>A peer reset or the loss of the connection faults pending and later reads and
+/// writes with an <see cref="IOException"/>.</description></item>
+/// </list>
+/// <para>
+/// Accepting takes the exchange over, as an HTTP/1.1 protocol upgrade does: the transport no longer
+/// writes the application's response for the exchange, and the exchange interceptors' response-head
+/// and after-response hooks do not run for it. The tunnel lasts as long as the exchange: when the
+/// application's handler returns, the transport ends a tunnel the application left open, and a
+/// cancelled exchange (<see cref="IHttpContext.Cancel"/>) resets the stream instead. The wire work is
+/// the transport's: the feature wraps the exchange control's
+/// <see cref="IHttpExchangeControl.AcceptTunnelAsync"/>.
+/// </para>
+/// <para>
+/// The stream carries raw octets. Framing the inner protocol is the caller's concern; for WebSocket,
+/// <c>System.Net.WebSockets.WebSocket.CreateFromStream</c> runs over it.
 /// </para>
 /// </remarks>
 public interface IHttpExtendedConnectFeature : IHttpFeature
 {
     /// <summary>
-    /// Gets the value of the <c>:protocol</c> pseudo-header the client requested
-    /// (for example <c>websocket</c>). Never <see langword="null"/> or empty when
-    /// the feature is present.
+    /// Gets the value of the <c>:protocol</c> pseudo-header the client requested (for example
+    /// <c>websocket</c>). Never <see langword="null"/> or empty.
     /// </summary>
     string Protocol { get; }
+
+    /// <summary>
+    /// Accepts the extended CONNECT: sends a <c>200</c> response head without ending the stream and
+    /// returns the exchange's stream as a duplex tunnel.
+    /// </summary>
+    /// <param name="cancellationToken">A token that cancels writing the response head.</param>
+    /// <returns>
+    /// The duplex tunnel. The caller owns it and disposes it to end the server's side of the stream.
+    /// </returns>
+    /// <exception cref="System.InvalidOperationException">
+    /// An accept was already attempted for this exchange (whether or not that attempt succeeded), the
+    /// response has already started, or the exchange was cancelled.
+    /// </exception>
+    /// <exception cref="IOException">
+    /// The peer reset the stream or the connection closed before the response head was written.
+    /// </exception>
+    /// <exception cref="System.OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before the response head was written; the
+    /// exchange is then reset when it ends.
+    /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a header set on
+    /// <see cref="IHttpContext.Response"/> has a name that is not a token, or a value with a control
+    /// character other than HTAB — CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The transport checks
+    /// the head before it claims the stream, so nothing was written, the response has not started, and the
+    /// status the application set is restored: the exchange can still be answered with an ordinary
+    /// response. The accept is spent and cannot be retried.
+    /// </exception>
+    ValueTask<Stream> AcceptAsync(CancellationToken cancellationToken = default);
 }

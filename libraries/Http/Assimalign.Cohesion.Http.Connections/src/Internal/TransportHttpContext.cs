@@ -5,54 +5,84 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+/// <summary>
+/// The exchange context every HTTP version's transport derives from.
+/// </summary>
+/// <remarks>
+/// The context constructs its own request and response and passes itself to each, so their
+/// <see cref="HttpRequest.HttpContext"/> / <see cref="HttpResponse.HttpContext"/> back-references
+/// are fixed at construction (#699). A transport therefore hands the constructor the decoded
+/// <see cref="TransportHttpRequestHead"/>, after the request-parse interceptors have run over it,
+/// rather than a finished request.
+/// </remarks>
 internal abstract class TransportHttpContext : HttpContext
 {
-    // Backs RequestAborted. Linked to the transport-supplied token so the
+    // Backs RequestAborted. Linked to the transport-supplied token(s) so the
     // exchange is aborted when the connection/stream is torn down, and can also
     // be tripped locally by Cancel().
     private readonly CancellationTokenSource _abortedSource;
 
+    /// <summary>
+    /// Initializes the exchange: its request, its response, and the source behind
+    /// <see cref="RequestCancelled"/>.
+    /// </summary>
+    /// <param name="version">The exchange's protocol version.</param>
+    /// <param name="requestHead">The parsed request head.</param>
+    /// <param name="connectionInfo">The connection's endpoints.</param>
+    /// <param name="requestAborted">The transport's token that aborts the exchange.</param>
+    /// <param name="featureCapacity">
+    /// The number of features the exchange is expected to carry, which sizes the feature collection
+    /// this constructor creates when <paramref name="features"/> is <see langword="null"/>.
+    /// </param>
+    /// <param name="features">The features request-parse interceptors attached, or <see langword="null"/>.</param>
+    /// <param name="streamAborted">
+    /// A second transport token that aborts the exchange — the HTTP/3 request stream's
+    /// <c>ConnectionClosed</c>, which fires when the client resets or stops the stream — or
+    /// <see langword="default"/> for none. Both tokens feed one linked source.
+    /// </param>
     protected TransportHttpContext(
         HttpVersion version,
-        TransportHttpRequest request,
-        TransportHttpResponse response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
-        IHttpFeatureCollection? features = null)
+        int featureCapacity,
+        IHttpFeatureCollection? features = null,
+        CancellationToken streamAborted = default)
     {
         Version = version;
-        Request = request;
-        Response = response;
+        // The request and response only store the reference; neither calls back into this context
+        // while it is still being constructed. HTTP/2 and HTTP/3 send response trailers as a trailing
+        // HEADERS frame (RFC 9113 §8.1, RFC 9114 §4.1); HTTP/1.1 does not (decision 18), and neither
+        // does a CONNECT exchange, whose stream carries only DATA once the tunnel is up (RFC 9113
+        // §8.5, RFC 9114 §4.4).
+        Request = new TransportHttpRequest(this, requestHead);
+        Response = new TransportHttpResponse(
+            this,
+            supportsTrailers: (version is HttpVersion.Http20 or HttpVersion.Http30) && requestHead.Method != HttpMethod.Connect);
         ConnectionInfo = connectionInfo;
-        _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        _abortedSource = streamAborted.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(requestAborted, streamAborted)
+            : CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors
         // attached features during the read (see IHttpExchangeInterceptor); it is used directly —
         // no defaults-wrapper layer, which would add a second dictionary probe to every Get on
         // the hot path. A null/foreign collection degrades gracefully: null gets a fresh empty
-        // collection (the zero-interceptor fast path), and a non-HttpFeatureCollection
-        // implementation is wrapped as a read-through defaults source. On disposal the effective
-        // collection is walked and every feature implementing IDisposable / IAsyncDisposable is
-        // disposed.
+        // collection sized for the features the exchange is expected to carry (the zero-interceptor
+        // fast path), and a non-HttpFeatureCollection implementation is wrapped as a read-through
+        // defaults source. On disposal the effective collection is walked and every feature
+        // implementing IDisposable / IAsyncDisposable is disposed.
         Features = features switch
         {
-            null => new HttpFeatureCollection(),
+            null => new HttpFeatureCollection(featureCapacity),
             HttpFeatureCollection concrete => concrete,
             _ => new HttpFeatureCollection(features),
         };
         Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
-
-        // Wire the back-references last so the request and response can resolve
-        // their owning context from this point forward. Construction order in
-        // the transports is request -> response -> context, so the
-        // HttpContext back-reference can only be installed after the context
-        // itself exists.
-        request.AttachContext(this);
-        response.AttachContext(this);
     }
 
     public override HttpVersion Version { get; }
-    public override HttpRequest Request { get; }
-    public override HttpResponse Response { get; }
+    public override TransportHttpRequest Request { get; }
+    public override TransportHttpResponse Response { get; }
     public override HttpConnectionInfo ConnectionInfo { get; }
     public override HttpFeatureCollection Features { get; }
     public override IDictionary<string, object?> Items { get; }
@@ -101,13 +131,52 @@ internal abstract class TransportHttpContext : HttpContext
 
     /// <summary>
     /// The exchange's current control-flow directive, derived from the transport flags the
-    /// <see cref="IHttpExchangeControl"/> transitions drive: <see cref="Cancel"/> /
-    /// <see cref="IHttpExchangeControl.Abort"/> maps to <see cref="HttpExchangeDirective.Abort"/>;
-    /// a protocol that supports handing off its connection overrides this to report
-    /// <see cref="HttpExchangeDirective.TakeOver"/> (see <c>Http1Context</c>).
+    /// application and the <see cref="IHttpExchangeControl"/> transitions drive: <see cref="Cancel"/>
+    /// maps to <see cref="HttpExchangeDirective.Abort"/>; a protocol that supports handing off its
+    /// connection or stream overrides this to report <see cref="HttpExchangeDirective.TakeOver"/>
+    /// (<see cref="IHttpExchangeControl.TakeOver"/> on <c>Http1Context</c>,
+    /// <see cref="IHttpExchangeControl.AcceptTunnelAsync"/> on <c>Http2Context</c> and
+    /// <c>Http3Context</c>).
     /// </summary>
     internal virtual HttpExchangeDirective ExchangeDirective =>
         CancelRequested ? HttpExchangeDirective.Abort : HttpExchangeDirective.Continue;
+
+    /// <summary>
+    /// The response interceptors a request-parse hook added to this exchange alone
+    /// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), carried from the
+    /// parse context to the exchange's setup; <see langword="null"/> when none was added.
+    /// </summary>
+    internal IReadOnlyList<IHttpExchangeInterceptor>? AddedResponseInterceptors { get; init; }
+
+    /// <summary>
+    /// Resolves the response interceptors that take part in this exchange: the listener's
+    /// <paramref name="registered"/> ones, then any a request-parse hook added to this exchange, in
+    /// the order added, each at most once. Returns <paramref name="registered"/> itself, allocating
+    /// nothing, unless a hook added one, so an exchange no hook claimed keeps the fast path when the
+    /// listener registered no response interceptor.
+    /// </summary>
+    /// <param name="registered">The listener's snapshotted response interceptors.</param>
+    /// <returns>The interceptors to run the response phase with; empty for the buffered fast path.</returns>
+    internal IHttpExchangeInterceptor[] ResolveResponseInterceptors(IHttpExchangeInterceptor[] registered)
+    {
+        if (AddedResponseInterceptors is not { Count: > 0 } added)
+        {
+            return registered;
+        }
+
+        List<IHttpExchangeInterceptor> effective = new(registered.Length + added.Count);
+        effective.AddRange(registered);
+
+        foreach (IHttpExchangeInterceptor interceptor in added)
+        {
+            if (!effective.Contains(interceptor))
+            {
+                effective.Add(interceptor);
+            }
+        }
+
+        return effective.Count == registered.Length ? registered : [.. effective];
+    }
 
     /// <summary>
     /// Runs the registered response interceptors' <see cref="IHttpExchangeInterceptor.BeforeResponse"/>

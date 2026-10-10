@@ -25,6 +25,13 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 ///   <item><description>For HTTP/1.1 the last (or only) transfer coding MUST be <c>chunked</c>.</description></item>
 /// </list>
 /// <para>
+/// A list element loses SP and HTAB at either end and nothing else (RFC 9110 §5.6.1, §5.6.3). Field
+/// values are decoded as Latin-1, so a no-break space (<c>0xA0</c>) or a next-line octet
+/// (<c>0x85</c>) reaches this reader as obs-text. A Unicode trim would strip both and read
+/// <c>chunked\xA0</c> as <c>chunked</c>, while a hop that compares the coding exactly sees an unknown
+/// coding. Here the element stays as sent, and the request is rejected (#1341).
+/// </para>
+/// <para>
 /// The body-size cap is deliberately <em>not</em> checked here: an endpoint or middleware may still
 /// raise or lower the per-request cap after dispatch (before the body is read), so the cap is
 /// enforced by <see cref="Http1RequestBodyStream"/> at the first read against the frozen value.
@@ -82,9 +89,15 @@ internal static class Http1MessageBodyReader
                 continue;
             }
 
-            foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
             {
-                last = segment;
+                // RFC 9110 §5.6.1 / §5.6.3 — trim OWS (SP and HTAB) only; see the remarks.
+                ReadOnlySpan<char> coding = list[range].Trim(Http1FieldLine.OptionalWhitespace);
+                if (!coding.IsEmpty)
+                {
+                    last = coding.ToString();
+                }
             }
         }
         if (last is null || !string.Equals(last, "chunked", StringComparison.OrdinalIgnoreCase))
@@ -111,8 +124,17 @@ internal static class Http1MessageBodyReader
                 continue;
             }
 
-            foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            ReadOnlySpan<char> list = entry.AsSpan();
+            foreach (Range range in list.Split(','))
             {
+                // RFC 9110 §5.6.1 / §5.6.3 — trim OWS (SP and HTAB) only, so "5\xA0" is not a digit run.
+                ReadOnlySpan<char> trimmed = list[range].Trim(Http1FieldLine.OptionalWhitespace);
+                if (trimmed.IsEmpty)
+                {
+                    continue;
+                }
+
+                string segment = trimmed.ToString();
                 if (!IsAllAsciiDigits(segment))
                 {
                     throw new InvalidDataException(

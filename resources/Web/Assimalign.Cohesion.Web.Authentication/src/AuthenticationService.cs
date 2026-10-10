@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// </summary>
 /// <remarks>
 /// The returned service reads <paramref name="options"/> live, so a composition root can create
-/// the service first and register schemes onto the same options afterward (the pattern used when
-/// <c>AddAuthentication</c> installs the service feature eagerly and the chained
-/// <c>AddCookie</c>/<c>AddJwtBearer</c> calls add schemes).
+/// the service first and register schemes onto the same options afterward: a scheme added
+/// to an <see cref="AuthenticationBuilder"/> after its <see cref="AuthenticationBuilder.Build"/> call
+/// still reaches the service that call returned.
 /// </remarks>
 public static class AuthenticationService
 {

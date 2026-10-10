@@ -33,7 +33,9 @@ public static class ResponseCompressionExtensions
         /// <remarks>
         /// Register this early in the pipeline so it wraps the response body of every middleware whose
         /// output it should compress. It composes with the exception boundary and content-negotiated
-        /// writes: it appends to any existing <c>Vary</c> rather than clobbering it.
+        /// writes: it appends to any existing <c>Vary</c> rather than clobbering it. With output caching,
+        /// register it after <c>UseOutputCache</c>, which itself follows <c>UseRouting</c>, so the cache
+        /// stores the encoded variant under the <c>Vary</c> this middleware stamps.
         /// </remarks>
         public IWebApplicationPipelineBuilder UseResponseCompression(Action<ResponseCompressionOptions>? configure = null)
         {

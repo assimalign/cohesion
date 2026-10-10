@@ -11,6 +11,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// exchange owns its whole connection, so this is the one version whose control offers the full
 /// surface: interim (<c>1xx</c>) writes straight onto the connection stream (RFC 9110 §15.2) and
 /// the raw-stream takeover that protocol upgrades / <c>CONNECT</c> tunnels need (§7.8 / §9.3.6).
+/// The extended CONNECT stream tunnel is HTTP/2 and HTTP/3 only, so it reports unsupported here.
 /// Aborting is not a control mechanism — it is the application-owned
 /// <see cref="IHttpContext.Cancel"/>, which <see cref="Http1ConnectionContext.SendAsync"/> honors
 /// by writing no response and ending the connection after the exchange.
@@ -47,6 +48,17 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
     /// <inheritdoc />
     public bool HasResponseStarted =>
         _context.ResponseFinalized || _context.HasFinalResponseStarted;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The status <see cref="Http1Context.RequestBodyRejectedStatusCode"/> latched when a body read after
+    /// dispatch failed on the client's side: <c>400</c> for malformed chunked framing or a malformed
+    /// trailer section, <c>413</c> over the body-size cap, <c>408</c> below the minimum data rate,
+    /// <c>431</c> for a trailer section over the header-section bounds, and <c>400</c> for a body the peer
+    /// cut short by closing the connection (the read throws <see cref="System.IO.EndOfStreamException"/>).
+    /// <see cref="Http1ConnectionContext.SendAsync"/> answers the exchange with the same status.
+    /// </remarks>
+    public HttpStatusCode? ClientFaultStatusCode => _context.RequestBodyRejectedStatusCode;
 
     /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;
@@ -95,4 +107,17 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         return _stream;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="false"/>: HTTP/1.1 has no extended CONNECT. Its <c>CONNECT</c> tunnels and
+    /// protocol upgrades take the whole connection over (<see cref="TakeOver"/>).
+    /// </remarks>
+    public bool CanAcceptTunnel => false;
+
+    /// <inheritdoc />
+    public ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromException<Stream>(new InvalidOperationException(
+            "HTTP/1.1 has no extended CONNECT stream tunnel; a CONNECT or a protocol upgrade takes the connection over instead (RFC 9110 §9.3.6, §7.8)."));
+    }
 }

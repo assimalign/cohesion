@@ -12,8 +12,9 @@ capability on `IHttpContext`, wired entirely through the server transport's inte
 
 ## Usage
 
-Register the single interceptor on the listener options (one registration — detection rides the
-request seam, acceptance rides the response seam):
+The Web host (`Web.Hosting`) registers the interceptor on every listener by default. On any other
+host, register the single interceptor on the listener options (one registration — detection rides
+the request seam, acceptance rides the response seam):
 
 ```csharp
 using Assimalign.Cohesion.Http;
@@ -25,14 +26,24 @@ options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
 Then, in a handler:
 
 ```csharp
-if (context.Upgrade is { Kind: HttpProtocolUpgradeKind.Upgrade, Protocol: "websocket" } upgrade)
+if (context.Upgrade is { Kind: HttpProtocolUpgradeKind.Upgrade, Protocol: "example/1" } upgrade)
 {
     Stream tunnel = await upgrade.AcceptAsync(context.RequestCancelled);
-    // ... drive the negotiated protocol over `tunnel` (e.g. the WebSocket framing layer).
+    // ... drive the negotiated protocol over `tunnel`.
 }
 // context.Upgrade is null for ordinary exchanges, on HTTP/2 / HTTP/3, and when the
 // interceptors are not registered.
 ```
+
+`AcceptAsync` checks every response field before it claims the connection: a name that is not a
+token, or a value holding CR, LF, NUL, or another control character but HTAB, throws an
+`HttpException` with `HttpErrorCode.InvalidResponseField`. Nothing has been written then, so the
+exchange can still be answered with an ordinary response; validate any request text a handler
+copies into a response header.
+
+For a WebSocket, use `context.WebSockets` (`Assimalign.Cohesion.Http.WebSockets`) instead: it
+validates the RFC 6455 handshake, answers with `Sec-WebSocket-Accept`, and accepts through this
+upgrade.
 
 ## Dependencies
 
@@ -48,6 +59,6 @@ and this package (the layering constraint of #751).
 
 ## Non-goals
 
-This package does not provide a WebSocket (RFC 6455) framing surface — it surrenders the stream
-after the handshake. See [DESIGN.md](./DESIGN.md) for the interceptor-based design and its
-rationale.
+This package runs no protocol over the transition — it surrenders the stream after the `101` or
+`200`. The WebSocket handshake and framing are `Assimalign.Cohesion.Http.WebSockets`'s, built on
+this upgrade. See [DESIGN.md](./DESIGN.md) for the interceptor-based design and its rationale.

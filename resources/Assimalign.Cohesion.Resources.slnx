@@ -1183,6 +1183,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Antiforgery/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Antiforgery/src/Assimalign.Cohesion.Web.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Antiforgery/tests/Assimalign.Cohesion.Web.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Api/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
@@ -1253,6 +1264,10 @@
 		<Project Path="Web/Assimalign.Cohesion.Web.CookiePolicy/tests/Assimalign.Cohesion.Web.CookiePolicy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Cors/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Cors/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Cors/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Cors/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Cors/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Cors/src/Assimalign.Cohesion.Web.Cors.csproj" />
 	</Folder>
@@ -1334,11 +1349,39 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/src/Assimalign.Cohesion.Web.Hosting.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/tests/Assimalign.Cohesion.Web.Hosting.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/">
+		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/README.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.OpenApi/src/Assimalign.Cohesion.Web.OpenApi.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.OpenApi/tests/Assimalign.Cohesion.Web.OpenApi.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/src/Assimalign.Cohesion.Web.HttpsPolicy.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/Assimalign.Cohesion.Web.HttpsPolicy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/docs/">
@@ -1373,263 +1416,16 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/Assimalign.Cohesion.Web.RequestTimeouts.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/bin/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/bin/Debug/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/bin/Debug/net10.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.deps.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.pdb" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Rewrite/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Rewrite/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Rewrite/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Rewrite/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/bin/Release/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/bin/Release/net10.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/bin/Release/net10.0/Assimalign.Cohesion.Web.Results.deps.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/bin/Release/net10.0/Assimalign.Cohesion.Web.Results.dll" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Rewrite/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Rewrite/src/Assimalign.Cohesion.Web.Rewrite.csproj" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Assimalign.Cohesion.Web.Results.csproj.nuget.dgspec.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Assimalign.Cohesion.Web.Results.csproj.nuget.g.props" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Assimalign.Cohesion.Web.Results.csproj.nuget.g.targets" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/project.assets.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/project.nuget.cache" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/Assimalign.Cohesion.Web.Results.1.0.0.nuspec" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.csproj.CoreCompileInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.csproj.FileListAbsolute.txt" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.pdb" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.sourcelink.json" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/ref/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/ref/Assimalign.Cohesion.Web.Results.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/refint/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net10.0/refint/Assimalign.Cohesion.Web.Results.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net11.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.csproj.FileListAbsolute.txt" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net9.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Release/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/Assimalign.Cohesion.Web.Results.10.0.1-preview.1.nuspec" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/Assimalign.Cohesion.Web.Results.10.0.2-preview.1.nuspec" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.csproj.CoreCompileInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.csproj.FileListAbsolute.txt" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/ref/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/ref/Assimalign.Cohesion.Web.Results.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/refint/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/src/obj/Release/net10.0/refint/Assimalign.Cohesion.Web.Results.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/.msCoverageSourceRootsMapping_Assimalign.Cohesion.Web.Results" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/.msCoverageSourceRootsMapping_Assimalign.Cohesion.Web.Results.Tests" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.pdb" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.deps.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.pdb" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.runtimeconfig.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/CoverletSourceRootsMapping_Assimalign.Cohesion.Web.Results" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/CoverletSourceRootsMapping_Assimalign.Cohesion.Web.Results.Tests" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/FluentAssertions.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.TestPlatform.CommunicationUtilities.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.TestPlatform.CoreUtilities.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.TestPlatform.CrossPlatEngine.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.TestPlatform.PlatformAbstractions.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.TestPlatform.Utilities.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.VisualStudio.CodeCoverage.Shim.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.VisualStudio.TestPlatform.Common.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Microsoft.VisualStudio.TestPlatform.ObjectModel.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/Newtonsoft.Json.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/testhost.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/testhost.exe" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/xunit.abstractions.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/xunit.assert.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/xunit.core.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/xunit.execution.dotnet.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/xunit.runner.visualstudio.testadapter.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/cs/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/cs/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/cs/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/cs/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/cs/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/cs/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/de/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/de/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/de/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/de/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/de/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/de/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/es/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/es/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/es/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/es/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/es/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/es/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/fr/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/fr/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/fr/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/fr/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/fr/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/fr/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/it/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/it/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/it/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/it/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/it/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/it/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ja/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ja/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ja/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ja/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ja/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ja/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ko/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ko/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ko/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ko/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ko/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ko/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pl/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pl/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pl/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pl/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pl/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pl/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pt-BR/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pt-BR/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pt-BR/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pt-BR/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pt-BR/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/pt-BR/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ru/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ru/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ru/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ru/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ru/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/ru/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/tr/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/tr/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/tr/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/tr/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/tr/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/tr/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hans/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hans/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hans/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hans/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hans/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hans/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hant/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hant/Microsoft.TestPlatform.CommunicationUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hant/Microsoft.TestPlatform.CoreUtilities.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hant/Microsoft.TestPlatform.CrossPlatEngine.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hant/Microsoft.VisualStudio.TestPlatform.Common.resources.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net10.0/zh-Hant/Microsoft.VisualStudio.TestPlatform.ObjectModel.resources.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net11.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net11.0/.msCoverageSourceRootsMapping_Assimalign.Cohesion.Web.Results" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net11.0/CoverletSourceRootsMapping_Assimalign.Cohesion.Web.Results" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net9.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net9.0/.msCoverageSourceRootsMapping_Assimalign.Cohesion.Web.Results" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/bin/Debug/net9.0/CoverletSourceRootsMapping_Assimalign.Cohesion.Web.Results" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Assimalign.Cohesion.Web.Results.csproj.nuget.dgspec.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Assimalign.Cohesion.Web.Results.csproj.nuget.g.props" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Assimalign.Cohesion.Web.Results.csproj.nuget.g.targets" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Assimalign.Cohesion.Web.Results.Tests.csproj.nuget.dgspec.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Assimalign.Cohesion.Web.Results.Tests.csproj.nuget.g.props" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Assimalign.Cohesion.Web.Results.Tests.csproj.nuget.g.targets" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/project.assets.json" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/project.nuget.cache" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimali.9391ACCA.Up2Date" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.csproj.AssemblyReference.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.csproj.AssemblyReference.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.csproj.CoreCompileInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.csproj.FileListAbsolute.txt" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.dll" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.GeneratedMSBuildEditorConfig.editorconfig" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.genruntimeconfig.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.pdb" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/Assimalign.Cohesion.Web.Results.Tests.sourcelink.json" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/ref/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/ref/Assimalign.Cohesion.Web.Results.Tests.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/refint/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net10.0/refint/Assimalign.Cohesion.Web.Results.Tests.dll" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/.NETCoreApp,Version=v11.0.AssemblyAttributes.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.csproj.AssemblyReference.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.csproj.FileListAbsolute.txt" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net11.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/">
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/.NETCoreApp,Version=v9.0.AssemblyAttributes.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.AssemblyInfo.cs" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.AssemblyInfoInputs.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.assets.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.csproj.AssemblyReference.cache" />
-		<File Path="Web/Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Rewrite/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Rewrite/tests/Assimalign.Cohesion.Web.Rewrite.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="Web/Assimalign.Cohesion.Web.Routing/README.md" />
@@ -1643,6 +1439,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Routing/tests/Assimalign.Cohesion.Web.Routing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/src/Assimalign.Cohesion.Web.SecurityHeaders.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/Assimalign.Cohesion.Web.SecurityHeaders.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/docs/">
 		<File Path="Web/Assimalign.Cohesion.Web.Serialization/docs/DESIGN.md" />
@@ -1653,6 +1460,14 @@
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Serialization/tests/Assimalign.Cohesion.Web.Serialization.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Server/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Server/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Server/src/Assimalign.Cohesion.Web.Server.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
@@ -1685,6 +1500,28 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Testing/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Testing/tests/Assimalign.Cohesion.Web.Testing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Validation/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Validation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Validation/src/Assimalign.Cohesion.Web.Validation.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Validation/tests/Assimalign.Cohesion.Web.Validation.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.WebSockets/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.WebSockets/src/Assimalign.Cohesion.Web.WebSockets.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.WebSockets/tests/Assimalign.Cohesion.Web.WebSockets.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/refs/" >
 		<Project Path="../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
@@ -1705,6 +1542,7 @@
 		<Project Path="../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Cookies/src/Assimalign.Cohesion.Http.Cookies.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Antiforgery/src/Assimalign.Cohesion.Http.Antiforgery.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/Assimalign.Cohesion.Http.Forwarded.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.RequestLimits/src/Assimalign.Cohesion.Http.RequestLimits.csproj" />
 		<Project Path="../libraries/Connections/Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />
@@ -1712,6 +1550,7 @@
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
 		<Project Path="../libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+		<Project Path="../libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/Assimalign.Cohesion.ObjectValidation.csproj" />
 	</Folder>
 	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/">
 		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/README.md" />

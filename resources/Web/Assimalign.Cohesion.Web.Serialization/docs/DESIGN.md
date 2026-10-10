@@ -39,18 +39,31 @@ layer, composing over the same seam.
   RFC media range); the JSON pair claims `application/json` + `text/json`. Suffix awareness is the
   negotiation layer's call, via `HttpMediaType.Suffix` — delivered narrowly (see *Content
   negotiation* below).
-- **`AddJsonSerialization(resolver)` is the AOT registration story.** The built-in JSON pair
+- **`builder.Services.AddJsonSerialization(resolver)` is the AOT registration story.** The built-in JSON pair
   serializes exclusively through the `JsonTypeInfo`-based System.Text.Json entry points, with
   contracts supplied by the application's source-generated resolver (typically its
   `JsonSerializerContext`). There is no reflection fallback: options are frozen with
   `MakeReadOnly()` (the non-populating overload), and a type outside the resolver's contracts
   faults with `HttpContentSerializationException` instead of silently reflecting. Options
   default to `JsonSerializerDefaults.Web` (camelCase, case-insensitive reads).
-- **Builder-time feature, no DI** — the `AddAuthentication` idiom. The root verb creates the
-  registry and attaches it via `IWebApplicationBuilder.AddFeature`; the returned
-  `ContentSerializationBuilder` feeds the same instance, so chained format verbs (`AddJson`,
-  future grafts) take effect without re-registration. Repeating the *root* verb composes a
-  fresh registry that replaces the old one (features are name-keyed) — call it once.
+- **Builder-time feature, no DI reference** — the `AddAuthentication` idiom. Both registration
+  verbs are component integrations (owner decisions 34 and 35, 2026-10-09, #1380), declared in
+  `src/Properties/ComponentIntegrations.cs` and projected onto `IServiceProviderBuilder` in the
+  application's compilation, so the package never references the container.
+  `builder.Services.AddContentSerialization(serialization => serialization.AddJson(...))` is the
+  builder template over `ContentSerializationBuilder`: the generator constructs the builder (public,
+  parameterless), runs the callback, so format verbs (`AddJson`, future grafts) compose on it, calls
+  `Build()`, and registers the registry as an `IHttpFeature` singleton. `Build()` hands the registry
+  a snapshot of the readers and writers, so it is immutable and the request path takes no lock.
+  `builder.Services.AddJsonSerialization(resolver, configure)` is the static-factory shorthand
+  (`SerializationComponents`, `[EditorBrowsable(Never)]`), because the resolver is an argument the
+  template's single callback cannot carry. Until #1380 both were `extension(IWebApplicationBuilder)`
+  members that returned the builder, and the feature read copy-on-write arrays the builder kept
+  mutating. Repeating a verb composes a fresh registry that replaces the old one (features are
+  name-keyed) — call one, once. That is a break for code that chained onto the old return:
+  `AddJsonSerialization(resolver).AddReader(...)` added to the JSON registry, while a separate
+  `AddContentSerialization(...)` call now silently replaces it, so a JSON registry with extra
+  readers or writers is `AddContentSerialization(s => s.AddJson(...).AddReader(...))`.
 - **`ReadContentAsync`/`WriteContentAsync`, not `WriteAsync`.** The issue sketch says
   `response.WriteAsync(value)`; the shipped names add `Content` because a raw-text
   `WriteAsync(string)` response helper is a likely future addition, and an unconstrained
@@ -129,6 +142,37 @@ write, or compose the `406`).
   client-facing outcome. The pure `TryNegotiate` seam is non-throwing throughout (an unacceptable
   request is `false`, never an exception).
 
+## Contract lookup (#152)
+
+A component that *describes* the application's payloads, rather than serializing them, has to see the
+contracts the JSON writer uses: the same property names (camelCase under the web defaults), nullability,
+converters and number handling, or the description drifts from the wire. The first such component is
+the OpenAPI adapter (`Assimalign.Cohesion.Web.OpenApi`), which turns those contracts into JSON Schema
+with System.Text.Json's `JsonSchemaExporter`. The options live inside the built-in JSON pair, so the
+package exposes one read-only seam:
+
+```csharp
+bool IHttpContentSerializationFeature.TryGetJsonTypeInfo(Type type, out JsonTypeInfo? typeInfo)
+```
+
+- **Which contract.** The writer the registry selects for `application/json` (`GetWriter`: most specific
+  range, then the earliest registration). When that is the built-in JSON writer, the result is
+  `TryGetTypeInfo` on its frozen options. The reader `AddJson` registers alongside it shares those
+  options, so the same contract describes request bodies.
+- **When there is none.** `false` when `application/json` resolves to no writer or to a writer of the
+  application's own, or when the registered resolver has no contract for the type. Nothing throws: like
+  `GetReader`/`GetWriter`, this is a lookup a caller branches on.
+- **What stays internal.** The options, the reader and the writer. A `JsonTypeInfo` from a frozen
+  options instance is itself read-only, so the seam cannot change how anything serializes.
+- **AOT.** The lookup asks the registered resolver, exactly as `CanWrite` does; no reflection fallback
+  exists to reach.
+
+Rejected alternatives, recorded with the adapter that drove the decision: the describer taking the
+`JsonSerializerContext` a second time (two registrations that can drift, and a context alone lacks the
+web defaults and the `configure` callback's changes); exposing `JsonSerializerOptions` (a wider seam than
+the question being asked); and a public interface on the internal writer (a type added for one
+consumer). The adapter's own DESIGN carries the full reasoning.
+
 ## Error model
 
 `HttpContentSerializationException` (sealed, this package's root) covers exactly the
@@ -157,7 +201,7 @@ outcome, not a fault).
 A feature package on the area root's seams, per `.claude/rules/resource-areas.md`: it
 references `Assimalign.Cohesion.Http` + `Assimalign.Cohesion.Web` only, ships its builder verbs
 itself, and is delivered to applications through the `App.Web` shared framework.
-`Web.Hosting` never references it (COHRES002) — the runtime seeds whatever features the
+`Web.Hosting` does not reference it — the runtime seeds whatever features the
 builder registered, with no compile-time knowledge of this package.
 
 ## Non-goals

@@ -9,8 +9,9 @@ decides what the client sees, with an overridable default that renders the RFC 9
 
 - **The hook contract** — `IErrorHandler` / the `HttpErrorHandler` delegate: inspect a fault, own
   the response for it (return `true`) or pass (`false`).
-- **Builder-time registration** — `builder.AddErrorHandling().OnError(...)`; handlers are
-  consulted in registration order.
+- **Builder-time registration** — `builder.Services.AddErrorHandling(errors => errors.OnError(...))`,
+  a component integration the application's compilation receives; handlers are consulted in
+  registration order.
 - **The exchange feature** — `IErrorHandlingFeature`, seeded onto every exchange; a pipeline
   exception boundary invokes `HandleAsync(context, exception)` to turn a caught fault into the
   application's response.
@@ -20,7 +21,13 @@ decides what the client sees, with an overridable default that renders the RFC 9
   faults escaping downstream, publishes the caught exception as an `IHttpExceptionFeature`, resets
   an unstarted response (aborting the exchange when it has already started), and dispatches through
   the `OnError` chain. A developer-detail toggle enriches the terminal payload; a diagnostics
-  observer (`OnException`) and its suppression predicate provide the fault-observation seam.
+  observer (`OnException`) and its suppression predicate provide the fault-observation seam. On an
+  HTTP/1.1 request with a body, a request body that broke its framing or a limit while it was read,
+  or that the client cut short by closing the connection, is the client's fault, which the default
+  Web server reports through `IWebClientFaultFeature`: the boundary skips `OnException` and the
+  `OnError` chain for it and stages the transport's `400`/`413`/`408`/`431` instead of a `500`
+  (#1340). HTTP/2 and HTTP/3 exchanges carry no such report until #1378, so the boundary handles
+  their body faults like any other fault.
 - **Status-code pages** — `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal response
   (such as the pipeline's bodyless 404) into problem+json, or a custom responder body.
 
@@ -29,7 +36,7 @@ decides what the client sees, with an overridable default that renders the RFC 9
 ```csharp
 // Composition (builder time). With no OnError registrations, every fault renders as
 // problem+json 500 — the hook is useful with zero configuration.
-builder.AddErrorHandling().OnError(async (context, exception, cancellationToken) =>
+builder.Services.AddErrorHandling(errors => errors.OnError(async (context, exception, cancellationToken) =>
 {
     if (exception is not StorageUnavailableException)
     {
@@ -41,7 +48,7 @@ builder.AddErrorHandling().OnError(async (context, exception, cancellationToken)
         ProblemDetails.FromStatus(503, detail: "Storage is briefly unavailable; retry."),
         cancellationToken);
     return true;
-});
+}));
 ```
 
 Install the boundary (and, optionally, status-code pages) on the pipeline. Register
@@ -66,9 +73,10 @@ await hook.HandleAsync(context, exception, context.RequestCancelled);
 - **Faults only.** Expected protocol outcomes — an authentication challenge's `401`, a router's
   `404`, an unsupported media type's `415` — are each feature's normal response path and must
   never arrive here as exceptions.
-- **The bodyless 404 terminal lives in `Web.Hosting`.** The pipeline's unhandled-request terminal
-  can only set a payload-free `404` (the hosting-isolation rule keeps `Web.ProblemDetails` out of
-  the runtime module); `UseStatusCodePages()` here is what upgrades it to problem+json.
+- **The bodyless 404 terminal is `Web.Routing`'s `WebApplicationTerminal`.** `Web.Hosting`'s
+  pipeline and every `Map`/`MapWhen` branch end in it, and it can only set a payload-free `404`
+  (neither `Web.Hosting` nor `Web.Routing` references `Web.ProblemDetails`);
+  `UseStatusCodePages()` here is what upgrades it to problem+json.
 - **The payload** is `Web.ProblemDetails`' scope; this package renders it.
 
 Design rationale lives in [DESIGN.md](DESIGN.md).

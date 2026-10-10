@@ -17,8 +17,9 @@ public sealed class QuicConnectionFactoryOptions
 {
     // The options default to HTTP/3 (the sole default ApplicationProtocols entry), so the
     // default error codes are the matching RFC 9114 §8.1 codes: H3_REQUEST_CANCELLED (0x10c)
-    // for stream aborts and H3_NO_ERROR (0x100) for connection close. A client dialing a
-    // different ALPN protocol overrides both alongside ApplicationProtocols.
+    // for stream aborts and H3_NO_ERROR (0x100) for connection close, wherever the caller gives
+    // no code of its own. A client dialing a different ALPN protocol overrides both alongside
+    // ApplicationProtocols.
     private long _defaultStreamErrorCode = 0x10c;
     private long _defaultCloseErrorCode = 0x100;
 
@@ -69,12 +70,21 @@ public sealed class QuicConnectionFactoryOptions
     public long? MaxWriteBufferSize { get; set; } = 64 * 1024;
 
     /// <summary>
-    /// Gets or sets the error code used when closing the connection.
+    /// Gets or sets the error code a connection closes with when the caller supplies none.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The code goes on the wire when the connection closes through
+    /// <see cref="IMultiplexedConnection.Abort(Exception)"/> or
+    /// <see cref="IAsyncDisposable.DisposeAsync"/>.
+    /// <see cref="IMultiplexedConnectionAbort.Abort(long, Exception)"/> closes with the caller's code
+    /// instead; the first abort or disposal decides the close.
+    /// </para>
+    /// <para>
     /// Defaults to <c>0x100</c> — HTTP/3 <c>H3_NO_ERROR</c> (RFC 9114 §8.1) — matching the
     /// default HTTP/3 application protocol. Override this when dialing a different ALPN
     /// protocol.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when the value is outside the valid QUIC error-code range of 0 to 2^62 - 1.
@@ -90,12 +100,22 @@ public sealed class QuicConnectionFactoryOptions
     }
 
     /// <summary>
-    /// Gets or sets the error code used when a stream abort is triggered.
+    /// Gets or sets the error code a stream direction is ended with when the caller supplies none.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The code goes on the wire only where the driver ends a direction on its own:
+    /// <see cref="IConnection.Abort(Exception)"/> and <see cref="IAsyncDisposable.DisposeAsync"/> on a
+    /// stream, and completing a stream's <see cref="System.IO.Pipelines.IDuplexPipe.Input"/> or
+    /// <see cref="System.IO.Pipelines.IDuplexPipe.Output"/>, which releases the QUIC stream and stops a
+    /// receiving direction still open. A direction aborted through <see cref="IMultiplexedStreamAbort"/>
+    /// carries the caller's code instead, and keeps it when the stream is later aborted or disposed.
+    /// </para>
+    /// <para>
     /// Defaults to <c>0x10c</c> — HTTP/3 <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §8.1) — matching
     /// the default HTTP/3 application protocol. Override this when dialing a different ALPN
     /// protocol.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when the value is outside the valid QUIC error-code range of 0 to 2^62 - 1.

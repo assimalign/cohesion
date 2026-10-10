@@ -109,6 +109,24 @@ public class HttpHostTests
         port.ShouldBe(80);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpHost: Only SP and HTAB should be trimmed, so obs-text whitespace stays in the host component")]
+    [InlineData(" \tapi.test:80\t ", "api.test")]
+    [InlineData("api.test\u00A0", "api.test\u00A0")]   // a no-break space, which an HTTP/1.1 Latin-1 decode delivers
+    [InlineData("\u0085api.test", "\u0085api.test")]   // a next-line character
+    [InlineData("\u2003api.test", "\u2003api.test")]   // any other Unicode space
+    public void TryGetComponents_OnSurroundingWhitespace_ShouldTrimOnlySpaceAndTab(string value, string expectedHost)
+    {
+        // Arrange
+        HttpHost httpHost = new(value);
+
+        // Act
+        bool parsed = httpHost.TryGetComponents(out ReadOnlySpan<char> host, out _);
+
+        // Assert
+        parsed.ShouldBeTrue();
+        host.ToString().ShouldBe(expectedHost);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - HttpHost: Should reject values that are not structurally host[:port]")]
     [InlineData("example.com:")]
     [InlineData("example.com:0")]

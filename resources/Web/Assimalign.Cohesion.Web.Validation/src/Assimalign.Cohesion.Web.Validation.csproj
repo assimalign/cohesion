@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Validation</RootNamespace>
+		<Description>Request validation for the Cohesion Web pipeline over Assimalign.Cohesion.ObjectValidation. AddValidation registers a validator per model type (keyed by typeof(T), with no reflection) and a global on/off switch; source-generated typed endpoints validate their bound request-body model before the handler runs and answer an invalid one with 400 application/problem+json carrying an errors map keyed by member path, the shape binding failures use. Endpoints and route groups turn validation off or on through sealed routing metadata (DisableValidation, RequireValidation), and handlers can validate any value with context.ValidateAsync.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- The 400 a failed validation answers is the RFC 9457 payload binding failures use. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- The validation engine: validators and profiles. Outside the Web area, so unconstrained by the
+		     hosting-isolation rule; Web.Api deliberately does not reference it (validation is this
+		     package's opt-in, not a dependency of endpoint mapping). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
+	</ItemGroup>
+</Project>

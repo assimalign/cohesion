@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 /// <summary>
 /// Grafts the cookie scheme verbs onto <see cref="AuthenticationBuilder"/>, so registering cookie
 /// authentication reads identically wherever the builder came from:
-/// <c>builder.AddAuthentication(...).AddCookie(...)</c>.
+/// <c>builder.Services.AddAuthentication(authentication => authentication.AddCookie(...))</c>.
 /// </summary>
 /// <remarks>
 /// The ticket protector is derived here — at composition time, from the builder's data-protection

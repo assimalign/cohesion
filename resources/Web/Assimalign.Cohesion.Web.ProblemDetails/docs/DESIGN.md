@@ -23,7 +23,7 @@ owns only the former:
 - `ProblemDetails` — the plain, mutable RFC 9457 model. No serialization attributes, no
   serializer coupling; the five standard members plus a constrained extensions bag.
 - `ProblemDetailsWriter.Default` (`IProblemDetailsWriter`) — the single problem+json serializer
-  in the framework. Consumers that need the payload (the future `OnError` default handler,
+  in the framework. Consumers that need the payload (the `OnError` default handler in `Web.ErrorHandling`,
   status-code pages, any feature library shaping an error response) all flow through it.
 - `response.WriteProblemDetailsAsync(problem)` — the imperative write path, consistent with the
   pipeline's middleware-first idiom: sets status (when the payload carries one), `Content-Type`,

@@ -6,9 +6,10 @@ using Assimalign.Cohesion.OpenApi.Generated;
 namespace Assimalign.Cohesion.OpenApi.Integration.Tests;
 
 /// <summary>
-/// A representative Web-layer endpoint source: it exposes the source generator's compile-time metadata
-/// registry through the integration contract, with no runtime reflection. This is the shape a real Web
-/// layer would take.
+/// A representative Web-layer endpoint source: it exposes this assembly's generated metadata registry
+/// through the integration contract, with no runtime reflection. The registry is internal and combines
+/// this assembly's annotations with every annotated assembly it references, so one source covers them
+/// all. This is the shape a real Web layer would take.
 /// </summary>
 internal sealed class GeneratedEndpointSource : IOpenApiEndpointSource
 {

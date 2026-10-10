@@ -34,6 +34,15 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// partial response the faulted handler staged and writes the error cleanly.
 /// </para>
 /// <para>
+/// <b>Client faults are not application faults.</b> When the server reports that the client's request
+/// was at fault (<see cref="IWebClientFaultFeature"/>: reading a body that broke its framing or a
+/// configured limit failed, and the transport answers the exchange itself, #1340), the boundary still
+/// publishes the <see cref="IHttpExceptionFeature"/> but skips the
+/// <see cref="ExceptionBoundaryOptions.OnException"/> hook and the <c>OnError</c> handlers, and stages
+/// the transport's status with an empty body in place of the <c>500</c> problem. A started response is
+/// aborted as for any other fault.
+/// </para>
+/// <para>
 /// <b>Handler faults propagate.</b> An exception thrown by a registered <see cref="IErrorHandler"/> is
 /// not masked — it surfaces out of the boundary to the server's last-resort connection isolation
 /// (#762), which keeps the connection alive without invoking this hook. The diagnostic-observation
@@ -84,7 +93,15 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         // can read it without it being re-thrown or passed out of band.
         context.Features.Set<IHttpExceptionFeature>(new HttpExceptionFeature(exception, context.Request.Path));
 
-        await ObserveAsync(context, exception).ConfigureAwait(false);
+        // The server reports that the client's request was at fault: reading its body failed on the
+        // client's side, and the transport answers the exchange itself (#1340). That is an expected
+        // protocol outcome, not an application defect, so the fault observer does not see it.
+        HttpStatusCode? clientFault = context.Features.Get<IWebClientFaultFeature>()?.StatusCode;
+
+        if (clientFault is null)
+        {
+            await ObserveAsync(context, exception).ConfigureAwait(false);
+        }
 
         // No-clobber: a started response can no longer be reshaped, so abort this one exchange.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
@@ -93,7 +110,17 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        ResetResponse(context.Response);
+        if (clientFault is { } status)
+        {
+            // Stage the transport's own answer, with no body: no 500 problem, and no OnError handler,
+            // since those own application faults. Staging the status the transport sends keeps every
+            // reader downstream of the boundary (an access log, the server's telemetry) on the status
+            // that reaches the wire.
+            ResetResponse(context.Response, status);
+            return;
+        }
+
+        ResetResponse(context.Response, HttpStatusCode.InternalServerError);
 
         // Give the application's OnError registrations first crack, in registration order — the
         // first to own the fault stops the chain. A handler that throws is not masked.
@@ -181,10 +208,10 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
     /// Discards whatever partial response a faulted handler staged before it threw, so the error body
     /// is written onto a clean slate. Mirrors the request-timeout middleware's reset: an unstarted
     /// response is still buffered, so headers clear and a seekable body truncates (a non-seekable body
-    /// is replaced outright); the status is set to a 500 baseline that a handler or the terminal may
-    /// override.
+    /// is replaced outright); the status is set to <paramref name="statusCode"/>: a 500 baseline that a
+    /// handler or the terminal may override, or the status the transport answers a client fault with.
     /// </summary>
-    private static void ResetResponse(IHttpResponse response)
+    private static void ResetResponse(IHttpResponse response, HttpStatusCode statusCode)
     {
         response.Headers.Clear();
 
@@ -197,6 +224,6 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
             response.Body = new MemoryStream();
         }
 
-        response.StatusCode = HttpStatusCode.InternalServerError;
+        response.StatusCode = statusCode;
     }
 }

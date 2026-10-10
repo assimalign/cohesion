@@ -30,6 +30,14 @@ into `trace.id`/`span.id` attributes when valid. Optionally (`LogRequestStart`),
 seeds an `IScopedLogger` scope so the completion entry correlates via `ILoggerEntry.ParentId` —
 the Logging library's own correlation mechanism, not a bespoke one.
 
+The package does not read the server's request id (`IWebRequestIdFeature`). It references
+`Web.Server` only for the client-fault report (`IWebClientFaultFeature`, "Emission model" below). The
+request id is the same W3C trace id the header carries when it is valid, but the default server also
+invents one for a request without a valid `traceparent`. Logging that id would give every entry a
+`trace.id`, including entries no span or caller shares. That is a separate decision: if it is taken,
+the middleware reads the feature from `Web.Server`, where it moved from the Web root with #1379, and
+handles its absence under a custom server.
+
 ## Why-this-not-that
 
 - **Explicit logger at composition time, not DI.** `UseHttpLogging(ILogger | ILoggerFactory, ...)`
@@ -63,21 +71,35 @@ the Logging library's own correlation mechanism, not a bespoke one.
   evaluates once, at the application's first body write — by which point the response head is
   set. Request capture is decided upfront from the request headers.
 - **Per-endpoint overrides read after `next`, not before.** The logging middleware sits ahead
-  of routing (it must see unrouted requests), so no endpoint is known when it starts. By the
-  time the downstream pipeline completes, routing has installed `IRouteMatchFeature`, and one
-  metadata lookup (`GetMetadata<HttpLoggingMetadata>`, last-wins) is effectively free. The
+  of routing (it must also log the exchanges middleware ahead of routing reject), so no endpoint
+  is known when it starts. `UseRouting` publishes the matched endpoint (`IRouteMatchFeature`) on
+  the exchange and calls `next`; the pipeline's terminal runs it (#1054), and the match is still
+  there when the pipeline unwinds, so one metadata lookup (`GetMetadata<HttpLoggingMetadata>`,
+  last-wins) is effectively free. Before #1054 routing was terminal and published the same
+  feature before running the handler, so the post-`next` read carried across the split
+  unchanged; only the preflight rule below is new. The
   consequence is honest and documented: an override freely widens/narrows *emission-time*
   fields (request line, headers, status, duration — all still readable post-pipeline), but the
   *capture* fields (`RequestBody`/`ResponseBody`/`BytesTransferred`) can only narrow, because
   the streams were armed (or not) before routing ran. `HttpLoggingFields.None` suppresses the
   entry entirely — the health-probe case. `HttpLoggingMetadata` is a sealed concrete carrier
-  per the metadata-carrier discipline; there is no `IHttpLoggingMetadata`.
-- **Effective client address is a seam, not a guess.** The default logs the transport socket
-  peer (`IHttpConnectionInfo.RemoteIp`) — the only honest answer until a trust model exists.
-  The middleware never parses `X-Forwarded-For` itself; when the forwarded-headers middleware
-  (#778) merges, its trusted result plugs in through
-  `HttpLoggingOptions.ClientAddressResolver`. A faulting resolver falls back to the socket peer
-  rather than failing the exchange.
+  per the metadata-carrier discipline; there is no `IHttpLoggingMetadata`. Access logging is
+  optional behavior, so the carrier does not name a required middleware
+  (`IRouteMiddlewareMetadata`): an endpoint dispatched without `UseHttpLogging` is just not
+  logged. Applications attach it with the convention verb `WithHttpLogging(fields)` (#1055), a
+  generic extension member over routing's `IRouterConventionBuilder` that serves routes and groups
+  alike; routing composes the metadata at route-table build, outer group first.
+- **A CORS preflight is logged with the configured fields.** Routing publishes the candidate
+  endpoint of a CORS preflight (`IsPreflight`) so CORS can read its metadata, but the candidate
+  never runs for the preflight. An override describes the exchanges its endpoint handles, so it
+  is not applied to the preflight: otherwise an `OPTIONS` request naming a silenced endpoint would
+  vanish from the access log while being answered by something else entirely.
+- **The effective identity is read, never guessed.** Scheme, host, and client address are the
+  effective values from `Assimalign.Cohesion.Http.Forwarded` (see "Behind a proxy" below): what
+  the forwarded-headers trust model vouched for, otherwise the transport's. The middleware never
+  parses `Forwarded`/`X-Forwarded-For` itself. `HttpLoggingOptions.ClientAddressResolver`
+  remains as an override for a client source that trust model does not cover; a faulting
+  resolver falls back to the effective client rather than failing the exchange.
 - **One package, two halves.** The provider could live in `libraries/Logging.File`, but the W3C
   format is defined by HTTP exchange semantics (`cs-method`, `sc-status`, `time-taken`), i.e. by
   the attribute contract this package owns. Shipping them together keeps the contract and its
@@ -94,9 +116,31 @@ One entry per completed exchange, emitted in the middleware's `finally`:
 
 - **Level** — `Options.Level` (default `Information`); escalated to `Error` with the exception
   attached when the downstream pipeline throws (the exception is rethrown — observing is this
-  package's job, the exception *boundary* is #881's).
+  package's job, the exception *boundary* is #881's), unless the exchange is a client fault (below).
 - **Message** — `"GET /orders -> 200 in 12.345 ms"`, composed only from enabled fields
-  (invariant culture, `string.Create`); `"(faulted)"` appended on exceptions.
+  (invariant culture, `string.Create`); `"(faulted)"` appended on exceptions, `"(client fault)"` on a
+  client fault.
+- **Client faults (#1340).** A request body that breaks its framing or a configured limit, or that the
+  client cuts short by closing the connection, fails the application's read, and the transport answers
+  the exchange itself with `400`, `413`, `408` or `431`.
+  Any client can cause that, so it is not an application defect, and escalating it filled the log with
+  `Error` entries on demand. The server reports it through `IWebClientFaultFeature` (`Web.Server`,
+  installed by the default Web server on an HTTP/1.1 request with a body). When the feature reports a
+  status, the entry stays at `Options.Level`, carries no exception, is marked
+  `http.client_fault = true` (`HttpLoggingAttributes.ClientFault`), and logs the status that reaches
+  the wire: the transport's, unless the response had already started
+  (`IHttpResponseStreamingFeature.HasStarted`, from `Http.Streaming`), in which case the transport ends
+  that response as it stands and its own status is logged. That holds whether the read's exception
+  reaches the middleware or a binder or the exception boundary answered it first. Under a server that
+  does not install the feature, the entry is escalated as before.
+  #1340's first acceptance criterion asked for these entries at `Debug`, like other peer faults. They
+  stay at `Options.Level` instead, deliberately: this is an access log, one entry per exchange at one
+  level, and a client fault is an exchange the server answered. At `Debug` a `400` would rank below an
+  ordinary `200` and vanish from a log configured at the default `Information`, the opposite of what an
+  access log is for. What the criterion was after, not escalating to `Error` and not attaching the
+  exception, holds, and `http.client_fault` lets a reader filter the entries out or route them
+  elsewhere. The server's own diagnostics (`Web.Hosting`'s `WebApplicationServerLog`) write no entry
+  per exchange, a client fault included, so this entry is the one place it is logged.
 - **Attributes** — per the `HttpLoggingAttributes` contract, only for enabled fields.
 - **Never throws.** Attribute building is guarded; a logging failure cannot fail an exchange or
   mask an application exception mid-unwind. Sink failures are already isolated by the logging
@@ -107,6 +151,43 @@ One entry per completed exchange, emitted in the middleware's `finally`:
 Duration comes from `TimeProvider.GetTimestamp()`/`GetElapsedTime` and entry timestamps from
 `TimeProvider.GetUtcNow()`, so tests can substitute a fake `TimeProvider` for deterministic
 output.
+
+## Behind a proxy — effective identity, peer kept beside it
+
+An access log that records the proxy as every request's client is useless for audit, and one that
+believes `X-Forwarded-For` from anyone is forgeable (#1050, defect D7). The package reads the
+`Effective*` convention of `Assimalign.Cohesion.Http.Forwarded` — owner decision 3 in
+`docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4: consumers read the effective values; nothing
+rewrites the request — and leaves every trust decision to `Web.ForwardedHeaders`:
+
+| Attribute | Value |
+| --- | --- |
+| `http.request.scheme` / `http.request.host` | `EffectiveScheme` / `EffectiveHost`: forwarded by a trusted proxy, otherwise the wire values |
+| `http.client.address` | `EffectiveRemoteIp` (or the `ClientAddressResolver` result): the client a trusted chain vouched for, otherwise the transport peer |
+| `http.client.port` | the effective endpoint's port: the forwarded node's port when a hop resolved the client (omitted when it carried none), otherwise the transport's |
+| `network.peer.address` / `network.peer.port` | the transport peer — normally the nearest proxy — emitted only when it is not the logged client |
+
+- **Why both addresses.** Replacing the peer with the forwarded client loses the hop that
+  delivered the exchange, which is what a forensic reader needs to spot a misconfigured trust list
+  or an unexpected ingress path. The peer pair costs nothing on a direct connection (it is omitted
+  when it equals the client) and uses the OpenTelemetry names for exactly this distinction
+  (`client.address` behind intermediaries versus `network.peer.address`). The existing attribute
+  names are unchanged; only their values became proxy-aware.
+- **Why only the effective scheme and host.** Behind a proxy the wire scheme and host describe the
+  internal proxy-to-app hop, which is deployment configuration rather than per-exchange evidence,
+  so no attribute is spent on them. `IHttpForwardedFeature.OriginalScheme`/`OriginalHost` keep
+  them available to any consumer that wants them.
+- **Timing, and why `UseHttpLogging` can still run first.** The attributes are read in the
+  middleware's `finally`, after the pipeline unwinds; the forwarded-headers middleware leaves its
+  feature on the exchange, so the entry carries the forwarded identity even though logging is
+  registered ahead of `UseForwardedHeaders`. An exchange rejected *before* `UseForwardedHeaders`
+  runs is logged with the transport values.
+- **W3C output.** `c-ip` renders `http.client.address` and `cs-host` renders `http.request.host`,
+  so access-log files show the forwarded client and host with no format change; the fixed
+  `#Fields` list gains no peer column.
+- **No trust, no change.** Without the forwarded-headers middleware (or from a peer outside its
+  trust model) every effective value is the transport's, so a client that sends
+  `X-Forwarded-For` itself cannot forge its logged address.
 
 ## The W3C provider
 
@@ -134,8 +215,11 @@ output.
 ## Ordering guidance
 
 `UseHttpLogging` belongs **first** in the pipeline — before authentication, CORS, host
-filtering, and routing — so rejected and unrouted exchanges are still logged. Two consequences
-to be aware of:
+filtering, and routing — so rejected and unrouted exchanges are still logged. Behind a proxy,
+`UseForwardedHeaders` follows it, after `UseSecurityHeaders` when that is registered (the area's
+[middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)): the entry reads the effective identity after the
+pipeline unwinds (see "Behind a proxy"). Per-endpoint overrides are read at the same point, so
+they need no position relative to `UseRouting`. Two consequences to be aware of:
 
 - Anything registered *before* it is invisible to the access log.
 - Captured bodies are whatever crosses the wire at its position: place it after a
@@ -154,8 +238,9 @@ decodes UTF-8 into a string only at emission. The package carries the repo-wide
 - **No general-purpose file logging provider.** The W3C writer renders HTTP exchanges only. A
   text/JSON file provider for application logging is Logging-area work; when it exists, the
   rotation machinery here is the reference implementation to lift.
-- **No proxy trust model.** `X-Forwarded-For`/`Forwarded` parsing and trust decisions are #778's
-  middleware; this package only exposes the resolver seam.
+- **No proxy trust model.** `X-Forwarded-For`/`Forwarded` parsing and trust decisions belong to
+  `Web.ForwardedHeaders`; this package reads its published result through the `Effective*`
+  convention and never re-parses forwarding headers.
 - **No error handling.** The middleware observes exceptions and rethrows; status-code pages and
   the exception boundary are #881 (over the #864 `OnError` hook).
 - **No push/export telemetry.** OTLP export, metrics, and `EventSource` counters are the

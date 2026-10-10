@@ -103,31 +103,6 @@ internal sealed class TestHttpResponse : IHttpResponse
 }
 
 /// <summary>
-/// An <see cref="IWebApplicationBuilder"/> double that records the features registered by
-/// builder-time composition verbs.
-/// </summary>
-internal sealed class TestWebApplicationBuilder : IWebApplicationBuilder
-{
-    public List<IHttpFeature> Features { get; } = [];
-
-    public IWebApplicationBuilder AddFeature(IHttpFeature feature)
-    {
-        Features.Add(feature);
-        return this;
-    }
-
-    public IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure) => this;
-
-    public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
-
-    public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => this;
-
-    public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
-
-    public IWebApplication Build() => throw new NotSupportedException("The test builder does not build applications.");
-}
-
-/// <summary>
 /// A registry entry double whose media types are supplied per test, for exercising the
 /// specificity/registration-order matching rules without a real serializer.
 /// </summary>

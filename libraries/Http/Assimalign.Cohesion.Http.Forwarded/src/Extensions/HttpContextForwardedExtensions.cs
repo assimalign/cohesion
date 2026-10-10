@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Http;
 /// identity behind a proxy &#8212; CORS origins, cookie <c>Secure</c> decisions, session
 /// partitioning, rate-limit keys, redirect generation, access logging &#8212; should read
 /// these members instead of the wire surfaces, and must run <em>after</em> the
-/// forwarded-headers middleware in the pipeline (the middleware documents a
-/// first-position ordering contract).
+/// forwarded-headers middleware in the pipeline (the middleware documents its
+/// ordering contract).
 /// </para>
 /// <para>
 /// Without an attached feature the members are exactly the wire values, so they are

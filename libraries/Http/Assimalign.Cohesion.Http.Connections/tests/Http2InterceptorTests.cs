@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
@@ -19,8 +20,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// context-construction site (<c>Http2Stream.CreateContextAsync</c>, reached from the frame pump's
 /// END_HEADERS dispatch): head hooks attaching features and observing read-only headers, body
 /// hooks wrapping the streaming request-body stream, the freeze contract, CONNECT body-hook
-/// skipping, empty-body invocation, the unenforced-cap posture, and typed rejection surfaced as an
-/// RST_STREAM.
+/// skipping, empty-body invocation, enforcement of the frozen per-request cap, and typed rejection
+/// surfaced as an RST_STREAM.
 /// </summary>
 public class Http2InterceptorTests
 {
@@ -157,6 +158,56 @@ public class Http2InterceptorTests
         interceptor.BodyInvocations.ShouldBe(0);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hooks should observe the validated :protocol of an extended CONNECT")]
+    public async Task AfterRequestHead_OnExtendedConnect_ShouldObserveProtocol()
+    {
+        // Arrange — RFC 8441 §4: the :protocol is the only signal that tells an extended CONNECT from a
+        // classic one, so the transport hands the validated value to the head hooks (#1368).
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1, // END_HEADERS + END_STREAM
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(Combine(preface, settings, headers), options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBe("websocket");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hooks should observe no :protocol on any other request")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AfterRequestHead_OnClassicConnectOrOrdinaryRequest_ShouldObserveNoProtocol(bool classicConnect)
+    {
+        // Arrange — a classic CONNECT carries only :method and :authority (RFC 9113 §8.5).
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        byte[] headers = classicConnect
+            ? HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "CONNECT"), (":authority", "api.test:443"))
+            : HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "GET"), (":scheme", "https"), (":path", "/"), (":authority", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        // Act
+        await ReceiveFirstContextAsync(Combine(preface, settings, headers), options);
+
+        // Assert
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.Protocol.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Body hooks should run for empty bodies")]
     public async Task EmptyBody_ShouldStillRunBodyHooks()
     {
@@ -171,19 +222,61 @@ public class Http2InterceptorTests
         interceptor.BodyInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A lowered cap should not reject the streamed body (h2 cap enforcement is follow-up)")]
-    public async Task AfterRequestHead_LoweringCap_ShouldNotRejectBody()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A lowered cap should reject the streamed body with 413")]
+    public async Task AfterRequestHead_LoweringCap_ShouldRejectBodyWith413()
     {
-        // HTTP/2 bounds request-body buffering via flow-control backpressure; the hard wire-level
-        // cap is tracked follow-up work (see HttpConnectionListenerLimits.MaxRequestBodySize).
-        // Lowering the cap at head-hook time therefore adjusts only the value hook-attached
-        // features expose — the streamed body still dispatches and reads in full.
+        // The head hook lowers the per-request cap below the 64-octet body; HTTP/2 enforces the
+        // frozen value on receipt (RFC 9110 §15.5.14), so the stream is answered 413 and the
+        // handler's body read fails instead of delivering the oversized body.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
             1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new CapSettingInterceptor(16));
+        TestConnection connection = new(payload);
+        options.UseHttp2(new TestConnectionListener(connection));
 
-        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(context);
+
+        bool readFailed = false;
+        try
+        {
+            using StreamReader reader = new(httpContext.Request.Body);
+            await reader.ReadToEndAsync();
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        {
+            // The 413 condition itself, or the request abort once the transport ended the stream.
+            readFailed = true;
+        }
+
+        readFailed.ShouldBeTrue();
+
+        Http2FrameCollector output = new(connection);
+        IReadOnlyList<Http2WireFrame> frames = await output.ReadUntilAsync(
+            written => written.Any(frame => frame.IsHeaders && frame.StreamId == 1),
+            "the 413 response on stream 1");
+        Http2WireFrame head = frames.First(frame => frame.IsHeaders && frame.StreamId == 1);
+        head.EndStream.ShouldBeTrue();
+        HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(head.Payload)[":status"].ShouldBe("413");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A raised cap should admit a body over the listener cap")]
+    public async Task AfterRequestHead_RaisingCap_ShouldAdmitBody()
+    {
+        // The listener-wide cap (16) would reject the 64-octet body; the head hook raises the
+        // per-request cap, and the frozen per-request value is what HTTP/2 enforces.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
+            1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
+        HttpConnectionListenerOptions options = new();
+        options.Interceptors.Add(new CapSettingInterceptor(1024));
+        TestConnection connection = new(payload);
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxRequestBodySize = 16);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(context);
 
         using StreamReader reader = new(httpContext.Request.Body);
         (await reader.ReadToEndAsync()).Length.ShouldBe(64);

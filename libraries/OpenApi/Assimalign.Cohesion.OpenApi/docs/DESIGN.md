@@ -123,20 +123,67 @@ thrown — they are reported as `OpenApiDiagnostic` values by the validation pac
 (area-scoped root, inherits `Exception` per the AGENTS area-root rule) is reserved for hard programming
 errors such as a structurally impossible node.
 
-## Suggested project family and ownership boundaries (Story L01.01.15.01.04)
+## Project family and ownership boundaries
 
-Advisory architecture for the full OpenApi family. Dependency direction is strictly one-way — every
-package depends on the root model; no package depends on a sibling except through the model.
+Story L01.01.15.01.04 planned the family with a stricter rule than the one it was built to: every
+package would depend on the root model and on no sibling. The built family keeps the part that matters.
+This package references nothing in the family, every other package references it, and the graph is
+acyclic. It does have sibling references, and each one reuses a sibling's behavior instead of
+duplicating it:
 
-| Package | Responsibility | Depends on | Status |
-|---|---|---|---|
-| `Assimalign.Cohesion.OpenApi` | Canonical model, version capability matrix, node tree | — | **this wave** |
-| `…OpenApi.Serialization` | Model ↔ node-tree mapping; JSON and YAML I/O | model, Content.Yaml | **this wave** |
-| `…OpenApi.Validation` | Diagnostics + structural/semantic/version rules | model | **this wave** |
-| `…OpenApi.Fluent` | Fluent authoring builders | model | Wave 2 |
-| `…OpenApi.Attributes` | Attribute metadata model | model | Wave 2 |
-| `…OpenApi.SourceGeneration` | AOT-safe attribute discovery → descriptors | attributes, model | Wave 2 |
-| `…OpenApi.Generation` | Generation orchestration | model, serialization, attributes | Wave 2 |
+- **Validation → Serialization:** the official-schema conformance stage checks the serialized document.
+- **Generation → Attributes:** generation consumes the attributes' intermediate metadata.
+- **Versioning → Serialization, Validation:** a transform deep-copies by a serialization round trip and
+  reports version fit by running the validator.
+- **Integration → Attributes, Generation, Serialization, Versioning:** the contracts compose all four.
+
+The graph below draws those references; an arrow means "references". The labeled edge is an analyzer
+reference: Attributes carries the source generator inside its package, and nothing references the
+generator at run time.
+
+```mermaid
+flowchart LR
+    P0["OpenApi — this package"]
+    P1["OpenApi.Attributes"]
+    P2["OpenApi.Fluent"]
+    P3["OpenApi.Generation"]
+    P4["OpenApi.Integration"]
+    P5["OpenApi.Serialization"]
+    P6["OpenApi.Validation"]
+    P7["OpenApi.Versioning"]
+    P8["OpenApi.SourceGeneration — analyzer"]
+    P1 --> P0
+    P1 -->|"analyzer"| P8
+    P2 --> P0
+    P3 --> P0
+    P3 --> P1
+    P4 --> P0
+    P4 --> P1
+    P4 --> P3
+    P4 --> P5
+    P4 --> P7
+    P5 --> P0
+    P6 --> P0
+    P6 --> P5
+    P7 --> P0
+    P7 --> P5
+    P7 --> P6
+```
+
+| Package | Responsibility | Depends on |
+|---|---|---|
+| `Assimalign.Cohesion.OpenApi` | Canonical model, version capability matrix, node tree | — |
+| `…OpenApi.Serialization` | Model ↔ node-tree mapping; JSON and YAML I/O | model, Content.Yaml |
+| `…OpenApi.Validation` | Diagnostics + structural/semantic/version rules; official-schema stage | model, serialization |
+| `…OpenApi.Fluent` | Fluent authoring builders | model |
+| `…OpenApi.Attributes` | Attribute model, intermediate metadata, and mapper; carries the source generator | model |
+| `…OpenApi.SourceGeneration` | AOT-safe attribute discovery → metadata registry (build time, under `analyzers/`) | — |
+| `…OpenApi.Generation` | Metadata → version-targeted document | model, attributes |
+| `…OpenApi.Versioning` | 3.0 ↔ 3.1 ↔ 3.2 transforms with diagnostics | model, serialization, validation |
+| `…OpenApi.Integration` | Web/ApiManager contracts: endpoint source, description provider, import/export | model, attributes, generation, serialization, versioning |
+
+Which of these ship, and how, is in the [area README](../../README.md) (*Project family* and *Source
+generator delivery*).
 
 Boundaries that exist to preserve specific properties: the model stays free of serialization so YAML
 and future formats are additive; attribute discovery is isolated so it can be source-generated (no

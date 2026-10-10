@@ -29,9 +29,14 @@ public interface IValidationContext
     IEnumerable<IValidationError> Errors { get; }
 
     /// <summary>
-    /// Specifies whether the validator should continue 
-    /// or stop after the first validation item failure.
+    /// Specifies whether the validator evaluates every validation item and reports each one that fails
+    /// (<see cref="ValidationMode.Cascade"/>, the default), or evaluates no further item once one has
+    /// failed (<see cref="ValidationMode.Stop"/>).
     /// </summary>
+    /// <remarks>
+    /// The mode decides between items (members). How many of one item's chained rules run is decided by
+    /// <see cref="ContinueThroughValidationChain"/>.
+    /// </remarks>
     ValidationMode ValidationMode { get; }
 
     /// <summary>
@@ -41,20 +46,33 @@ public interface IValidationContext
     bool ThrowExceptionOnFailure { get; }
 
     /// <summary>
-    /// By default, when more then one rule is chained to a validation item
-    /// the first failure will exit the chain. Set this property to true if 
-    /// the desired behavior is to iterate through all rules in the validation chain.
-    /// <br/>
-    /// <br/>
+    /// Specifies whether every rule chained to a validation item runs (<see langword="true"/>), or the
+    /// item's chain stops at the first of its rules that fails (<see langword="false"/>, the default). An
+    /// item runs its rules in the order they are chained.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The chain stops on the item's own failure only. An error another item reported, or one already in
+    /// the context, never keeps an item's rules from running: stopping between items is
+    /// <see cref="ValidationMode.Stop"/>. With the defaults, every failing item is therefore reported, each
+    /// with the errors of its first failing rule.
+    /// </para>
+    /// <para>
+    /// A collection item (<c>RuleForEach</c>) runs each rule over every element, so the rule that fails
+    /// reports each failing element before the chain stops.
+    /// </para>
+    /// </remarks>
     /// <example>
-    /// <b>An example of default behavior:</b>
+    /// <b>With the default:</b>
     /// <code>
-    /// RuleFor(p => p.Property)
-    ///       .NotNull()     // If this Rule Fails
-    ///       .NotEmpty()    // Then this one will not run  
+    /// RuleFor(p => p.Name)
+    ///       .NotEmpty()
+    ///       .MaxLength(50);   // Runs only when NotEmpty passed: Name's chain stops at its first failing rule.
+    ///
+    /// RuleFor(p => p.Email)
+    ///       .NotEmpty();      // Email's rules run whether or not Name failed.
     /// </code>
     /// </example>
-    /// </summary>
     bool ContinueThroughValidationChain { get; }
 
     /// <summary>

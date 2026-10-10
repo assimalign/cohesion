@@ -7,26 +7,29 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// The transport's per-exchange <b>wire mechanisms</b> that fall outside the normal response path,
 /// surfaced through <see cref="HttpExchangeInterceptorResponseContext.Control"/>: interim (<c>1xx</c>)
-/// writes ahead of the final response, and the raw-stream takeover that protocol upgrades /
-/// <c>CONNECT</c> tunnels need. It is the single generic surface feature packages wrap into
+/// writes ahead of the final response, the raw-connection takeover that HTTP/1.1 protocol upgrades /
+/// <c>CONNECT</c> tunnels need, and the stream tunnel that an HTTP/2 or HTTP/3 extended
+/// <c>CONNECT</c> needs. It is the single generic surface feature packages wrap into
 /// application-facing features — one contract instead of a per-capability contract for every wire
 /// action.
 /// </summary>
 /// <remarks>
 /// <para>
 /// One generic control deliberately replaces per-capability contracts (the former
-/// <c>IHttpConnectionTakeover</c> and <c>IHttpInterimResponseWriter</c>): feature packages —
-/// protocol upgrade, interim responses, and future WebSockets / compression features — compose
-/// from this contract plus the <see cref="IHttpExchangeInterceptor"/> lifecycle hooks, so tapping
-/// a new wire mechanism never requires a new core abstraction or new transport plumbing. The
-/// transport implements this per protocol version and owns every wire encoding behind it; feature
-/// packages reference only the protocol core.
+/// <c>IHttpConnectionTakeover</c> and <c>IHttpInterimResponseWriter</c>, and the extended CONNECT
+/// accept that core carried for a while): feature packages — protocol upgrade, interim responses,
+/// extended CONNECT, and future compression features — compose from this contract plus the
+/// <see cref="IHttpExchangeInterceptor"/> lifecycle hooks, so tapping a new wire mechanism never
+/// requires a new core abstraction or new transport plumbing. The transport implements this per
+/// protocol version and owns every wire encoding behind it; feature packages reference only the
+/// protocol core.
 /// </para>
 /// <para>
 /// <b>This control carries mechanisms, not decisions.</b> The layering rule: mechanisms live at
 /// the lowest level that can observe what they need; decisions live at the application level.
 /// Feature packages wrap these mechanisms into typed features (<c>context.Upgrade</c>,
-/// <c>context.InterimResponse</c>), and the <em>application</em> decides when to exercise them.
+/// <c>context.InterimResponse</c>, <c>context.ExtendedConnect</c>), and the <em>application</em>
+/// decides when to exercise them.
 /// Aborting an exchange is likewise an application decision and has no member here — it is
 /// <see cref="IHttpContext.Cancel"/> / <see cref="IHttpContext.CancelAsync"/>, which the transport
 /// honors at its lifecycle checkpoints with the wire behavior appropriate to its version (HTTP/2
@@ -34,11 +37,13 @@ namespace Assimalign.Cohesion.Http;
 /// connection after the exchange).
 /// </para>
 /// <para>
-/// Capability probes (<see cref="CanWriteInterimResponse"/>, <see cref="CanTakeOver"/>) are the
-/// report-don't-throw discovery path: a caller checks them and learns the exchange state without
-/// provoking an exception. The imperative members throw only on genuine misuse (taking over an
-/// exchange that cannot be taken over, writing an interim response after the final response
-/// started). The control is exchange-scoped and is not thread-safe; it must be driven from the
+/// Capability probes (<see cref="CanWriteInterimResponse"/>, <see cref="CanTakeOver"/>,
+/// <see cref="CanAcceptTunnel"/>) and the client-fault report (<see cref="ClientFaultStatusCode"/>)
+/// are the report-don't-throw discovery path: a caller checks them and learns the exchange state
+/// without provoking or inspecting an exception. The imperative members throw only
+/// on genuine misuse (taking over an exchange that cannot be taken over, writing an interim
+/// response after the final response started, accepting a tunnel twice) or on a stream the peer
+/// already reset. The control is exchange-scoped and is not thread-safe; it must be driven from the
 /// exchange's handling flow (interceptor hooks, the application handler, features it installed).
 /// </para>
 /// </remarks>
@@ -50,6 +55,40 @@ public interface IHttpExchangeControl
     /// response status/headers are effectively locked.
     /// </summary>
     bool HasResponseStarted { get; }
+
+    /// <summary>
+    /// Gets the status the transport answers this exchange with because the client's request was at
+    /// fault, or <see langword="null"/> when it was not, or when this control does not report client
+    /// faults.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A transport that dispatches a request at its head learns some of the client's faults only while
+    /// the application reads the request body: the body breaks the message framing, it breaks a
+    /// configured limit (its size, its data rate, the bounds on a trailer section), or the client
+    /// closes the connection before the body its framing declared is complete. The body stream
+    /// throws, as any stream does: an <see cref="System.IO.InvalidDataException"/> for a malformed
+    /// body, an <see cref="IOException"/> for a broken limit, and an
+    /// <see cref="System.IO.EndOfStreamException"/> for a body cut short. The transport also latches the
+    /// <c>4xx</c> status it answers the exchange with (<c>400</c>, <c>408</c>, <c>413</c> or
+    /// <c>431</c>), which replaces any response that has not started, and it closes the connection
+    /// after the exchange. A response that had already started is finished or reset as the host
+    /// decides; the status then does not reach the wire, and this member still reports it.
+    /// </para>
+    /// <para>
+    /// This member reports that latched status. Code that observes the body read's exception, such as
+    /// a host's fault boundary, its access log or its telemetry, reads it to classify the failure as
+    /// the client's rather than the application's, without inspecting the exception's type. Once it
+    /// reports a status, it reports the same status for the rest of the exchange.
+    /// </para>
+    /// <para>
+    /// The default implementation returns <see langword="null"/>, which a caller reads as "no client
+    /// fault reported": an implementation that predates this member, or a protocol version whose
+    /// transport does not report client faults, keeps compiling and is classified as before. The
+    /// server transport reports it for HTTP/1.1 exchanges.
+    /// </para>
+    /// </remarks>
+    HttpStatusCode? ClientFaultStatusCode => null;
 
     /// <summary>
     /// Gets whether an interim (<c>1xx</c>) response can still be emitted for this exchange — the
@@ -84,6 +123,13 @@ public interface IHttpExchangeControl
     /// <exception cref="System.InvalidOperationException">
     /// The final response has already started, so an interim response can no longer precede it.
     /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a field name in
+    /// <paramref name="headers"/> is not a token, or a value holds a control character other than HTAB —
+    /// CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The interim head is checked before any of it is
+    /// written, so nothing was written and the final response has not started; the exchange can still be
+    /// answered, and another interim response can still be written.
+    /// </exception>
     ValueTask WriteInterimResponseAsync(
         HttpStatusCode statusCode,
         IHttpHeaderCollection? headers = null,
@@ -93,7 +139,8 @@ public interface IHttpExchangeControl
     /// Gets whether this exchange's connection can be taken over. Only an HTTP/1.1 exchange owns
     /// its whole connection; HTTP/2 and HTTP/3 exchanges are multiplexed streams over a shared
     /// connection — those protocols removed the <c>Upgrade</c> mechanism (RFC 9113 §8.6,
-    /// RFC 9114 §4.2) and bootstrap other protocols via extended CONNECT — so takeover reports
+    /// RFC 9114 §4.2) and bootstrap other protocols via extended CONNECT instead, which
+    /// <see cref="AcceptTunnelAsync"/> serves per stream — so takeover reports
     /// <see langword="false"/> there. Also <see langword="false"/> once the exchange has already
     /// been taken over, the final response has started, or the exchange has been aborted.
     /// </summary>
@@ -121,4 +168,97 @@ public interface IHttpExchangeControl
     /// aborted.
     /// </exception>
     Stream TakeOver();
+
+    /// <summary>
+    /// Gets whether this exchange's stream can be accepted as an extended CONNECT tunnel
+    /// (<see cref="AcceptTunnelAsync"/>): the exchange is a validated HTTP/2 or HTTP/3 extended
+    /// CONNECT (RFC 8441 §4, RFC 9220 §3; see <see cref="HttpExchangeInterceptorRequestContext.Protocol"/>),
+    /// no accept has been attempted for it yet, its final response has not started, and it has not
+    /// been cancelled. Always <see langword="false"/> on HTTP/1.1, whose <c>CONNECT</c> and upgrades
+    /// take the whole connection over instead (<see cref="TakeOver"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The accept latches on its first attempt: once <see cref="AcceptTunnelAsync"/> has been called
+    /// on an extended CONNECT, this is <see langword="false"/> for the rest of the exchange, whether or
+    /// not that call succeeded.
+    /// </para>
+    /// <para>
+    /// The probe does not report a stream the peer has already reset: that is learned from
+    /// <see cref="AcceptTunnelAsync"/>, which fails with an <see cref="IOException"/>.
+    /// </para>
+    /// </remarks>
+    bool CanAcceptTunnel { get; }
+
+    /// <summary>
+    /// Accepts the exchange's extended CONNECT: answers it with <c>200</c> in a response head that
+    /// does not end the stream, takes the exchange over, and returns the stream as a duplex tunnel
+    /// (RFC 8441 §5, RFC 9220 §3). One-shot.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On an extended CONNECT, the first call latches the accept before any other guard runs. A call
+    /// that then fails — the exchange was cancelled, its response started, its stream was reset, a
+    /// response field was refused, or writing the head failed or was cancelled — still uses the accept
+    /// up: every later call throws
+    /// <see cref="System.InvalidOperationException"/>, and <see cref="CanAcceptTunnel"/> reports
+    /// <see langword="false"/>. A call on an exchange that is not an extended CONNECT is refused
+    /// without latching.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>The response head carries the headers already set on the exchange's
+    /// response, with the fields a tunnel cannot carry removed: <c>Content-Length</c> and
+    /// <c>Transfer-Encoding</c> (RFC 9110 §9.3.6) and the connection-specific fields (RFC 9113
+    /// §8.2.2, RFC 9114 §4.2). Any status already set is replaced by <c>200</c>, and a body written
+    /// to the response is discarded.</description></item>
+    /// <item><description>Reads return the client's <c>DATA</c> as it arrives and return 0 once the
+    /// client ends its side (HTTP/2 <c>END_STREAM</c>, HTTP/3 FIN).</description></item>
+    /// <item><description>Writes go out as <c>DATA</c> at once, unbuffered and paced by the peer's
+    /// flow control: a write completes when its octets are on the wire, and waits while the peer's
+    /// windows are exhausted.</description></item>
+    /// <item><description>Disposing the tunnel ends the server's side (HTTP/2 <c>END_STREAM</c>,
+    /// HTTP/3 FIN). The client may still send until it ends its own side.</description></item>
+    /// <item><description>A peer reset or the loss of the connection faults pending and later reads
+    /// and writes with an <see cref="IOException"/>.</description></item>
+    /// </list>
+    /// <para>
+    /// Accepting takes the exchange over, as <see cref="TakeOver"/> does for an HTTP/1.1 connection:
+    /// the transport registers the tunnel before it writes the head, so it never writes the
+    /// application's response for the exchange, and the
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> and
+    /// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/> hooks do not run for it. The tunnel
+    /// lasts as long as the exchange: when the application's handler returns, the transport ends a
+    /// tunnel the application left open, and a cancelled exchange (<see cref="IHttpContext.Cancel"/>)
+    /// resets the stream instead.
+    /// </para>
+    /// <para>
+    /// The tunnel carries raw octets. Framing the inner protocol is the caller's concern; for
+    /// WebSocket, <c>System.Net.WebSockets.WebSocket.CreateFromStream</c> runs over it.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">A token that cancels writing the response head.</param>
+    /// <returns>
+    /// The duplex tunnel. The caller owns it and disposes it to end the server's side of the stream.
+    /// </returns>
+    /// <exception cref="System.InvalidOperationException">
+    /// The exchange is not an extended CONNECT on HTTP/2 or HTTP/3, an accept was already attempted
+    /// for it (whether or not that attempt succeeded), its response has already started, or it was
+    /// cancelled.
+    /// </exception>
+    /// <exception cref="IOException">
+    /// The peer reset the stream or the connection closed before the response head was written.
+    /// </exception>
+    /// <exception cref="System.OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was cancelled before the response head was written; the
+    /// exchange is then reset when it ends.
+    /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a response
+    /// field name is not a token, or a value holds a control character other than HTAB — CR, LF, and NUL
+    /// among them (RFC 9110 §5.1, §5.5). The head is checked before the stream is claimed, so nothing was
+    /// written, the response has not started, and the status set before the call is restored: the
+    /// exchange can still be answered with an ordinary response. The accept is spent and cannot be
+    /// retried.
+    /// </exception>
+    ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default);
 }

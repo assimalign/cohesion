@@ -69,9 +69,12 @@ A handler that writes through `context.Response.Streaming` commits its own head 
 and bypasses `IHttpResponse.Body` entirely. The compression wrapper on `IHttpResponse.Body` is
 simply never written to, and `SendAsync` short-circuits to the sink — so the streamed response is
 **left untouched**, never corrupted. Compressing the streaming-sink path would require a transport
-response interceptor wired at server-composition time, which crosses the Web-area hosting-isolation
-boundary; it is a deliberate non-goal (see below). "Composes with the streaming write path" here
-means *does not break it*.
+response interceptor wired at server-composition time, inside `Web.Hosting`. This package may not
+reach into `Web.Hosting` (COHRES001). The other direction, `Web.Hosting` referencing this package,
+was forbidden by COHRES002 when this was designed; since the rule's 2026-10-09 relaxation it is
+permitted, but it would make the runtime compose a pipeline feature and ship this package in every
+framework that carries `Web.Hosting`. It stays a deliberate non-goal (see below). "Composes with the
+streaming write path" here means *does not break it*.
 
 ### Composition with the exception boundary (#864/#881)
 
@@ -81,6 +84,16 @@ handler wrote a partial body is handled by the exception boundary exactly as bef
 buffered response is reset and rewritten. When the exception boundary resets the response it clears
 the headers (including any `Content-Encoding`/`Vary` the wrapper staged) and the wrapper's
 `CompleteAsync` then finalizes over the reset body harmlessly.
+
+### Composition with output caching (#1054)
+
+The output cache must wrap compression, so its buffered copy holds the encoded bytes and the `Vary`
+this middleware stamps: `UseRouting` → `UseOutputCache` → `UseResponseCompression`. Since routing
+stopped being terminal, the cache reads the endpoint `UseRouting` publishes and therefore sits after
+it, which puts compression after `UseRouting` as well in an application that caches. Compression
+itself needs nothing from routing; the cost is that a middleware answering ahead of `UseRouting`
+(static files, for example) is outside its reach and relies on its own encoding (precompressed
+assets). Web.Caching DESIGN, "Ordering", carries the full reasoning.
 
 ## Vary: always append, never clobber
 
@@ -117,8 +130,26 @@ through compressed-length observation (BREACH). So `EnableForHttps` defaults to 
 `https` request the middleware does nothing — no wrapper, no `Vary`, no compression. The scheme is
 known at entry, so the default path skips HTTPS responses with zero per-response overhead. Enabling
 the flag is an explicit, documented opt-in for pipelines whose responses do not mix a secret with
-reflected input. Compression over HTTP (for example behind a TLS-terminating proxy where the app
-sees `http`) is on by default.
+reflected input. Compression over HTTP is on by default.
+
+### Behind a TLS-terminating proxy — the guard reads the effective scheme
+
+BREACH attacks the TLS channel the *client* sees, so "over `https`" must mean the client-facing
+scheme, not the app-facing hop. The guard reads `context.EffectiveScheme` from
+`Assimalign.Cohesion.Http.Forwarded` (owner decision 3 in `docs/programs/HTTP_WEB_PROGRAM_PLAN.md`
+§7.4: consumers read the effective values; nothing rewrites the request):
+
+- **With `UseForwardedHeaders`** registered ahead of `UseResponseCompression`, a response a trusted
+  proxy relays over TLS is treated as HTTPS and left uncompressed unless `EnableForHttps` is set.
+  Before #1050 the guard read the wire scheme, so every such response was compressed on the TLS leg
+  — the exposure the default exists to prevent (defect D7).
+- **Without it** — or from a peer outside the forwarded-headers trust model — the effective scheme is
+  the transport-derived one: the app sees `http` behind the proxy and compresses as before. A client
+  that sends `X-Forwarded-Proto: https` itself cannot switch compression off, because this package
+  never reads forwarding headers.
+
+Deployments that relied on the old behavior (compression behind a trusted TLS-terminating proxy) set
+`EnableForHttps` explicitly once the proxy is resolved — the same opt-in a direct-TLS deployment makes.
 
 ## Request decompression
 
@@ -148,6 +179,19 @@ top-level cap is sufficient even for a nested chain. The guard trip surfaces as 
 the handler's read, which the middleware catches and turns into `413`; a decoder rejecting a
 malformed body surfaces (through a typed wrapper) as `400`.
 
+### The transport's failure is not the content's (#1340)
+
+The decoders read the transport's body, and that body throws the same `InvalidDataException` when the
+message framing is malformed (a broken chunk size or trailer section). Before #1340 the wrapper
+relabeled that too, so the middleware answered `400` for "malformed coded content" and swallowed an
+exception the handler, a body binder and the access log should have seen as the client's framing
+fault. The wire status happened to match (the transport answers `400` itself), but the failure was
+misattributed. The middleware now hands the wrapper the server's client-fault report
+(`IWebClientFaultFeature`, `Web.Server`): when it reports a status, the transport latched the fault
+before throwing, so the exception passes through unchanged and the transport answers with its own
+status. A decoder's own failure still becomes `400` here. A transport limit failure (an
+`IOException`) was never caught and is unchanged.
+
 ### Ordering requirement
 
 Because the guard surfaces during the handler's body read, `UseRequestDecompression` must be
@@ -164,7 +208,8 @@ conventionally the outermost middleware, so this is the natural order.
   runs).
 - `400 Bad Request` — a malformed coded request body (internal `RequestDecompressionFormatException`
   wrapping the decoder's `InvalidDataException`, so an unrelated handler `InvalidDataException` is
-  never mis-mapped).
+  never mis-mapped). A malformed message framing under the decoders is not wrapped when the server
+  reports it as a client fault: it propagates, and the transport answers it (#1340).
 - On any of these, a response that has already started streaming is aborted at the protocol layer
   (`IHttpContext.CancelAsync`) instead, since its head is locked.
 
@@ -182,7 +227,8 @@ Nothing in the package or its tests needs dynamic code. `IsAotCompatible=true` h
   Out of scope for a first body-compression pass.
 - **No compression of the streaming-sink path.** A handler that streams via
   `IHttpResponseStreamingFeature` is handed off untouched; compressing it needs a transport
-  interceptor across the hosting-isolation boundary.
+  interceptor that `Web.Hosting` wires at server-composition time (see "Composition with streamed
+  responses").
 - **No raw-deflate (RFC 1951) request bodies.** `deflate` is the RFC 9110 zlib format; a bare-deflate
   sender gets a `400`.
 - **No HEAD length mirroring.** A bodyless HEAD is left alone; precisely mirroring the coded

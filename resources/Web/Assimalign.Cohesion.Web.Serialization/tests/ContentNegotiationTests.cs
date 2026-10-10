@@ -22,15 +22,14 @@ public class ContentNegotiationTests
 
     private static IHttpContentSerializationFeature Compose(params IHttpContentWriter[] writers)
     {
-        TestWebApplicationBuilder builder = new();
-        ContentSerializationBuilder composition = builder.AddContentSerialization();
+        ContentSerializationBuilder composition = new();
 
         foreach (IHttpContentWriter writer in writers)
         {
             composition.AddWriter(writer);
         }
 
-        return builder.Features.OfType<IHttpContentSerializationFeature>().Single();
+        return composition.Build();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - Negotiate: Should return false when no writers are registered")]

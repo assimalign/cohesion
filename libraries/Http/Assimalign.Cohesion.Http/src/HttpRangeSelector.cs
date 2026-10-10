@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Http;
 /// &#167; 14.2, deciding between a <c>206 Partial Content</c> response (returning the concrete byte
 /// slices) and a <c>416 Range Not Satisfiable</c> response (returning the <c>bytes */N</c>
 /// content-range). This is the selection step only; whether a present range should be honored at all
-/// is a precondition/<c>If-Range</c> decision made by <see cref="HttpPreconditionEvaluator"/>.
+/// is a precondition/<c>If-Range</c> decision made by <see cref="HttpConditionalRequest"/> and <see cref="HttpIfRange"/>.
 /// </summary>
 /// <remarks>
 /// <para>

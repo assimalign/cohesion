@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -179,6 +183,112 @@ public class WebTlsHostingIntegrationTests
         {
             await server.StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttps: Should serve an HTTP/1.1 client and an HTTP/2 client on the same TLS port")]
+    public async Task UseHttps_OverTls_ShouldServeHttp11AndHttp2ClientsOnOnePort()
+    {
+        // Arrange — one TLS endpoint offering h2 and http/1.1 (the UseHttps default), served through the
+        // full composition root.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        int port = GetAvailableLoopbackPort();
+        using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.UseServer(options =>
+        {
+            options.UseHttps(
+                tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, port),
+                new TlsServerOptions
+                {
+                    AuthenticationOptions = { ServerCertificate = certificate }
+                });
+        });
+
+        WebApplication app = builder.Build();
+
+        ConcurrentDictionary<string, (Assimalign.Cohesion.Http.HttpVersion Version, HttpScheme Scheme)> observed = new();
+        app.Use((context, next) =>
+        {
+            observed[context.Request.Path.ToString()] = (context.Version, context.Request.Scheme);
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+
+        IWebApplicationServer server = app.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
+        await server.StartAsync(cancellationToken);
+
+        try
+        {
+            // Act — four clients reach the same port: the .NET client asking for HTTP/1.1 (it sends no
+            // ALPN extension), the .NET client asking for HTTP/2 (it offers h2), and two raw TLS clients,
+            // one offering only http/1.1 and one sending no ALPN extension at all.
+            using HttpResponseMessage http11 = await SendWithRetryAsync(
+                new Uri($"https://127.0.0.1:{port}/h1"),
+                NetHttpVersion.Version11,
+                cancellationToken);
+            using HttpResponseMessage http2 = await SendWithRetryAsync(
+                new Uri($"https://127.0.0.1:{port}/h2"),
+                NetHttpVersion.Version20,
+                cancellationToken);
+            (SslApplicationProtocol http11Protocol, string http11Response) = await SendRawHttp11Async(
+                port, "/alpn-http11", [SslApplicationProtocol.Http11], cancellationToken);
+            (SslApplicationProtocol noAlpnProtocol, string noAlpnResponse) = await SendRawHttp11Async(
+                port, "/no-alpn", applicationProtocols: null, cancellationToken);
+
+            // Assert — the client and the server agree on the protocol of every connection.
+            http11.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
+            http11.Version.ShouldBe(NetHttpVersion.Version11);
+            http2.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
+            http2.Version.ShouldBe(NetHttpVersion.Version20);
+            http11Protocol.ShouldBe(SslApplicationProtocol.Http11);
+            http11Response.ShouldStartWith("HTTP/1.1 200", Case.Sensitive);
+            noAlpnProtocol.Protocol.IsEmpty.ShouldBeTrue();
+            noAlpnResponse.ShouldStartWith("HTTP/1.1 200", Case.Sensitive);
+
+            observed["/h1"].ShouldBe((Assimalign.Cohesion.Http.HttpVersion.Http11, HttpScheme.Https));
+            observed["/h2"].ShouldBe((Assimalign.Cohesion.Http.HttpVersion.Http20, HttpScheme.Https));
+            observed["/alpn-http11"].ShouldBe((Assimalign.Cohesion.Http.HttpVersion.Http11, HttpScheme.Https));
+            observed["/no-alpn"].ShouldBe((Assimalign.Cohesion.Http.HttpVersion.Http11, HttpScheme.Https));
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Sends one HTTP/1.1 request over a TLS connection whose handshake offers
+    /// <paramref name="applicationProtocols"/> through ALPN (no ALPN extension at all when
+    /// <see langword="null"/>), and returns what the handshake negotiated together with the raw response.
+    /// </summary>
+    private static async Task<(SslApplicationProtocol Protocol, string Response)> SendRawHttp11Async(
+        int port,
+        string path,
+        List<SslApplicationProtocol>? applicationProtocols,
+        CancellationToken cancellationToken)
+    {
+        using TcpClient tcp = new();
+        await tcp.ConnectAsync(IPAddress.Loopback, port, cancellationToken).ConfigureAwait(false);
+        await using SslStream ssl = new(tcp.GetStream(), leaveInnerStreamOpen: false);
+        await ssl.AuthenticateAsClientAsync(
+            new SslClientAuthenticationOptions
+            {
+                TargetHost = "localhost",
+                ApplicationProtocols = applicationProtocols,
+                RemoteCertificateValidationCallback = static (_, _, _, _) => true
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        byte[] request = Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        await ssl.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+        await ssl.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+        using StreamReader reader = new(ssl, Encoding.ASCII);
+        string response = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+
+        return (ssl.NegotiatedApplicationProtocol, response);
     }
 
     /// <summary>

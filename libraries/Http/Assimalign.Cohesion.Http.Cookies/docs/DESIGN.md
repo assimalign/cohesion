@@ -86,18 +86,23 @@ enumeration.
 
 ## How the transports stay decoupled from cookie semantics
 
-`Assimalign.Cohesion.Http.Connections` depends on this package, but
-only for the type identity (the `HttpCookie.ToString()` serialization
-and the feature lookup). The transports do not parse the `Cookie`
-header themselves (that's the request extension's job), and they do
-not own the typed collection (that's the response feature's job).
-They only:
+`Assimalign.Cohesion.Http.Connections` does not reference this package.
+The transports do not parse the `Cookie` header themselves (that's the
+request extension's job), and they do not own the typed collection
+(that's the response feature's job). The response collection writes
+every mutation through to `response.Headers[Set-Cookie]`, one header
+value per cookie, so the transports only:
 
-1. **Reach into the response feature** at write time
-   (`context.Features.Get<IHttpResponseCookieFeature>()`) and, when
-   present, emit one `Set-Cookie` line per queued cookie.
+1. **Serialize the `Set-Cookie` header** like any other response
+   field, at write time.
 2. **Honour the RFC 6265 §3 rule** that each `Set-Cookie` value MUST
    be on its own line; no comma folding.
+
+The one serializer that reads `IHttpResponseCookieFeature` directly is
+the HTTP/1.1 upgrade writer in `Assimalign.Cohesion.Http.ProtocolUpgrade`.
+A replacement feature therefore has to keep the header in sync, which it
+does by queuing into a header-synchronized collection, as
+`Web.CookiePolicy` does.
 
 The wire-level `Cookie` header remains on `request.Headers` whether
 or not the cookies package is referenced. A consumer that never reads
@@ -128,9 +133,11 @@ real consumers prove the looser shape is a footgun.
 | Package | Role | Dependencies |
 |---------|------|---------------|
 | `Assimalign.Cohesion.Http.Cookies` | Typed cookie model + request/response features + extensions | `Assimalign.Cohesion.Http` |
-| `Assimalign.Cohesion.Http.Connections` | Wire-level HTTP/1.1, HTTP/2, HTTP/3 readers + writers | `Assimalign.Cohesion.Http.Cookies` (for `Set-Cookie` emission) |
+| `Assimalign.Cohesion.Http.Connections` | Wire-level HTTP/1.1, HTTP/2, HTTP/3 readers + writers | None on this package: it serializes the `Set-Cookie` header the response collection maintains |
+| `Assimalign.Cohesion.Http.ProtocolUpgrade` | HTTP/1.1 upgrade writer | This package (reads `IHttpResponseCookieFeature` for the `101` head) |
+| `Assimalign.Cohesion.Web.Authentication.Cookie` | Cookie-scheme auth handler | This package + Web.Authentication |
+| `Assimalign.Cohesion.Web.CookiePolicy` | Cookie-policy enforcement; replaces the response feature | This package |
 | Future: `&hellip;Http.Cookies.Signing` | Signed-cookie middleware | This package |
-| Future: `&hellip;Web.Authentication.Cookie` | Cookie-scheme auth handler | This package + Web.Authentication |
 
 Dependency direction is one-way: cookie-aware packages depend on this
 one; this one depends only on the protocol core. The protocol core

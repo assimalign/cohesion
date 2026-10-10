@@ -5,8 +5,9 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// <summary>
 /// A minimum data-rate policy: the lowest sustained throughput, in octets per second, a peer must
 /// maintain once a <see cref="GracePeriod"/> has elapsed, or the transport reclaims the exchange.
-/// Used for the HTTP/1.1 request-body read (slow-body / trickle defence) and the streaming
-/// response write (slow-reader defence), mirroring Kestrel's <c>MinDataRate</c> semantics.
+/// Used for the request-body read on HTTP/1.1, HTTP/2 and HTTP/3 (slow-body / trickle defence) and
+/// the HTTP/1.1 streaming response write (slow-reader defence), mirroring Kestrel's
+/// <c>MinDataRate</c> semantics.
 /// </summary>
 /// <remarks>
 /// <para>

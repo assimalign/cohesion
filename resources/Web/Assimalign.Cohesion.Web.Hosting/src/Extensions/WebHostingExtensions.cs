@@ -32,6 +32,13 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// layer derives the <c>https</c> scheme.
 /// </para>
 /// <para>
+/// <see cref="WebHostingExtensions.UseHttps(HttpConnectionListenerOptions, Action{TcpConnectionListenerOptions}, TlsServerOptions)"/>
+/// serves what a client expects of an <c>https</c> origin: one TLS endpoint that offers <c>h2</c> and
+/// <c>http/1.1</c> through ALPN (RFC 7301) and serves each connection the protocol its handshake
+/// negotiated, HTTP/1.1 when it negotiated none. <c>UseHttp1s</c> and <c>UseHttp2s</c> serve a single
+/// protocol over TLS.
+/// </para>
+/// <para>
 /// HTTP/3 is served over QUIC through the callback members
 /// <see cref="WebHostingExtensions.UseHttp3(HttpConnectionListenerOptions, Action{QuicConnectionListenerOptions})"/>
 /// and
@@ -60,24 +67,33 @@ public static class WebHostingExtensions
     extension(WebApplicationServerBuilder builder)
     {
         /// <summary>
-        /// Configures the web server's listener endpoints and per-endpoint limits from a Cohesion
-        /// <see cref="IConfiguration"/> section at builder time. Binding is explicit and AOT-safe
-        /// (no reflection); the bound <c>Limits</c> section is applied to every endpoint the
-        /// section registers (all keys to HTTP/1.1 endpoints; the shared
-        /// <see cref="HttpConnectionListenerLimits"/> keys to HTTP/2 endpoints). See
-        /// <c>HttpServerConfiguration</c> for the expected section shape (Kestrel
-        /// <c>appsettings</c> parity).
+        /// Configures the web server's listener endpoints, per-endpoint limits, and connection cap from a
+        /// Cohesion <see cref="IConfiguration"/> section. Binding is explicit and AOT-safe (no
+        /// reflection) and runs when the default server is created at host start. The bound
+        /// <c>Limits</c> section is applied to every endpoint the section registers (the HTTP/1.1 keys
+        /// to HTTP/1.1 endpoints; the shared <see cref="HttpConnectionListenerLimits"/> keys and the
+        /// <c>Limits:Http2</c> keys to HTTP/2 endpoints; the shared keys to HTTP/3 endpoints), and
+        /// <c>Limits:MaxConcurrentConnections</c> caps the default server unless
+        /// <see cref="WebApplicationServerBuilder.LimitConcurrentConnections(int)"/> set a cap. See
+        /// <c>HttpServerConfiguration</c> for the expected section shape (Kestrel <c>appsettings</c>
+        /// parity).
         /// </summary>
         /// <param name="configuration">The configuration to bind from.</param>
         /// <param name="sectionKey">The root section key. Defaults to <c>"Http"</c>.</param>
         /// <returns>The current server builder.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configuration"/> is <see langword="null"/>.</exception>
-        /// <exception cref="InvalidOperationException">Thrown when a configured value cannot be parsed.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when a configured value cannot be parsed or a certificate cannot be loaded.</exception>
         public WebApplicationServerBuilder UseConfiguration(IConfiguration configuration, string sectionKey = HttpServerConfiguration.DefaultSectionKey)
         {
             ArgumentNullException.ThrowIfNull(configuration);
 
-            return builder.UseServer((_, options) => HttpServerConfiguration.Bind(configuration, sectionKey, options, builder.OwnEndpointCertificate));
+            return builder.UseServer((_, options) => HttpServerConfiguration.Bind(
+                configuration,
+                sectionKey,
+                options,
+                builder.OwnEndpointCertificate,
+                builder.ContentRootPath,
+                builder.UseConfiguredConnectionLimit));
         }
     }
 
@@ -121,7 +137,9 @@ public static class WebHostingExtensions
         /// concern and is intentionally not modeled here. When
         /// <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is left unset, it is defaulted
         /// to <see cref="SslApplicationProtocol.Http11"/> (ALPN <c>http/1.1</c>, RFC 7301); a caller-supplied
-        /// protocol list is preserved unmodified.
+        /// protocol list is preserved unmodified. Every connection is served HTTP/1.1, so a supplied list
+        /// should not offer <c>h2</c>: a client that negotiated it would be sent HTTP/1.1. Use
+        /// <see cref="UseHttps(Action{TcpConnectionListenerOptions}, TlsServerOptions)"/> to serve both.
         /// </param>
         /// <returns>The current options instance.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> or <paramref name="tlsOptions"/> is <see langword="null"/>.</exception>
@@ -161,7 +179,9 @@ public static class WebHostingExtensions
         /// concern and is intentionally not modeled here. When
         /// <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is left unset, it is defaulted
         /// to <see cref="SslApplicationProtocol.Http2"/> (ALPN <c>h2</c>, RFC 7301); a caller-supplied
-        /// protocol list is preserved unmodified.
+        /// protocol list is preserved unmodified. Every connection is served HTTP/2, so a supplied list
+        /// should not offer <c>http/1.1</c>: a client that negotiated it would be sent HTTP/2. Use
+        /// <see cref="UseHttps(Action{TcpConnectionListenerOptions}, TlsServerOptions)"/> to serve both.
         /// </param>
         /// <returns>The current options instance.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> or <paramref name="tlsOptions"/> is <see langword="null"/>.</exception>
@@ -188,6 +208,75 @@ public static class WebHostingExtensions
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2);
 
             return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
+        }
+
+        /// <summary>
+        /// Serves HTTP/2 and HTTP/1.1 on one TLS endpoint by composing the security library's
+        /// <c>UseTls</c> layer onto a TCP connection listener configured by the supplied callback, then
+        /// registering the secured listener for both protocols: each connection is served the protocol its
+        /// TLS handshake negotiated through ALPN (RFC 7301).
+        /// </summary>
+        /// <param name="configure">The TCP listener configuration callback (endpoint, socket options).</param>
+        /// <param name="tlsOptions">
+        /// The server TLS options. The caller supplies the server certificate through
+        /// <see cref="TlsServerOptions.AuthenticationOptions"/>; certificate sourcing is a Security-area
+        /// concern and is intentionally not modeled here. When
+        /// <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is left unset, it is defaulted
+        /// to <see cref="SslApplicationProtocol.Http2"/> then <see cref="SslApplicationProtocol.Http11"/>
+        /// (<c>h2</c>, <c>http/1.1</c>), the server's preference order; a caller-supplied protocol list is
+        /// preserved unmodified.
+        /// </param>
+        /// <returns>The current options instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> or <paramref name="tlsOptions"/> is <see langword="null"/>.</exception>
+        /// <remarks>
+        /// <para>
+        /// This is the registration an <c>https</c> origin normally wants: a client that offers both
+        /// identifiers, as browsers do, gets HTTP/2 (RFC 9113 §3.2), a client that offers only
+        /// <c>http/1.1</c> gets it, and a client that sends no ALPN extension gets HTTP/1.1. The choice
+        /// is made per connection inside <c>Assimalign.Cohesion.Http.Connections</c>
+        /// (<see cref="HttpConnectionListenerOptions.UseHttp1AndHttp2(Func{IConnectionListener}, Action{Http1ConnectionListenerOptions}, Action{Http2ConnectionListenerOptions})"/>),
+        /// so both protocols share the endpoint, the request/response interceptors, and the <c>Alt-Svc</c>
+        /// advertisement.
+        /// </para>
+        /// <para>
+        /// TLS is composed <em>before</em> registration, so the layered listener reports
+        /// <see cref="ConnectionCapabilities.Security"/> equal to <see cref="ConnectionSecurity.Tls"/> and every
+        /// request carries the <c>https</c> scheme.
+        /// </para>
+        /// </remarks>
+        public HttpConnectionListenerOptions UseHttps(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions)
+            => options.UseHttps(configure, tlsOptions, null, null);
+
+        /// <summary>
+        /// Serves HTTP/2 and HTTP/1.1 on one TLS endpoint with explicit per-protocol options; each
+        /// connection is served the protocol its TLS handshake negotiated through ALPN (RFC 7301).
+        /// </summary>
+        /// <param name="configure">The TCP listener configuration callback (endpoint, socket options).</param>
+        /// <param name="tlsOptions">
+        /// The server TLS options. When <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is
+        /// left unset, it is defaulted to <c>h2</c> then <c>http/1.1</c>; a caller-supplied protocol list is
+        /// preserved unmodified.
+        /// </param>
+        /// <param name="configureHttp1">Optional settings, including request limits, for the connections served HTTP/1.1.</param>
+        /// <param name="configureHttp2">Optional settings, including request limits, for the connections served HTTP/2.</param>
+        /// <returns>The current options instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> or <paramref name="tlsOptions"/> is <see langword="null"/>.</exception>
+        /// <remarks>See <see cref="UseHttps(Action{TcpConnectionListenerOptions}, TlsServerOptions)"/>.</remarks>
+        public HttpConnectionListenerOptions UseHttps(
+            Action<TcpConnectionListenerOptions> configure,
+            TlsServerOptions tlsOptions,
+            Action<Http1ConnectionListenerOptions>? configureHttp1,
+            Action<Http2ConnectionListenerOptions>? configureHttp2)
+        {
+            ArgumentNullException.ThrowIfNull(configure);
+            ArgumentNullException.ThrowIfNull(tlsOptions);
+
+            EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2, SslApplicationProtocol.Http11);
+
+            return options.UseHttp1AndHttp2(
+                () => TcpConnectionListener.Create(configure).UseTls(tlsOptions),
+                configureHttp1 ?? (static _ => { }),
+                configureHttp2 ?? (static _ => { }));
         }
 
         /// <summary>
@@ -277,6 +366,33 @@ public static class WebHostingExtensions
         [SupportedOSPlatform("linux")]
         [SupportedOSPlatform("macos")]
         public HttpConnectionListenerOptions UseHttp3(Action<QuicConnectionListenerOptions> configure, TlsServerOptions tlsOptions)
+            => options.UseHttp3(configure, tlsOptions, null);
+
+        /// <summary>
+        /// Serves HTTP/3 over a QUIC multiplexed connection listener whose TLS is supplied through
+        /// <see cref="TlsServerOptions"/>, with explicit HTTP/3 options.
+        /// </summary>
+        /// <param name="configure">
+        /// The QUIC listener configuration callback (endpoint, per-connection stream limits, and error
+        /// codes). Any <see cref="QuicConnectionListenerOptions.ServerAuthenticationOptions"/> set here
+        /// is superseded by <paramref name="tlsOptions"/>.
+        /// </param>
+        /// <param name="tlsOptions">
+        /// The server TLS options. When <see cref="SslServerAuthenticationOptions.ApplicationProtocols"/> is
+        /// left unset it is defaulted to <c>h3</c> and, when the enabled TLS protocols are unset, to
+        /// <see cref="SslProtocols.Tls13"/>.
+        /// </param>
+        /// <param name="configureHttp">Optional HTTP/3 settings, including request limits and QPACK.</param>
+        /// <returns>The current options instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> or <paramref name="tlsOptions"/> is <see langword="null"/>.</exception>
+        /// <remarks>See <see cref="UseHttp3(Action{QuicConnectionListenerOptions}, TlsServerOptions)"/>.</remarks>
+        [SupportedOSPlatform("windows")]
+        [SupportedOSPlatform("linux")]
+        [SupportedOSPlatform("macos")]
+        public HttpConnectionListenerOptions UseHttp3(
+            Action<QuicConnectionListenerOptions> configure,
+            TlsServerOptions tlsOptions,
+            Action<Http3ConnectionListenerOptions>? configureHttp)
         {
             ArgumentNullException.ThrowIfNull(configure);
             ArgumentNullException.ThrowIfNull(tlsOptions);
@@ -284,14 +400,16 @@ public static class WebHostingExtensions
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http3);
             EnsureTls13(tlsOptions.AuthenticationOptions);
 
-            return options.UseHttp3(() =>
-            {
-                QuicConnectionListenerOptions quicOptions = new();
-                configure(quicOptions);
-                quicOptions.ServerAuthenticationOptions = tlsOptions.AuthenticationOptions;
+            return options.UseHttp3(
+                () =>
+                {
+                    QuicConnectionListenerOptions quicOptions = new();
+                    configure(quicOptions);
+                    quicOptions.ServerAuthenticationOptions = tlsOptions.AuthenticationOptions;
 
-                return new QuicConnectionListener(quicOptions);
-            });
+                    return new QuicConnectionListener(quicOptions);
+                },
+                configureHttp ?? (static _ => { }));
         }
     }
 
@@ -301,10 +419,10 @@ public static class WebHostingExtensions
     /// caller's options so a subsequent read observes the negotiated protocol.
     /// </summary>
     /// <param name="tlsOptions">The TLS options whose application protocols are defaulted.</param>
-    /// <param name="defaultProtocol">The ALPN protocol id to install when none was supplied.</param>
-    private static void EnsureApplicationProtocols(TlsServerOptions tlsOptions, SslApplicationProtocol defaultProtocol)
+    /// <param name="defaultProtocols">The ALPN protocol ids to install, in the server's preference order, when none was supplied.</param>
+    private static void EnsureApplicationProtocols(TlsServerOptions tlsOptions, params ReadOnlySpan<SslApplicationProtocol> defaultProtocols)
     {
-        EnsureApplicationProtocols(tlsOptions.AuthenticationOptions, defaultProtocol);
+        EnsureApplicationProtocols(tlsOptions.AuthenticationOptions, defaultProtocols);
     }
 
     /// <summary>
@@ -313,12 +431,12 @@ public static class WebHostingExtensions
     /// subsequent read observes the negotiated protocol.
     /// </summary>
     /// <param name="authentication">The authentication options whose application protocols are defaulted.</param>
-    /// <param name="defaultProtocol">The ALPN protocol id to install when none was supplied.</param>
-    private static void EnsureApplicationProtocols(SslServerAuthenticationOptions authentication, SslApplicationProtocol defaultProtocol)
+    /// <param name="defaultProtocols">The ALPN protocol ids to install, in the server's preference order, when none was supplied.</param>
+    private static void EnsureApplicationProtocols(SslServerAuthenticationOptions authentication, params ReadOnlySpan<SslApplicationProtocol> defaultProtocols)
     {
         if (authentication.ApplicationProtocols is null || authentication.ApplicationProtocols.Count == 0)
         {
-            authentication.ApplicationProtocols = new List<SslApplicationProtocol> { defaultProtocol };
+            authentication.ApplicationProtocols = new List<SslApplicationProtocol>(defaultProtocols.ToArray());
         }
     }
 

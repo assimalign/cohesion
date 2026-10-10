@@ -127,8 +127,13 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Server" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Cookies" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />

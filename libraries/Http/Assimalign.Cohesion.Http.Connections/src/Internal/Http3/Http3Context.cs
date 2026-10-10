@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 
@@ -6,17 +7,46 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http3Context : TransportHttpContext
 {
+    // 0 while the exchange runs, 1 once it has ended (SendAsync returned or threw, or the exchange was
+    // disposed). A SendAsync that refused the head or a buffered trailer section (#1183) does not end it:
+    // nothing reached the wire, and the exchange runs until the caller finalizes it again or disposes it.
+    // Interlocked: the send path and the host's disposal race to end it.
+    private int _exchangeEnded;
+
+    /// <summary>
+    /// Initializes the exchange for a decoded request head.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="HttpContext.RequestCancelled"/> fires on <paramref name="requestAborted"/> and on the
+    /// request stream's <see cref="IConnection.ConnectionClosed"/>, which the drivers signal when the
+    /// client resets the request stream (<c>RESET_STREAM</c>), stops the response
+    /// (<c>STOP_SENDING</c>), or the stream is aborted or lost. RFC 9114 §4.1.1 — that is how a client
+    /// cancels a request, so the application learns of it as an HTTP/2 <c>RST_STREAM</c> tells it,
+    /// without having to read or write (#1329).
+    /// </remarks>
     public Http3Context(
-        Http3Request request,
-        Http3Response response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         IConnection streamConnection,
+        long streamId,
+        Http3RequestBodyStream requestBody,
+        int featureCapacity,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http30, request, response, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, featureCapacity, features, streamConnection.ConnectionClosed)
     {
         StreamConnection = streamConnection;
+        StreamId = streamId;
+        RequestBody = requestBody;
+        ExtendedConnectProtocol = requestHead.Protocol;
     }
+
+    /// <summary>
+    /// The <c>:protocol</c> of a valid extended CONNECT (RFC 9220), or <see langword="null"/> for any
+    /// other request. Only an exchange that carries one can accept a tunnel
+    /// (<see cref="Http3ExchangeControl.AcceptTunnelAsync"/>).
+    /// </summary>
+    public string? ExtendedConnectProtocol { get; }
 
     /// <summary>
     /// The bidirectional QUIC stream this exchange arrived on; the response is written
@@ -25,10 +55,68 @@ internal sealed class Http3Context : TransportHttpContext
     public IConnection StreamConnection { get; }
 
     /// <summary>
+    /// The request stream's wire ID (client-initiated bidirectional: 0, 4, 8, …), derived when the
+    /// stream was accepted (see <see cref="Http3ConnectionContext"/>). Keys the QPACK decoder-stream
+    /// instructions for the stream.
+    /// </summary>
+    public long StreamId { get; }
+
+    /// <summary>
+    /// The transport's request-body stream for this exchange — the innermost stream, independent of
+    /// any wrapper a request interceptor installed on <see cref="HttpRequest.Body"/>. The send path
+    /// consults it for a rejected body (413 over the size cap, 408 below the minimum data rate, 431 for
+    /// an oversized trailer section), for a transport reset, and to stop reading the request stream
+    /// once the complete response is on the wire.
+    /// </summary>
+    public Http3RequestBodyStream RequestBody { get; }
+
+    /// <summary>
     /// The effective RFC 9218 priority derived from this request's <c>Priority</c>
     /// header (urgency 3, non-incremental by default). HTTP/3 delegates cross-stream
     /// response ordering to the QUIC transport, so this is observable engine state
     /// rather than an input to an explicit scheduler (see docs/DESIGN.md).
     /// </summary>
     public HttpPriority EffectivePriority { get; set; } = HttpPriority.Default;
+
+    /// <summary>
+    /// The extended CONNECT tunnel accepted on this exchange (RFC 9220), or <see langword="null"/>. Set
+    /// by the accept path before the tunnel's response head is written.
+    /// </summary>
+    public Http3ExtendedConnectStream? Tunnel { get; set; }
+
+    /// <summary>
+    /// The connection that built this exchange, so ending the exchange tells it the request stream no
+    /// longer keeps the connection busy (#1085); <see langword="null"/> until the exchange is built.
+    /// </summary>
+    public Http3ConnectionContext? Connection { get; set; }
+
+    /// <summary>
+    /// An accepted extended CONNECT tunnel takes the exchange's request stream over, so the exchange
+    /// reports <see cref="HttpExchangeDirective.TakeOver"/> and the raw response body sink refuses to
+    /// commit a second head; otherwise the base's abort/continue derivation applies.
+    /// </summary>
+    internal override HttpExchangeDirective ExchangeDirective =>
+        Tunnel is not null ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
+
+    /// <summary>
+    /// Claims the end of the exchange: its <c>SendAsync</c> returned or threw, or it was disposed. A
+    /// <c>SendAsync</c> that refused the head or a buffered trailer section (#1183) does not claim it:
+    /// nothing reached the wire and the response has not started, so the exchange stays running until
+    /// the caller finalizes it again or disposes it.
+    /// </summary>
+    /// <returns><see langword="true"/> for the first caller only.</returns>
+    public bool TryEndExchange()
+    {
+        return Interlocked.Exchange(ref _exchangeEnded, 1) == 0;
+    }
+
+    /// <summary>
+    /// Ends the exchange on its connection, then disposes it. A host that never finalizes the exchange
+    /// through <c>SendAsync</c> still lets the connection fall idle by disposing it (#1085).
+    /// </summary>
+    public override ValueTask DisposeAsync()
+    {
+        Connection?.EndExchange(this);
+        return base.DisposeAsync();
+    }
 }

@@ -4,8 +4,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Enforces an <see cref="HttpMinDataRate"/> as an average over a transfer, measuring only the time
-/// actually spent waiting for the peer. Shared by the HTTP/1.1 streaming request-body read (a slow
-/// sender trickling its body) and the streaming response write (a slow reader refusing to drain).
+/// actually spent waiting for the peer. Shared by the request-body reads of every version (a slow
+/// sender trickling its body: <c>Http1RequestBodyStream</c>, <c>Http2RequestBodyStream</c>,
+/// <c>Http3RequestBodyStream</c>) and the HTTP/1.1 streaming response write (a slow reader refusing
+/// to drain).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -83,11 +85,27 @@ internal sealed class MinDataRateGate
             return false;
         }
 
-        double seconds = remainingTicks / (double)_frequency;
-        timeout = seconds >= _maxOperationTimeout.TotalSeconds
+        timeout = ToOperationTimeout(remainingTicks);
+        return true;
+    }
+
+    /// <summary>
+    /// Converts a wait, in <see cref="TimeProvider"/> ticks, to the timeout a blocking transport operation
+    /// is bounded by, clamped to the same sane upper bound as <see cref="TryGetOperationTimeout"/>.
+    /// </summary>
+    /// <param name="ticks">The wait, in clock ticks; a non-positive value yields <see cref="TimeSpan.Zero"/>.</param>
+    /// <returns>The operation timeout.</returns>
+    public TimeSpan ToOperationTimeout(long ticks)
+    {
+        if (ticks <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        double seconds = ticks / (double)_frequency;
+        return seconds >= _maxOperationTimeout.TotalSeconds
             ? _maxOperationTimeout
             : TimeSpan.FromSeconds(seconds);
-        return true;
     }
 
     /// <summary>

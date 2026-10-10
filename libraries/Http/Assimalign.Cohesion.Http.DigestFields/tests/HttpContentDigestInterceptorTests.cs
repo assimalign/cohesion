@@ -14,11 +14,10 @@ using Assimalign.Cohesion.Http;
 
 public class HttpContentDigestInterceptorTests
 {
-    // ------------------------------------------------------------ eager path (HTTP/1.1, HTTP/3)
+    // ------------------------------------------------------------ eager path (HTTP/1.1)
 
     [Theory(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: A matching Content-Digest passes and replays the body (eager protocols)")]
     [InlineData(HttpVersion.Http11)]
-    [InlineData(HttpVersion.Http30)]
     public void AfterRequestBody_EagerMatch_ReplaysBody(HttpVersion version)
     {
         byte[] content = Encoding.UTF8.GetBytes("payload that matches its digest");
@@ -42,7 +41,6 @@ public class HttpContentDigestInterceptorTests
 
     [Theory(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: A mismatched Content-Digest is rejected with 400 before dispatch (eager protocols)")]
     [InlineData(HttpVersion.Http11)]
-    [InlineData(HttpVersion.Http30)]
     public void AfterRequestBody_EagerMismatch_Rejects400(HttpVersion version)
     {
         byte[] declared = Encoding.UTF8.GetBytes("the original payload");
@@ -95,17 +93,20 @@ public class HttpContentDigestInterceptorTests
         original.IsDisposed.ShouldBeTrue();
     }
 
-    // ------------------------------------------------------------ lazy path (HTTP/2)
+    // ------------------------------------------------------------ lazy path (HTTP/2, HTTP/3)
 
-    [Fact(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: The HTTP/2 hook is CPU-only — it wraps without reading a single body octet")]
-    public void AfterRequestBody_OnHttp2_DoesNotReadBodyInHook()
+    [Theory(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: The hook is CPU-only on streamed-body protocols — it wraps without reading a single body octet")]
+    [InlineData(HttpVersion.Http20)]
+    [InlineData(HttpVersion.Http30)]
+    public void AfterRequestBody_OnStreamedBodyProtocol_DoesNotReadBodyInHook(HttpVersion version)
     {
-        // On h2 the hook runs on the connection's frame pump while the body may still be arriving;
-        // reading it in-hook is the deadlock this rework removes. A body that throws on any read
-        // proves the hook never touches it.
+        // On h2 the hook runs on the connection's frame pump while the body may still be arriving,
+        // so reading it in-hook would deadlock the connection. On h3 the body is read off the QUIC
+        // stream after dispatch, so an in-hook read would hold a thread-pool thread for the whole
+        // upload. A body that throws on any read proves the hook never touches it.
         byte[] content = Encoding.UTF8.GetBytes("still arriving");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
-        HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
+        HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
         IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         // The eager path would throw from ReadForbiddenStream here; returning at all proves the
@@ -117,12 +118,14 @@ public class HttpContentDigestInterceptorTests
         result.CanSeek.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: An HTTP/2 body matching its digest streams through and verifies at end-of-body")]
-    public async Task AfterRequestBody_OnHttp2Match_StreamsAndVerifiesAtEof()
+    [Theory(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: A streamed body matching its digest streams through and verifies at end-of-body")]
+    [InlineData(HttpVersion.Http20)]
+    [InlineData(HttpVersion.Http30)]
+    public async Task AfterRequestBody_OnStreamedBodyMatch_StreamsAndVerifiesAtEof(HttpVersion version)
     {
-        byte[] content = Encoding.UTF8.GetBytes("a streamed h2 body verified as the application reads");
+        byte[] content = Encoding.UTF8.GetBytes("a streamed body verified as the application reads");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
-        HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
+        HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
         Stream wrapped = HttpDigestFields.CreateContentDigestVerifier()
             .AfterRequestBody(context, new ChunkedReadStream(content, maxChunk: 7));
 
@@ -133,13 +136,15 @@ public class HttpContentDigestInterceptorTests
         (await wrapped.ReadAsync(new byte[8])).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: An HTTP/2 digest mismatch surfaces as the typed failure on the terminal read")]
-    public async Task AfterRequestBody_OnHttp2Mismatch_ThrowsTypedFailureOnTerminalRead()
+    [Theory(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: A streamed-body digest mismatch surfaces as the typed failure on the terminal read")]
+    [InlineData(HttpVersion.Http20)]
+    [InlineData(HttpVersion.Http30)]
+    public async Task AfterRequestBody_OnStreamedBodyMismatch_ThrowsTypedFailureOnTerminalRead(HttpVersion version)
     {
         byte[] declared = Encoding.UTF8.GetBytes("the original payload");
         byte[] actual = Encoding.UTF8.GetBytes("the tampered payload");
         string digest = HttpDigestField.ForContent(declared, HttpDigestAlgorithm.Sha256).Serialize();
-        HttpExchangeInterceptorRequestContext context = CreateContext(digest, HttpVersion.Http20);
+        HttpExchangeInterceptorRequestContext context = CreateContext(digest, version);
         Stream wrapped = HttpDigestFields.CreateContentDigestVerifier()
             .AfterRequestBody(context, new ChunkedReadStream(actual, maxChunk: 5));
 

@@ -134,7 +134,9 @@ public sealed class RouteParameterPolicyMap
             .Add("max", static argument => CreateMaxPolicy(argument))
             .Add("range", static argument => CreateRangePolicy(argument))
             .Add("regex", static argument => CreateRegexPolicy(argument))
-            .Add("when", static argument => CreateRequiredRouteValuePolicy(argument));
+            .Add("when", static argument => CreateRequiredRouteValuePolicy(argument))
+            // The last segment names no file (no extension): the fallback route's catch-all.
+            .Add("nonfile", static _ => new NonFileRouteParameterPolicy());
     }
 
     private static RegexRouteParameterPolicy CreateRegexPolicy(string? argument)

@@ -1,28 +1,34 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Web.Serialization.Internal;
 
 namespace Assimalign.Cohesion.Web.Serialization;
 
 /// <summary>
-/// The composition surface for the content-serialization registry, returned by
-/// <c>AddContentSerialization</c> / <c>AddJsonSerialization</c>. Format packages graft their
-/// registration verbs onto this type (the built-in JSON pair registers through
-/// <see cref="JsonContentSerializationBuilderExtensions.AddJson"/>).
+/// Composes the content-serialization registry: the request-body readers and response-body writers an
+/// application registers. Format packages graft their registration verbs onto this type (the built-in
+/// JSON pair registers through <see cref="JsonContentSerializationBuilderExtensions.AddJson"/>).
 /// </summary>
 /// <remarks>
-/// Registration is composition-time only: the builder feeds the feature instance that
-/// <c>AddContentSerialization</c> attached to the application, and the feature reads the
-/// registrations live, so verbs chained after the root call still take effect. Mutating the
-/// registry while the application is serving is not supported.
+/// Applications receive one in the
+/// <c>builder.Services.AddContentSerialization(serialization => serialization.AddJson(...))</c> callback.
+/// That verb is a component integration (<c>Properties/ComponentIntegrations.cs</c>, owner decision 34):
+/// it creates the builder, runs the callback, calls <see cref="Build"/>, and registers the resulting
+/// <see cref="IHttpContentSerializationFeature"/> as an <c>IHttpFeature</c> singleton. A composition
+/// surface without a service container registers <see cref="Build"/>'s result through
+/// <c>IWebApplicationBuilder.AddFeature</c>.
 /// </remarks>
 public sealed class ContentSerializationBuilder
 {
-    private readonly HttpContentSerializationFeature _feature;
+    private readonly List<IHttpContentReader> _readers = new();
+    private readonly List<IHttpContentWriter> _writers = new();
 
-    internal ContentSerializationBuilder(HttpContentSerializationFeature feature)
+    /// <summary>
+    /// Initializes a builder with no formats registered.
+    /// </summary>
+    public ContentSerializationBuilder()
     {
-        _feature = feature;
     }
 
     /// <summary>
@@ -42,7 +48,7 @@ public sealed class ContentSerializationBuilder
             throw new ArgumentException("A content reader must declare at least one media type.", nameof(reader));
         }
 
-        _feature.AddReader(reader);
+        _readers.Add(reader);
         return this;
     }
 
@@ -72,7 +78,19 @@ public sealed class ContentSerializationBuilder
                 nameof(writer));
         }
 
-        _feature.AddWriter(writer);
+        _writers.Add(writer);
         return this;
+    }
+
+    /// <summary>
+    /// Builds the registry from the readers and writers registered so far.
+    /// </summary>
+    /// <remarks>
+    /// The registry holds a snapshot of the registrations: formats added after this call do not reach it.
+    /// </remarks>
+    /// <returns>The registry, an <see cref="IHttpContentSerializationFeature"/> for the application to register.</returns>
+    public IHttpContentSerializationFeature Build()
+    {
+        return new HttpContentSerializationFeature(_readers.ToArray(), _writers.ToArray());
     }
 }
