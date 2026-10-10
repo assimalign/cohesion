@@ -1394,6 +1394,26 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             ResetRequestStream(streamConnection, requestStreamId, exception, abandonsReading: !reader.IsCompleted);
             return null;
         }
+        catch (Http3LimitExceededException exception)
+        {
+            // RFC 9114 §4.2.2 — the request head decodes past SETTINGS_MAX_FIELD_SECTION_SIZE. The decoder
+            // stopped at the field that crossed it, and the request never became an exchange, so the
+            // transport answers 431 itself. The reader sits just past the HEADERS frame, so what follows is
+            // drained or stopped like any unread request; the connection keeps serving its other streams.
+            Http3RequestBodyStream remainder = new(
+                this,
+                reader,
+                streamConnection,
+                requestStreamId,
+                new HttpTrailerCollection(isSupported: true),
+                declaredContentLength: null,
+                isTunnel: false,
+                fallbackCap: null,
+                _limits.MaxRequestHeadersFrameSize,
+                cancellationToken);
+            await AnswerRejectedRequestAsync(streamConnection, remainder, requestStreamId, exception.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
         catch (Http3ConnectionException exception)
         {
             AbortConnection(exception);
@@ -1579,6 +1599,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// Thrown (<c>H3_MESSAGE_ERROR</c>) when the encoding is malformed but the shared decoder state is
     /// intact — the stream is reset and the connection survives.
     /// </exception>
+    /// <exception cref="Http3LimitExceededException">
+    /// Thrown (<c>431</c>) when the decoded section exceeds <see cref="Http3QPackOptions.MaxFieldSectionSize"/>
+    /// (RFC 9114 §4.2.2). The decoder stops at the field that crosses it; the caller answers or resets
+    /// the stream, and the connection survives.
+    /// </exception>
     /// <exception cref="QPackException">Thrown on a QPACK connection error (RFC 9204 §2.2).</exception>
     internal async ValueTask<List<(string Name, string Value)>> DecodeFieldSectionAsync(
         byte[] fieldSection,
@@ -1592,7 +1617,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 // Static-only QPACK decode (dynamic table disabled): the field section resolves against
                 // the static table or literals only, and a malformed encoding cannot corrupt state shared
                 // with other streams — it is isolated to this stream.
-                return QPackFieldSectionDecoder.Decode(fieldSection);
+                return QPackFieldSectionDecoder.Decode(fieldSection, _qpackOptions.MaxFieldSectionSize);
             }
             catch (Exception exception) when (IsFieldSectionDecodeFailure(exception))
             {
@@ -1780,10 +1805,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
-        // RFC 9110 §15.5.14 — the request body exceeded the body-size cap and the final response head
-        // has not been committed, so the exchange is answered 413 Content Too Large, whatever the
-        // application staged from a body it never fully received — unless it answered 413 itself, whose
-        // representation is kept.
+        // RFC 9110 §15.5.14 — the request body exceeded the body-size cap (or, RFC 9114 §4.2.2, its trailer
+        // section exceeded SETTINGS_MAX_FIELD_SECTION_SIZE) and the final response head has not been
+        // committed, so the exchange is answered 413 Content Too Large (or 431 Request Header Fields Too
+        // Large), whatever the application staged from a request it never fully received — unless it
+        // answered that status itself, whose representation is kept.
         if (requestBody.RejectedStatusCode is { } rejectedStatus && http3Context.Response.StatusCode != rejectedStatus)
         {
             await ReplaceWithStatusOnlyResponseAsync(http3Context, rejectedStatus).ConfigureAwait(false);

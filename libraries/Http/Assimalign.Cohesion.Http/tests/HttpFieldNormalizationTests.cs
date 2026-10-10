@@ -90,6 +90,30 @@ public class HttpFieldNormalizationTests
         combined.Count.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Combining many repeated list field lines should allocate in proportion to the count")]
+    public void CombineFieldValue_OnManyRepeatedListFieldLines_ShouldAllocateLinearly()
+    {
+        // Arrange — the way every transport combines a repeated field line. Copying the combined value on
+        // every repeat allocates about 10 GB for this many; amortized constant-time appends about 1 MB.
+        const int repeats = 50_000;
+        HttpHeaderValue line = new("*/*");
+        HttpHeaderValue combined = line;
+
+        // Act
+        long before = System.GC.GetAllocatedBytesForCurrentThread();
+
+        for (int index = 1; index < repeats; index++)
+        {
+            combined = HttpFieldNormalization.CombineFieldValue(HttpHeaderKey.Accept, combined, line);
+        }
+
+        long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        combined.Count.ShouldBe(repeats);
+        allocated.ShouldBeLessThan(16L * 1024 * 1024);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: An empty :protocol is an extended CONNECT violation on every method")]
     [InlineData("CONNECT")]
     [InlineData("GET")]

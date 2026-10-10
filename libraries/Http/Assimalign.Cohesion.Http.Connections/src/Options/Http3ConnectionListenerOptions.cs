@@ -61,7 +61,8 @@ public sealed class Http3ConnectionListenerOptions
         /// length is checked when the frame header arrives, before any of its payload is buffered; a
         /// longer frame resets that request stream with <c>H3_FRAME_ERROR</c> (RFC 9114 §7.1) while the
         /// connection's other streams keep being served. Defaults to
-        /// <see cref="DefaultMaxRequestHeadersFrameSize"/> (32 KB).
+        /// <see cref="DefaultMaxRequestHeadersFrameSize"/> (32 KB). This bounds the encoded section; what
+        /// it decodes to is bounded by <see cref="Http3QPackOptions.MaxFieldSectionSize"/>.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is less than <c>1</c>.</exception>
         public int MaxRequestHeadersFrameSize

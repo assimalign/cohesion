@@ -474,7 +474,7 @@ internal static class HttpProtocolPayloadFactory
         // field lines, name references, or literals).
         Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach ((string name, string value) in QPackFieldSectionDecoder.Decode(headerBlock))
+        foreach ((string name, string value) in QPackFieldSectionDecoder.Decode(headerBlock, long.MaxValue))
         {
             headers[name] = value;
         }

@@ -90,6 +90,36 @@ lines are preserved without forcing a lossy early join; the comma-folded
 `Value` is computed on demand for the common case where RFC 9110 §5.2 permits
 combining a list-valued field into one line.
 
+Combining a field repeated `n` times costs time and allocation linear in `n`.
+Every transport combines a repeated line with `HttpHeaderValue.Concat`, one
+line at a time. Concat used to copy every value into a new exact array on each
+call, which made `n` repeats quadratic. An HTTP/3 request of one-octet QPACK
+references reached about 32,000 repeats per request (#1082). Concat now
+appends in amortized constant time:
+
+- **Exact arrays up to four values.** The common one-to-four-value field
+  allocates exactly what it did before.
+- **Geometric growth past four.** The array grows to twice the value count, and
+  the value carries a private live count beside its array. Every accessor reads
+  only the live elements: the indexer, `Count`, `Value`, enumeration, `CopyTo`,
+  `ToArray`, equality, and the hash.
+- **Atomic slot claims.** The next append writes into the first spare slot,
+  claimed with a compare-and-exchange from `null`. The first append from a given
+  value takes the slot. Any other append from that value finds the slot taken and
+  copies, on any thread, so two values appended to one original never see each
+  other's. Appended values are never `null`, and a caller's array never has a
+  live count shorter than the array, so a caller's array is never written to.
+- **Accepted costs.** The struct is one `int` wider. A value can hold its array
+  alive at up to twice the size its values need.
+
+The alternative was to group repeats in every transport before building the
+collection. That fixes each caller separately, and any caller that misses it
+stays quadratic. Fixing Concat covers HTTP/1.1, HTTP/2, HTTP/3, the trailer
+readers, and `AppendValue` in one place. `Cookie` is the exception. Its crumbs
+join into one string with `"; "`, and an immutable string cannot grow in place.
+A transport that combines many cookie crumbs joins them once (HTTP/3 does,
+#1082).
+
 `Set-Cookie` is the field that must **never** be folded: each cookie occupies
 its own field line (RFC 9110 §5.3, RFC 6265 §3), and HTTP/2 / HTTP/3 likewise
 keep each `Set-Cookie` distinct. The cookie *request* header, conversely, is

@@ -48,6 +48,9 @@ internal static class Http3HeaderCodec
         string? schemeValue = null;
         string? protocol = null;
         bool seenRegularField = false;
+        // RFC 9114 §4.2.1 — the crumbs of a split cookie field, joined with "; " once the section is read.
+        // Joining them a pair at a time copies the growing value per crumb, quadratic in the crumb count.
+        List<string>? cookieCrumbs = null;
 
         foreach ((string name, string value) in fields)
         {
@@ -125,13 +128,29 @@ internal static class Http3HeaderCodec
             if (headers.TryGetValue(key, out HttpHeaderValue existingValue))
             {
                 // RFC 9114 §4.2.1 — repeated-field combining (Cookie coalesces
-                // with "; ", other list fields combine) matches HTTP/2.
-                headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
+                // with "; ", other list fields combine) matches HTTP/2. Both run in
+                // time linear in the repeats: HttpHeaderValue.Concat appends in
+                // amortized constant time, and cookie crumbs are joined once below.
+                if (key == HttpHeaderKey.Cookie)
+                {
+                    (cookieCrumbs ??= [existingValue.Value]).Add(value);
+                }
+                else
+                {
+                    headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
+                }
             }
             else
             {
                 headers[key] = value;
             }
+        }
+
+        if (cookieCrumbs is not null)
+        {
+            // The first crumb already holds the field's place in the collection; replacing its value
+            // keeps the order the fields arrived in.
+            headers[HttpHeaderKey.Cookie] = string.Join("; ", cookieCrumbs);
         }
 
         // RFC 9114 §4.3.1 — required request pseudo-headers. A CONNECT request
@@ -219,8 +238,9 @@ internal static class Http3HeaderCodec
     /// <summary>
     /// Encodes the field section of a bodyless final response the transport answers on its own —
     /// the <c>:status</c> pseudo-header and <c>content-length: 0</c> — used when a request is
-    /// refused before it ever became an exchange (a request-body limit violated while a request
-    /// interceptor read the body).
+    /// refused before it ever became an exchange: a request head over
+    /// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> (431), or a request-body limit violated while a request
+    /// interceptor read the body (413, or 431 for its trailer section).
     /// </summary>
     /// <param name="statusCode">The final status code.</param>
     /// <returns>The QPACK-encoded field section.</returns>

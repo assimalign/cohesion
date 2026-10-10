@@ -89,7 +89,10 @@ HTTP/1.1 wire-format bounds, `Http2ConnectionListenerOptions.Http2Limits` adds
 the HTTP/2 abuse caps). `Http3ConnectionListenerOptions.Http3Limits` adds only
 `MaxRequestHeadersFrameSize` — the bound on the one request-stream frame the
 server buffers whole — because HTTP/3's stream and flow-control limits live in
-the QUIC transport (see the HTTP/3 non-goals).
+the QUIC transport (see the HTTP/3 non-goals). What that frame decodes to is
+bounded by `Http3QPackOptions.MaxFieldSectionSize`, beside the other settings the
+QPACK decoder advertises and enforces (see "QPACK field-section compression →
+Decoded field-section size").
 
 `BacklogCapacity` retains its bounded-channel semantics: it caps how
 many accepted HTTP connections may buffer before the per-listener accept
@@ -2503,6 +2506,11 @@ same posture as the HTTP/2 transport's initial SETTINGS:
   table is disabled (see the QPACK section) — and is raised to the configured
   `Http3QPackOptions.MaxTableCapacity` when the dynamic table is opted in, in
   which case **`QPACK_BLOCKED_STREAMS` (0x07)** is advertised alongside it.
+- **`SETTINGS_MAX_FIELD_SECTION_SIZE` (0x06)** (RFC 9114 §7.2.4.1) is
+  `Http3QPackOptions.MaxFieldSectionSize`, 16 KB by default: the decoded size
+  above which the server refuses a request head or trailer section (see "QPACK
+  field-section compression → Decoded field-section size"). Without it a peer
+  may assume the size is unlimited.
 
 Emission is best-effort: opening an outbound stream requires a live QUIC
 connection, so if the connection is already gone the setup failure is
@@ -2654,8 +2662,11 @@ default), checked before any of it is buffered. The field section is QPACK
 decoded exactly as before — static-only, or against the opt-in dynamic table
 with its blocked-stream wait, Section Acknowledgment, and Stream Cancellation
 keyed on the request stream ID — then validated by `Http3HeaderCodec`, which
-also parses `Content-Length`. The request then gets its lazy body, the request
-interceptors run, and the context is published.
+also parses `Content-Length`. The decode stops at
+`Http3QPackOptions.MaxFieldSectionSize` (16 KB by default); a head that crosses
+it is never dispatched, and the transport answers it `431` itself (see "QPACK
+field-section compression → Decoded field-section size"). The request then gets
+its lazy body, the request interceptors run, and the context is published.
 
 **The body** (`Http3RequestBodyStream`) continues from the same reader position
 when the application reads. It delivers DATA payloads straight into the
@@ -2686,7 +2697,9 @@ not been committed, the exchange is answered `413 Content Too Large` with no
 content — replacing whatever the application staged (an exception boundary's
 500, say), unless the application itself answered 413, whose representation is
 kept. If a request hook read the body before dispatch and hit the cap, no
-exchange exists, so the transport writes the bodyless 413 itself.
+exchange exists, so the transport writes the bodyless 413 itself. A trailer
+section that decodes past `MaxFieldSectionSize` is rejected the same way and
+answered `431`, provided the response head is still uncommitted.
 
 **Ending the exchange.** The response ends with the stream's FIN (see "Ending
 the request stream at response completion"). If the request was not read to its
@@ -2718,6 +2731,8 @@ The signals and their RFC 9114 §8.1 codes:
 | Refused before dispatch — an interceptor rejection, teardown before dispatch, or assembled but never handed over | reset | `H3_REQUEST_REJECTED` | §4.1.1: no application processing, so the peer may retry |
 | Malformed request (field section, `:path`, Content-Length, trailers) | reset | `H3_MESSAGE_ERROR` | §4.1.2 |
 | HEADERS frame longer than `MaxRequestHeadersFrameSize` | reset | `H3_FRAME_ERROR` | §7.1 names invalid frame sizes; a local limit leaves connection state intact, so the error is scoped to the stream (§8) |
+| Request head decoded past `MaxFieldSectionSize` | `431` response, then drained or `STOP_SENDING` | `H3_NO_ERROR` | §4.2.2 lets the server answer 431; the request was never dispatched |
+| Trailer section decoded past `MaxFieldSectionSize` after the response head was committed | reset | `H3_MESSAGE_ERROR` | §10.5.1 lets an oversized section be treated as malformed (§4.1.2); no status can follow a committed head |
 | Stream ended before its HEADERS frame | reset | `H3_REQUEST_INCOMPLETE` | §8.1 |
 | A frame truncated by the stream's end | connection close | `H3_FRAME_ERROR` | §7.1 requires a connection error |
 | DATA before HEADERS; DATA or HEADERS after the trailer section; HEADERS after a CONNECT head; a control, push, reserved HTTP/2, or PRIORITY_UPDATE frame on a request stream | connection close | `H3_FRAME_UNEXPECTED` | §4.1, §4.4, §7.2.x, §7.2.8, RFC 9218 §7.2 |
@@ -3230,6 +3245,58 @@ offending request stream is reset with `H3_MESSAGE_ERROR` and the connection
 survives (with the dynamic table disabled no state is shared, so a strict
 `QPACK_DECOMPRESSION_FAILED` connection error would buy nothing).
 
+### Decoded field-section size (RFC 9114 §4.2.2)
+
+`MaxRequestHeadersFrameSize` bounds the encoded HEADERS frame, but QPACK
+expands: a one-octet static reference such as `accept: */*` decodes to a field,
+and the references to one large dynamic-table entry cost an octet each. Before
+#1082 nothing bounded the decoded section. One 32 KB frame of one-octet
+references decoded to about 32,000 fields. Combining them as one repeated field
+cost about 0.85 s of CPU and 4 GB of allocation per request, on any HTTP/3
+listener, from an unauthenticated client.
+
+`Http3QPackOptions.MaxFieldSectionSize` (16 KB by default, the HTTP/2
+`MaxRequestHeaderListSize` default) is the bound:
+
+- **Counting.** Each field costs its name length plus its value length plus 32
+  octets (RFC 9114 §4.2.2). Strings decode as Latin-1, so the lengths are the
+  octet counts. The overhead bounds the field count too: 16 KB admits at most
+  512 fields, so no separate count cap is needed.
+- **Advertised.** The value goes out as `SETTINGS_MAX_FIELD_SECTION_SIZE` (0x06)
+  in the server's opening SETTINGS (see "The server control stream and SETTINGS
+  emission").
+- **Enforced inside the decoder.** `QPackFieldSectionDecoder` adds each field's
+  size as the field resolves and throws before the field joins the decoded list.
+  The decode stops at the field that crosses the limit and never reads the rest.
+  The static-only path passes the option directly, and `QPackDecoderState` copies
+  it for the dynamic path, so request heads and trailer sections share one check
+  on both profiles. A decode only reads the dynamic table, so stopping one is
+  stream-scoped. A section that referenced the table gets the Stream Cancellation
+  any abandoned decode gets.
+- **The response.** The decoder throws `Http3LimitExceededException` carrying
+  `431 Request Header Fields Too Large`, which RFC 9114 §4.2.2 lets a server send
+  and which HTTP/1.1 sends for the same condition. A request head over the limit
+  is never dispatched: the transport writes a bodyless `431`, then drains or stops
+  the rest of the stream as for any refused request. A trailer section over the
+  limit fails the body read and is recorded like an over-cap body. `SendAsync`
+  then answers `431` if the response head is uncommitted. If the head is already
+  on the wire, no status can follow it, so the stream is reset with
+  `H3_MESSAGE_ERROR`: RFC 9114 §10.5.1 lets a peer treat a section over the
+  advertised size as malformed. The connection and its other streams are
+  unaffected in every case.
+
+The option lives on `Http3QPackOptions`, not `Http3Limits`, because it is a
+decoder setting advertised in the same SETTINGS frame as `QPACK_MAX_TABLE_CAPACITY`
+and enforced by the same decoder. The decoder state already receives those
+options, so the connection context changed only at the static-only call.
+
+**Repeated fields combine in linear time.** The limit makes the quadratic
+combine cheap at 16 KB, but a host may raise it. Two changes keep the combine
+linear at any limit. `HttpHeaderValue.Concat` (core Http) now appends in
+amortized constant time. `Http3HeaderCodec` collects cookie crumbs and joins
+them with `"; "` once, instead of re-copying the growing cookie value for every
+crumb. The joined cookie keeps the position of its first crumb.
+
 ### Field-section rules (RFC 9114 §4.2 / §4.3)
 
 After QPACK decoding, `Http3HeaderCodec` enforces the HTTP/3 message
@@ -3302,6 +3369,10 @@ and string primitives.
 - **Acting on the peer's `QPACK_MAX_TABLE_CAPACITY`.** The server reads the
   peer's SETTINGS but, being a static-only encoder, does not use the peer's
   advertised decoder capacity to size a response-side table.
+- **Acting on the peer's `SETTINGS_MAX_FIELD_SECTION_SIZE`.** RFC 9114 §4.2.2
+  says an endpoint SHOULD NOT send a field section over the size its peer
+  advertised. The server records the peer's value but does not check its
+  response heads or trailers against it.
 
 ## Extended CONNECT (`:protocol`)
 

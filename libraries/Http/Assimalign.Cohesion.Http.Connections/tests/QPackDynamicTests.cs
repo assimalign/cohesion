@@ -71,7 +71,7 @@ public class QPackDynamicTests
     {
         byte[] encoded = QPackFieldSectionEncoder.Encode([("accept", "application/json"), ("x-a", "v")]);
 
-        List<(string Name, string Value)> decoded = QPackFieldSectionDecoder.Decode(encoded);
+        List<(string Name, string Value)> decoded = QPackFieldSectionDecoder.Decode(encoded, long.MaxValue);
 
         decoded.ShouldContain(("accept", "application/json"));
         decoded.ShouldContain(("x-a", "v"));
@@ -295,7 +295,7 @@ public class QPackDynamicTests
         // Field line: dynamic indexed, relative 0 → absolute Base-1-0 = 0.
         byte[] section = [0x02, 0x00, 0x80];
 
-        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section, table);
+        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section, table, long.MaxValue);
 
         fields.ShouldHaveSingleItem();
         fields[0].ShouldBe(("x-dyn", "hello"));
@@ -312,7 +312,7 @@ public class QPackDynamicTests
         // Post-base index 0 → absolute Base + 0 = 0.
         byte[] section = [0x02, 0x80, 0x10];
 
-        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section, table);
+        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(section, table, long.MaxValue);
 
         fields.ShouldHaveSingleItem();
         fields[0].ShouldBe(("x-pb", "pbvalue"));
@@ -326,7 +326,7 @@ public class QPackDynamicTests
         // No insertions, but a field section claims RIC 1 and references entry 0.
         byte[] section = [0x02, 0x00, 0x80];
 
-        QPackException ex = Should.Throw<QPackException>(() => QPackFieldSectionDecoder.Decode(section, table));
+        QPackException ex = Should.Throw<QPackException>(() => QPackFieldSectionDecoder.Decode(section, table, long.MaxValue));
         ex.ErrorCode.ShouldBe(Http3ErrorCode.QPackDecompressionFailed);
     }
 

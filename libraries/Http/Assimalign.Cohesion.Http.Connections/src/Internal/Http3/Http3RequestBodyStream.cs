@@ -33,6 +33,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// send path answers 413 when the response head has not been committed and then stops reading.
 /// </para>
 /// <para>
+/// <b>Trailer-section size.</b> A trailer section that decodes past
+/// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> (RFC 9114 §4.2.2) is rejected the same way, answered 431,
+/// while the response head is uncommitted; after that it resets the stream with
+/// <c>H3_MESSAGE_ERROR</c>.
+/// </para>
+/// <para>
 /// <b>Errors.</b> A malformed request detected in the body (a Content-Length the DATA frames contradict,
 /// a malformed trailer section) is an <c>H3_MESSAGE_ERROR</c> stream error (RFC 9114 §4.1.2); an
 /// oversized trailer section an <c>H3_FRAME_ERROR</c> stream error; either resets the request stream
@@ -68,6 +74,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private readonly Lock _gate = new();
 
     private HttpExchangeInterceptorRequestContext? _interception;
+    // The exchange this body belongs to, once it exists: an oversized trailer section asks it whether
+    // the response has started. Null while a request hook reads the body before dispatch.
+    private Http3Context? _owner;
     private CancellationToken _requestAborted;
     private bool _started;
     private long? _cap;
@@ -138,7 +147,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
     /// <summary>
     /// Gets the status the exchange is answered with because the request body was rejected — 413 when it
-    /// exceeded the body-size cap — or <see langword="null"/> when it was not rejected.
+    /// exceeded the body-size cap, 431 when its trailer section exceeded
+    /// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> before the response started — or <see langword="null"/> when
+    /// it was not rejected.
     /// </summary>
     public HttpStatusCode? RejectedStatusCode { get; private set; }
 
@@ -183,11 +194,13 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
     /// <summary>
     /// Attaches the exchange this body belongs to, so a read in flight is cancelled with the exchange
-    /// (<see cref="HttpContext.RequestCancelled"/>). Called once, when the exchange is constructed.
+    /// (<see cref="HttpContext.RequestCancelled"/>) and an oversized trailer section can tell whether a
+    /// 431 can still be sent. Called once, when the exchange is constructed.
     /// </summary>
     /// <param name="owner">The owning exchange.</param>
     public void AttachOwner(Http3Context owner)
     {
+        _owner = owner;
         _requestAborted = owner.RequestCancelled;
     }
 
@@ -451,7 +464,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
         catch (Http3LimitExceededException)
         {
-            // Recorded by Reject; the send path answers 413 and stops reading.
+            // Recorded by Reject; the send path answers 413 (or 431) and stops reading.
             throw;
         }
         catch (OperationCanceledException) when (_connection.ConnectionClosed.IsCancellationRequested
@@ -570,6 +583,21 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             Fail(new IOException("A read was cancelled inside the request's trailer section; the request body can no longer be read.", exception));
             throw;
         }
+        catch (Http3LimitExceededException exception)
+        {
+            // RFC 9114 §4.2.2 — the trailer section decodes past SETTINGS_MAX_FIELD_SECTION_SIZE. Its frame was
+            // read whole, so the stream sits on a frame boundary. While the response head is uncommitted the
+            // exchange is answered 431, as an over-cap body is answered 413. Once the head is on the wire no
+            // status can follow, so the section is treated as malformed (RFC 9114 §10.5.1): an
+            // H3_MESSAGE_ERROR stream error.
+            if (_owner is { HasFinalResponseStarted: true })
+            {
+                throw new Http3StreamException(Http3ErrorCode.MessageError, exception.Message, exception);
+            }
+
+            Reject(exception);
+            throw;
+        }
 
         try
         {
@@ -622,8 +650,12 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
     private Http3LimitExceededException Reject(string message)
     {
-        Http3LimitExceededException rejection = new(HttpStatusCode.RequestEntityTooLarge, message);
-        RejectedStatusCode = HttpStatusCode.RequestEntityTooLarge;
+        return Reject(new Http3LimitExceededException(HttpStatusCode.RequestEntityTooLarge, message));
+    }
+
+    private Http3LimitExceededException Reject(Http3LimitExceededException rejection)
+    {
+        RejectedStatusCode = rejection.StatusCode;
         Fail(rejection);
         return rejection;
     }
