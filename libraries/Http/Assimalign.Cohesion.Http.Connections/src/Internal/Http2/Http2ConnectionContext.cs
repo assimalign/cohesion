@@ -183,12 +183,26 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // set its own), advertising the listener's HTTP/3 endpoint. Null when advertisement is off.
     private readonly string? _altSvcHeaderValue;
 
+    // #1085 — the monotonic clock the connection's deadlines and its streams' data-rate gates measure on.
+    // TimeProvider.System in production, as on HTTP/1.1.
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
+    // #1085 — the keep-alive and request-headers deadline every inbound frame read is bounded by. Created
+    // with the frame pump (its token links the pump's) and disposed when the pump stops; the stream table
+    // and the retired exchange slots tell it, under _syncRoot, whether the connection is idle.
+    private Http2ConnectionTimeout? _timeout;
+    // #1085 — the minimum request-body data rate shared by the streams' body readers, or null when the
+    // limit is disabled.
+    private readonly Http2RequestBodyDataRate? _requestBodyDataRate;
+
     public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
         _floodGuard = new Http2FloodGuard(limits);
         _altSvcHeaderValue = altSvcHeaderValue;
+        _requestBodyDataRate = limits.MinRequestBodyDataRate is { } minRequestBodyDataRate
+            ? new Http2RequestBodyDataRate(minRequestBodyDataRate, _timeProvider, IsReceiveWindowLow, RejectSlowRequestBodyAsync)
+            : null;
         // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
         // decoded field list; the stream's header-block accumulator enforces the raw-byte cap.
         _headerDecoder = new HPackDecoder(maxHeaderListSize: limits.MaxRequestHeaderListSize);
@@ -277,6 +291,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
 
         _pumpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // #1085 — the connection is idle from acceptance: the preface, the client's SETTINGS and its
+        // first stream all arrive under the keep-alive deadline.
+        _timeout = new Http2ConnectionTimeout(_http2Limits.KeepAliveTimeout, _http2Limits.RequestHeadersTimeout, _timeProvider, _pumpCts.Token);
         _pumpTask = Task.Run(() => PumpAsync(_pumpCts.Token));
     }
 
@@ -308,6 +326,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 if (processed.TerminateConnection)
                 {
                     return;
+                }
+
+                // #1085 — the request-headers deadline holds until the field block the frame belonged to
+                // ends (RFC 9113 §6.10): END_HEADERS, or a frame that failed before setting a
+                // continuation.
+                if (_continuationStreamId is null)
+                {
+                    _timeout?.OnHeaderBlockEnded();
                 }
 
                 if (processed.Context is not null)
@@ -379,6 +405,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // racing a clean end-of-enumerable.
             AbortPendingRequests(cancelled: cancellationToken.IsCancellationRequested);
             _readyContexts.Writer.TryComplete();
+
+            // Nothing reads frames any more; the streams' later removals find it disposed and leave it.
+            _timeout?.Dispose();
         }
     }
 
@@ -447,6 +476,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // throwing on a preface mismatch.
             return false;
         }
+        catch (OperationCanceledException) when (_timeout is { TimedOut: true })
+        {
+            // #1085 — the preface did not arrive within the keep-alive deadline. The server has sent
+            // nothing yet, and its SETTINGS must be its first frame (RFC 9113 §3.4), so the connection is
+            // closed without a GOAWAY.
+            return false;
+        }
         catch (Exception ex) when (IsWireLevelFailure(ex))
         {
             return false;
@@ -464,7 +500,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     {
         try
         {
-            ReceivedFrame? frame = await ReadFrameAsync(Stream, _localSettings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+            ReceivedFrame? frame = await ReadFrameAsync(Stream, _localSettings.MaxFrameSize, _timeout, cancellationToken).ConfigureAwait(false);
             return new FrameReadOutcome(frame, terminate: false);
         }
         catch (Http2ConnectionException error)
@@ -472,10 +508,44 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             await TryEmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
             return new FrameReadOutcome(frame: null, terminate: true);
         }
+        catch (OperationCanceledException) when (_timeout is { TimedOut: true })
+        {
+            await CloseOnTimeoutAsync(_timeout, cancellationToken).ConfigureAwait(false);
+            return new FrameReadOutcome(frame: null, terminate: true);
+        }
         catch (Exception ex) when (IsWireLevelFailure(ex))
         {
             return new FrameReadOutcome(frame: null, terminate: true);
         }
+    }
+
+    /// <summary>
+    /// Ends a connection whose deadline elapsed while the pump waited for a frame (#1085). The read the
+    /// deadline cancelled may have consumed part of a frame, so the connection cannot read on.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description><b>A field block was arriving</b> — the request-headers deadline. A field block
+    /// holds the whole connection until END_HEADERS (RFC 9113 §6.10), so the connection ends with
+    /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>: RFC 9113 §10.5 lets an endpoint treat activity that ties up its
+    /// resources as that connection error, and it is the code every other HTTP/2 limit escalates to.
+    /// Requests already received in full stay answerable, as after any connection error.</description></item>
+    /// <item><description><b>The connection carried no stream</b> — the keep-alive deadline. The
+    /// connection closes gracefully: <c>GOAWAY(NO_ERROR)</c> with the last stream it accepted (RFC 9113
+    /// §6.8 and §9.1, which ask an endpoint closing an idle connection to send GOAWAY first), and the
+    /// receive enumeration ends. Before the preface has been exchanged nothing is sent.</description></item>
+    /// </list>
+    /// </remarks>
+    private async Task CloseOnTimeoutAsync(Http2ConnectionTimeout timeout, CancellationToken cancellationToken)
+    {
+        if (timeout.IsHeaderBlockOpen)
+        {
+            await TryEmitGoAwayAsync(Http2ErrorCode.EnhanceYourCalm, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        BeginGracefulClose();
+        await AnnounceGracefulCloseAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -866,8 +936,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         // RFC 9113 §3.4 — the connection preface MUST appear before any
         // other client data. A mismatch is a connection error with code
-        // PROTOCOL_ERROR.
-        byte[] preface = await ReadExactOrThrowAsync(Stream, _clientPreface.Length, cancellationToken).ConfigureAwait(false);
+        // PROTOCOL_ERROR. It arrives under the keep-alive deadline (#1085).
+        byte[] preface = await ReadExactOrThrowAsync(Stream, _clientPreface.Length, _timeout?.Token ?? cancellationToken).ConfigureAwait(false);
 
         if (!preface.AsSpan().SequenceEqual(_clientPreface))
         {
@@ -1897,7 +1967,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // RFC 9110 §15.5.14 — the request content crossed the stream's body-size cap. The frame was
             // not delivered; its flow-control cost stays consumed until the stream's removal reclaims it
             // to the connection window, which every rejection path below ends in.
-            await RejectOversizedRequestBodyAsync(stream, cancellationToken).ConfigureAwait(false);
+            await RejectRequestBodyAsync(stream, HttpStatusCode.RequestEntityTooLarge, cancellationToken).ConfigureAwait(false);
         }
 
         return null;
@@ -2015,7 +2085,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 OnRequestBodyConsumedAsync,
                 _requestInterceptors,
                 _http2Limits.MaxRequestBodySize,
-                _featureCapacity).ConfigureAwait(false);
+                _featureCapacity,
+                _requestBodyDataRate).ConfigureAwait(false);
         }
         catch (HPackDecodingException error)
         {
@@ -2052,7 +2123,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // dispose it first, which runs the exchange's disposal walk over the hook-attached
             // features and the body-wrapper chain (no context will ever own them), then answer 413.
             await context.DisposeAsync().ConfigureAwait(false);
-            await RejectOversizedRequestBodyAsync(stream, cancellationToken).ConfigureAwait(false);
+            await RejectRequestBodyAsync(stream, HttpStatusCode.RequestEntityTooLarge, cancellationToken).ConfigureAwait(false);
             return null;
         }
 
@@ -2060,20 +2131,22 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Answers a request whose content exceeds its stream's body-size cap (RFC 9110 §15.5.14) — found at
-    /// dispatch from the declared <c>content-length</c>, or on receipt when the running total of DATA
-    /// crosses the cap.
+    /// Answers a request whose content the transport rejects: <c>413</c> for content that exceeds its
+    /// stream's body-size cap (RFC 9110 §15.5.14) — found at dispatch from the declared
+    /// <c>content-length</c>, or on receipt when the running total of DATA crosses the cap — or
+    /// <c>408</c> for content that arrives below the minimum data rate (RFC 9110 §15.5.9, #1085), found
+    /// by the body reader.
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
     /// <item><description><b>No response started</b> — the transport claims the final response and writes
-    /// <c>413 Content Too Large</c> itself (HEADERS with <c>END_STREAM</c>), then resets the stream with
+    /// the status itself (HEADERS with <c>END_STREAM</c>), then resets the stream with
     /// <c>NO_ERROR</c> if the peer is still sending: RFC 9113 §8.1 lets a server that has sent a complete
     /// response ask the client to stop transmitting the request with <c>RST_STREAM(NO_ERROR)</c>, and
     /// the client must not discard the response because of it. The application's own response for the
     /// exchange, if it still writes one, is discarded.</description></item>
-    /// <item><description><b>The application's response is in progress</b> — a 413 can no longer be sent,
-    /// and the response cannot complete without the content the server refuses to accept, so the
+    /// <item><description><b>The application's response is in progress</b> — a status can no longer be
+    /// sent, and the response cannot complete without the content the server refuses to accept, so the
     /// stream is reset with <c>CANCEL</c> (RFC 9113 §7: the stream is no longer needed).
     /// <c>NO_ERROR</c> would claim a complete response (§8.1); <c>PROTOCOL_ERROR</c> or
     /// <c>ENHANCE_YOUR_CALM</c> would blame the peer for a well-formed body that merely exceeds this
@@ -2083,11 +2156,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// body.</description></item>
     /// </list>
     /// </remarks>
-    private async Task RejectOversizedRequestBodyAsync(Http2Stream stream, CancellationToken cancellationToken)
+    private async Task RejectRequestBodyAsync(Http2Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
     {
         if (stream.TryClaimResponseForRejection())
         {
-            await WriteRequestBodyTooLargeAsync(stream, cancellationToken).ConfigureAwait(false);
+            await WriteRequestBodyRejectionAsync(stream, statusCode, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -2098,20 +2171,21 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Writes the transport's own <c>413 Content Too Large</c> response for <paramref name="stream"/> —
-    /// a HEADERS frame with <c>END_STREAM</c> and <c>content-length: 0</c>, bypassing the response
-    /// hooks like HTTP/1.1's minimal limit responses — then either removes the fully-closed stream or
-    /// resets it with <c>NO_ERROR</c> to stop the rest of the request body (RFC 9113 §8.1). The caller
-    /// must hold the stream's final-response claim.
+    /// Writes the transport's own response rejecting <paramref name="stream"/>'s request body —
+    /// <c>413 Content Too Large</c> or <c>408 Request Timeout</c>: a HEADERS frame with <c>END_STREAM</c>
+    /// and <c>content-length: 0</c>, bypassing the response hooks like HTTP/1.1's minimal limit
+    /// responses — then either removes the fully-closed stream or resets it with <c>NO_ERROR</c> to stop
+    /// the rest of the request body (RFC 9113 §8.1). The caller must hold the stream's final-response
+    /// claim.
     /// </summary>
-    private async Task WriteRequestBodyTooLargeAsync(Http2Stream stream, CancellationToken cancellationToken)
+    private async Task WriteRequestBodyRejectionAsync(Http2Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
     {
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(
-            HttpStatusCode.RequestEntityTooLarge,
+            statusCode,
             new HttpHeaderCollection(),
             bodyLength: 0);
 
-        // The frame pump writes this, and the pump must never queue behind response DATA, so the
+        // The frame pump writes a 413, and the pump must never queue behind response DATA, so the
         // HEADERS go through the gate at control urgency.
         await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -2164,6 +2238,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 initialReceiveWindow: _localSettings.InitialWindowSize,
                 maxHeaderBlockSize: _http2Limits.MaxRequestHeaderListSize);
             _streams.Add(streamId, stream);
+
+            // #1085 — a connection that carries a stream is not idle.
+            _timeout?.SetBusy(true);
 
             // RFC 9218 §7.1 — apply any PRIORITY_UPDATE that arrived while this
             // stream was still idle. It pins the effective priority so the
@@ -2229,6 +2306,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 _retiredExchangeSlots++;
             }
+
+            UpdateIdleLocked();
 
             // Recorded with the removal, under the same lock, so a frame the pump reads next finds the
             // stream either still tracked or remembered as reset — never neither. RFC 9113 §5.1 has the
@@ -2304,7 +2383,66 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             lock (_syncRoot)
             {
                 _retiredExchangeSlots--;
+                UpdateIdleLocked();
             }
+        }
+    }
+
+    /// <summary>
+    /// Tells the connection's deadline whether the connection is idle (#1085): it is busy while its
+    /// stream table holds a stream or an exchange keeps a retired slot — by the same count that admits
+    /// streams against <c>SETTINGS_MAX_CONCURRENT_STREAMS</c>, so a stream the server reset keeps the
+    /// connection busy exactly as long as it keeps its slot. Must be called while holding
+    /// <see cref="_syncRoot"/>.
+    /// </summary>
+    private void UpdateIdleLocked()
+    {
+        _timeout?.SetBusy(_streams.Count + _retiredExchangeSlots > 0);
+    }
+
+    /// <summary>
+    /// Whether the connection-level receive window is below half its initial size (#1085), so a stream's
+    /// peer may be held back by other streams' unconsumed DATA (RFC 9113 §6.9) and a body reader's wait
+    /// says nothing about its own rate.
+    /// </summary>
+    private bool IsReceiveWindowLow()
+    {
+        lock (_syncRoot)
+        {
+            return _connectionReceiveWindow.Available < Http2ConnectionSettings.InitialInitialWindowSize / 2;
+        }
+    }
+
+    /// <summary>
+    /// Answers a stream whose request body fell below <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/>
+    /// (#1085), as a body over the size cap is answered: RFC 9110 §15.5.9 — <c>408 Request Timeout</c>
+    /// and <c>RST_STREAM(NO_ERROR)</c> while no response has started (RFC 9113 §8.1), or
+    /// <c>RST_STREAM(CANCEL)</c> when the application's response is under way. The stream keeps its
+    /// concurrency slot until its exchange ends, like every stream the server resets. Called from the
+    /// body reader; best-effort, and never throws.
+    /// </summary>
+    /// <param name="streamId">The stream whose body is too slow.</param>
+    private async ValueTask RejectSlowRequestBodyAsync(int streamId)
+    {
+        Http2Stream? stream;
+        lock (_syncRoot)
+        {
+            _streams.TryGetValue(streamId, out stream);
+        }
+
+        if (stream is null)
+        {
+            // The stream was already reset or removed; there is nothing left to answer.
+            return;
+        }
+
+        try
+        {
+            await RejectRequestBodyAsync(stream, HttpStatusCode.RequestTimeout, _pumpCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException || IsWireLevelFailure(exception))
+        {
+            // The connection is going away; its teardown ends the stream.
         }
     }
 
@@ -2812,13 +2950,24 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         return buffer;
     }
 
-    private static async Task<ReceivedFrame?> ReadFrameAsync(Stream stream, uint maxFrameSize, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads one frame. Every read is bounded by <paramref name="timeout"/>'s deadline when there is one
+    /// (#1085); a HEADERS frame's header starts the request-headers deadline before its payload is read,
+    /// so a field block trickled inside one frame is bounded too.
+    /// </summary>
+    private static async Task<ReceivedFrame?> ReadFrameAsync(Stream stream, uint maxFrameSize, Http2ConnectionTimeout? timeout, CancellationToken cancellationToken)
     {
-        byte[]? header = await ReadExactOrNullAsync(stream, Http2FrameReader.HeaderLength, cancellationToken).ConfigureAwait(false);
+        CancellationToken readToken = timeout?.Token ?? cancellationToken;
+        byte[]? header = await ReadExactOrNullAsync(stream, Http2FrameReader.HeaderLength, readToken).ConfigureAwait(false);
 
         if (header is null)
         {
             return null;
+        }
+
+        if (header[3] == (byte)Http2FrameType.Headers)
+        {
+            timeout?.OnHeaderBlockStarted();
         }
 
         int payloadLength = (header[0] << 16) | (header[1] << 8) | header[2];
@@ -2838,7 +2987,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         if (payloadLength > 0)
         {
-            byte[] payload = await ReadExactOrThrowAsync(stream, payloadLength, cancellationToken).ConfigureAwait(false);
+            byte[] payload = await ReadExactOrThrowAsync(stream, payloadLength, readToken).ConfigureAwait(false);
             Buffer.BlockCopy(payload, 0, buffer, Http2FrameReader.HeaderLength, payload.Length);
         }
 

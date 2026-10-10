@@ -42,7 +42,12 @@ public sealed class Http3ConnectionListenerOptions
     /// the per-request value (seeded into each request's parse context, where request-parse
     /// interceptors and the <c>Assimalign.Cohesion.Http.RequestLimits</c> feature can adjust it) freezes
     /// at the first body read, and a body that exceeds it is answered with <c>413 Content Too Large</c>.
-    /// The connection timeouts and data rates are tracked follow-up work.
+    /// The connection is closed gracefully once no request stream has been in flight for
+    /// <see cref="HttpConnectionListenerLimits.KeepAliveTimeout"/>; a request stream whose head does not
+    /// arrive within <see cref="HttpConnectionListenerLimits.RequestHeadersTimeout"/> is reset with
+    /// <c>H3_REQUEST_REJECTED</c>; and a body that falls below
+    /// <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/> is answered with
+    /// <c>408 Request Timeout</c>. Each property documents its HTTP/3 enforcement.
     /// </para>
     /// </remarks>
     public sealed class Http3Limits : HttpConnectionListenerLimits

@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 
@@ -6,6 +7,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http3Context : TransportHttpContext
 {
+    // 0 while the exchange runs, 1 once it has ended (SendAsync returned or threw, or the exchange was
+    // disposed). Interlocked: the send path and the host's disposal race to end it.
+    private int _exchangeEnded;
+
     /// <summary>
     /// Initializes the exchange for a decoded request head.
     /// </summary>
@@ -77,10 +82,35 @@ internal sealed class Http3Context : TransportHttpContext
     public Http3ExtendedConnectStream? Tunnel { get; set; }
 
     /// <summary>
+    /// The connection that built this exchange, so ending the exchange tells it the request stream no
+    /// longer keeps the connection busy (#1085); <see langword="null"/> until the exchange is built.
+    /// </summary>
+    public Http3ConnectionContext? Connection { get; set; }
+
+    /// <summary>
     /// An accepted extended CONNECT tunnel takes the exchange's request stream over, so the exchange
     /// reports <see cref="HttpExchangeDirective.TakeOver"/> and the raw response body sink refuses to
     /// commit a second head; otherwise the base's abort/continue derivation applies.
     /// </summary>
     internal override HttpExchangeDirective ExchangeDirective =>
         Tunnel is not null ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
+
+    /// <summary>
+    /// Claims the end of the exchange: its <c>SendAsync</c> returned or threw, or it was disposed.
+    /// </summary>
+    /// <returns><see langword="true"/> for the first caller only.</returns>
+    public bool TryEndExchange()
+    {
+        return Interlocked.Exchange(ref _exchangeEnded, 1) == 0;
+    }
+
+    /// <summary>
+    /// Ends the exchange on its connection, then disposes it. A host that never finalizes the exchange
+    /// through <c>SendAsync</c> still lets the connection fall idle by disposing it (#1085).
+    /// </summary>
+    public override ValueTask DisposeAsync()
+    {
+        Connection?.EndExchange(this);
+        return base.DisposeAsync();
+    }
 }

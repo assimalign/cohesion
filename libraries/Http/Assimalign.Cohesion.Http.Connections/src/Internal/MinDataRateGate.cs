@@ -4,8 +4,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Enforces an <see cref="HttpMinDataRate"/> as an average over a transfer, measuring only the time
-/// actually spent waiting for the peer. Shared by the HTTP/1.1 streaming request-body read (a slow
-/// sender trickling its body) and the streaming response write (a slow reader refusing to drain).
+/// actually spent waiting for the peer. Shared by the request-body reads of every version (a slow
+/// sender trickling its body: <c>Http1RequestBodyStream</c>, <c>Http2RequestBodyStream</c>,
+/// <c>Http3RequestBodyStream</c>) and the HTTP/1.1 streaming response write (a slow reader refusing
+/// to drain).
 /// </summary>
 /// <remarks>
 /// <para>

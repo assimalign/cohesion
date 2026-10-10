@@ -100,6 +100,21 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     private readonly object _priorityLock = new();
     private volatile bool _pushPriorityUpdateRejected;
 
+    // #1085 — the keep-alive deadline. The connection is idle while no request stream is in flight: none
+    // is having its head read, and no exchange built from one is still running. _activeRequestStreams
+    // counts them (a stream from acceptance until its head yields no exchange, or until its exchange
+    // ends); _idleSince is when it last reached zero. The timer, armed at zero and re-checked when it
+    // fires, closes the connection gracefully once it has been idle for KeepAliveTimeout. Guarded by
+    // _keepAliveLock; the timer is created when the receive loop starts and disposed when it ends.
+    // TimeProvider.System in production, as on HTTP/1.1.
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
+    private readonly Lock _keepAliveLock = new();
+    private TimeSpan _keepAliveTimeout;
+    private ITimer? _keepAliveTimer;
+    private int _activeRequestStreams;
+    private long _idleSince;
+    private bool _keepAliveStopped;
+
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
@@ -211,6 +226,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         try
         {
+            // #1085 — the connection is idle until its first request stream arrives.
+            StartKeepAlive();
+
             // RFC 9114 §6.2.1 — each peer MUST open a control stream and send
             // SETTINGS as its first frame. Do this before (and independently
             // of) accepting request streams.
@@ -308,6 +326,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     // instructions (RFC 9204 §4.4); capturing it off the same
                     // increment keeps the two derivations from ever drifting apart.
                     long requestStreamId = 4L * (Interlocked.Increment(ref _processedRequestStreamCount) - 1);
+
+                    // #1085 — the connection is busy until this stream's head yields no exchange, or
+                    // the exchange it yields ends.
+                    BeginRequestStream();
                     _ = ProcessRequestStreamAsync(streamConnection, requestStreamId, receiveToken);
                 }
                 else
@@ -467,6 +489,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </remarks>
     private async Task ShutdownAsync()
     {
+        // The enumeration has ended, so there is nothing left for an idle close to end.
+        StopKeepAlive();
+
         if (!_teardownSource.IsCancellationRequested)
         {
             _teardownSource.Cancel();
@@ -620,6 +645,128 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // the GOAWAY boundary is derived from is final.
         await _acceptStopped.Task.ConfigureAwait(false);
         await SendGoAwayAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts the keep-alive deadline when the receive loop starts (#1085): the connection is idle until
+    /// its first request stream arrives. Nothing is armed for an infinite
+    /// <see cref="HttpConnectionListenerLimits.KeepAliveTimeout"/>.
+    /// </summary>
+    private void StartKeepAlive()
+    {
+        TimeSpan keepAliveTimeout = _limits.KeepAliveTimeout;
+        if (keepAliveTimeout == Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+
+        lock (_keepAliveLock)
+        {
+            if (_keepAliveTimer is not null || _keepAliveStopped)
+            {
+                return;
+            }
+
+            // The deadline is read once, as HTTP/2 reads it when its frame pump starts.
+            _keepAliveTimeout = keepAliveTimeout;
+            _idleSince = _timeProvider.GetTimestamp();
+            _keepAliveTimer = _timeProvider.CreateTimer(
+                static state => ((Http3ConnectionContext)state!).OnKeepAliveTimer(),
+                this,
+                _activeRequestStreams == 0 ? _keepAliveTimeout : Timeout.InfiniteTimeSpan,
+                Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <summary>
+    /// Stops the keep-alive deadline for good: the receive enumeration has ended, or an idle close began.
+    /// </summary>
+    private void StopKeepAlive()
+    {
+        ITimer? timer;
+
+        lock (_keepAliveLock)
+        {
+            _keepAliveStopped = true;
+            timer = _keepAliveTimer;
+            _keepAliveTimer = null;
+        }
+
+        timer?.Dispose();
+    }
+
+    /// <summary>
+    /// Counts an accepted request stream as in flight, so the connection is not idle (#1085).
+    /// </summary>
+    private void BeginRequestStream()
+    {
+        lock (_keepAliveLock)
+        {
+            if (_activeRequestStreams++ == 0)
+            {
+                _keepAliveTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends a request stream's time in flight (#1085): its head yielded no exchange, or its exchange
+    /// ended. The last one to end starts the keep-alive deadline afresh.
+    /// </summary>
+    private void EndRequestStream()
+    {
+        lock (_keepAliveLock)
+        {
+            if (--_activeRequestStreams == 0 && _keepAliveTimer is not null && !_keepAliveStopped)
+            {
+                _idleSince = _timeProvider.GetTimestamp();
+                _keepAliveTimer.Change(_keepAliveTimeout, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends <paramref name="context"/>'s exchange on this connection: its <c>SendAsync</c> returned or
+    /// threw, or it was disposed. Idempotent per exchange.
+    /// </summary>
+    /// <param name="context">The exchange that ended.</param>
+    internal void EndExchange(Http3Context context)
+    {
+        if (context.TryEndExchange())
+        {
+            EndRequestStream();
+        }
+    }
+
+    /// <summary>
+    /// Closes the connection once it has been idle for <see cref="HttpConnectionListenerLimits.KeepAliveTimeout"/>
+    /// (#1085). RFC 9114 §5.2 — the server closes gracefully: <see cref="BeginGracefulClose"/> stops
+    /// accepting, writes the <c>GOAWAY</c> that tells the peer no request stream beyond it was processed,
+    /// and ends the receive enumeration, after which the host disposes the connection, which closes the
+    /// QUIC connection with <c>H3_NO_ERROR</c>. A timer that fires after the connection became busy, or
+    /// that a later idle period re-armed, changes nothing. Unlike QUIC's own idle timeout, which any
+    /// packet resets, this deadline is not moved by PING or other connection-level traffic.
+    /// </summary>
+    private void OnKeepAliveTimer()
+    {
+        lock (_keepAliveLock)
+        {
+            if (_keepAliveStopped || _keepAliveTimer is null || _activeRequestStreams > 0)
+            {
+                return;
+            }
+
+            TimeSpan remaining = _keepAliveTimeout - _timeProvider.GetElapsedTime(_idleSince);
+            if (remaining > TimeSpan.Zero)
+            {
+                _keepAliveTimer.Change(remaining, Timeout.InfiniteTimeSpan);
+                return;
+            }
+
+            _keepAliveStopped = true;
+        }
+
+        BeginGracefulClose();
     }
 
     /// <summary>
@@ -1335,9 +1482,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     private async Task ProcessRequestStreamAsync(IConnection streamConnection, long requestStreamId, CancellationToken receiveToken)
     {
+        Http3Context? context = null;
+
         try
         {
-            Http3Context? context = await ReadRequestHeadAsync(streamConnection, requestStreamId, receiveToken).ConfigureAwait(false);
+            context = await ReadRequestHeadAsync(streamConnection, requestStreamId, receiveToken).ConfigureAwait(false);
 
             if (context is not null && !_readyContexts.Writer.TryWrite(context))
             {
@@ -1357,6 +1506,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
         finally
         {
+            // #1085 — a stream whose head yielded no exchange is no longer in flight; one that yielded an
+            // exchange is, until the exchange ends (EndExchange).
+            if (context is null)
+            {
+                EndRequestStream();
+            }
+
             EndStreamWork();
         }
     }
@@ -1377,6 +1533,15 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         CancellationToken cancellationToken = headCancellation.Token;
         Http3RequestStreamReader reader = new(streamConnection.Input);
 
+        // #1085 — the request head must arrive, and decode, within RequestHeadersTimeout of the stream's
+        // acceptance — which QUIC makes the arrival of its first octets. The deadline is disarmed once the
+        // field section has decoded; a deadline that fired by then still rejects the request.
+        bool headersTimed = _limits.RequestHeadersTimeout != Timeout.InfiniteTimeSpan;
+        if (headersTimed)
+        {
+            headCancellation.CancelAfter(_limits.RequestHeadersTimeout);
+        }
+
         try
         {
             byte[]? fieldSection = await reader.ReadHeaderSectionAsync(_limits.MaxRequestHeadersFrameSize, cancellationToken).ConfigureAwait(false);
@@ -1393,6 +1558,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             }
 
             List<(string Name, string Value)> fields = await DecodeFieldSectionAsync(fieldSection, requestStreamId, cancellationToken).ConfigureAwait(false);
+
+            if (headersTimed)
+            {
+                headCancellation.CancelAfter(Timeout.InfiniteTimeSpan);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             return await CreateContextAsync(streamConnection, reader, requestStreamId, fields, receiveToken, cancellationToken).ConfigureAwait(false);
         }
         catch (Http3StreamException exception)
@@ -1436,12 +1608,18 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
         catch (OperationCanceledException)
         {
-            // Teardown (or the consumer's cancellation) before the request was dispatched: it was never
-            // processed, so RFC 9114 §4.1.1 H3_REQUEST_REJECTED tells the peer it may retry it.
+            // Teardown (or the consumer's cancellation) before the request was dispatched, or a head that
+            // did not arrive within RequestHeadersTimeout (#1085): it was never processed, so RFC 9114
+            // §4.1.1 H3_REQUEST_REJECTED tells the peer it may retry it.
+            bool timedOut = !receiveToken.IsCancellationRequested && !_teardownSource.IsCancellationRequested;
             ResetRequestStream(
                 streamConnection,
                 requestStreamId,
-                new Http3StreamException(Http3ErrorCode.RequestRejected, "The connection stopped before the request was dispatched."),
+                new Http3StreamException(
+                    Http3ErrorCode.RequestRejected,
+                    timedOut
+                        ? "The HTTP/3 request head did not arrive within the request-headers timeout."
+                        : "The connection stopped before the request was dispatched."),
                 abandonsReading: !reader.IsCompleted);
             return null;
         }
@@ -1497,7 +1675,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             isConnect,
             _limits.MaxRequestBodySize,
             maxHeadersFrameSize: _limits.MaxRequestHeadersFrameSize,
-            headToken);
+            headToken,
+            _limits.MinRequestBodyDataRate,
+            _timeProvider);
         requestHead = requestHead with { Body = body };
 
         HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);
@@ -1563,6 +1743,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             interception.Features)
         {
             AddedResponseInterceptors = interception.ResponseInterceptors,
+            Connection = this,
         };
         body.AttachOwner(context);
 
@@ -1770,6 +1951,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         public bool TerminateConnection { get; }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The exchange ends when this call returns or throws, whatever it wrote: from then on its request
+    /// stream no longer keeps the connection from going idle (#1085).
+    /// </remarks>
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         if (context is not Http3Context http3Context)
@@ -1777,6 +1963,18 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
+        try
+        {
+            await SendCoreAsync(http3Context, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndExchange(http3Context);
+        }
+    }
+
+    private async ValueTask SendCoreAsync(Http3Context http3Context, CancellationToken cancellationToken)
+    {
         Http3RequestBodyStream requestBody = http3Context.RequestBody;
 
         // The transport already reset this request stream — a stream error surfaced while the request

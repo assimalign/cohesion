@@ -39,6 +39,16 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <c>H3_MESSAGE_ERROR</c>.
 /// </para>
 /// <para>
+/// <b>Minimum data rate (#1085).</b> With a <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/>,
+/// a <see cref="MinDataRateGate"/> started at the first read bounds every read by what is left of the
+/// peer's allowance and charges the time the read waited; DATA octets delivered extend it, as on
+/// HTTP/1.1. A read the allowance runs out on stops the request stream with
+/// <c>STOP_SENDING(H3_NO_ERROR)</c> — RFC 9114 §4.1's signal that the server needs no more of the
+/// request and will answer it — and is rejected with <c>408</c> (RFC 9110 §15.5.9), recorded like an
+/// over-cap body, so the send path answers <c>408</c> while the response head is uncommitted. A CONNECT
+/// tunnel's DATA is not a request body and may idle, so it is not held to the rate.
+/// </para>
+/// <para>
 /// <b>Errors.</b> A malformed request detected in the body (a Content-Length the DATA frames contradict,
 /// a malformed trailer section) is an <c>H3_MESSAGE_ERROR</c> stream error (RFC 9114 §4.1.2); an
 /// oversized trailer section an <c>H3_FRAME_ERROR</c> stream error; either resets the request stream
@@ -71,6 +81,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private readonly bool _isTunnel;
     private readonly long? _fallbackCap;
     private readonly int _maxHeadersFrameSize;
+    private readonly HttpMinDataRate? _minDataRate;
+    private readonly TimeProvider _timeProvider;
     private readonly Lock _gate = new();
 
     private HttpExchangeInterceptorRequestContext? _interception;
@@ -81,6 +93,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private bool _started;
     private long? _cap;
     private long _received;
+    // #1085 — the minimum data-rate gate, started at the first read of a body (never a tunnel's) when a
+    // rate is configured. Read-path only, like the frame progress below.
+    private MinDataRateGate? _rateGate;
 
     // Frame progress lives in fields, not locals, so a read cancelled mid-frame resumes exactly where it
     // stopped: _dataRemaining counts the current DATA frame's undelivered octets, _skipRemaining an
@@ -125,6 +140,11 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// The token that cancels reads before the exchange exists (connection teardown during the request
     /// head); replaced by the exchange's <see cref="HttpContext.RequestCancelled"/> once attached.
     /// </param>
+    /// <param name="minDataRate">
+    /// The minimum rate the body must arrive at once read (#1085), or <see langword="null"/> for none.
+    /// Not applied to a tunnel.
+    /// </param>
+    /// <param name="timeProvider">The monotonic clock the rate is measured on; the system clock when <see langword="null"/>.</param>
     public Http3RequestBodyStream(
         Http3ConnectionContext connection,
         Http3RequestStreamReader reader,
@@ -135,7 +155,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         bool isTunnel,
         long? fallbackCap,
         int maxHeadersFrameSize,
-        CancellationToken requestAborted)
+        CancellationToken requestAborted,
+        HttpMinDataRate? minDataRate = null,
+        TimeProvider? timeProvider = null)
     {
         _connection = connection;
         _reader = reader;
@@ -147,6 +169,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         _fallbackCap = fallbackCap;
         _maxHeadersFrameSize = maxHeadersFrameSize;
         _requestAborted = requestAborted;
+        _minDataRate = minDataRate;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -413,7 +437,37 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             return 0;
         }
 
-        (CancellationToken readToken, CancellationTokenSource? linked) = LinkAbort(cancellationToken);
+        // #1085 — the read may wait for the peer no longer than what is left of its allowance. Where the
+        // stream carries a code, the deadline stops it with STOP_SENDING(H3_NO_ERROR), which fails the read
+        // (RFC 9114 §4.1: the server needs no more of the request and will answer it); elsewhere it
+        // cancels the read.
+        CancellationTokenSource? rateDeadline = null;
+        CancellationTokenRegistration stopOnDeadline = default;
+        long rateStart = 0;
+        int delivered = 0;
+
+        if (_rateGate is not null)
+        {
+            if (!_rateGate.TryGetOperationTimeout(out TimeSpan allowance))
+            {
+                throw RejectTooSlow();
+            }
+
+            rateDeadline = new CancellationTokenSource(allowance, _timeProvider);
+
+            if (_streamConnection is IMultiplexedStreamAbort)
+            {
+                stopOnDeadline = rateDeadline.Token.UnsafeRegister(
+                    static state => Http3ConnectionContext.StopReadingWithCode((IConnection)state!, Http3ErrorCode.NoError),
+                    _streamConnection);
+            }
+
+            rateStart = _timeProvider.GetTimestamp();
+        }
+
+        (CancellationToken readToken, CancellationTokenSource? linked) = LinkAbort(
+            cancellationToken,
+            rateDeadline is not null && _streamConnection is not IMultiplexedStreamAbort ? rateDeadline.Token : default);
 
         try
         {
@@ -425,6 +479,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                     int read = await _reader.ReadDataAsync(buffer[..toRead], readToken).ConfigureAwait(false);
                     _dataRemaining -= read;
                     _received += read;
+                    delivered = read;
                     return read;
                 }
 
@@ -471,6 +526,15 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // Recorded by Reject; the send path answers 413 (or 431) and stops reading.
             throw;
         }
+        catch (Exception exception) when (rateDeadline is { IsCancellationRequested: true }
+            && (exception is OperationCanceledException || IsStreamFailure(exception))
+            && !cancellationToken.IsCancellationRequested
+            && !_requestAborted.IsCancellationRequested)
+        {
+            // #1085 — the allowance ran out while the read waited: the deadline stopped the stream (or
+            // cancelled the read). RFC 9110 §15.5.9 — recorded as 408, which the send path answers.
+            throw RejectTooSlow();
+        }
         catch (OperationCanceledException) when (_connection.ConnectionClosed.IsCancellationRequested
             && !cancellationToken.IsCancellationRequested
             && !_requestAborted.IsCancellationRequested)
@@ -504,6 +568,21 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         finally
         {
             linked?.Dispose();
+
+            if (rateDeadline is not null)
+            {
+                stopOnDeadline.Dispose();
+                _rateGate!.Record(_timeProvider.GetTimestamp() - rateStart, delivered);
+
+                // The deadline fired just as the read completed: the stream is already stopped, so the
+                // next read is the one that reports the 408 — unless the read delivered the body's end.
+                if (rateDeadline.IsCancellationRequested && _failure is null && !_endDelivered)
+                {
+                    RejectTooSlow();
+                }
+
+                rateDeadline.Dispose();
+            }
         }
     }
 
@@ -634,6 +713,12 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             return;
         }
 
+        // #1085 — the peer's allowance starts with the first read, as on HTTP/1.1.
+        if (_minDataRate is not null)
+        {
+            _rateGate = new MinDataRateGate(_minDataRate, _timeProvider);
+        }
+
         _cap = _interception is not null ? _interception.MaxRequestBodySize : _fallbackCap;
 
         if (_cap is { } cap && _declaredContentLength is { } declared && declared > cap)
@@ -655,6 +740,14 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private Http3LimitExceededException Reject(string message)
     {
         return Reject(new Http3LimitExceededException(HttpStatusCode.RequestEntityTooLarge, message));
+    }
+
+    private Http3LimitExceededException RejectTooSlow()
+    {
+        // RFC 9110 §15.5.9 — a body received below the minimum data rate is answered 408 Request Timeout.
+        return Reject(new Http3LimitExceededException(
+            HttpStatusCode.RequestTimeout,
+            $"The request body was received below the configured minimum data rate of {_minDataRate!.BytesPerSecond} octets per second."));
     }
 
     private Http3LimitExceededException Reject(Http3LimitExceededException rejection)
@@ -811,9 +904,20 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// read ends when any of them fires — the connection's closure included, since a body read may
     /// outlive the receive enumeration. Links only when more than one of them can fire.
     /// </summary>
-    private (CancellationToken Token, CancellationTokenSource? Linked) LinkAbort(CancellationToken cancellationToken)
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <param name="rateDeadline">
+    /// The minimum data rate's deadline when it must cancel the read itself — on a stream that cannot be
+    /// stopped with a code — or <see langword="default"/>.
+    /// </param>
+    private (CancellationToken Token, CancellationTokenSource? Linked) LinkAbort(CancellationToken cancellationToken, CancellationToken rateDeadline)
     {
         CancellationToken connectionClosed = _connection.ConnectionClosed;
+
+        if (rateDeadline.CanBeCanceled)
+        {
+            CancellationTokenSource all = CancellationTokenSource.CreateLinkedTokenSource([cancellationToken, _requestAborted, connectionClosed, rateDeadline]);
+            return (all.Token, all);
+        }
 
         if (!cancellationToken.CanBeCanceled && !_requestAborted.CanBeCanceled)
         {

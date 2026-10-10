@@ -1181,7 +1181,10 @@ through the registration verbs' configure overloads:
 
 The HTTP/1.1 wire-format keys have no HTTP/2 or HTTP/3 meaning. HTTP/3's stream
 and flow-control bounds belong to the QUIC transport, and its one HTTP/3-specific
-limit (`Http3Limits.MaxRequestHeadersFrameSize`) is not bound yet.
+limit (`Http3Limits.MaxRequestHeadersFrameSize`) is not bound yet. The shared
+timeouts take effect on every version: HTTP/2 and HTTP/3 enforce
+`KeepAliveTimeout` and `RequestHeadersTimeout` as HTTP/1.1 does (#1085; the
+transport's DESIGN, "HTTP/2 and HTTP/3 connection timeouts and data rates").
 
 `Limits:MaxConcurrentConnections` is not an endpoint limit: it caps the default
 server (see "Concurrency cap (`MaxConcurrentConnections`)"). The binder hands it to the

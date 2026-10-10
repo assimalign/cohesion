@@ -40,8 +40,13 @@ public sealed class Http2ConnectionListenerOptions
     /// well-behaved peer can retry its in-flight streams on a fresh connection. Of the inherited
     /// shared limits, the HTTP/2 machinery enforces <see cref="HttpConnectionListenerLimits.MaxRequestBodySize"/>
     /// (<c>413</c>, per stream — the connection keeps serving its other streams) on top of the
-    /// flow-control backpressure that bounds request-body buffering; the connection timeouts and
-    /// data rates are tracked follow-up work.
+    /// flow-control backpressure that bounds request-body buffering;
+    /// <see cref="HttpConnectionListenerLimits.KeepAliveTimeout"/> (an idle connection is closed with
+    /// <c>GOAWAY(NO_ERROR)</c>); <see cref="HttpConnectionListenerLimits.RequestHeadersTimeout"/> (a field
+    /// block that does not end in time escalates like the limits above, to
+    /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>); and <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/>
+    /// (<c>408</c>, or a reset once the response started, per stream). Each property documents its
+    /// HTTP/2 enforcement.
     /// </para>
     /// <para>
     /// These limits are consumed entirely by the HTTP/2 frame machinery; there is no DI, logging,

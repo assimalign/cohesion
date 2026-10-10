@@ -961,6 +961,10 @@ internal sealed class Http2Stream
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
     /// <param name="featureCapacity">The number of features the exchange is expected to carry; its feature collection is sized for it.</param>
+    /// <param name="requestBodyDataRate">
+    /// The connection's minimum request-body data rate, or <see langword="null"/> when none is configured.
+    /// A CONNECT, whose DATA is tunnel traffic rather than a request body, is never held to it.
+    /// </param>
     /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when a request-parse interceptor rejects the request.
@@ -985,7 +989,8 @@ internal sealed class Http2Stream
         Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
         IHttpExchangeInterceptor[] interceptors,
         long? maxRequestBodySize,
-        int featureCapacity)
+        int featureCapacity,
+        Http2RequestBodyDataRate? requestBodyDataRate = null)
     {
         if (!HeadersCompleted)
         {
@@ -1104,13 +1109,23 @@ internal sealed class Http2Stream
                 $"HTTP/2 stream {StreamId} carried a malformed :path: {exception.Message}");
         }
 
+        HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
+        bool isConnect = method == HttpMethod.Connect;
+
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
         // bounded by the advertised receive window and paced by the reader. RFC 9110
         // §6.5 — the trailer collection is supported and starts empty; the body fills
-        // it when its reader reaches the end (PublishTrailers).
+        // it when its reader reaches the end (PublishTrailers). A request body is held
+        // to the minimum data rate; a CONNECT's DATA is tunnel traffic, which may idle.
         _requestTrailers = new HttpTrailerCollection(isSupported: true);
-        Http2RequestBodyStream body = new(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted, PublishTrailers);
+        Http2RequestBodyStream body = new(
+            _bodyChannel.Reader,
+            onBodyConsumed,
+            StreamId,
+            requestAborted,
+            PublishTrailers,
+            isConnect ? null : requestBodyDataRate);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
@@ -1118,8 +1133,6 @@ internal sealed class Http2Stream
         HttpScheme scheme = decodedHeaders.Scheme is null
             ? fallbackScheme
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
-
-        HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
 
         // RFC 8441 §4 — :protocol is non-null only on a valid extended CONNECT (validated above). The
         // request-parse interceptors read it, so a feature package can offer the tunnel, and the exchange
@@ -1150,7 +1163,6 @@ internal sealed class Http2Stream
         // still run). The hook-populated feature collection and the (possibly wrapped) body flow
         // into the exchange through the Http2Context constructor; zero interceptors keeps the
         // pre-seam fast path.
-        bool isConnect = method == HttpMethod.Connect;
         _isConnect = isConnect;
         HttpRequestInterceptionResult interception = await HttpRequestInterceptorPipeline.InterceptAsync(
             interceptors,

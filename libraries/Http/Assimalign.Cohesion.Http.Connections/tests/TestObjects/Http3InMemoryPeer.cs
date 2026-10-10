@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Http.Connections.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
@@ -90,6 +91,61 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     public async Task<Connection> OpenUnidirectionalStreamAsync()
     {
         return await _client.OpenStreamAsync(ConnectionDirection.WriteOnly);
+    }
+
+    /// <summary>
+    /// Reads the server's control stream — the first stream it opens (RFC 9114 §6.2.1) — until its
+    /// <c>GOAWAY</c> frame arrives, and returns the stream ID the frame announces: the first request
+    /// stream the server did not process (RFC 9114 §5.2).
+    /// </summary>
+    /// <returns>The stream ID the server's <c>GOAWAY</c> carries.</returns>
+    public async Task<long> ReadGoAwayAsync()
+    {
+        using CancellationTokenSource timeout = new(_timeout);
+        Connection control = await _client.AcceptStreamAsync(timeout.Token);
+        List<byte> received = new();
+
+        while (true)
+        {
+            ReadResult result = await control.Input.ReadAsync(timeout.Token);
+
+            foreach (ReadOnlyMemory<byte> segment in result.Buffer)
+            {
+                received.AddRange(segment.ToArray());
+            }
+
+            control.Input.AdvanceTo(result.Buffer.End);
+
+            IReadOnlyList<(long FrameType, byte[] Payload)> frames;
+            try
+            {
+                (_, frames) = HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(received.ToArray());
+            }
+            catch (Exception exception) when (exception is ArgumentOutOfRangeException or IndexOutOfRangeException)
+            {
+                // A frame is split across reads; read more.
+                if (result.IsCompleted)
+                {
+                    throw new InvalidOperationException("The server's control stream ended inside a frame.");
+                }
+
+                continue;
+            }
+
+            foreach ((long frameType, byte[] payload) in frames)
+            {
+                if (frameType == (long)Http3FrameType.GoAway)
+                {
+                    int index = 0;
+                    return QuicVariableLengthInteger.Decode(payload, ref index);
+                }
+            }
+
+            if (result.IsCompleted)
+            {
+                throw new InvalidOperationException("The server's control stream ended without a GOAWAY frame.");
+            }
+        }
     }
 
     /// <summary>
