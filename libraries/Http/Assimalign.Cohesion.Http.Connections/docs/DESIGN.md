@@ -1895,6 +1895,9 @@ claims it, writes `408` with END_STREAM, and resets the stream with `NO_ERROR`, 
 RFC 9113 §8.1 lets a server send after a complete response. Once the application's response is
 under way the stream is reset with `CANCEL`. The read then fails with an `IOException`. The
 stream keeps its concurrency slot until its exchange ends, like every stream the server resets.
+`SendAsync` sets the exchange's `StatusCode` to the `408` it finds there, so a host reports the
+status that went on the wire, not the `500` its fault boundary staged for the failed read (see
+"Each stream has one final-response owner").
 
 The rate is per stream, and the connection keeps serving its other streams. A CONNECT stream's
 DATA is tunnel traffic, which may idle, so it gets no gate.
@@ -2532,7 +2535,7 @@ because the peer never received those octets and will never credit them back.
   exchange gives its slot back when `SendAsync` ends (see "A reset stream keeps its
   slot until its exchange ends"). Send credit reserved for a frame that never
   reached the wire was already returned by the writer. Nothing is sent for a stream
-  already reset, or one the transport answered itself with its `413`.
+  already reset, or one the transport answered itself with its `413` or `408`.
 - **No reset after `END_STREAM`.** A cancellation can land after the frame that
   carries `END_STREAM` was handed to the transport: in that frame's own write, since
   only a write's wait is cut short (see "A frame is written in one piece"), or in the
@@ -2585,14 +2588,24 @@ and one copy per frame.
 RFC 9113 §8.1: a stream carries exactly one final response. `Http2Stream` records
 who owns it. The application claims it when its buffered send or its streaming head
 commit starts the final response; the transport claims it only to answer a request
-it rejects itself (`413`). The frame pump and the application race for the claim,
-so it is taken with `Interlocked`, and the loser writes nothing: an application
-whose claim fails discards its response, and a pump that finds the application's
-response under way resets the stream instead of sending a `413`.
+it rejects itself (`413`, or the `408` of the minimum data rate). The frame pump, the
+body reader and the application race for the claim, so it is taken with
+`Interlocked`, and the loser writes nothing: an application whose claim fails
+discards its response, and a rejection that finds the application's response under
+way resets the stream instead of sending its status.
 `CanWriteResponse` — the application owns the response, has not completed it, and
 the stream is not reset — gates every DATA frame and the streaming terminator. An
 interim (`1xx`) response is discarded once the final response is claimed or the
 stream is reset.
+
+A transport claim stores the status it answers with in the owner field itself, so
+the claim and its status are one compare-exchange and no reader sees one without the
+other. `SendAsync` copies that status onto the exchange's `StatusCode` when it finds
+the stream answered by the transport, before it returns without writing, as HTTP/1.1
+and HTTP/3 do when they replace a staged response with their own. Without it a host
+reported whatever the exchange held instead: a Web host whose pipeline faulted on the
+failed read had staged its `500`, so a slow HTTP/2 upload answered `408` on the wire
+was recorded as a `500` server error in its telemetry.
 
 The ownership states, as the paragraph above describes them:
 
@@ -2600,10 +2613,10 @@ The ownership states, as the paragraph above describes them:
 stateDiagram-v2
     [*] --> Unclaimed
     Unclaimed --> Application: application commits its response head
-    Unclaimed --> Transport: request body crosses the cap
+    Unclaimed --> Transport: request body crosses the cap, or falls below the data rate
     Application --> Completed: END_STREAM of the response written
     Application --> [*]: stream reset, rest of the response discarded
-    Transport --> [*]: 413 sent, then reset NO_ERROR or removed
+    Transport --> [*]: 413 or 408 sent, then reset NO_ERROR or removed
     Completed --> [*]: removed, or reset NO_ERROR if the peer is still sending
 ```
 

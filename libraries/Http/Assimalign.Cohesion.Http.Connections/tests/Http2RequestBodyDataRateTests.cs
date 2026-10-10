@@ -49,9 +49,12 @@ public class Http2RequestBodyDataRateTests
         frames.Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.NoError);
         exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
 
-        // The application's own response is discarded: the transport already answered the stream.
+        // The application's own response is discarded: the transport already answered the stream. The
+        // exchange reports the 408 that went on the wire, not the 500 a host's fault boundary staged for
+        // the failed read, so the host's telemetry records what the client got.
         exchange.Response.StatusCode = HttpStatusCode.InternalServerError;
         await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
+        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.RequestTimeout);
 
         // The connection keeps serving.
         await peer.SendHeadersAsync(3, endStream: true, Http2TestPeer.Get("/next"));

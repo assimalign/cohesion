@@ -38,11 +38,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http2Stream
 {
     // _responseOwner values. RFC 9113 §8.1 — a stream carries exactly one final response, written
-    // either by the application or, when the transport rejects the request itself (413), by the
-    // transport.
+    // either by the application or, when the transport rejects the request itself (413 or 408), by the
+    // transport. A transport claim stores the status the transport answers with, a 4xx and so never
+    // one of these two values, which keeps the claim and its status a single atomic write.
     private const int responseOwnerNone = 0;
     private const int responseOwnerApplication = 1;
-    private const int responseOwnerTransport = 2;
 
     // _exchangeState values. RFC 9113 §5.1.2 / CVE-2023-44487 — the exchange dispatched on this stream
     // keeps the stream's slot against SETTINGS_MAX_CONCURRENT_STREAMS while it runs, even after the
@@ -104,10 +104,10 @@ internal sealed class Http2Stream
     // is woken to observe it. Written under _stateLock, read lock-free by the writer threads.
     private volatile bool _reset;
 
-    // Who owns this stream's final response (the responseOwner* constants): the application claims
-    // it when its buffered send or streaming head commit starts the final response; the transport
-    // claims it only to answer a request it rejects itself. The frame pump and the application race
-    // for the claim, so it is taken with Interlocked.
+    // Who owns this stream's final response (the responseOwner* constants, or the transport's status):
+    // the application claims it when its buffered send or streaming head commit starts the final
+    // response; the transport claims it only to answer a request it rejects itself. The frame pump, the
+    // body reader and the application race for the claim, so it is taken with Interlocked.
     private int _responseOwner;
 
     // Set once the END_STREAM completing the application's final response is on the wire.
@@ -350,10 +350,25 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Whether the transport claimed the stream's final response to answer a request it rejected
-    /// itself (<c>413 Content Too Large</c>). The application's response for such an exchange is never
-    /// written.
+    /// itself (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>). The application's response
+    /// for such an exchange is never written.
     /// </summary>
-    public bool IsAnsweredByTransport => Volatile.Read(ref _responseOwner) == responseOwnerTransport;
+    public bool IsAnsweredByTransport => Volatile.Read(ref _responseOwner) > responseOwnerApplication;
+
+    /// <summary>
+    /// The status the transport answers the stream with when it claimed the final response itself
+    /// (<see cref="TryClaimResponseForRejection"/>), or <see langword="null"/> when it did not. Set with
+    /// the claim, so it is never missing once <see cref="IsAnsweredByTransport"/> is <see langword="true"/>.
+    /// </summary>
+    public HttpStatusCode? TransportResponseStatusCode
+    {
+        get
+        {
+            int owner = Volatile.Read(ref _responseOwner);
+
+            return owner > responseOwnerApplication ? new HttpStatusCode(owner) : null;
+        }
+    }
 
     /// <summary>
     /// Whether the <c>END_STREAM</c> completing the application's final response has been written.
@@ -383,15 +398,17 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Claims the stream's final response for the transport, to answer a request it rejects itself
-    /// (<c>413 Content Too Large</c>).
+    /// with <paramref name="statusCode"/> (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>).
     /// </summary>
+    /// <param name="statusCode">The status the transport answers with; a <c>4xx</c>.</param>
     /// <returns>
     /// <see langword="true"/> when the transport now owns the final response;
-    /// <see langword="false"/> when the application already started its own.
+    /// <see langword="false"/> when the application already started its own, or the transport already
+    /// answered the stream.
     /// </returns>
-    public bool TryClaimResponseForRejection()
+    public bool TryClaimResponseForRejection(HttpStatusCode statusCode)
     {
-        return Interlocked.CompareExchange(ref _responseOwner, responseOwnerTransport, responseOwnerNone) == responseOwnerNone;
+        return Interlocked.CompareExchange(ref _responseOwner, statusCode.Value, responseOwnerNone) == responseOwnerNone;
     }
 
     /// <summary>

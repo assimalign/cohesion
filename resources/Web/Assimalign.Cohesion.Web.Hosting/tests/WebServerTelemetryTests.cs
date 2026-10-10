@@ -474,6 +474,58 @@ public class WebServerTelemetryTests
         duration.Tags.ContainsKey("error.type").ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An HTTP/2 body below the minimum data rate should report the transport's 408, not a 500 error")]
+    public async Task ServerSpan_Http2BodyBelowMinimumDataRate_ShouldReportTheTransport408WithoutAnError()
+    {
+        // Arrange — the pipeline reads a body the client never sends and lets the failed read escape, so
+        // the server's fault boundary stages a 500. The transport has already answered the stream with
+        // 408 and reset it (#1085), so the 500 never reaches the wire and must not be what is recorded.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new();
+
+        string path = $"/telemetry/h2-slow-body/{Guid.NewGuid():N}";
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp2(
+            transport,
+            http2 => http2.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 1000, gracePeriod: TimeSpan.FromMilliseconds(100))));
+        factory.Application.Use(async (context, next) =>
+        {
+            byte[] buffer = new byte[256];
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Http2RawClient client = await Http2RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act — the HEADERS frame leaves the stream open for a body that never comes.
+        await client.SendPostHeadersAsync(1, path, cancellationToken);
+        Http2RawFrame answer = await client.ReadUntilAsync(frame => frame.StreamId == 1 && frame.Type == Http2RawFrame.HeadersType, cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // The span stops after the duration is recorded, so the exchange's measurement is already in.
+        RecordedMeasurement duration = recorder.Measurements.Single(
+            m => m.Instrument == "http.server.request.duration" && Equals(m.Tags.GetValueOrDefault("network.protocol.version"), "2"));
+
+        // Assert — the transport's 408 is the stream's only response, and it is what the server reports.
+        answer.EndStream.ShouldBeTrue();
+        client.Frames.Count(frame => frame.StreamId == 1 && frame.Type == Http2RawFrame.HeadersType).ShouldBe(1);
+        span.GetTagItem("network.protocol.version").ShouldBe("2");
+        span.GetTagItem("http.response.status_code").ShouldBe(408);
+        span.GetTagItem("error.type").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+        duration.Tags.GetValueOrDefault("http.response.status_code").ShouldBe(408);
+        duration.Tags.ContainsKey("error.type").ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A cancelled exchange should report request_canceled and no status code")]
     public async Task ServerSpan_CanceledExchange_ShouldReportRequestCanceled()
     {

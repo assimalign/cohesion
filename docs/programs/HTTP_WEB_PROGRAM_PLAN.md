@@ -334,7 +334,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 | #1073 | A | — | `Content-Length` on 204, 304 and empty HTTP/1.1 HEAD (HTTP/2 and HTTP/3 HEAD done) |
 | #1083 → #1306 | A | #1080 | HTTP/3 control-stream FIN and push PRIORITY_UPDATE. Requests after GOAWAY are reset with H3_REQUEST_REJECTED |
 | #1330 | C/A | #1080, #1084 | A QUIC stream cannot half-close, which breaks extended CONNECT tunnels over real QUIC |
-| #1378 | A/D | #1080, #1340 | #1340's client-fault report on HTTP/2 and HTTP/3 |
+| #1378 | A/D | #1080, #1340 | #1340's client-fault report on HTTP/2 and HTTP/3: each control's `ClientFaultStatusCode` from the latch it already has (the HTTP/2 stream's transport status, `Http3RequestBodyStream.RejectedStatusCode`), and a body signal for the Web interceptor's gate, since an HTTP/2 or HTTP/3 request need not declare its body. Until then a body those transports reject while it is read can still be logged at `Error` and run `OnException`. The HTTP/2 `408` was also recorded as a `500` server error; that was fixed when wave 2 was integrated |
 | #1334 | A/B | #1073 | Classic CONNECT and asterisk-form targets are unvalidated on HTTP/2 and HTTP/3 |
 | #1153 → #1154 | B | #1183 | Cookie `Path`/`Domain` grammar. One `Set-Cookie` line per value on a 101 |
 | #1185, #1204 | B | — | Exact `If-Range` date match. RFC 9110 reason phrases |

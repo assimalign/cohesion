@@ -345,8 +345,10 @@ pipeline like any exception, and the server stages its `500`. The HTTP/1.1 trans
 latched the limit when it threw, so its `SendAsync` answers `413` or `408` with
 `Connection: close` in place of the unstarted `500`, sets the exchange's status to match,
 and closes the connection (#1339); a malformed body gets `400` the same way (#1333). No
-`500` reaches the client. HTTP/2 and HTTP/3 answer an over-cap body with `413` on their
-own stream.
+`500` reaches the client. HTTP/2 and HTTP/3 answer an over-cap body with `413`, and a body
+below the minimum data rate with `408` (#1085), on their own stream, and they too set the
+exchange's status to the one they answered with, so the server's telemetry reports that status
+rather than the `500` it staged.
 
 **A client fault is not an application fault (#1340).** The read above throws an
 `InvalidDataException` or an `IOException`, and so does a read the client cuts short by closing the
@@ -631,6 +633,7 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | --- | --- | --- |
 | A response was sent with a status below 500 | the status | none |
 | The request body broke its framing or a limit while it was read, or the client cut it short, and the HTTP/1.1 transport answered it in place of the staged response (#1333, #1339, #1340) | the transport's `400`, `413`, `408` or `431`, which it also sets on the exchange | none |
+| The request body fell below the minimum data rate while it was read, and the HTTP/2 or HTTP/3 transport answered its stream with `408` before the server's replacement `500` (#1085) | `408`, which the transport also sets on the exchange | none |
 | A response was sent with a 5xx status, including the server's replacement `500` after a fault | the status | the status, for example `500` |
 | The exchange was cancelled (a peer reset or closed connection, the server stopping, `IHttpContext.Cancel`) and reset | only when a streamed response had started | `request_canceled` |
 | The pipeline threw after its response started, or its response could not be replaced, after the transport reported a client fault (`IWebClientFaultFeature`), and the exchange was reset (#1340) | only when the response had started | `client_fault` |

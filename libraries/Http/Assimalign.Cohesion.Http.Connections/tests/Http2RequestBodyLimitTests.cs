@@ -67,13 +67,15 @@ public class Http2RequestBodyLimitTests
         exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
         await ShouldFailToReadBodyAsync(exchange.Request.Body);
 
-        // The application's own response is discarded: the transport already answered the stream.
+        // The application's own response is discarded: the transport already answered the stream, and the
+        // exchange reports that 413 rather than the status the application staged.
         exchange.Response.StatusCode = HttpStatusCode.Ok;
         exchange.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("too late"));
         await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
         await peer.SyncAsync();
         peer.Output.ForStream(1).Count(frame => frame.IsHeaders).ShouldBe(1);
         peer.Output.ForStream(1).ShouldNotContain(frame => frame.IsData);
+        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.RequestEntityTooLarge);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Body Cap: A body crossing the cap with END_STREAM should be answered 413 and close the stream without a reset")]

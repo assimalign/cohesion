@@ -687,11 +687,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         {
             // The exchange is already over on the wire: the stream was reset (RFC 9113 §5.4.2 — no
             // further frame may be sent for it), or the transport rejected the request itself and its
-            // 413 is the stream's final response (RFC 9110 §15.5.14). There is nothing to finalize. The
-            // application observed the end through RequestCancelled; the BeforeResponseHead and
-            // AfterResponse hooks do not fire for an aborted exchange.
+            // 413 or 408 is the stream's final response (RFC 9110 §15.5.14, §15.5.9). There is nothing to
+            // finalize. The application observed the end through RequestCancelled; the BeforeResponseHead
+            // and AfterResponse hooks do not fire for an aborted exchange.
             if (stream.IsReset || stream.IsAnsweredByTransport)
             {
+                AdoptTransportResponseStatus(http2Context);
                 return;
             }
 
@@ -807,9 +808,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
                 // Claim the stream's final response. The claim fails only when the transport has already
                 // answered the stream itself — the request body crossed its cap and the frame pump wrote
-                // the 413 (RFC 9110 §15.5.14). That answer stands; the application's response is discarded.
+                // the 413 (RFC 9110 §15.5.14), or it fell below the minimum data rate and the body reader
+                // had the 408 written (§15.5.9). That answer stands; the application's response is
+                // discarded.
                 if (!stream.TryClaimResponse())
                 {
+                    AdoptTransportResponseStatus(http2Context);
                     return;
                 }
 
@@ -861,6 +865,20 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             {
                 EndExchange(stream);
             }
+        }
+    }
+
+    /// <summary>
+    /// Sets the exchange's status to the one the transport answered its stream with, when the transport
+    /// rejected the request itself (<see cref="RejectRequestBodyAsync"/>). The status the application or
+    /// a host's fault boundary staged never reaches the wire then, so a host that reports the exchange
+    /// (its telemetry, its access log) reads the status that did, as on HTTP/1.1 and HTTP/3.
+    /// </summary>
+    private static void AdoptTransportResponseStatus(Http2Context context)
+    {
+        if (context.Stream.TransportResponseStatusCode is { } answeredStatus)
+        {
+            context.Response.StatusCode = answeredStatus;
         }
     }
 
@@ -2194,7 +2212,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// </remarks>
     private async Task RejectRequestBodyAsync(Http2Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
     {
-        if (stream.TryClaimResponseForRejection())
+        if (stream.TryClaimResponseForRejection(statusCode))
         {
             await WriteRequestBodyRejectionAsync(stream, statusCode, cancellationToken).ConfigureAwait(false);
             return;

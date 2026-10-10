@@ -81,14 +81,18 @@ internal sealed class Http2RawClient : IAsyncDisposable
     /// </summary>
     public Task SendGetAsync(int streamId, string path, CancellationToken cancellationToken)
     {
-        using MemoryStream headerBlock = new();
-        WriteLiteralField(headerBlock, ":method", "GET");
-        WriteLiteralField(headerBlock, ":scheme", "http");
-        WriteLiteralField(headerBlock, ":path", path);
-        WriteLiteralField(headerBlock, ":authority", "localhost");
-
         // END_STREAM (0x1) | END_HEADERS (0x4).
-        return WriteFrameAsync(Http2RawFrame.HeadersType, flags: 0x5, streamId, headerBlock.ToArray(), cancellationToken);
+        return WriteFrameAsync(Http2RawFrame.HeadersType, flags: 0x5, streamId, CreateRequestHeaderBlock("GET", path), cancellationToken);
+    }
+
+    /// <summary>
+    /// Opens <paramref name="streamId"/> with a POST for <paramref name="path"/> whose body is still to
+    /// come: the HEADERS frame does not end the stream, and no DATA follows unless a test sends it.
+    /// </summary>
+    public Task SendPostHeadersAsync(int streamId, string path, CancellationToken cancellationToken)
+    {
+        // END_HEADERS (0x4) only.
+        return WriteFrameAsync(Http2RawFrame.HeadersType, flags: 0x4, streamId, CreateRequestHeaderBlock("POST", path), cancellationToken);
     }
 
     /// <summary>
@@ -143,6 +147,17 @@ internal sealed class Http2RawClient : IAsyncDisposable
         byte[] buffer = new byte[count];
         await _stream.ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
         return buffer;
+    }
+
+    private static byte[] CreateRequestHeaderBlock(string method, string path)
+    {
+        using MemoryStream headerBlock = new();
+        WriteLiteralField(headerBlock, ":method", method);
+        WriteLiteralField(headerBlock, ":scheme", "http");
+        WriteLiteralField(headerBlock, ":path", path);
+        WriteLiteralField(headerBlock, ":authority", "localhost");
+
+        return headerBlock.ToArray();
     }
 
     private static void WriteLiteralField(MemoryStream headerBlock, string name, string value)
