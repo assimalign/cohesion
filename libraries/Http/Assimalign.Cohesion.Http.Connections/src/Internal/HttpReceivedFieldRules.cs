@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
@@ -31,9 +32,22 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// text that may still hold a control character: an invalid name is described by its offending
 /// character, and a value is never quoted.
 /// </para>
+/// <para>
+/// <b>Cost.</b> The rule runs on every field line of every request head and trailer section, so an
+/// accepted field costs two vectorized scans: one over the name against the lowercase <c>tchar</c> set,
+/// and one over the value for a control character, after which only its two end characters are read.
+/// The slower checks run only to describe a refusal.
+/// </para>
 /// </remarks>
 internal static class HttpReceivedFieldRules
 {
+    // RFC 9110 §5.6.2 tchar without 'A'-'Z': what a received HTTP/2 or HTTP/3 field name may hold, since
+    // RFC 9113 §8.2.1 and RFC 9114 §4.2 require it lowercase. Every field line of every head and trailer
+    // section is checked, so a valid name costs one scan; the core rule
+    // (HttpFieldNormalization.IsValidFieldName) runs only to describe a name this set refuses.
+    private static readonly SearchValues<char> _lowercaseTokenCharacters = SearchValues.Create(
+        "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz");
+
     /// <summary>
     /// Rejects a received regular field name that is not a lowercase token.
     /// </summary>
@@ -47,6 +61,11 @@ internal static class HttpReceivedFieldRules
             throw new InvalidDataException($"The {protocol} field section contains a zero-length field name.");
         }
 
+        if (!name.AsSpan().ContainsAnyExcept(_lowercaseTokenCharacters))
+        {
+            return;
+        }
+
         if (!HttpFieldNormalization.IsValidFieldName(name))
         {
             int index = IndexOfNonTokenCharacter(name);
@@ -54,12 +73,9 @@ internal static class HttpReceivedFieldRules
                 $"An {protocol} field name holds the character 0x{(int)name[index]:X2} at index {index}, which a token cannot carry (RFC 9110 §5.1, RFC 9113 §8.2.1, RFC 9114 §4.2).");
         }
 
-        // The name is a token, so it is safe to quote.
-        if (name.AsSpan().IndexOfAnyInRange('A', 'Z') >= 0)
-        {
-            throw new InvalidDataException(
-                $"The {protocol} field name '{name}' must be lowercase (RFC 9113 §8.2.1, RFC 9114 §4.2).");
-        }
+        // A token that is not a lowercase token holds an uppercase letter, and is safe to quote.
+        throw new InvalidDataException(
+            $"The {protocol} field name '{name}' must be lowercase (RFC 9113 §8.2.1, RFC 9114 §4.2).");
     }
 
     /// <summary>
@@ -80,7 +96,9 @@ internal static class HttpReceivedFieldRules
                 $"The value of the {protocol} field {DescribeName(name)} holds the control character 0x{(int)value[invalid]:X2} at index {invalid}; a field value holds no control character but HTAB (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.2).");
         }
 
-        if (!HttpFieldNormalization.IsValidFieldValue(value))
+        // The control characters include NUL, CR, and LF, so of IsValidFieldValue's rule only the ends are
+        // left to check, and the value is not scanned again.
+        if (value.Length > 0 && (IsOptionalWhitespace(value[0]) || IsOptionalWhitespace(value[^1])))
         {
             throw new InvalidDataException(
                 $"The value of the {protocol} field {DescribeName(name)} starts or ends with whitespace (RFC 9113 §8.2.1, RFC 9114 §4.2).");
@@ -98,6 +116,12 @@ internal static class HttpReceivedFieldRules
         ReadOnlySpan<char> token = name.Length > 1 && name[0] == ':' ? name.AsSpan(1) : name;
 
         return HttpFieldNormalization.IsValidFieldName(token) ? $"'{name}'" : "with a name that is not a token";
+    }
+
+    private static bool IsOptionalWhitespace(char character)
+    {
+        // RFC 9110 §5.6.3 — OWS is SP / HTAB, nothing else.
+        return character is ' ' or '\t';
     }
 
     private static int IndexOfNonTokenCharacter(string name)

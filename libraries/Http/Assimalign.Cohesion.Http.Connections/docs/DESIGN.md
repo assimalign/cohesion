@@ -2765,6 +2765,10 @@ for a trailer section on either.
   writer refuses to send one (#1183) and the HTTP/1.1 reader rejects one (#1341). Accepting it here
   would let a request that HTTP/1.1 answers with `400` reach the application over HTTP/2 or HTTP/3,
   and turn an application that echoes it into a `500`.
+- **Cost: two scans per accepted field.** The name is scanned once against a lowercase `tchar` set,
+  and the value once for a control character (which covers NUL, CR, and LF), after which only its
+  two end characters are read. The core `IsValidFieldName` runs only to describe a refused name, and
+  a test pins the lowercase set to it so the two cannot drift.
 
 **The failure.** A violation throws `InvalidDataException`: the request is malformed, a stream
 error that costs that request alone. HTTP/2 resets the stream with `PROTOCOL_ERROR` before the

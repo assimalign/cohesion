@@ -213,6 +213,41 @@ public class HttpReceivedFieldSyntaxTests
         context.Request.Headers[new HttpHeaderKey("x-echo")].Value.ShouldBe("a\tb");
     }
 
+    // ------------------------------------------------------------------ The rule itself
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Received Field Syntax: A received name should be accepted exactly when the core rule calls it a token and it holds no uppercase letter")]
+    public void EnsureValidName_OnEachCharacter_ShouldAcceptExactlyTheLowercaseTokens()
+    {
+        // Arrange — the decoders keep their own lowercase tchar set for speed; it must not drift from the
+        // core token rule. Every Latin-1 character, and a few past it, in second position.
+        List<string> disagreements = new();
+
+        // Act
+        for (int character = 0; character <= 0x17F; character++)
+        {
+            string name = "x" + (char)character;
+            bool expected = HttpFieldNormalization.IsValidFieldName(name) && character is not (>= 'A' and <= 'Z');
+            bool accepted = true;
+
+            try
+            {
+                HttpReceivedFieldRules.EnsureValidName(name, "HTTP/2");
+            }
+            catch (InvalidDataException)
+            {
+                accepted = false;
+            }
+
+            if (accepted != expected)
+            {
+                disagreements.Add($"0x{character:X2}");
+            }
+        }
+
+        // Assert
+        disagreements.ShouldBeEmpty();
+    }
+
     // ------------------------------------------------------------------ Helpers
 
     /// <summary>
