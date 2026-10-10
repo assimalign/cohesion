@@ -1295,6 +1295,43 @@ another keeps is how requests are smuggled. The name is no longer trimmed, and a
 empty one used to throw `ArgumentException` out of `HttpHeaderKey`, past every
 catch here. A trailer section uses the same parser (see `Http1RequestBodyStream`).
 
+### Request-line octets and field values (#1341)
+
+`ReadLineAsync` ends a line only at CRLF, so a bare CR or a bare LF stays inside
+the line it arrived in. An intermediary that ends the line at a bare LF (RFC 9112
+§2.2 lets it) reads `X-Trace: a<LF>Transfer-Encoding: chunked` as two fields
+where this server would read one. So each kind of line is checked once read, and
+a violation is a `400` through `Http1BadRequestException`, with the connection
+closed:
+
+- **The request line** is `method SP request-target SP HTTP-version`, so every
+  octet is a VCHAR or SP (RFC 9112 §3). Any other octet is rejected before the
+  line is split: a tab, a bare CR or LF, NUL, DEL, or anything above `0x7F`.
+  Before this check, the line was decoded as ASCII, which turned each octet
+  above `0x7F` into `?`. `HttpRequestTarget` then split at that `?`, so
+  `GET /admin\xFFx` was routed as the path `/admin` with the query `x`. An
+  intermediary forwarding the raw octets saw another path. Other malformed
+  request lines (a wrong part count, an unsupported version, a bad target)
+  still drop the connection as a wire-level failure.
+- **A field value** loses SP and HTAB at either end and nothing else (RFC 9112
+  §5.1, RFC 9110 §5.6.3). `string.Trim()` used to strip every Unicode
+  whitespace character as well: a vertical tab, a form feed, a bare CR, a
+  no-break space. Another parser keeps those as part of the value. What remains
+  may hold no control character but HTAB, so NUL, a bare CR, a bare LF, and DEL
+  are rejected (RFC 9110 §5.5). `Http1FieldLine` applies the core field rule,
+  `HttpFieldNormalization.IsValidFieldName` and
+  `IndexOfInvalidControlCharacter`, which the response writers (#1183) and the
+  HTTP/2 and HTTP/3 decoders (#1376) share. A trailer line goes through the
+  same parser and fails the body read with an `InvalidDataException`. The
+  transport then answers it with `400`, like any other malformed chunked body.
+- **Lines are decoded as Latin-1**, one character per octet, so obs-text
+  (`%x80-FF`, RFC 9110 §5.5) reaches a field value intact: a no-break space is
+  `U+00A0`, not `?`. The trailer reader already decoded this way.
+
+A rejection message never quotes the offending line or value. It names the
+field, which is a token, and gives the octet in hex: the raw text can hold CR,
+LF, or NUL, and a log that copied it would be open to injection.
+
 ### The two-phase read timeout
 
 `Http1ReadTimeout` reclaims idle and slow peers with a single
@@ -1456,7 +1493,8 @@ chunked). Load-bearing invariants:
   collection from the trailer section when it reaches the terminating chunk. So
   `Request.Trailers` is populated only *after* the body is fully read — there is
   no "trailers ready" signal before then. Each trailer field line has the header
-  section's syntax (`Http1FieldLine`: a token name, nothing between it and the colon)
+  section's syntax (`Http1FieldLine`: a token name, nothing between it and the colon,
+  and a value with no control character but HTAB)
   and is held to the trailer rule set HTTP/2 and HTTP/3 share (see "One trailer rule
   set for every version"); a line that breaks either fails the body read with an
   `InvalidDataException`. The section is held to the header section's bounds

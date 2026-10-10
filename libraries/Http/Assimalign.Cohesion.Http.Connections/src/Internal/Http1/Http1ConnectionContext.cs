@@ -290,7 +290,9 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         catch (Http1BadRequestException)
         {
             // RFC 9112 §5.1 — a field line whose name is not a token (whitespace before the colon, an
-            // empty name) MUST be answered with 400 before the connection is closed (#1333).
+            // empty name) MUST be answered with 400 before the connection is closed (#1333). A field
+            // value with a control character other than HTAB (RFC 9110 §5.5) and a request line with an
+            // octet other than VCHAR and SP (RFC 9112 §3) are answered the same way (#1341).
             await TryWriteErrorResponseAsync(HttpStatusCode.BadRequest, cancellationToken).ConfigureAwait(false);
             return null;
         }

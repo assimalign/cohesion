@@ -37,6 +37,10 @@ internal static class Http1MessageReader
     /// <exception cref="Http1LimitExceededException">
     /// Thrown when the request head violates a configured limit (414 / 431).
     /// </exception>
+    /// <exception cref="Http1BadRequestException">
+    /// Thrown when the request line holds an octet other than VCHAR and SP, or a header field line is
+    /// malformed: a name that is not a token, or a value with a control character other than HTAB (400).
+    /// </exception>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when an interceptor rejects the request (4xx / 5xx).
     /// </exception>
@@ -66,6 +70,18 @@ internal static class Http1MessageReader
         if (requestLine is null)
         {
             return null;
+        }
+
+        // RFC 9112 §3 — a request line is method SP request-target SP HTTP-version, so every octet in
+        // it is a VCHAR or SP. Anything else is answered with 400 before the line is split (#1341): an
+        // octet above 0x7F was once decoded to '?', which split "/admin\xFFx" into the path "/admin"
+        // and the query "x" while an intermediary forwarding the raw octets saw another path, and a
+        // bare CR, a bare LF, or a tab is whitespace that another parser may split on.
+        int invalidOctet = requestLine.AsSpan().IndexOfAnyExceptInRange(' ', '~');
+        if (invalidOctet >= 0)
+        {
+            throw new Http1BadRequestException(
+                $"RFC 9112 §3: the HTTP/1.1 request line holds the octet 0x{(int)requestLine[invalidOctet]:X2} at offset {invalidOctet}, which is neither a VCHAR nor SP.");
         }
 
         if (string.IsNullOrWhiteSpace(requestLine))
@@ -390,11 +406,12 @@ internal static class Http1MessageReader
 
             // RFC 9112 §5.1 — the field name is a token: no whitespace before its colon, never empty. A
             // server MUST answer such a request with 400, since an intermediary that reads the line
-            // differently would disagree about the message (#1333). The connection then closes.
-            if (!Http1FieldLine.TryParse(line, out string name, out string value))
+            // differently would disagree about the message (#1333). RFC 9110 §5.5 — the value, trimmed
+            // of SP and HTAB only, holds no NUL, CR, LF, or other control character but HTAB (#1341).
+            // The connection then closes.
+            if (!Http1FieldLine.TryParse(line, out string name, out string value, out string? violation))
             {
-                throw new Http1BadRequestException(
-                    $"RFC 9112 §5.1: the HTTP/1.1 header field line '{line}' has no colon, or a field name that is not a token.");
+                throw new Http1BadRequestException($"The HTTP/1.1 header section is malformed. {violation}");
             }
 
             HttpHeaderKey key = new(name);
@@ -491,6 +508,12 @@ internal static class Http1MessageReader
     /// Reads a single CRLF-terminated line, capping its length so an unbounded line cannot be
     /// buffered into an ever-growing <see cref="MemoryStream"/> (a live memory-exhaustion vector).
     /// </summary>
+    /// <remarks>
+    /// Only CRLF ends the line. A bare CR or a bare LF stays in it, for the caller to reject: the
+    /// request line accepts nothing but VCHAR and SP, and a field value no control character but HTAB.
+    /// The line is decoded as Latin-1, one character per octet, so an octet above 0x7F reaches the
+    /// caller as itself rather than as the '?' an ASCII decode substitutes (#1341).
+    /// </remarks>
     /// <param name="stream">The connection stream.</param>
     /// <param name="maxLineSize">The maximum number of payload octets the line may contain.</param>
     /// <param name="overflowStatus">The HTTP status to reject with when the cap is exceeded.</param>
@@ -538,7 +561,8 @@ internal static class Http1MessageReader
             {
                 if (value == '\n')
                 {
-                    return Encoding.ASCII.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+                    // RFC 9110 §5.5 — obs-text (%x80-FF) is a field-value octet; Latin-1 keeps it.
+                    return Encoding.Latin1.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
                 }
 
                 AppendByte(buffer, (byte)'\r', maxLineSize, overflowStatus, subject);

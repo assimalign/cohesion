@@ -619,11 +619,11 @@ internal sealed class Http1RequestBodyStream : Stream
             }
 
             // RFC 9112 §5.1 / §7.1.2 — a trailer field line has the header section's syntax: the name
-            // is a token, with no whitespace before its colon and never empty (#1333).
-            if (!Http1FieldLine.TryParse(line, out string name, out string value))
+            // is a token, with no whitespace before its colon and never empty (#1333), and the value
+            // holds no control character but HTAB (RFC 9110 §5.5, #1341).
+            if (!Http1FieldLine.TryParse(line, out string name, out string value, out string? violation))
             {
-                throw new InvalidDataException(
-                    $"RFC 9112 §7.1.2: the trailer field line '{line}' has no colon, or a field name that is not a token.");
+                throw new InvalidDataException($"RFC 9112 §7.1.2: the HTTP/1.1 trailer section is malformed. {violation}");
             }
 
             HttpHeaderKey key = new(name);

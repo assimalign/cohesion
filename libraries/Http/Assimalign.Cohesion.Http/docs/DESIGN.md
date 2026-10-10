@@ -214,6 +214,38 @@ quirks.
   field coalesces with `"; "` (RFC 9113 §8.2.3, RFC 9114 §4.2.1); `Set-Cookie`
   is never folded; other list fields combine as distinct values. Previously the
   HTTP/3 path combined cookies with a comma; now it matches HTTP/2.
+- **Field syntax** (`IsValidFieldName`, `IsValidFieldValue`,
+  `IndexOfInvalidControlCharacter`) — the one field rule every reader and
+  writer applies, received or sent (#1341; decision 27 of the HTTP/Web
+  program). The members take `ReadOnlySpan<char>`, allocate nothing, and
+  return a boolean or an index, so each caller raises its own error: a `400`
+  on HTTP/1.1, a malformed-request stream error on HTTP/2 and HTTP/3, an
+  exception before the first byte on a writer.
+  - A **name** is a token, `1*tchar` (RFC 9110 §5.1, §5.6.2). That excludes
+    every HTTP/1.1 delimiter (SP, HTAB, `:`, CR, LF), every control character,
+    and every non-ASCII character. HTTP/2 and HTTP/3 also require lowercase and
+    check that themselves; pseudo-headers are not field names.
+  - A **value** has no NUL, CR, or LF, and no SP or HTAB at either end
+    (RFC 9110 §5.5, RFC 9113 §8.2.1, RFC 9114 §4.2). This is the minimum a
+    recipient must enforce and a sender must never break: CR and LF end an
+    HTTP/1.1 field line, and a hop that strips boundary whitespace changes the
+    value.
+  - **Other control characters** are a separate, stricter check:
+    `IndexOfInvalidControlCharacter` finds any CTL but HTAB (`%x00-08`,
+    `%x0A-1F`, `%x7F`), NUL, CR, and LF included. RFC 9110 §5.5 calls such a
+    value invalid but lets a recipient keep it, so the check is a separate
+    member. HTTP/1.1 applies it to every received value once SP and HTAB are
+    trimmed. obs-text (`%x80-FF`, C1 controls included) is a valid octet in
+    both rules.
+  - The rules judge characters, not octets. A character above U+00FF is never
+    produced by a Latin-1 decode and is left to the encoder that writes it.
+
+  Callers: today, HTTP/1.1's `Http1FieldLine`, for headers and chunked
+  trailers. #1183 brings the response writers on all three
+  versions, the `Http.ProtocolUpgrade` 101 writer included. #1376 brings the
+  HTTP/2 and HTTP/3 decoders and `HttpTrailerFieldRules`. A check in the
+  header collection alone would not be enough: any `IHttpHeaderCollection`
+  implementation could bypass it.
 
 ### Version-specific boundaries that must NOT cross
 
@@ -233,7 +265,8 @@ and must not be normalized away:
 ### AOT posture
 
 Pure logic over the existing collections — no reflection, no codegen. Fully
-AOT/trim safe.
+AOT/trim safe. The field-syntax checks scan spans with `SearchValues<char>`
+and `IndexOfAny`, which vectorize and allocate nothing.
 
 ## Host values and allowlist matching
 
