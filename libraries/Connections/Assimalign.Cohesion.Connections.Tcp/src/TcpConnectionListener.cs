@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -25,6 +26,11 @@ public sealed class TcpConnectionListener : ConnectionListener
     private readonly TcpConnectionSettings[] _settings;
     private readonly ListenerId _listenerId = ListenerId.New();
     private readonly ConcurrentDictionary<ConnectionId, TcpConnection> _connections = new();
+    private readonly Func<Socket, CancellationToken, ValueTask<Socket>> _acceptSocket;
+    private readonly TcpAcceptBackoff _backoff = new();
+    // Cancelled on disposal to end a back-off wait, and never disposed, so a wait that races disposal can
+    // still link to its token.
+    private readonly CancellationTokenSource _disposeCancellation = new();
     private readonly Lock _gate = new();
 
     private EndPoint _endPoint;
@@ -48,9 +54,17 @@ public sealed class TcpConnectionListener : ConnectionListener
     /// <param name="options">The binding and socket-tuning options for the listener.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
     public TcpConnectionListener(TcpConnectionListenerOptions options)
+        : this(options, AcceptSocketAsync)
+    {
+    }
+
+    // The test seam: acceptSocket stands in for the accept on the listening socket, so a test can fail it
+    // with errors a real socket cannot be made to report on demand, such as running out of descriptors.
+    internal TcpConnectionListener(TcpConnectionListenerOptions options, Func<Socket, CancellationToken, ValueTask<Socket>> acceptSocket)
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        _acceptSocket = acceptSocket;
         _options = options;
         _settings = options.CreateConnectionSettings();
         _endPoint = options.EndPoint;
@@ -119,23 +133,42 @@ public sealed class TcpConnectionListener : ConnectionListener
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// A failure that belongs to one queued connection is skipped, and the next connection is accepted: its
+    /// client reset it before the accept, or, on Linux, a network error was pending on it.
+    /// </para>
+    /// <para>
+    /// When the process or the system has run out of descriptors or buffers, the accept is retried after a
+    /// wait that starts at 5 milliseconds and doubles with each consecutive failure up to 1 second. The
+    /// schedule starts over with every call. Cancelling <paramref name="cancellationToken"/> or disposing the
+    /// listener ends the wait at once. Each wait is reported by the <c>Assimalign.Cohesion.Connections.Tcp</c>
+    /// event source, at most once a second per listener.
+    /// </para>
+    /// <para>
+    /// Any other failure escapes, because it leaves the listening socket unable to accept.
+    /// </para>
+    /// </remarks>
     public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
     {
         await BindAsync(cancellationToken).ConfigureAwait(false);
 
+        // The current back-off. It is local to this call, so the schedule starts over after a successful accept.
+        TimeSpan backoff = TimeSpan.Zero;
+
         while (!cancellationToken.IsCancellationRequested)
         {
+            Socket listenerSocket;
+
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_isDisposed, this);
+                listenerSocket = _socket!;
+            }
+
             try
             {
-                Socket listenerSocket;
-
-                lock (_gate)
-                {
-                    ObjectDisposedException.ThrowIf(_isDisposed, this);
-                    listenerSocket = _socket!;
-                }
-
-                Socket socket = await AcceptSocketAsync(listenerSocket, cancellationToken).ConfigureAwait(false);
+                Socket socket = await _acceptSocket(listenerSocket, cancellationToken).ConfigureAwait(false);
                 TcpConnection? connection = null;
 
                 lock (_gate)
@@ -184,25 +217,47 @@ public sealed class TcpConnectionListener : ConnectionListener
                     ObjectDisposedException.ThrowIf(_isDisposed, this);
                 }
             }
-            catch (SocketException exception) when (IsQueuedConnectionFailure(exception.SocketErrorCode))
+            catch (SocketException exception) when (TcpAcceptErrors.IsQueuedConnectionFailure(exception.SocketErrorCode, listenerSocket))
             {
-                // A client closed its connection while the connection waited in the accept queue. The
-                // failure belongs to that one connection, so skip it and accept the next one. Letting it
-                // escape would stop the listener, and any client could do that with one reset (#1308).
+                // The failure belongs to the one queued connection the accept was taking: its client closed it
+                // while it waited in the accept queue, or, on Linux, a network error was pending on it. Skip it
+                // and accept the next one. Letting it escape would stop the listener, and any client could do
+                // that with one reset (#1308).
                 TcpConnectionEventSource.Log.AcceptSkipped(_listenerId, exception.SocketErrorCode);
+            }
+            catch (SocketException exception) when (TcpAcceptErrors.IsResourceExhaustion(exception.SocketErrorCode, listenerSocket))
+            {
+                // The process or the system is out of descriptors or buffers. That clears once connections
+                // close, so wait and retry. Letting it escape would stop the listener for good, and a client
+                // that holds enough connections open could do that (#1312). Retrying at once would spin.
+                backoff = TcpAcceptBackoff.NextDelay(backoff);
+
+                if (_backoff.TryReport(Stopwatch.GetTimestamp(), out int unreportedBackoffs))
+                {
+                    TcpConnectionEventSource.Log.AcceptBackoff(_listenerId, exception.SocketErrorCode, backoff, unreportedBackoffs);
+                }
+
+                await WaitBeforeRetryAsync(backoff, cancellationToken).ConfigureAwait(false);
             }
         }
 
         throw new OperationCanceledException(cancellationToken);
     }
 
-    // The errors an accept reports for the queued connection it was taking, not for the listening socket. A
-    // client that resets (RST) before the accept makes Windows fail it with ConnectionReset, and BSD-derived
-    // stacks, and Linux in some cases, with ConnectionAborted. Neither can recur without a new connection, so
-    // retrying cannot spin. Errors that leave the listener unable to accept, such as running out of
-    // descriptors (TooManyOpenSockets), still escape.
-    private static bool IsQueuedConnectionFailure(SocketError error)
-        => error is SocketError.ConnectionReset or SocketError.ConnectionAborted;
+    // Waits out a back-off. Cancellation and disposal both end the wait early, and the accept loop then sees
+    // which of the two it was, so the wait itself never throws.
+    private async ValueTask WaitBeforeRetryAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
+
+        try
+        {
+            await Task.Delay(delay, wait.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
 
     // On Windows an accept is an AcceptEx into a socket created before the call, and the OS can attach
     // an incoming client to that socket before the accept completes. When the accept is cancelled, or
@@ -255,6 +310,10 @@ public sealed class TcpConnectionListener : ConnectionListener
             socketFilePath = _socketFilePath;
             _socketFilePath = null;
         }
+
+        // Outside the gate: cancelling can run an accept's continuation inline, and that continuation takes
+        // the gate to observe the disposal.
+        _disposeCancellation.Cancel();
 
         socket?.Close();
         socket?.Dispose();

@@ -7,8 +7,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 /// <summary>
-/// The TCP driver's diagnostics: listener and connection lifecycle events, skipped accepts, and connection
-/// counters.
+/// The TCP driver's diagnostics: listener and connection lifecycle events, skipped and backed-off accepts, and
+/// connection counters.
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools enable
@@ -62,6 +62,15 @@ internal sealed class TcpConnectionEventSource : EventSource
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
             AcceptSkipped(listenerId.ToString(), error.ToString());
+        }
+    }
+
+    [NonEvent]
+    public void AcceptBackoff(ListenerId listenerId, SocketError error, TimeSpan delay, int unreportedBackoffs)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            AcceptBackoff(listenerId.ToString(), error.ToString(), (int)delay.TotalMilliseconds, unreportedBackoffs);
         }
     }
 
@@ -179,9 +188,13 @@ internal sealed class TcpConnectionEventSource : EventSource
     private void ConnectionError(string connectionId, string operation, string exceptionType, string exceptionMessage)
         => WriteEvent(9, connectionId, operation, exceptionType, exceptionMessage);
 
-    [Event(10, Level = EventLevel.Verbose, Message = "Listener {0} skipped a queued connection its client closed before it was accepted ({1})")]
+    [Event(10, Level = EventLevel.Verbose, Message = "Listener {0} skipped a queued connection that failed before it was accepted ({1})")]
     private void AcceptSkipped(string listenerId, string socketError)
         => WriteEvent(10, listenerId, socketError);
+
+    [Event(11, Level = EventLevel.Warning, Message = "Listener {0} could not accept for want of descriptors or buffers ({1}) and retries in {2} ms; {3} earlier back-offs were not reported")]
+    private void AcceptBackoff(string listenerId, string socketError, int delayMilliseconds, int unreportedBackoffs)
+        => WriteEvent(11, listenerId, socketError, delayMilliseconds, unreportedBackoffs);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

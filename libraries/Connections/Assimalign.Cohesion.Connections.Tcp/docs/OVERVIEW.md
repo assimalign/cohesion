@@ -49,8 +49,9 @@ Connection accepted = await accept;
 
 ## Diagnostics
 
-Listener and connection lifecycle events, back-pressure and reset detail, errors, and connection counters
-are reported through the driver's internal event source, `Assimalign.Cohesion.Connections.Tcp`. Enable it
+Listener and connection lifecycle events, back-pressure and reset detail, errors, skipped accepts,
+accept back-offs while the process is out of descriptors or buffers, and connection counters are reported
+through the driver's internal event source, `Assimalign.Cohesion.Connections.Tcp`. Enable it
 by name in `dotnet-trace` / `dotnet-counters`, or forward it into an application's logging with
 `Assimalign.Cohesion.Logging.EventSource`. The event table is in [DESIGN.md](DESIGN.md#diagnostics).
 

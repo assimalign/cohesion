@@ -334,7 +334,8 @@ to it. The interface remains the canonical surface consumers depend on.
   endpoint failed), or the caller canceled, and a consumer may treat it as fatal. The layered
   listener below and the QUIC driver honor this (#1304). So does the TCP driver: it skips a
   connection whose client reset it before the accept, which Windows reports by failing the
-  accept (#1308).
+  accept (#1308), and it waits and retries when the process runs out of descriptors or buffers,
+  which clears once connections close (#1312).
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
   `Abort(Exception?)` to tear down immediately, discarding in-flight data. A multiplexed transport's
   streams and connections can also abort with an application error code, one stream direction at a time

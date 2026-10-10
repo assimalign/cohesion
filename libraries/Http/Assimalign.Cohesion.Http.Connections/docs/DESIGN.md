@@ -1152,8 +1152,11 @@ handshakes `System.Net.Quic` runs, reporting them from its own event
 source. Below TLS, the TCP driver skips a connection whose client reset
 it while it waited in the accept queue (Windows fails that accept with
 `ConnectionReset`), so a reset never reaches the accept loop either
-(#1308). So a slow client never delays another client's accept, and one
-client never stops an endpoint.
+(#1308). Nor does running out of descriptors or buffers: the TCP driver
+waits and retries, from 5 ms doubling to 1 s, so clients that hold
+enough connections open slow accepts down until some close instead of
+stopping the endpoint (#1312). So a slow client never delays another
+client's accept, and one client never stops an endpoint.
 
 That is the contract of `AcceptAsync` on both listener shapes: a
 listener contains each connection's failure, so whatever escapes it is

@@ -13,6 +13,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.Tcp.Internal;
+using Assimalign.Cohesion.Connections.Tcp.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 
@@ -167,6 +168,49 @@ public class TcpConnectionEventSourceTests
             // Windows fails the accept of every connection reset while it was queued.
             skipped.Length.ShouldBe(resetClients);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - TcpConnectionEventSource: Should report the first of a burst of accept back-offs and hold back the rest")]
+    public async Task AcceptBackoff_BurstOfResourceFailures_ShouldReportFirstBackoffOnly()
+    {
+        // Arrange — three back-offs (5, 10 and 20 ms) fall inside one report interval.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using EventSourceRecorder recorder = new(TcpConnectionEventSource.Log, EventLevel.Verbose);
+        ScriptedAccept accept = new(SocketError.TooManyOpenSockets, SocketError.NoBufferSpaceAvailable, SocketError.TooManyOpenSockets);
+
+        await using TcpConnectionListener listener = new(
+            new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) },
+            accept.AcceptAsync);
+        await listener.BindAsync(cancellation.Token);
+
+        using Socket client = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(listener.EndPoint, cancellation.Token);
+
+        // Act
+        await using Connection server = await listener.AcceptAsync(cancellation.Token);
+
+        // Assert
+        accept.Attempts.ShouldBe(4);
+
+        IReadOnlyList<EventWrittenEventArgs> events = recorder.Events;
+        events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+
+        string listenerId = events
+            .Where(e => e.EventName == "ListenerBound" && Equals(e.Payload![2], listener.EndPoint.ToString()))
+            .ShouldHaveSingleItem()
+            .Payload![0]
+            .ShouldBeOfType<string>();
+
+        EventWrittenEventArgs backoff = events
+            .Where(e => e.EventName == "AcceptBackoff" && Equals(e.Payload![0], listenerId))
+            .ShouldHaveSingleItem();
+
+        backoff.EventId.ShouldBe(11);
+        backoff.Level.ShouldBe(EventLevel.Warning);
+        backoff.PayloadNames.ShouldBe(["listenerId", "socketError", "delayMilliseconds", "unreportedBackoffs"]);
+        backoff.Payload![1].ShouldBe(nameof(SocketError.TooManyOpenSockets));
+        backoff.Payload[2].ShouldBe(5);
+        backoff.Payload[3].ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - TcpConnectionEventSource: Should publish its connection counters")]

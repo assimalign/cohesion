@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -8,11 +10,14 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Connections.Tcp.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 
 public class TcpConnectionListenerTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _backoffTestTimeout = TimeSpan.FromSeconds(15);
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - BindAsync: Should bind an ephemeral endpoint explicitly")]
     public async Task BindAsync_WithEphemeralEndPoint_ShouldReflectBoundPort()
@@ -324,6 +329,154 @@ public class TcpConnectionListenerTests
         accepted.ShouldNotBeNull();
         await accepted.DisposeAsync();
     }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: An accept that fails for want of descriptors or buffers should back off, retry and start over after a success")]
+    [InlineData(SocketError.TooManyOpenSockets)]
+    [InlineData(SocketError.NoBufferSpaceAvailable)]
+    public async Task AcceptAsync_AcceptFailsForWantOfResources_ShouldBackOffRetryAndStartOverAfterSuccess(SocketError error)
+    {
+        // Arrange — running out of descriptors (EMFILE/ENFILE) or buffers (ENOBUFS) is transient, so the
+        // listener has to wait and retry instead of failing (#1312). Eight failures take the wait through
+        // 5, 10, 20, ... 640 ms, and the next failure would wait 1 s.
+        using CancellationTokenSource cancellation = new(_backoffTestTimeout);
+        ScriptedAccept accept = new(error, error, error, error, error, error, error, error);
+
+        await using TcpConnectionListener listener = CreateListener(accept);
+        await listener.BindAsync(cancellation.Token);
+
+        using Socket first = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await first.ConnectAsync(listener.EndPoint, cancellation.Token);
+
+        // Act
+        await using Connection firstAccepted = await listener.AcceptAsync(cancellation.Token);
+        IReadOnlyList<long> attempts = accept.AttemptTimestamps;
+
+        accept.Fail(error);
+
+        using Socket second = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await second.ConnectAsync(listener.EndPoint, cancellation.Token);
+
+        Stopwatch secondAcceptTime = Stopwatch.StartNew();
+        await using Connection secondAccepted = await listener.AcceptAsync(cancellation.Token);
+        secondAcceptTime.Stop();
+
+        // Assert
+        attempts.Count.ShouldBe(9, "each failure is retried, and the ninth attempt accepts");
+        Stopwatch.GetElapsedTime(attempts[7], attempts[8]).ShouldBeGreaterThan(
+            TimeSpan.FromMilliseconds(600),
+            "the wait doubles with each consecutive failure, so the eighth wait is 640 ms");
+        ((IPEndPoint)firstAccepted.RemoteEndPoint!).Port.ShouldBe(((IPEndPoint)first.LocalEndPoint!).Port);
+
+        accept.Attempts.ShouldBe(11);
+        secondAcceptTime.Elapsed.ShouldBeLessThan(
+            TimeSpan.FromMilliseconds(500),
+            "a successful accept starts the schedule over at 5 ms instead of continuing at 1 s");
+        ((IPEndPoint)secondAccepted.RemoteEndPoint!).Port.ShouldBe(((IPEndPoint)second.LocalEndPoint!).Port);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: Cancelling during a back-off should end the accept at once")]
+    public async Task AcceptAsync_CanceledDuringBackoff_ShouldThrowOperationCanceledExceptionAtOnce()
+    {
+        // Arrange — the ninth consecutive failure starts a 1 s wait.
+        using CancellationTokenSource timeout = new(_backoffTestTimeout);
+        using CancellationTokenSource acceptCancellation = new();
+        ScriptedAccept accept = ScriptedAccept.FailingForever(SocketError.TooManyOpenSockets);
+
+        await using TcpConnectionListener listener = CreateListener(accept);
+        await listener.BindAsync(timeout.Token);
+
+        Task<Connection> acceptTask = listener.AcceptAsync(acceptCancellation.Token).AsTask();
+        await accept.WaitForAttemptsAsync(9, acceptTask, timeout.Token);
+        acceptTask.IsCompleted.ShouldBeFalse("the listener should be backing off, not failing");
+
+        // Act
+        Stopwatch elapsed = Stopwatch.StartNew();
+        acceptCancellation.Cancel();
+        Exception? exception = await Record.ExceptionAsync(() => acceptTask);
+        elapsed.Stop();
+
+        // Assert
+        exception.ShouldBeAssignableTo<OperationCanceledException>();
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(500), "cancellation ends the 1 s wait");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: Disposing the listener during a back-off should end the accept at once")]
+    public async Task AcceptAsync_DisposedDuringBackoff_ShouldThrowObjectDisposedExceptionAtOnce()
+    {
+        // Arrange — the ninth consecutive failure starts a 1 s wait.
+        using CancellationTokenSource timeout = new(_backoffTestTimeout);
+        ScriptedAccept accept = ScriptedAccept.FailingForever(SocketError.NoBufferSpaceAvailable);
+
+        await using TcpConnectionListener listener = CreateListener(accept);
+        await listener.BindAsync(timeout.Token);
+
+        Task<Connection> acceptTask = listener.AcceptAsync(timeout.Token).AsTask();
+        await accept.WaitForAttemptsAsync(9, acceptTask, timeout.Token);
+        acceptTask.IsCompleted.ShouldBeFalse("the listener should be backing off, not failing");
+
+        // Act
+        Stopwatch elapsed = Stopwatch.StartNew();
+        await listener.DisposeAsync();
+        Exception? exception = await Record.ExceptionAsync(() => acceptTask);
+        elapsed.Stop();
+
+        // Assert
+        exception.ShouldBeOfType<ObjectDisposedException>();
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(500), "disposal ends the 1 s wait");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: A network error pending on a queued connection should be skipped on Linux and escape elsewhere")]
+    public async Task AcceptAsync_PendingNetworkError_ShouldBeSkippedOnLinuxOnly()
+    {
+        // Arrange — Linux accept(2) reports a network error pending on the new socket as the accept's error,
+        // and the same SocketError means the listening socket failed on Windows.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        ScriptedAccept accept = new(SocketError.NetworkUnreachable);
+
+        await using TcpConnectionListener listener = CreateListener(accept);
+        await listener.BindAsync(cancellation.Token);
+
+        using Socket client = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(listener.EndPoint, cancellation.Token);
+
+        // Act
+        Exception? exception = await Record.ExceptionAsync(async () =>
+        {
+            await using Connection connection = await listener.AcceptAsync(cancellation.Token);
+        });
+
+        // Assert
+        if (OperatingSystem.IsLinux())
+        {
+            exception.ShouldBeNull();
+            accept.Attempts.ShouldBe(2);
+        }
+        else
+        {
+            exception.ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.NetworkUnreachable);
+            accept.Attempts.ShouldBe(1);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: An error of the listening socket itself should escape without a retry")]
+    public async Task AcceptAsync_ListeningSocketError_ShouldEscapeWithoutRetry()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        ScriptedAccept accept = new(SocketError.InvalidArgument);
+
+        await using TcpConnectionListener listener = CreateListener(accept);
+
+        // Act
+        Exception? exception = await Record.ExceptionAsync(async () => await listener.AcceptAsync(cancellation.Token));
+
+        // Assert
+        exception.ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.InvalidArgument);
+        accept.Attempts.ShouldBe(1);
+    }
+
+    private static TcpConnectionListener CreateListener(ScriptedAccept accept)
+        => new(new TcpConnectionListenerOptions { EndPoint = new IPEndPoint(IPAddress.Loopback, 0) }, accept.AcceptAsync);
 
     private static async Task<bool> ClosesWithinAsync(Socket client, TimeSpan budget)
     {
