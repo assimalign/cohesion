@@ -106,8 +106,9 @@ Owner decisions 34 and 35 (2026-10-09, #1380) set how a feature reaches an appli
 | `Web.OpenApi` | `AddOpenApi(options => ...)` | static factory (`OpenApiComponents`) |
 
 A verb whose callback configures a builder other packages graft onto is a builder template; a verb
-called bare, with an optional options callback, or with a value argument is a static factory, so
-callers keep `builder.Services.AddRouting()`. The rule set is `.claude/rules/web-area.md`, "Builder
+called bare, with an optional options callback, with a value argument, or with a required callback
+over an options type that has no `Build()` (`ValidationComponents`) is a static factory, so callers
+keep `builder.Services.AddRouting()`. The rule set is `.claude/rules/web-area.md`, "Builder
 verbs ship with their feature".
 
 ```csharp

@@ -60,7 +60,10 @@ layer, composing over the same seam.
   template's single callback cannot carry. Until #1380 both were `extension(IWebApplicationBuilder)`
   members that returned the builder, and the feature read copy-on-write arrays the builder kept
   mutating. Repeating a verb composes a fresh registry that replaces the old one (features are
-  name-keyed) — call one, once.
+  name-keyed) — call one, once. That is a break for code that chained onto the old return:
+  `AddJsonSerialization(resolver).AddReader(...)` added to the JSON registry, while a separate
+  `AddContentSerialization(...)` call now silently replaces it, so a JSON registry with extra
+  readers or writers is `AddContentSerialization(s => s.AddJson(...).AddReader(...))`.
 - **`ReadContentAsync`/`WriteContentAsync`, not `WriteAsync`.** The issue sketch says
   `response.WriteAsync(value)`; the shipped names add `Content` because a raw-text
   `WriteAsync(string)` response helper is a likely future addition, and an unconstrained

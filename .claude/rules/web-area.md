@@ -72,12 +72,15 @@ by kind:
   parameterless constructor and one zero-parameter instance `Build()` that returns the feature
   (`AuthenticationBuilder`, `ErrorHandlingBuilder`, `ContentSerializationBuilder` →
   `builder.Services.AddAuthentication(auth => auth.AddCookie(...))`). A verb with no arguments, an
-  optional options callback, or a value argument the template cannot carry uses the **static
-  factory**: an `[EditorBrowsable(Never)]` `<Feature>Components` class in a `ComponentModel/`
-  folder that declares the feature's **root namespace**, so the projected verb lands in the
-  namespace callers already import (`RoutingComponents` → `builder.Services.AddRouting()`,
-  `AntiforgeryComponents` → `AddAntiforgery(dataProtectionProvider, ...)`). The builder template
-  always takes a required `Action<TBuilder>`, so it never fits a verb that is called bare.
+  optional options callback, a value argument the template cannot carry, or a required callback
+  over an options type that has no `Build()` uses the **static factory**: an
+  `[EditorBrowsable(Never)]` `<Feature>Components` class in a `ComponentModel/` folder that
+  declares the feature's **root namespace**, so the projected verb lands in the namespace callers
+  already import (`RoutingComponents` → `builder.Services.AddRouting()`, `AntiforgeryComponents` →
+  `AddAntiforgery(dataProtectionProvider, ...)`, `ValidationComponents` →
+  `AddValidation(validation => ...)` over `EndpointValidationOptions`). The builder template
+  always takes a required `Action<TBuilder>`, so it never fits a verb that is called bare, and it
+  needs a builder with `Build()`, so an options type does not get one just to fit the template.
 - **Every request feature is a singleton (decision 35).** The host stamps one snapshot of the
   `IHttpFeature` aggregate onto every exchange, and middleware reads it while the pipeline is
   composed. `WebApplicationBuilder.Build` rejects an `IHttpFeature` registration that is scoped
