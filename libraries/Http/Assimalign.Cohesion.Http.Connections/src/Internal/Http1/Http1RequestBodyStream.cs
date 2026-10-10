@@ -13,9 +13,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <summary>
 /// The lazy, forward-only HTTP/1.1 request-body stream. Reads the body incrementally from the
 /// connection on demand — never buffering the whole body before the request is dispatched — while
-/// enforcing the effective per-request body-size cap (413) and, when configured, the minimum
-/// request-body data rate (408). Framing (Content-Length or chunked, RFC 9112 §6 / §7) is decided
-/// up front from the request headers and handed in as an <see cref="Http1RequestBodyFraming"/>.
+/// enforcing the effective per-request body-size cap (413), when configured the minimum request-body
+/// data rate (408), and the header-section bounds on a chunked body's trailer section (431, #1375).
+/// Framing (Content-Length or chunked, RFC 9112 §6 / §7) is decided up front from the request
+/// headers and handed in as an <see cref="Http1RequestBodyFraming"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +30,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// Every chunk framing line is capped (<see cref="Http1ConnectionListenerOptions.Http1Limits.MaxChunkFramingLineSize"/>,
 /// chunk extensions included), and the trailer section is held to the header section's count and
 /// size bounds, so what a chunked body buffers outside its data is bounded however the peer frames
-/// it (#1375).
+/// it (#1375). The chunk-size lines of the whole body are held to a framing budget as well, so what
+/// a chunked body makes the server read beyond its data is bounded too.
 /// </para>
 /// <para>
 /// The stream does not own the connection stream (the connection does), so disposal never closes or
@@ -61,6 +63,7 @@ internal sealed class Http1RequestBodyStream : Stream
     private readonly long? _fallbackCap;
     private readonly HttpMinDataRate? _rate;
     private readonly int _maxFramingLineSize;
+    private readonly long _maxFramingExcess;
     private readonly int _maxTrailerFieldCount;
     private readonly int _maxTrailerSectionSize;
     private readonly TimeProvider _timeProvider;
@@ -91,6 +94,10 @@ internal sealed class Http1RequestBodyStream : Stream
     // Chunked state: octets left in the current chunk, or -1 when the next chunk header must be read.
     private long _chunkRemaining = -1;
     private bool _needChunkTerminator;
+
+    // The chunk framing octets received so far that the chunks' data has not paid for; see
+    // ChargeChunkFraming.
+    private long _framingExcess;
 
     // Set when a read failed while a framing line or the trailer section was in progress. The octets
     // that read consumed are gone, so where the framing resumes on the wire is not known.
@@ -141,6 +148,7 @@ internal sealed class Http1RequestBodyStream : Stream
         _fallbackCap = limits.MaxRequestBodySize;
         _rate = limits.MinRequestBodyDataRate;
         _maxFramingLineSize = limits.MaxChunkFramingLineSize;
+        _maxFramingExcess = 2L * limits.MaxChunkFramingLineSize;
         _maxTrailerFieldCount = limits.MaxRequestHeaderCount;
         _maxTrailerSectionSize = limits.MaxRequestHeadersTotalSize;
         _timeProvider = timeProvider;
@@ -481,7 +489,8 @@ internal sealed class Http1RequestBodyStream : Stream
     {
         // RFC 9112 §7.1.1 — a server ought to limit the total length of chunk extensions. The whole
         // line is capped, extensions included, so an extension that never ends is rejected as
-        // malformed (400) at the cap instead of being buffered for as long as the peer sends it (#1375).
+        // malformed (400) at the cap instead of being buffered for as long as the peer sends it (#1375),
+        // and ChargeChunkFraming holds the lines of the whole body to a total.
         string sizeLine = await ReadFramingLineAsync(_maxFramingLineSize, FramingLine.ChunkSize, cancellationToken).ConfigureAwait(false);
 
         // RFC 9112 §7.1.1 — strip the optional ";<chunk-ext>" (BWS allowed before the ';').
@@ -528,7 +537,33 @@ internal sealed class Http1RequestBodyStream : Stream
             value = (value * 16) + digit;
         }
 
+        ChargeChunkFraming(sizeLine.Length, value);
         return value;
+    }
+
+    /// <summary>
+    /// Holds the chunk framing of the whole body to a budget, as Go's chunked reader does. RFC 9112
+    /// §7.1.1 asks a server to limit the total length of a request's chunk extensions, and the
+    /// per-line cap alone does not: a peer can put a line just under the cap before every one-octet
+    /// chunk, and the body-size cap, which counts data only, never sees it. So each chunk-size line
+    /// charges its octets, its CRLF and the CRLF that ends its chunk's data, and each chunk pays back
+    /// 16 octets plus twice its size. Once the unpaid excess passes twice
+    /// <see cref="Http1ConnectionListenerOptions.Http1Limits.MaxChunkFramingLineSize"/>, the body is
+    /// malformed (400). Leading zeros in a chunk-size are charged the same way. Ordinary framing never
+    /// accumulates: a line of up to 14 octets is paid for by the smallest chunk. A chunk's credit is
+    /// always backed by data, since its data must arrive before the next chunk-size line is read.
+    /// </summary>
+    /// <param name="sizeLineLength">The chunk-size line's length, extensions included, without its CRLF.</param>
+    /// <param name="chunkSize">The chunk's size.</param>
+    private void ChargeChunkFraming(int sizeLineLength, int chunkSize)
+    {
+        _framingExcess = Math.Max(0, _framingExcess + sizeLineLength + 4 - (16 + (2L * chunkSize)));
+
+        if (_framingExcess > _maxFramingExcess)
+        {
+            throw new InvalidDataException(
+                $"RFC 9112 §7.1.1: the chunked request body carries more than {_maxFramingExcess} octets of chunk framing, chunk extensions included, beyond what its chunks' data pays for.");
+        }
     }
 
     private async ValueTask ReadTrailersAsync(CancellationToken cancellationToken)

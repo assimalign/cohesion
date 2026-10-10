@@ -101,10 +101,22 @@ public sealed class Http1ConnectionListenerOptions
         /// every field line, repeated names included. Defaults to <c>8192</c> (8 KB).
         /// </summary>
         /// <remarks>
+        /// <para>
         /// The body is read after the request is dispatched, and the transport drains a body the
         /// application did not read before it reuses the connection, so without this bound a chunk
         /// extension or trailer line that never ends would be buffered for as long as the peer sends
         /// it (RFC 9112 §7.1.1 asks a server to limit chunk extensions).
+        /// </para>
+        /// <para>
+        /// The bound also sets the total for the whole body. Each chunk-size line is charged its
+        /// octets plus four (its CRLF and the CRLF that ends its chunk's data), each chunk pays back
+        /// 16 octets plus twice its size, and a body whose unpaid framing passes twice this bound
+        /// (16 KB by default) is rejected as malformed with <c>400 Bad Request</c>. A chunk extension
+        /// just under the bound before every one-octet chunk is therefore rejected after a couple of
+        /// chunks, rather than read for as long as the body-size cap, which counts data only, allows.
+        /// Ordinary framing never accumulates: a chunk-size line of up to 14 octets is paid for by a
+        /// one-octet chunk.
+        /// </para>
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is less than <c>1</c>.</exception>
         public int MaxChunkFramingLineSize

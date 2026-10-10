@@ -1234,7 +1234,7 @@ of the box:
 | `MaxRequestLineSize` | 8 KB | `Http1MessageReader` request-line read | `414` URI Too Long (RFC 9110 §15.5.15) |
 | `MaxRequestHeaderCount` | 100 | header loop | `431` Request Header Fields Too Large (§15.5.22) |
 | `MaxRequestHeadersTotalSize` | 32 KB | per-line cap = remaining budget | `431` |
-| `MaxChunkFramingLineSize` | 8 KB | `Http1RequestBodyStream` chunk framing-line read | `400` for a chunk-size line (extensions included), `431` for a trailer field line, after dispatch (#1375) |
+| `MaxChunkFramingLineSize` | 8 KB | `Http1RequestBodyStream` chunk framing-line read; twice it bounds the body's unpaid chunk framing | `400` for a chunk-size line (extensions included) or a body over its framing budget, `431` for a trailer field line, after dispatch (#1375) |
 | `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1RequestBodyStream` (frozen at first read) | `413` Content Too Large (§15.5.14), after dispatch (#1339) |
 | `MinRequestBodyDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1RequestBodyStream` | `408` Request Timeout (§15.5.9), after dispatch (#1339) |
 | `MinResponseDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1ResponseBodyStream` (streaming sink) | exchange aborted (`IOException`) |
@@ -1411,6 +1411,21 @@ chunked). Load-bearing invariants:
   as described under "Trailers on completion". Before the cap, a chunk extension or
   trailer line was appended to a `StringBuilder` for as long as the peer sent it, on
   any route, since the keep-alive drain reads a body the application never touched.
+- **A framing budget for the whole body (#1375).** RFC 9112 §7.1.1 asks a server to
+  limit the *total* length of a request's chunk extensions, and a per-line cap does
+  not: a line just under the cap before every one-octet chunk is about 8 KB of
+  framing per data octet, so the body-size cap, which counts data only, let a client
+  make the server read about 240 GB of framing at the default 28.6 MB, one octet at a
+  time, on any route. The stream keeps Go's chunked-reader budget: each chunk-size
+  line is charged its octets plus four (its CRLF and the CRLF that ends its chunk's
+  data), each chunk pays back 16 octets plus twice its size, the unpaid excess never
+  goes below zero, and a body whose excess passes twice `MaxChunkFramingLineSize`
+  (16 KB by default, Go's figure) is malformed (`400`, below). Leading zeros in a
+  chunk-size are charged the same way. Ordinary framing never accumulates: a line of
+  up to 14 octets is paid for by a one-octet chunk, and a long extension is paid for
+  by a chunk about half its length. The budget derives from the line cap rather than
+  adding a limit, so a listener that raises the cap for long extensions raises the
+  total with it.
 - **Cap frozen at first read.** `EnsureStarted` (first read) freezes the parse
   context's body-size knob and resolves the cap. Up to that point head hooks
   *and* middleware may raise or lower it via `IHttpMaxRequestBodySizeFeature`. A
@@ -1505,10 +1520,10 @@ the client did nothing wrong. A read cancelled inside a chunk's data consumed no
 of it, so the drain still resumes that one.
 
 The drain reads framing lines under the same caps as the application (#1375). A
-drain that meets an over-long chunk extension or trailer line, or a trailer section
-over its bounds, stops at the breach, returns `false`, and the connection closes;
-it never reads on to find where the line ends. The response the application sent
-before the drain is not changed.
+drain that meets an over-long chunk extension or trailer line, a trailer section
+over its bounds, or a body over its framing budget stops at the breach, returns
+`false`, and the connection closes; it never reads on to find where the line ends.
+The response the application sent before the drain is not changed.
 
 ### Graceful close (`BeginGracefulClose`)
 

@@ -169,7 +169,9 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         //     whose name is not a token) is answered 400 (#1333);
         //   - RFC 9110 §15.5.14 / §15.5.9: a body over the size cap is answered 413, and one received
         //     below the minimum data rate 408 (#1339). Without this the application only saw the
-        //     read fail, and a host's fault boundary answered 500.
+        //     read fail, and a host's fault boundary answered 500;
+        //   - RFC 9110 §15.5.22: a chunked body whose trailer section breaks the header-section
+        //     bounds is answered 431 (#1375).
         // The status replaces whatever the application staged, unless it staged that status itself,
         // whose representation is kept; the exchange's status is updated too, so a host reports what
         // went on the wire. The connection then closes, since where the request ends on the wire is no

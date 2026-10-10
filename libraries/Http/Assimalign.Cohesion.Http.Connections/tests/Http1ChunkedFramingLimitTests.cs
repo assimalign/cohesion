@@ -18,11 +18,13 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// <summary>
 /// The bounds on a chunked HTTP/1.1 request body's framing (#1375). A chunk-size line, chunk
 /// extensions included, and each trailer field line are capped by
-/// <see cref="Http1ConnectionListenerOptions.Http1Limits.MaxChunkFramingLineSize"/>, and the trailer
-/// section by the header section's count and size limits. Without them a peer could make the
-/// listener buffer a line that never ends, whether the application read the body or the keep-alive
-/// drain did. The body-stream tests feed the stream from a peer that keeps sending and check how far
-/// the reader got and what it allocated; the connection tests check what the client is answered.
+/// <see cref="Http1ConnectionListenerOptions.Http1Limits.MaxChunkFramingLineSize"/>, the chunk-size
+/// lines of the whole body by a framing budget of twice that cap beyond what their chunks' data pays
+/// for, and the trailer section by the header section's count and size limits. Without them a peer
+/// could make the listener buffer a line that never ends, or read far more framing than data,
+/// whether the application read the body or the keep-alive drain did. The body-stream tests feed the
+/// stream from a peer that keeps sending and check how far the reader got and what it allocated; the
+/// connection tests check what the client is answered.
 /// </summary>
 public class Http1ChunkedFramingLimitTests
 {
@@ -121,34 +123,23 @@ public class Http1ChunkedFramingLimitTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Chunked Framing: Repeated trailer fields should combine in linear time, in arrival order")]
     public void ReadAsync_OnRepeatedTrailerFields_ShouldCombineInLinearTime()
     {
-        // Arrange — limits raised so 5000 repeats are allowed. Combining on each repeat copies the
-        // values gathered so far, about 100 MB here; combining once costs a few hundred KB.
-        const int repeats = 5000;
-        StringBuilder section = new("0\r\n");
-        for (int i = 0; i < repeats; i++)
-        {
-            section.Append("X-Repeat: v").Append(i).Append("\r\n");
-        }
-
-        section.Append("\r\n");
-        CountingInputStream peer = new(Encoding.ASCII.GetBytes(section.ToString()), (byte)'a', 0);
-        HttpTrailerCollection trailers = new(isSupported: true);
-        Http1RequestBodyStream body = CreateChunkedBody(peer, limits =>
-        {
-            limits.MaxRequestHeaderCount = repeats;
-            limits.MaxRequestHeadersTotalSize = 1024 * 1024;
-        }, trailers);
+        // Arrange — combining on each repeat copies the values gathered so far, so what the read
+        // allocates grows with the square of the repeats; combining once, it grows linearly. The test
+        // compares twice the repeats with once rather than bounding either: a Debug build allocates an
+        // async state machine for every octet it reads, which an absolute bound would mostly measure.
+        // Doubling the repeats about doubles a linear read and about quadruples a quadratic one. The
+        // first read takes the one-time costs (type loading, static state) out of the ratio.
+        ReadRepeatedTrailers(500);
 
         // Act
-        (Exception? failure, long allocated) = ReadToEnd(body);
+        (long once, _) = ReadRepeatedTrailers(2500);
+        (long twice, HttpHeaderValue combined) = ReadRepeatedTrailers(5000);
 
         // Assert
-        failure.ShouldBeNull();
-        HttpHeaderValue combined = trailers[new HttpHeaderKey("x-repeat")];
-        combined.Count.ShouldBe(repeats);
+        combined.Count.ShouldBe(5000);
         combined[0].ShouldBe("v0");
-        combined[repeats - 1].ShouldBe($"v{repeats - 1}");
-        allocated.ShouldBeLessThan(16L * 1024 * 1024, $"allocated {allocated} octets");
+        combined[4999].ShouldBe("v4999");
+        ((double)twice / once).ShouldBeLessThan(2.5, $"allocated {once} octets for 2500 repeats and {twice} for 5000");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Chunked Framing: The drain of an unread body should stop at the line cap of an endless chunk extension")]
@@ -171,6 +162,77 @@ public class Http1ChunkedFramingLimitTests
         body.IsMalformed.ShouldBeTrue();
         peer.Consumed.ShouldBeLessThanOrEqualTo(LineCap + 1);
         allocated.ShouldBeLessThan(BoundedAllocation, $"allocated {allocated} octets");
+    }
+
+    /// <summary>
+    /// Chunk-size lines just under the line cap: one carrying a chunk extension, and one whose
+    /// chunk-size is padded with leading zeros.
+    /// </summary>
+    public static TheoryData<string> NearCapChunkSizeLines => new()
+    {
+        "1;" + new string('a', LineCap - 2),
+        new string('0', LineCap - 1) + "1",
+    };
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Chunked Framing: The drain should stop within the framing budget a body whose chunk framing far outweighs its data")]
+    [MemberData(nameof(NearCapChunkSizeLines))]
+    public void DrainAsync_OnNearCapLineBeforeEveryOneOctetChunk_ShouldStopWithinTheFramingBudget(string sizeLine)
+    {
+        // Arrange — 2,000 one-octet chunks, each behind a line just under the cap. Every line keeps to
+        // the cap and the data keeps to the body-size cap, but the body is about 2 MB of framing for
+        // 2,000 octets of data. The budget is twice the line cap and each chunk leaves about one line
+        // cap unpaid, so the third line breaks it.
+        const int chunks = 2000;
+        CountingInputStream peer = new(
+            Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat(sizeLine + "\r\nx\r\n", chunks)) + "0\r\n\r\n"),
+            (byte)'a',
+            0);
+        Http1RequestBodyStream body = CreateChunkedBody(peer);
+
+        // Act
+        ValueTask<bool> drain = body.DrainAsync(CancellationToken.None);
+        bool completedSynchronously = drain.IsCompleted;
+        bool drained = drain.IsCompleted && drain.Result;
+
+        // Assert — two whole chunks, then the third chunk-size line.
+        completedSynchronously.ShouldBeTrue();
+        drained.ShouldBeFalse();
+        body.IsMalformed.ShouldBeTrue();
+        peer.Consumed.ShouldBeLessThanOrEqualTo(3 * (sizeLine.Length + 5));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Chunked Framing: Chunk extensions paid for by their chunks' data should be read however many there are")]
+    public async Task ReadAsync_OnLongChunkExtensionsPaidForByData_ShouldDeliverTheBody()
+    {
+        // Arrange — 200 chunks of 512 octets, each behind an extension just under the line cap, about
+        // a hundred times the framing budget in all; then 2,000 one-octet chunks behind short
+        // extensions. Every line is paid for by its own chunk's data, so none of it accumulates.
+        StringBuilder wire = new();
+        for (int i = 0; i < 200; i++)
+        {
+            wire.Append("200;sig=").Append('a', LineCap - 8).Append("\r\n").Append('d', 512).Append("\r\n");
+        }
+
+        for (int i = 0; i < 2000; i++)
+        {
+            wire.Append("1;n=v\r\nd\r\n");
+        }
+
+        wire.Append("0\r\n\r\n");
+        Http1RequestBodyStream body = CreateChunkedBody(new CountingInputStream(Encoding.ASCII.GetBytes(wire.ToString()), (byte)'a', 0));
+
+        // Act
+        long delivered = 0;
+        byte[] buffer = new byte[4096];
+        int read;
+        while ((read = await body.ReadAsync(buffer)) > 0)
+        {
+            delivered += read;
+        }
+
+        // Assert
+        delivered.ShouldBe((200 * 512) + 2000);
+        body.IsMalformed.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Chunked Framing: An endless chunk extension read by the application should be answered with 400 and close the connection")]
@@ -246,6 +308,33 @@ public class Http1ChunkedFramingLimitTests
         result.Paths.ShouldBe(["/upload"]);
         result.Output.ShouldStartWith("HTTP/1.1 200");
         result.Output.Split("HTTP/1.1 ").Length.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// Reads a body whose trailer section repeats one field <paramref name="repeats"/> times, with the
+    /// limits raised to allow it, and returns what the read allocated and the combined field.
+    /// </summary>
+    private static (long Allocated, HttpHeaderValue Combined) ReadRepeatedTrailers(int repeats)
+    {
+        StringBuilder section = new("0\r\n");
+        for (int i = 0; i < repeats; i++)
+        {
+            section.Append("X-Repeat: v").Append(i).Append("\r\n");
+        }
+
+        section.Append("\r\n");
+        CountingInputStream peer = new(Encoding.ASCII.GetBytes(section.ToString()), (byte)'a', 0);
+        HttpTrailerCollection trailers = new(isSupported: true);
+        Http1RequestBodyStream body = CreateChunkedBody(peer, limits =>
+        {
+            limits.MaxRequestHeaderCount = repeats;
+            limits.MaxRequestHeadersTotalSize = 1024 * 1024;
+        }, trailers);
+
+        (Exception? failure, long allocated) = ReadToEnd(body);
+
+        failure.ShouldBeNull();
+        return (allocated, trailers[new HttpHeaderKey("x-repeat")]);
     }
 
     private static Http1RequestBodyStream CreateChunkedBody(
