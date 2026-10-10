@@ -52,11 +52,13 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 6 = format 5's stamped records and index trees, with each
-    /// table's physical column layout in its catalog record (table-record extension
-    /// version 3): a dropped column keeps its physical ordinal, rows are decoded
-    /// through that layout, and DROP COLUMN rewrites no row (#1241). Earlier
-    /// versions — 5 (DROP COLUMN spliced the column out of every stored version, so
+    /// the catalog: 7 = format 6's rows, index trees and physical column layout, with
+    /// each column's domain name in its table's catalog record (table-record extension
+    /// version 4, phase E3): a column of a domain stores its base type, and the name lets
+    /// an opening engine bind the domain again. Earlier versions — 6 (each table's
+    /// physical column layout in its catalog record, table-record extension version 3:
+    /// a dropped column keeps its physical ordinal, rows are decoded through that
+    /// layout, and DROP COLUMN rewrites no row, #1241), 5 (DROP COLUMN spliced the column out of every stored version, so
     /// the catalog recorded no dropped columns; index keys encode the temporal
     /// identity, <see cref="ToKeyIdentity"/>, in index trees of B-tree page format 2,
     /// which order entries by key, entry reference and writer, #1194), 4 (the same
@@ -67,7 +69,7 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 6;
+    internal const int RecordSpaceFormatVersion = 7;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

@@ -113,30 +113,42 @@ public sealed partial class SqlQueryParser
         return true;
     }
 
+    /// <summary>
+    /// Resolves a CAST target that is a built-in type name, checking its type arguments. A name
+    /// that is not a built-in type is left unresolved without a diagnostic: the engine's type
+    /// catalog may register it as a domain (phase E3), so the planner resolves it, and reports a
+    /// name it does not know. Which conversions exist is the engine's cast registry's question,
+    /// not the parser's, so every built-in type is a valid target here.
+    /// </summary>
     private DatabaseTypeInfo? ResolveCastTarget(
         string name, int? firstArgument, int? secondArgument, bool validArguments, int start, int end)
     {
+        const string argumentShape = "CAST type arguments must be one or two unsigned integer literals within the Int32 range.";
         if (!SqlTypeNames.TryResolve(name, firstArgument, null, secondArgument, out var typeInfo))
         {
-            AddCastTargetDiagnostic("SQL0004", $"Unknown CAST target type '{name}'.", start, end);
+            if (!validArguments)
+            {
+                AddCastTargetDiagnostic("SQL0005", argumentShape, start, end);
+            }
+
             return null;
         }
 
         string? error = !validArguments
-            ? "CAST type arguments must be one or two unsigned integer literals within the Int32 range."
+            ? argumentShape
             : typeInfo.Type switch
             {
-                DatabaseType.Boolean or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
-                    when firstArgument is not null => $"CAST target '{name}' does not accept type arguments.",
                 DatabaseType.Decimal when firstArgument is < 1 or > 28 =>
                     "CAST decimal precision must be between 1 and 28.",
                 DatabaseType.Decimal when secondArgument > firstArgument =>
                     "CAST decimal scale must be between 0 and precision.",
                 DatabaseType.String when firstArgument is < 1 || secondArgument is not null =>
                     "CAST string targets accept one positive length argument.",
-                DatabaseType.Boolean or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 or
-                    DatabaseType.Decimal or DatabaseType.String => null,
-                _ => $"CAST target '{name}' resolves to {typeInfo.Type}, which is not supported for explicit conversion.",
+                DatabaseType.Binary when firstArgument is < 1 || secondArgument is not null =>
+                    "CAST binary targets accept one positive length argument.",
+                DatabaseType.Decimal or DatabaseType.String or DatabaseType.Binary => null,
+                _ when firstArgument is not null => $"CAST target '{name}' does not accept type arguments.",
+                _ => null,
             };
 
         if (error is not null)

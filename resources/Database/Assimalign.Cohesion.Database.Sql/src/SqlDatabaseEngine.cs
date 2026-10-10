@@ -98,11 +98,12 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // How the model's messages start: "SQL engine '{name}' …".
     internal const string ModelName = "SQL";
 
-    private SqlDatabaseEngine(string name, SqlDatabaseEngineOptions options, SqlFunctionCatalog functions)
+    private SqlDatabaseEngine(string name, SqlDatabaseEngineOptions options, SqlFunctionCatalog functions, SqlTypeCatalog types)
         : base(name, EngineModel.Sql, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
         Functions = functions;
+        Types = types;
         _signalCommitPending = _commitPendingSignal.Set;
         _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
@@ -160,6 +161,15 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="Create"/> executes the standard library alone.
     /// </summary>
     public SqlFunctionCatalog Functions { get; }
+
+    /// <summary>
+    /// Gets the types and casts the engine knows, frozen when it was built: the built-in types and
+    /// casts, the domains and casts the builder's <see cref="SqlDatabaseEngineBuilder.Types"/>
+    /// registered, and the domains its declared schemas declare, visible in every database of the
+    /// engine (phase E3). DDL and <c>CAST</c> resolve a name that is not a built-in type name here.
+    /// An engine created by <see cref="Create"/> knows the built-in types and casts alone.
+    /// </summary>
+    public SqlTypeCatalog Types { get; }
 
     /// <summary>
     /// Gets the engine options, for the engine's background workers.
@@ -291,11 +301,13 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// (<see cref="SqlDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
     /// <param name="functions">The functions the engine executes, frozen; the standard library alone when null.</param>
+    /// <param name="types">The types and casts the engine knows, frozen; the built-in ones alone when null.</param>
     /// <returns>A new engine instance.</returns>
-    internal static SqlDatabaseEngine CreateUncomposed(string name, SqlDatabaseEngineOptions options, SqlFunctionCatalog? functions = null)
+    internal static SqlDatabaseEngine CreateUncomposed(string name, SqlDatabaseEngineOptions options, SqlFunctionCatalog? functions = null,
+        SqlTypeCatalog? types = null)
     {
         ValidateOptions(name, options);
-        return new SqlDatabaseEngine(name, options, functions ?? SqlFunctionCatalog.Standard);
+        return new SqlDatabaseEngine(name, options, functions ?? SqlFunctionCatalog.Standard, types ?? SqlTypeCatalog.Standard);
     }
 
     /// <summary>

@@ -380,6 +380,59 @@ internal sealed partial class SqlPlanExecutor
         => new(constraint.Name, $"{table.Schema}.{table.Name}", constraint.Kind == SqlCatalogConstraintKind.Check ? "CHECK" : "FOREIGN KEY", SafeValue(values));
 
     /// <summary>
+    /// Checks the values a write assigns to columns of a domain (phase E3): each domain's check is
+    /// evaluated on its column's value as a column CHECK is, so only FALSE refuses the row, and a
+    /// column whose domain the engine does not register refuses any write that assigns it with
+    /// <c>COHSQLE010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
+    /// INSERT for every column, its default included, and on UPDATE for the columns it sets
+    /// (<c>ExecEvalConstraintCheck</c>, <c>src/backend/executor/execExprInterp.c</c>).
+    /// </summary>
+    /// <param name="bound">The bound table version the row is written under.</param>
+    /// <param name="values">The row's values.</param>
+    /// <param name="evaluator">The statement's evaluator.</param>
+    /// <param name="ordinals">The columns the write assigns; null for every column.</param>
+    /// <exception cref="SqlConstraintViolationException">A domain's check returned FALSE.</exception>
+    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>COHSQLE010</c>), or a check failed (<c>COHSQLE007</c>).</exception>
+    private static void CheckDomains(SqlBoundTable bound, object?[] values, SqlExpressionEvaluator evaluator, IEnumerable<int>? ordinals = null)
+    {
+        if (bound.Domains.Count == 0)
+        {
+            return;
+        }
+
+        if (ordinals is null)
+        {
+            foreach (var domain in bound.Domains)
+            {
+                CheckDomain(bound.Table, domain, values, evaluator);
+            }
+
+            return;
+        }
+
+        foreach (int ordinal in ordinals)
+        {
+            if (bound.DomainAt(ordinal) is { } domain)
+            {
+                CheckDomain(bound.Table, domain, values, evaluator);
+            }
+        }
+    }
+
+    private static void CheckDomain(SqlCatalogTable table, SqlBoundDomain domain, object?[] values, SqlExpressionEvaluator evaluator)
+    {
+        if (domain.Unresolved is { } unresolved)
+        {
+            throw SqlEvaluationException.UnregisteredDomain(unresolved);
+        }
+
+        if (domain.Check is { } check && evaluator.Evaluate(check, values) is false)
+        {
+            throw new SqlConstraintViolationException(domain.Name, $"{table.Schema}.{table.Name}", "DOMAIN", SafeValue([values[domain.Ordinal]]));
+        }
+    }
+
+    /// <summary>
     /// Validates checks and outgoing references for a set of candidate rows.
     /// </summary>
     /// <param name="table">The table the rows belong to.</param>

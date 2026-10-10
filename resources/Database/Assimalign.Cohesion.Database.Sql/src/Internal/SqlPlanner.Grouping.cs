@@ -203,7 +203,9 @@ internal sealed partial class SqlPlanner
             (SqlCollateExpression a, SqlCollateExpression b) => Collation.FromName(a.CollationName) == Collation.FromName(b.CollationName),
             (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo?.Type == b.TargetTypeInfo?.Type
                 && a.TargetTypeInfo?.MaxLength == b.TargetTypeInfo?.MaxLength
-                && a.TargetTypeInfo?.Precision == b.TargetTypeInfo?.Precision && a.TargetTypeInfo?.Scale == b.TargetTypeInfo?.Scale,
+                && a.TargetTypeInfo?.Precision == b.TargetTypeInfo?.Precision && a.TargetTypeInfo?.Scale == b.TargetTypeInfo?.Scale
+                // A domain target is not a built-in type the parser resolved: the same domain is the same name.
+                && (a.TargetTypeInfo is not null || a.TargetType.Equals(b.TargetType, StringComparison.OrdinalIgnoreCase)),
             (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
             (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
             (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated,
@@ -250,7 +252,7 @@ internal sealed partial class SqlPlanner
         SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
             when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
         SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
-        SqlCastExpression cast => cast.TargetTypeInfo!.Type,
+        SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? ResolveCastTarget(cast, _functions.Types).Storage.Type,
         SqlParameterExpression parameter => GroupValueType(evaluator.Evaluate(parameter, [])),
         SqlLiteralExpression literal => literal.LiteralType switch
         {

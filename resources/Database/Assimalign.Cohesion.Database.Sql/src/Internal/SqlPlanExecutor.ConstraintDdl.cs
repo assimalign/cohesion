@@ -174,7 +174,7 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(plan.Table, [plan.Constraint]);
         var primary = plan.Constraint.Kind == SqlConstraintKind.PrimaryKey ? plan.Constraint.Columns : plan.Table.PrimaryKeyColumns;
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
-            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation) : column).ToArray();
+            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
@@ -233,9 +233,17 @@ internal sealed partial class SqlPlanExecutor
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
         var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
+        var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement);
+        var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken);
         foreach (var row in rows)
         {
             CoerceForColumn(row[^1], plan.Column);
+
+            // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
+            if (bound is not null)
+            {
+                CheckDomains(bound, row, evaluator!, [columns.Length - 1]);
+            }
         }
 
         ValidateRows(replacement, rows, statement, cancellationToken, current: true);

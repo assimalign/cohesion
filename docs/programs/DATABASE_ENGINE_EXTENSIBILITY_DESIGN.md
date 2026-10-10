@@ -1247,6 +1247,26 @@ IL2xxx or IL3xxx warning; the §10 gates.
 
 **E3: domains and the cast registry.** §4.8. *Gates:* the CAST and DDL suites, new domain tests,
 the catalog format tests, SDK parity for `table.Column(selector, sqlType)`.
+*Landed in E3* (`Database.Sql/docs/DESIGN.md`, "Types, domains and casts (E3)"). Domains are
+`SqlType.CreateDomain(name, baseType, check?)`, registered with `Types.Add` in the collection the
+built-in types and casts start in, and frozen at build phase 2 into a public `SqlTypeCatalog`
+(`SqlDatabaseEngine.Types`, the type-side twin of `SqlFunctionCatalog`, which §4.2 did not name). A
+domain's check follows E2's `Immutable`-only rule and runs where a value is assigned (INSERT for every
+column, its default included; UPDATE for the columns it sets; `ADD COLUMN` for the backfilled
+default; `CAST` to the domain); a domain over a domain is refused. DDL and `CAST` resolve built-in
+names first, then the catalog; the parser no longer reports `SQL0004` and leaves an unknown name to
+the planner, which reports `COHSQLE010` (SQLSTATE 42704, a new code: owner review). A column of a domain
+keeps its name in the catalog (table-record extension version 4, data-storage format 7); a reopening
+engine that does not register it opens the database and refuses writes that assign the column with
+`COHSQLE010`, and an engine that declares the database fails its build, decision 65's rule. The
+`SqlCastConverter` switch became `SqlStandardCasts`, entries made with the public
+`SqlCast.Create<TSource, TTarget>` and added through `AddCast`, carrying PostgreSQL's contexts, plus
+REAL and DOUBLE from text and the numbers and DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL and UUID
+from text; only `CAST` consults the registry in this iteration. The typed schema's
+`table.Column(selector, sqlType)` keeps a domain's or a built-in type's name as written, and
+`schema.Type<T>` lowers to a domain named for `T` (document format `v3`), which build phase 2 registers
+engine-wide; the planner plans `AddDomain`/`DropDomain`, which render no statement. The SDK extracts
+both with hash parity and no longer refuses `Type<T>` (`COHDBSDK108` is principals only).
 
 **E4: SQL-defined functions, domains and scripts.** §4.9 and the scripts of §5.5. *Gates:* reopening
 a persisted function and domain; DROP refused while a definition depends on the object; ownership;
@@ -1593,6 +1613,16 @@ Numbering continues the plan of record's table. Each line is the question, then 
 68. **Types in iteration 1.** Domains and a cast registry only; physical types, collations and
     operators deferred? *Recommend:* yes.
     > Agree
+
+    *Landed in E3* (§9's E3 paragraph). Two questions it leaves for the owner: (a) the new code
+    `COHSQLE010` (SQLSTATE 42704) for a type name that does not resolve and for a write to a column
+    whose domain the opening engine does not register, alongside decision 71's three; (b) whether
+    an uncast string literal should reach a DATE, TIME, TIMESTAMP, INTERVAL or UUID parameter.
+    PostgreSQL types a quoted literal `unknown` and resolves it to the candidate's type
+    (`src/backend/parser/parse_func.c`, `func_select_candidate`); §4.4's lattice converts nothing
+    from text, so E3 left literal typing unchanged and the literal takes a `CAST`. The registry's
+    `Assignment` and `Implicit` contexts are recorded for the phase that applies them to assignment
+    coercion and overload resolution.
 69. **Raw SQL.** `CREATE FUNCTION … RETURN expr` (SQL body only, no native alias), `CREATE DOMAIN`,
     and declared forward-only checksummed scripts? *Recommend:* yes, in E4.
     > Agree

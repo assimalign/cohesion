@@ -51,7 +51,17 @@ internal static class SqlSchemaCompiler
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (SqlSchemaType declaration in schema.Types)
         {
-            string name = TypeId(declaration.ClrType);
+            // A declared type lowers to a domain of the SQL engine (phase E3), named for the CLR type:
+            // its simple name, which must be a SQL identifier. SQL names are one flat namespace, so two
+            // CLR types of one simple name cannot both be declared.
+            string name = declaration.ClrType.Name;
+            if (!CompiledSchemaTypeNames.IsIdentifier(name))
+            {
+                errors.Add(Error(SqlSchemaValidationErrorCode.UnsupportedType, TypeId(declaration.ClrType),
+                    $"The custom type's name '{name}' is not a SQL identifier, so it cannot name a domain."));
+                continue;
+            }
+
             if (!names.Add(name) || result.ContainsKey(declaration.ClrType))
             {
                 errors.Add(Error(SqlSchemaValidationErrorCode.DuplicateDeclaration, name, "The custom type is declared more than once."));
@@ -282,7 +292,11 @@ internal static class SqlSchemaCompiler
                 continue;
             }
 
-            result.Add(new CompiledSchemaColumn(column.Name, type, column.IsNullable, Precision: precision, Scale: scale, CustomType: custom));
+            // A column declared with a SQL type (table.Column(selector, sqlType)) keeps the name as
+            // written, and the engine resolves its length, precision and scale.
+            result.Add(column.SqlType is { } sqlType
+                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType)
+                : new CompiledSchemaColumn(column.Name, type, column.IsNullable, Precision: precision, Scale: scale, CustomType: custom));
         }
 
         if (result.Count == 0)

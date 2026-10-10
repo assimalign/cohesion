@@ -15,13 +15,14 @@ using Assimalign.Cohesion.Database.Sql.Client;
 namespace Assimalign.Cohesion.Database.Sql.AotSample;
 
 /// <summary>
-/// The NativeAOT guard for the SQL engine's function ABI (phase E2 of
+/// The NativeAOT guard for the SQL engine's function ABI and its types (phases E2 and E3 of
 /// <c>docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md</c>). It registers a typed scalar of each
 /// <c>Create</c> arity, a typed aggregate over a reference-type state, a hand-written scalar and
-/// aggregate leaf, and a strict and a non-strict function; declares a schema whose <c>table.Check</c>
-/// calls a registered function; and runs the same statements in process and over the wire through
-/// <c>Sql.Client</c>. It prints one line per check and exits 1 when any fails, so a trimmed or
-/// AOT-compiled build that loses a code path fails the run, not only the build.
+/// aggregate leaf, and a strict and a non-strict function; a domain with a check and a domain with
+/// application casts to and from it; declares a schema whose <c>table.Check</c> calls a registered
+/// function and whose column is of a domain; and runs the same statements in process and over the
+/// wire through <c>Sql.Client</c>. It prints one line per check and exits 1 when any fails, so a
+/// trimmed or AOT-compiled build that loses a code path fails the run, not only the build.
 /// </summary>
 internal static class Program
 {
@@ -47,6 +48,18 @@ internal static class Program
 
     private static readonly object?[][] _registered =
         [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["or_none"], ["product"], ["scaled"], ["slugify"]];
+
+    // E3: a domain column, an application's casts to and from the cents domain (the inner CAST tells
+    // the outer one its source is cents), and a built-in cast from text to DATE.
+    private const string Domains =
+        "SELECT Email, CAST(CAST(Score AS cents) AS TEXT) AS shown, CAST('$4.56' AS cents) AS parsed, " +
+        "CAST('2026-02-01' AS DATE) AS day FROM customers ORDER BY Id";
+
+    private static readonly object?[][] _domains =
+    [
+        ["ada@example.com", "$1.00", 456L, new DateOnly(2026, 2, 1)],
+        ["grace@example.com", "$2.00", 456L, new DateOnly(2026, 2, 1)],
+    ];
 
     private static int _passed;
     private static int _failed;
@@ -96,6 +109,15 @@ internal static class Program
             .Add(new ClampFunction())
             .Add(new IsMissingFunction())
             .Add(new MedianFunction());
+        SqlType cents = SqlType.CreateDomain("cents", SqlType.BigInt);
+        sql.Types
+            .Add(SqlType.CreateDomain("email", SqlType.VarChar(320),
+                SqlScalarFunction.Create("is_email", static (string value) => value.Contains('@'), SqlFunctionVolatility.Immutable)))
+            .Add(cents)
+            .AddCast(SqlCast.Create<string, long>(SqlType.Text, cents,
+                static text => (long)(decimal.Parse(text.TrimStart('$'), CultureInfo.InvariantCulture) * 100), SqlCastContext.Explicit))
+            .AddCast(SqlCast.Create<long, string>(cents, SqlType.Text,
+                static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment));
         sql.AddDatabase(DatabaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Id);
@@ -104,6 +126,7 @@ internal static class Program
             table.Column(customer => customer.Active);
             table.Column(customer => customer.Token);
             table.Column(customer => customer.Note);
+            table.Column(customer => customer.Email, "email");
             table.Check("ck_name", "slugify(Name) <> ''");
         })));
         sql.AddServer(options => options.Listener = listener);
@@ -119,14 +142,18 @@ internal static class Program
         engine.TryGetDatabase(DatabaseName, out SqlDatabase? database);
         await using SqlDatabaseSession session = await database!.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(
-            "INSERT INTO customers (Id, Name, Score, Active, Token, Note) VALUES " +
-            "(1, 'Ada Lovelace', 100, TRUE, @first, NULL), (2, 'Grace Hopper', 200, FALSE, @second, 'admiral')",
+            "INSERT INTO customers (Id, Name, Score, Active, Token, Note, Email) VALUES " +
+            "(1, 'Ada Lovelace', 100, TRUE, @first, NULL, 'ada@example.com'), (2, 'Grace Hopper', 200, FALSE, @second, 'admiral', 'grace@example.com')",
             new Dictionary<string, object?> { ["first"] = Token(1), ["second"] = Token(2) },
             CancellationToken.None);
 
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
         Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, Registered), _registered);
+        Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, Domains), _domains);
+        CheckFailure("in process: the domain's check refuses a row",
+            await FailureAsync(() => session.ExecuteAsync(DomainRefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
+            "DOMAIN constraint 'email' on 'dbo.customers' was violated");
         CheckFailure("in process: the declared CHECK refuses a row",
             await FailureAsync(() => session.ExecuteAsync(RefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
@@ -137,6 +164,10 @@ internal static class Program
 
     // A row whose name slugifies to nothing, which the declared CHECK refuses.
     private const string RefusedInsert = "INSERT INTO customers (Id, Name, Score, Active, Token) VALUES (3, '!!!', 1, TRUE, @token)";
+
+    // A row whose email the email domain's check refuses.
+    private const string DomainRefusedInsert =
+        "INSERT INTO customers (Id, Name, Score, Active, Token, Email) VALUES (4, 'Mary Somerville', 1, TRUE, @token, 'nobody')";
 
     private static Dictionary<string, object?> RefusedParameters => new() { ["token"] = Token(3) };
 
@@ -155,6 +186,10 @@ internal static class Program
         Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, Projection, timeout.Token), _projection);
         Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, Aggregates, timeout.Token), _aggregates);
         Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, Registered, timeout.Token), _registered);
+        Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, Domains, timeout.Token), _domains);
+        CheckFailure("over the wire: the domain's check refuses a row",
+            await FailureAsync(() => connection.ExecuteAsync(DomainRefusedInsert, RefusedParameters, timeout.Token).AsTask()),
+            "DOMAIN constraint 'email' on 'dbo.customers' was violated");
         CheckFailure("over the wire: the declared CHECK refuses a row",
             await FailureAsync(() => connection.ExecuteAsync(RefusedInsert, RefusedParameters, timeout.Token).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
@@ -269,5 +304,5 @@ internal static class Program
             _ => string.Create(CultureInfo.InvariantCulture, $"{value}:{value.GetType().Name}"),
         }))));
 
-    private sealed record Customer(long Id, string Name, long Score, bool Active, Guid Token, string? Note);
+    private sealed record Customer(long Id, string Name, long Score, bool Active, Guid Token, string? Note, string? Email);
 }

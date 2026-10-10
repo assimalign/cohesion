@@ -72,7 +72,13 @@ the parser implements today. Recognized clauses outside that set produce the sha
 - **Type names resolve through one table.** `SqlTypeNames` is the single
   SQL-name → `DatabaseType` mapping (with the `DECIMAL(p[,s])`
   argument-is-precision rule); catalogs and the schema compiler must not grow
-  their own copies.
+  their own copies. A name outside the table is not this package's error (phase E3):
+  an engine's type catalog may register it as a domain, so a CAST target that is not
+  a built-in name parses with no resolved type and no diagnostic (only malformed
+  arguments are `SQL0005`), and DDL keeps any identifier as the column's type text;
+  the engine resolves both and reports a name it does not know. Which conversions a
+  CAST may make is the engine's cast registry's question too, so every built-in type
+  is a valid CAST target here.
 - **Recognized-but-unsupported tokens stay in the lexer tables.** `UNION`, `WITH`,
   and window functions are lexed so diagnostics can
   say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable

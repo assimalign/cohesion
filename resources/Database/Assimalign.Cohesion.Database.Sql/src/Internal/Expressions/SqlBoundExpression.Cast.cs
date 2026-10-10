@@ -1,27 +1,59 @@
-using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// <c>CAST</c> over a bound operand. The target is the one the language parser resolved on the CAST
-/// node, which the bound node refers to rather than copies; the conversion itself is
-/// <see cref="SqlCastConverter"/>'s, unchanged.
+/// <c>CAST</c> over a bound operand, with what binding resolved once: the target type (a built-in
+/// type with its length, precision and scale, or a domain of the engine's type catalog) and the
+/// casts of the engine's registry it may apply, one per storage type of the value it converts
+/// (phase E3). The evaluator picks the cast by the value's storage type, applies the target's
+/// length, precision and scale, and a domain target's check (<see cref="SqlCastConverter.Convert"/>).
 /// </summary>
 internal sealed class SqlBoundCast : SqlBoundExpression
 {
     /// <summary>Initializes a bound CAST.</summary>
     /// <param name="operand">The bound operand.</param>
-    /// <param name="cast">The CAST node, which carries the resolved target type.</param>
-    internal SqlBoundCast(SqlBoundExpression operand, SqlCastExpression cast)
+    /// <param name="targetText">The target as written, for messages.</param>
+    /// <param name="target">The resolved target type.</param>
+    /// <param name="casts">The casts the CAST may apply, by the storage type of the value it converts.</param>
+    /// <param name="database">The database whose statement makes the CAST, for a domain check's context.</param>
+    /// <param name="collation">The collation a domain check's input compares under.</param>
+    internal SqlBoundCast(SqlBoundExpression operand, string targetText, SqlType target, SqlCast?[] casts, DatabaseName database,
+        Collation collation)
         : base(SqlBoundExpressionKind.Cast)
     {
         Operand = operand;
-        Cast = cast;
+        TargetText = targetText;
+        Target = target;
+        Casts = casts;
+        Database = database;
+        Collation = collation;
+        CheckTarget = target.Check is { } check && SqlFunctionResolver.CoercionTargets(check, 1) is { } targets
+            ? targets[0]
+            : DatabaseType.Null;
     }
 
     /// <summary>Gets the bound operand.</summary>
     internal SqlBoundExpression Operand { get; }
 
-    /// <summary>Gets the CAST node, which carries the resolved target type.</summary>
-    internal SqlCastExpression Cast { get; }
+    /// <summary>Gets the target as written, with its type arguments.</summary>
+    internal string TargetText { get; }
+
+    /// <summary>Gets the resolved target type.</summary>
+    internal SqlType Target { get; }
+
+    /// <summary>
+    /// Gets the cast the CAST applies to a value of each storage type, indexed by its
+    /// <see cref="DatabaseType"/>; a null slot converts only a value of the target's own storage type.
+    /// </summary>
+    internal SqlCast?[] Casts { get; }
+
+    /// <summary>Gets the database whose statement makes the CAST.</summary>
+    internal DatabaseName Database { get; }
+
+    /// <summary>Gets the collation a domain check's input compares under.</summary>
+    internal Collation Collation { get; }
+
+    /// <summary>Gets the storage type a domain check's argument converts to; <see cref="DatabaseType.Null"/> for none.</summary>
+    internal DatabaseType CheckTarget { get; }
 }

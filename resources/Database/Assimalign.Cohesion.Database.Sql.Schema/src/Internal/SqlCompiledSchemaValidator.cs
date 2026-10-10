@@ -67,6 +67,14 @@ internal static class SqlCompiledSchemaValidator
                 continue;
             }
 
+            // A declared type is a domain of the SQL engine, named in DDL by this name.
+            if (!CompiledSchemaTypeNames.IsIdentifier(declaration.Name))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path,
+                    $"The custom type name '{declaration.Name}' is not a SQL identifier, so it cannot name a domain.");
+                continue;
+            }
+
             if (!result.TryAdd(declaration.Name, declaration))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
@@ -475,8 +483,13 @@ internal static class SqlCompiledSchemaValidator
 
         if (!types.TryGetValue(customType, out CompiledSchemaType? declaration))
         {
-            Add(errors, SqlSchemaValidationErrorCode.UnknownReference, $"{path}.customType",
-                $"Custom type '{customType}' is not declared.");
+            // Not a type the schema declares: a domain the SQL engine registers, or a built-in type
+            // name, which the engine resolves. Only its shape is this package's to check.
+            if (!CompiledSchemaTypeNames.IsTypeName(customType))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.customType",
+                    $"'{customType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments.");
+            }
         }
         else if (declaration.StorageType != type)
         {

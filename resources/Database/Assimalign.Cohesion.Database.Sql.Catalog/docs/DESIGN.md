@@ -79,12 +79,34 @@ dropped list.
   catalog checks it rather than trusting each caller.
 - **Persistence: table extension version 3.** The table record's trailing extension
   (constraints in version 1, column collations from version 2) appends the dropped
-  ordinals' count and values from version 3, which this catalog always writes.
-  Versions 1 and 2 still load, with no dropped column, so that the SQL engine's
-  data-storage format gate (format 6 for this layout) refuses a database written
-  before it with its own message rather than a decode error. A persisted layout
-  that cannot describe the table (a negative count, an ordinal outside the physical
-  columns, a repeated ordinal) fails the load with `SqlCatalogException`.
+  ordinals' count and values from version 3. Versions 1 and 2 still load, with no
+  dropped column, so that the SQL engine's data-storage format gate (format 6 for
+  this layout) refuses a database written before it with its own message rather than
+  a decode error. A persisted layout that cannot describe the table (a negative
+  count, an ordinal outside the physical columns, a repeated ordinal) fails the load
+  with `SqlCatalogException`.
+
+## A column's domain (phase E3)
+
+A column declared with a domain (`SqlType.CreateDomain` in the SQL engine, owner decision
+68) stores the domain's base type: `SqlCatalogColumn.Type` is the base type with its
+length, precision and scale, and `SqlCatalogColumn.DomainName` the domain's name. The
+catalog keeps the name only: a domain is registered on the engine, in code, and is not a
+catalog object, so the engine that opens the database binds the name to its own
+registration (and, when it registers none, opens the database and refuses writes to the
+column, the SQL engine's `COHSQLE010`). PostgreSQL records a domain column's type as the
+domain's own OID and keeps the domain in `pg_type`; here the base type is what the row
+codec, the key encoding and every comparison read, so they do not consult the domain.
+
+- **Every alteration carries the name.** ADD/DROP COLUMN and ADD/DROP CONSTRAINT copy the
+  column instances, and the SQL engine's planner passes the domain name when it rebuilds a
+  column (the primary key's implicit NOT NULL).
+- **Persistence: table extension version 4** (data-storage format 7). After the dropped
+  ordinals, one optional string per live column, NULL for a column of a built-in type,
+  which this catalog always writes. Versions 1 to 3 still load, with no domain, so that the
+  format gate refuses a database written before it with its own message. A persisted blank
+  name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
+  column's constructor (`ArgumentException`).
 
 ## Why-this-not-that decisions
 

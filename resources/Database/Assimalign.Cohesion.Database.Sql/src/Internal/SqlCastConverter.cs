@@ -1,105 +1,138 @@
 using System;
 using System.Globalization;
+using System.Threading;
 
-using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Executes the exact scalar CAST subset against the shared type identity resolved
-/// by the language parser. Loss of numeric precision or string content is an error.
+/// Runs a bound <c>CAST</c> (phase E3): the cast of the engine's registry chosen for the value's
+/// storage type (<see cref="SqlStandardCasts"/> and the application's), or the value unchanged when
+/// it has the target's storage type already; then the target's length, precision and scale; then a
+/// domain target's check. Loss of numeric precision or string content is an error.
 /// </summary>
 internal static class SqlCastConverter
 {
-    /// <summary>Converts a scalar, preserving null and rejecting unsupported source/target pairs.</summary>
-    internal static object? Convert(object? value, SqlCastExpression cast)
+    /// <summary>Converts a scalar, preserving null and rejecting a value no registered cast converts.</summary>
+    /// <param name="value">The operand's value.</param>
+    /// <param name="cast">The bound CAST.</param>
+    /// <param name="cancellationToken">The statement's cancellation token, for a domain check's context.</param>
+    /// <returns>The converted value; null for NULL.</returns>
+    /// <exception cref="DatabaseException">
+    /// No cast converts the value, the conversion failed or loses content, or the value violates the
+    /// domain target's check; a <see cref="DatabaseException"/> a conversion threw passes unchanged.
+    /// </exception>
+    internal static object? Convert(object? value, SqlBoundCast cast, CancellationToken cancellationToken)
     {
-        var target = cast.TargetTypeInfo
-            ?? throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
-
-        if (value is null)
+        object? converted = null;
+        if (value is not null)
         {
-            return null;
-        }
-
-        try
-        {
-            switch (target.Type)
+            try
             {
-                case DatabaseType.String:
-                    string text = value switch
-                    {
-                        string source => source,
-                        bool flag => flag ? "TRUE" : "FALSE",
-                        sbyte or short or int or long or decimal => System.Convert.ToString(value, CultureInfo.InvariantCulture)!,
-                        _ => throw new InvalidCastException("Unsupported source/target pair."),
-                    };
-                    if (target.MaxLength is int length && text.Length > length)
-                    {
-                        throw new InvalidCastException($"String length exceeds {length}; truncation is not supported.");
-                    }
-                    return text;
+                var source = StorageTypeOf(value);
+                SqlCast? registered = source == DatabaseType.Null ? null : cast.Casts[(int)source];
+                if (registered is not null)
+                {
+                    converted = registered.Apply(value);
+                }
+                else if (source != DatabaseType.Null && source == cast.Target.Storage.Type)
+                {
+                    converted = value;
+                }
+                else
+                {
+                    throw new InvalidCastException(source == DatabaseType.Null
+                        ? "Unsupported source/target pair."
+                        : $"no cast from {SqlType.NameOf(source)} to {cast.Target.Name} is registered.");
+                }
 
-                case DatabaseType.Boolean:
-                    if (value is bool boolean) { return boolean; }
-                    if (value is string booleanText && bool.TryParse(booleanText.Trim(), out bool parsed)) { return parsed; }
-                    throw new InvalidCastException("BOOLEAN requires a boolean or TRUE/FALSE text.");
-
-                case DatabaseType.Int8:
-                case DatabaseType.Int16:
-                case DatabaseType.Int32:
-                case DatabaseType.Int64:
-                case DatabaseType.Decimal:
-                    decimal number = value switch
-                    {
-                        sbyte source => source,
-                        short source => source,
-                        int source => source,
-                        long source => source,
-                        decimal source => source,
-                        string source => ParseExactDecimal(source),
-                        _ => throw new InvalidCastException("Numeric targets require signed integers, decimal, or numeric text."),
-                    };
-                    if (target.Type == DatabaseType.Decimal)
-                    {
-                        if (target.Scale is int scale && decimal.Round(number, scale) != number)
-                        {
-                            throw new InvalidCastException($"Value exceeds scale {scale}; rounding is not supported.");
-                        }
-                        if (target.Precision is int precision)
-                        {
-                            decimal limit = 1m;
-                            for (int i = 0; i < precision - (target.Scale ?? 0); i++) { limit *= 10m; }
-                            if (number <= -limit || number >= limit)
-                            {
-                                throw new OverflowException($"Value exceeds precision {precision} and scale {target.Scale ?? 0}.");
-                            }
-                        }
-                        return number;
-                    }
-                    if (decimal.Truncate(number) != number)
-                    {
-                        throw new InvalidCastException("An integer target requires a whole number; truncation is not supported.");
-                    }
-                    // Separate returns preserve the boxed CLR type, with checked range conversion.
-                    switch (target.Type)
-                    {
-                        case DatabaseType.Int8: return checked((sbyte)number);
-                        case DatabaseType.Int16: return checked((short)number);
-                        case DatabaseType.Int32: return checked((int)number);
-                        default: return checked((long)number);
-                    }
-
-                default:
-                    throw new InvalidCastException("Unsupported target type.");
+                if (converted is not null)
+                {
+                    converted = ApplyModifiers(converted, cast.Target.Storage);
+                }
+            }
+            catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+            {
+                throw new DatabaseException($"CAST from {value.GetType().Name} to {cast.TargetText} failed: {exception.Message}", exception);
             }
         }
-        catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
+
+        // A domain's check sees every value the CAST produces; a strict check passes NULL uncalled.
+        if (cast.Target.Check is { } check && (converted is not null || check.NullBehavior == SqlNullBehavior.CalledOnNullInput)
+            && check.InvokeResolved(converted, cast.CheckTarget, cast.Database, cast.Collation, cancellationToken) is false)
         {
-            throw new DatabaseException($"CAST from {value.GetType().Name} to {cast.TargetType} failed: {exception.Message}", exception);
+            throw new DatabaseException(
+                $"CAST to {cast.TargetText} failed: the value violates the check of domain '{cast.Target.Name}' ({check}).");
+        }
+
+        return converted;
+    }
+
+    /// <summary>
+    /// Applies a target's length, precision and scale to a converted value, which never rounds or
+    /// truncates: PostgreSQL's length coercion, a step after the cast itself.
+    /// </summary>
+    /// <param name="value">The converted value, of the target's storage type.</param>
+    /// <param name="target">The target's storage type and constraints.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="InvalidCastException">A string or binary value is longer than the target, or a decimal has more scale.</exception>
+    /// <exception cref="OverflowException">A decimal exceeds the target's precision.</exception>
+    internal static object ApplyModifiers(object value, DatabaseTypeInfo target)
+    {
+        switch (value)
+        {
+            case string text when target.MaxLength is int length && text.Length > length:
+                throw new InvalidCastException($"String length exceeds {length}; truncation is not supported.");
+            case byte[] bytes when target.MaxLength is int length && bytes.Length > length:
+                throw new InvalidCastException($"Binary length exceeds {length}; truncation is not supported.");
+            case decimal number when target.Type == DatabaseType.Decimal:
+                if (target.Scale is int scale && decimal.Round(number, scale) != number)
+                {
+                    throw new InvalidCastException($"Value exceeds scale {scale}; rounding is not supported.");
+                }
+                if (target.Precision is int precision)
+                {
+                    decimal limit = 1m;
+                    for (int i = 0; i < precision - (target.Scale ?? 0); i++) { limit *= 10m; }
+                    if (number <= -limit || number >= limit)
+                    {
+                        throw new OverflowException($"Value exceeds precision {precision} and scale {target.Scale ?? 0}.");
+                    }
+                }
+                return number;
+            default:
+                return value;
         }
     }
+
+    /// <summary>
+    /// The storage type of a value as the row holds it: exactly one of the codec's CLR types, so a
+    /// parameter of another CLR type (<see cref="byte"/>, <see cref="char"/>) has none and is refused,
+    /// as it was before the cast registry.
+    /// </summary>
+    /// <param name="value">The value, not NULL.</param>
+    /// <returns>The storage type; <see cref="DatabaseType.Null"/> for a CLR type the codec does not store.</returns>
+    private static DatabaseType StorageTypeOf(object value) => value switch
+    {
+        string => DatabaseType.String,
+        long => DatabaseType.Int64,
+        int => DatabaseType.Int32,
+        decimal => DatabaseType.Decimal,
+        bool => DatabaseType.Boolean,
+        short => DatabaseType.Int16,
+        sbyte => DatabaseType.Int8,
+        double => DatabaseType.Float64,
+        float => DatabaseType.Float32,
+        byte[] => DatabaseType.Binary,
+        DateOnly => DatabaseType.Date,
+        TimeOnly => DatabaseType.Time,
+        DateTime => DatabaseType.DateTime,
+        DateTimeOffset => DatabaseType.DateTimeOffset,
+        TimeSpan => DatabaseType.TimeSpan,
+        Guid => DatabaseType.Guid,
+        _ => DatabaseType.Null,
+    };
 
     /// <summary>
     /// Reads SQL numeric literals, including exponent notation, without rounding an
@@ -108,7 +141,7 @@ internal static class SqlCastConverter
     internal static decimal ParseNumericLiteral(string text) => ParseExactDecimal(text, allowLiteralSyntax: true);
 
     /// <summary>Parses fixed-point text, optionally accepting SQL literal decimal-point and exponent forms.</summary>
-    private static decimal ParseExactDecimal(string text, bool allowLiteralSyntax = false)
+    internal static decimal ParseExactDecimal(string text, bool allowLiteralSyntax = false)
     {
         string source = text.Trim();
         bool negative = source.StartsWith('-');

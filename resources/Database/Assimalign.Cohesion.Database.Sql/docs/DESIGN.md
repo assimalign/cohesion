@@ -332,8 +332,8 @@ flowchart LR
   standard library alone. The catalog is engine-wide: every database of the engine sees
   it (decision 61), through the `SqlFunctionEnvironment` (catalog and database name) each
   open database's `SqlBoundTableCache` holds and every statement plans with.
-  `SqlDatabaseEngineBuilder.Types` lists the built-in storage types; domains and casts,
-  the only types an application adds, come with E3.
+  `SqlDatabaseEngineBuilder.Types` holds the built-in types and casts and the
+  application's domains and casts (E3, see [Types, domains and casts (E3)](#types-domains-and-casts-e3)).
 - **Resolution** (`SqlFunctionResolver`, PostgreSQL's `func_get_detail` and
   `func_select_candidate`). The planner's pre-pass checks every call's name and count
   before it binds the catalog: a name outside the catalog is `Unknown function '<name>'.`
@@ -582,7 +582,10 @@ a typed aggregate over a reference-type state, a hand-written scalar (`clamp`) a
 whose `table.Check` calls one; runs the same statements in process and over the wire through
 `Sql.Client` on the in-memory driver (results compared value and CLR type, the CHECK's
 refusal, `COHSQLE007`, `COHESION_SCHEMA.FUNCTIONS` and a folded parameterized call); and
-exits 1 when a check fails. It promotes the trim and AOT analyzer diagnostics to errors and
+exits 1 when a check fails. E3 added a domain with a check (`email`, a declared column of
+it, and its refusal), a domain with application casts to and from it (`cents`, under
+`CAST(CAST(Score AS cents) AS TEXT)`) and a built-in cast from text to DATE, in process and
+over the wire. It promotes the trim and AOT analyzer diagnostics to errors and
 has ILC treat every warning of its whole-program analysis as an error, reported at its
 source (`IlcTreatWarningsAsErrors`, `TrimmerSingleWarn=false`); it is published for
 win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs the binary,
@@ -592,9 +595,10 @@ as it does a small-table smoke of the statement benchmark, and fails either publ
 **Not yet.** The context's transaction timestamp (no transaction carries its start time; the
 statement-context track owns that change); the `FunctionCatalogFrozen`,
 `PersistedDefinitionUnresolved` and `FunctionFailed` events (§8 of the design, the
-EventSource track's); a string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
-parameter (nothing converts from text, and `CAST` to those types is not supported, so such
-a parameter takes a column or a parameter of its type; the cast registry is E3); a widening
+EventSource track's); an uncast string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
+parameter (E3's cast registry converts text to those types under `CAST`, so
+`day_of_year(CAST('2026-02-01' AS DATE))` resolves, but literal typing is unchanged: see
+[Types, domains and casts (E3)](#types-domains-and-casts-e3)); a widening
 to REAL (a decimal or integer argument for a REAL parameter loses digits, so it stays an
 owner decision); a typed shorthand of no or two arguments for an aggregate, and an empty
 group that runs `finish`, which a hand-written leaf covers; and `SELECT f(1)` without
@@ -773,6 +777,106 @@ build than at `43e3ae90` (4,252,464 bytes against 4,287,784, and 6,032,344 again
 in every process; it is not explained, and like the 160 KB the review's re-measurement describes
 it points at ILC code generation rather than at an allocation the change removes.
 
+## Types, domains and casts (E3)
+
+A domain and a built-in type resolve through one catalog, and the engine's conversions and
+an application's run from one registry. Phase E3 of
+`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` (§4.8, §4.2's `SqlType`, §4.11, owner
+decision 68 of 2026-10-09: domains and a cast registry; physical base types, collations and
+operators stay closed). Public types live in `src/Functions/` beside the function family
+(`SqlType`, `SqlCast`, `SqlCastContext`, `SqlTypeCollection`, `SqlTypeCatalog`); the built-in
+casts and the type-name rules in `src/Internal/Types/`.
+
+```mermaid
+flowchart LR
+    Builder["SqlDatabaseEngineBuilder.Types: built-in types and casts, then Add / AddCast"] --> Freeze["build phase 2: + schema.Type&lt;T&gt; domains, frozen"]
+    Freeze --> Catalog["SqlDatabaseEngine.Types (SqlTypeCatalog)"]
+    Catalog --> Ddl["DDL column type: built-in name, else domain"]
+    Catalog --> Cast["CAST: target resolved, casts chosen once per statement"]
+    Catalog --> Bind["table version bound: each domain column's check, or COHSQLE010"]
+```
+
+- **A domain** (`SqlType.CreateDomain(name, baseType, check?)`, PostgreSQL's `CREATE DOMAIN`,
+  `src/backend/commands/typecmds.c`) is a name over a built-in base type, with its length,
+  precision and scale, and an optional check: an `Immutable` scalar function of one argument
+  that takes the base type (its storage type, an implicit widening of it, or a pseudo-type)
+  and returns BOOLEAN, the rule E2 holds a CHECK's functions to (decision 64). The name is an
+  identifier that is not a keyword, a built-in type name or alias, or a pseudo-type's name, since
+  a built-in name resolves first. A domain over a domain is refused in this iteration. A
+  function parameter or result of a domain type is its base type for resolution and signature
+  identity, as `func_get_detail` reduces one.
+- **One catalog** (open-closed). `SqlDatabaseEngineBuilder.Types` starts with the built-in
+  types and casts; `Add` registers a domain and `AddCast` a cast, refusing a built-in type, a
+  second domain of a name, a cast between two built-in types (the standard library's), a cast
+  that names a domain the collection does not register, a second cast of the same source and
+  target (a built-in's included), and anything once the build began. Build phase 2 adds the
+  domains the declared schemas declare and freezes the collection into
+  `SqlDatabaseEngine.Types`, engine-wide like the function catalog (decision 61); every open
+  database's `SqlFunctionEnvironment` carries it. DDL (`CREATE TABLE`, `ADD COLUMN`) and `CAST`
+  read a built-in name through `SqlTypeNames` first and fall back to the catalog
+  (`SqlTypeCatalog.Resolve`); a domain takes no type arguments, and a name neither resolves is
+  `COHSQLE010` (SQLSTATE 42704) while planning, in DDL and in `CAST`.
+- **Storage.** A column of a domain stores its base type: the row codec, key encoding and
+  on-disk format do not change. The catalog's column record keeps the domain's name
+  (`SqlCatalogColumn.DomainName`, table-record extension version 4), which is the reason the
+  data-storage format is 7 and the format gate refuses an older database.
+- **Checks on write.** A table version binds each domain column once (`SqlBoundTableCache`,
+  `SqlBoundDomain`): its check as a `SqlBoundCall` over the column's value. A write evaluates it
+  where the value is assigned, as PostgreSQL's `ExecEvalConstraintCheck` does
+  (`src/backend/executor/execExprInterp.c`): an INSERT, INSERT ... SELECT included, for every
+  column, its default included; an UPDATE for the columns it sets; `ADD COLUMN` for the default
+  each existing row takes. Only FALSE refuses the value, so a strict check passes NULL without a
+  call: `SqlConstraintViolationException` of kind `DOMAIN`, naming the domain and the table.
+- **An unregistered domain at reopen** (decision 65's rule, applied to types). When the engine
+  that opens a database registers no domain of a stored column's name, or one over another
+  storage type, the column binds as unresolved: the database opens, reads proceed and so do
+  writes that do not assign the column (an UPDATE of another column, a DELETE), and a write that
+  assigns it fails with `COHSQLE010`, naming the column, the table and the domain. An engine
+  that declares the database fails its build with it instead (`FindUnresolvedDomain`,
+  provisioning's last step).
+- **The cast registry** (`pg_cast`'s `castfunc` and `castcontext`, `src/include/catalog/pg_cast.h`).
+  A `SqlCast` maps a value of its source's storage type to its target's;
+  `SqlCast.Create<TSource, TTarget>` maps the CLR types as the typed function shorthands do
+  and refuses a CLR type that is not its SQL type's storage. The engine's conversions
+  (`SqlStandardCasts`) are entries created with the same `Create` and registered through the
+  same `AddCast`: the pairs `SqlCastConverter`'s switch had (text, BOOLEAN, the integers and
+  NUMERIC, and those to text, with their semantics), and new ones, REAL and DOUBLE from text and
+  the numbers, and DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL and UUID from text (DATE from
+  TIMESTAMP too), parsed as INSERT parses text for a column of the type. Each carries
+  PostgreSQL's context for the pair. An application adds casts to or from its domains, which
+  PostgreSQL warns it ignores (`src/backend/commands/functioncmds.c`, "cast will be ignored
+  because the source data type is a domain"); here they are what the owner asked for.
+- **CAST** binds once per statement (`SqlBoundCast`): the target type, and one cast per storage
+  type of the value it may convert, chosen in this order: from the operand's domain when the
+  plan knows it (a domain column, or a `CAST` to a domain), then from the value's storage type;
+  for a domain target, to the domain before to its base type. A value of the target's storage
+  type with no entry needs none (PostgreSQL's binary-coercible pair). Then the target's length,
+  precision and scale apply (PostgreSQL's separate length coercion), then a domain target's
+  check. A row looks nothing up. Whatever a conversion throws, other than a `DatabaseException`,
+  cancellation, an exhausted stack or memory, is `CAST from X to T failed: ...` with the original
+  as its inner exception, the built-ins' and an application's alike.
+- **Contexts in this iteration.** Only `CAST` consults the registry, and it applies an entry of
+  any context. Assignment coercion (`CoerceForColumn`) and overload resolution keep their rules,
+  so `Assignment` and `Implicit` are recorded for the phase that applies them.
+- **The typed schema.** `table.Column(selector, sqlType)` declares a column of a domain or a
+  built-in type name as written, and `schema.Type<T>(t => t.Decimal(p, s))` lowers to a domain
+  named for `T` over `NUMERIC(p, s)`, every member of `T` declared with it (Sql.Schema's DESIGN).
+  Build phase 2 registers a schema's domains in the engine's catalog (a domain the application
+  registers already, of the same name and base type, is the same domain; another is refused,
+  `COHSQLP001`); phase 3 resolves every declared column type, refusing a name the catalog does
+  not know or a type not stored as its member is, before any file. The statement renderer writes
+  the declared name into the DDL after checking its shape. An imperative
+  `SqlDatabase.ApplySchemaAsync` needs the engine to register the schema's domains already
+  (`COHSQLP005` otherwise). The migration planner's `AddDomain` and `DropDomain` steps render no
+  statement: a domain is the engine's, not the database's.
+
+**Not in E3.** A domain over a domain; `NOT NULL` or `DEFAULT` on a domain; casts in assignment
+coercion or overload resolution (an uncast string literal still does not reach a DATE
+parameter: PostgreSQL types it `unknown` and resolves it to the parameter, `parse_func.c`'s
+`func_select_candidate`, which the design's narrow lattice does not, and which is an owner
+question); casts from the date, time, UUID and binary floating-point types to text;
+`COHESION_SCHEMA` views of types and casts; and SQL `CREATE DOMAIN`, which is E4.
+
 ## Compiled-schema provisioning
 
 Provisioning belongs to this model (owner decisions 49 to 58 of 2026-10-09, B1 of
@@ -790,7 +894,7 @@ reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
 steps are table, column, and secondary-index add/drop; alter/rebuild operations
-and advanced objects (custom types, principals/grants) fail before execution rather than
+and advanced objects (principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
@@ -840,11 +944,13 @@ stateDiagram-v2
    every pass until the failure policy took the databases offline.
 2. **Function catalog.** `Functions`, the standard library and the application's registrations,
    is frozen into the engine's `SqlFunctionCatalog`; registration closed when the build began
-   ([Functions (E2)](#functions-e2)). `Types` lists the built-in types; domains and casts join it in E3.
+   ([Functions (E2)](#functions-e2)). `Types` is frozen into the engine's `SqlTypeCatalog` after the declared schemas' domains (`schema.Type<T>`) join it ([Types, domains and casts (E3)](#types-domains-and-casts-e3)).
 3. **Declarations.** Each declared schema is compiled, and each of its `table.Check` predicates is
    bound to the frozen catalog as its DDL will bind it (decision 64; [Functions (E2)](#functions-e2)).
-   A schema that does not compile, declares a principal (decision 58) or a custom type, or declares
-   a CHECK that does not bind (not exactly one predicate, an unknown column or function, a call no
+   Each declared column type resolves to the frozen type catalog too. A schema that does not
+   compile, declares a principal (decision 58), declares a domain that conflicts with a registered
+   type, declares a column of a type the catalog does not know or does not store as its member's,
+   or declares a CHECK that does not bind (not exactly one predicate, an unknown column or function, a call no
    overload accepts, a function that is not `Immutable`) is refused here with `COHSQLP001`, naming
    the table and the constraint, before any file is touched: the engine, whose creation makes the
    root directory, does not exist yet.

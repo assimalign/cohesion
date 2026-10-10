@@ -191,9 +191,8 @@ public class CompileDatabaseSchemaTaskTests
         File.ReadAllText(Path.Combine(task.OutputDirectory, "schemas.manifest")).ShouldBe("ledger\nreporting\n");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a principal or a custom type, which every engine build refuses, fails the build")]
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a principal, which every engine build refuses, fails the build")]
     [InlineData("""database.Principal("app", principal => principal.Grant(SqlPermission.Read, "Orders"));""", "Principal")]
-    [InlineData("""database.Type<Money>(type => type.Decimal(18, 2));""", "Type")]
     public void Execute_WithUnprovisionableDeclaration_ShouldFailWithoutArtifacts(string declaration, string method)
     {
         using var directory = new TemporaryDirectory();
@@ -320,6 +319,115 @@ public class CompileDatabaseSchemaTaskTests
                 ("ck_id", CompiledSchemaConstraintKind.Check, "Id >= 0"),
                 ("ck_item", CompiledSchemaConstraintKind.Check, "LENGTH(Item) > 0 AND slugify(Item) <> ''"),
             ]);
+    }
+
+    /// <summary>
+    /// <c>schema.Type&lt;T&gt;</c> extracts as a domain named for <c>T</c>, and <c>table.Column(selector,
+    /// sqlType)</c> as the constant type name, into the same document and hash the runtime compiler
+    /// writes (phase E3): a domain the engine registers is invisible to the SDK, as a native function
+    /// is, and the engine's build resolves the name.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: domains and column SQL types extract in parity with the runtime")]
+    public void Execute_WithDomainsAndColumnSqlTypes_ShouldMatchRuntimeCompilerDocumentAndHash()
+    {
+        SqlCompiledSchema runtimeSchema = SqlSchema.Compile("crm", schema =>
+        {
+            schema.Type<Price>(type => type.Decimal(18, 2));
+            schema.Table<CrmCustomer>("customers", table =>
+            {
+                table.Column(customer => customer.Code, "VARCHAR(16)");
+                table.Key(customer => customer.Code);
+                table.Column(customer => customer.Email, "email");
+                table.Column(customer => customer.Balance);
+            });
+        });
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Program.cs");
+        File.WriteAllText(sourcePath, """
+            using System;
+            using Assimalign.Cohesion.Database.Sql;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+
+            namespace Assimalign.Cohesion.Sdk.Database.Tests
+            {
+                public readonly record struct Price(decimal Amount);
+                public sealed record CrmCustomer(string Code, string Email, Price Balance);
+
+                public static class CrmProgram
+                {
+                    private const string Email = "em" + "ail";
+
+                    public static SqlDatabaseEngineBuilder Configure()
+                    {
+                        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder("crm-sql");
+                        sql.Types.Add(SqlType.CreateDomain("email", SqlType.VarChar(320)));
+                        sql.AddDatabase("crm", database => database.Schema(schema =>
+                        {
+                            schema.Table<CrmCustomer>("customers", table =>
+                            {
+                                table.Key(customer => customer.Code);
+                                table.Column(customer => customer.Code, "VARCHAR(16)");
+                                table.Column(sqlType: Email, selector: customer => customer.Email);
+                                table.Column(customer => customer.Balance);
+                            });
+                            schema.Type<Price>(type => type.Decimal(18, 2));
+                        }));
+                        return sql;
+                    }
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeTrue(Errors(engine));
+
+        File.ReadAllText(SchemaPath(task, "crm")).ShouldBe(runtimeSchema.CanonicalDocument);
+        task.Schemas.ShouldHaveSingleItem().GetMetadata("Hash").ShouldBe(runtimeSchema.Hash);
+        SqlCompiledSchema written = SqlCompiledSchemaSerializer.Read(SchemaPath(task, "crm"));
+        written.Types.ShouldHaveSingleItem().ShouldBe(new CompiledSchemaType("Price", Assimalign.Cohesion.Database.Types.DatabaseType.Decimal, 18, 2));
+        written.Tables.ShouldHaveSingleItem().Columns.Select(static column => (column.Name, column.CustomType))
+            .ShouldBe([("Code", "VARCHAR(16)"), ("Email", "email"), ("Balance", "Price")]);
+    }
+
+    /// <summary>A type the runtime cannot name as a domain, or a column type the build cannot read or that is not a type name, fails the build.</summary>
+    /// <param name="declaration">The declaration.</param>
+    /// <param name="code">The diagnostic code.</param>
+    /// <param name="message">A fragment of its message.</param>
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a domain needs an identifier name and a column type a constant type name")]
+    [InlineData("""database.Type<Money?>(type => type.Decimal(18, 2));""", "COHDBSDK106", "is not a SQL identifier")]
+    [InlineData("""database.Table<Session>("Sessions", table => { table.Key(session => session.Id); table.Column(session => session.Value, Environment.MachineName); });""",
+        "COHDBSDK104", "needs its SQL type as a non-empty compile-time string constant")]
+    [InlineData("""database.Table<Session>("Sessions", table => { table.Key(session => session.Id); table.Column(session => session.Value, "text; DROP TABLE x"); });""",
+        "COHDBSDK106", "is not a SQL type name")]
+    [InlineData("""database.Table<Session>("Sessions", table => { table.Key(session => session.Id); table.Column(session => session.Value, "a"); table.Column(session => session.Value, "b"); });""",
+        "COHDBSDK105", "already declared with SQL type 'a'")]
+    public void Execute_WithUnreadableDomainOrColumnType_ShouldFail(string declaration, string code, string message)
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, SchemaTypes + $$"""
+
+            public static class SchemaProgram
+            {
+                public static void Configure()
+                {
+                    SqlSchema.Create("orders", database =>
+                    {
+                        database.Table<Order>("Orders", table => table.Key(order => order.Id));
+                        {{declaration}}
+                    });
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeFalse();
+
+        engine.Errors.ShouldContain(error => error.Code == code && error.Message != null && error.Message.Contains(message, StringComparison.Ordinal),
+            Errors(engine));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
     }
 
     /// <summary>A CHECK whose name or text the build cannot read as a constant, or whose name is taken, fails the build.</summary>
@@ -800,5 +908,9 @@ public class CompileDatabaseSchemaTaskTests
 public sealed record ParityOrder(long Id, string Note, decimal Total);
 
 public sealed record SalesOrder(long Id, string Item);
+
+public readonly record struct Price(decimal Amount);
+
+public sealed record CrmCustomer(string Code, string Email, Price Balance);
 
 public sealed record DailyTotal(DateOnly Day, decimal Amount);

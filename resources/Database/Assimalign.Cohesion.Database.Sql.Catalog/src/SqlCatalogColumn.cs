@@ -6,7 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
 /// The catalog's description of one column: name, shared type identity, nullability,
-/// optional default literal, and optional collation override.
+/// optional default literal, optional collation override, and the domain it was declared
+/// with, when one was.
 /// </summary>
 public sealed class SqlCatalogColumn
 {
@@ -21,7 +22,17 @@ public sealed class SqlCatalogColumn
     /// <c>'it''s'</c>, <c>5</c> or <c>TRUE</c>), when declared.
     /// </param>
     /// <param name="collation">The string collation override; null inherits the database default.</param>
-    public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null, Collation? collation = null)
+    /// <param name="domainName">
+    /// The name of the domain the column was declared with (phase E3), or null for a column of a
+    /// built-in type. <paramref name="type"/> is then the domain's base type, which the row codec
+    /// stores; the name lets an engine that opens the database bind the domain again.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, a collation is declared for a non-string
+    /// column, or <paramref name="domainName"/> is empty or white space.
+    /// </exception>
+    public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null,
+        Collation? collation = null, string? domainName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(type);
@@ -29,12 +40,17 @@ public sealed class SqlCatalogColumn
         {
             throw new ArgumentException("Only string columns may declare a collation.", nameof(collation));
         }
+        if (domainName is not null && string.IsNullOrWhiteSpace(domainName))
+        {
+            throw new ArgumentException("A column's domain name cannot be empty or white space.", nameof(domainName));
+        }
 
         Name = name;
         Type = type;
         IsNullable = isNullable;
         DefaultLiteral = defaultLiteral;
         Collation = collation;
+        DomainName = domainName;
     }
 
     /// <summary>
@@ -63,4 +79,12 @@ public sealed class SqlCatalogColumn
     /// Gets the declared string collation, or null to inherit the database default.
     /// </summary>
     public Collation? Collation { get; }
+
+    /// <summary>
+    /// Gets the name of the domain the column was declared with, or null for a column of a
+    /// built-in type. The catalog keeps the name only: a domain is registered on the engine,
+    /// not stored in the database, so an engine that opens the database binds the name to its
+    /// own registration, and <see cref="Type"/> holds the base type the rows are stored as.
+    /// </summary>
+    public string? DomainName { get; }
 }

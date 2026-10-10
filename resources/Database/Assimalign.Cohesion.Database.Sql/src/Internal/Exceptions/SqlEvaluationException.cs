@@ -88,6 +88,17 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// </summary>
     internal const string UnregisteredFunctionCode = "COHSQLE009";
 
+    /// <summary>
+    /// A type name does not resolve (ISO SQLSTATE 42704, undefined object, as PostgreSQL's "type ...
+    /// does not exist"): neither a built-in type nor a domain the engine registers. Raised while
+    /// planning for a column type in DDL and a <c>CAST</c> target, the same over an empty table as
+    /// over a populated one; and, as decision 65 has it for a function, for a stored column of a
+    /// domain the engine that opened the database does not register: the database opens and reads
+    /// proceed, a write to the column fails with this code, and an engine build that declares the
+    /// database fails with it (phase E3).
+    /// </summary>
+    internal const string UnregisteredTypeCode = "COHSQLE010";
+
     private readonly string _detail;
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
@@ -152,6 +163,25 @@ internal sealed class SqlEvaluationException : DatabaseException
         => new(UnregisteredFunctionCode,
             $"{definition.Describe()}, so the constraint cannot be evaluated and the write is refused. " +
             "Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.",
+            null);
+
+    /// <summary>Creates the failure for a type name that neither a built-in type nor a registered domain has.</summary>
+    /// <param name="type">The type as written.</param>
+    /// <param name="where">Where it was written, for example <c>CAST target</c>; leads the message.</param>
+    /// <returns>The coded failure (<c>COHSQLE010</c>).</returns>
+    internal static SqlEvaluationException UnknownType(string type, string where)
+        => new(UnregisteredTypeCode,
+            $"{where}: type '{type}' does not exist: it is neither a built-in type nor a domain this engine registers. " +
+            "Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types) before Build.",
+            null);
+
+    /// <summary>Creates the failure of a write to a stored column whose domain the engine does not register.</summary>
+    /// <param name="domain">The column and the domain that does not resolve.</param>
+    /// <returns>The coded failure (<c>COHSQLE010</c>).</returns>
+    internal static SqlEvaluationException UnregisteredDomain(SqlUnresolvedDomain domain)
+        => new(UnregisteredTypeCode,
+            $"{domain.Describe()}, so the column cannot be written and the write is refused. " +
+            "Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column.",
             null);
 
     /// <summary>Creates the division-by-zero failure for a <c>/</c> or <c>%</c> operator.</summary>

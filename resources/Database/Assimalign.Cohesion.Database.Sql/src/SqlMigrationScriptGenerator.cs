@@ -36,6 +36,14 @@ public static class SqlMigrationScriptGenerator
 
         foreach (SqlSchemaMigrationOperation operation in plan.Operations)
         {
+            // A domain is registered on the engine, not stored in the database (phase E3): adding or
+            // dropping one changes no catalog, so it renders no statement. The engine that declares the
+            // database registers the schema's domains when it builds.
+            if (operation.Kind is SqlSchemaMigrationOperationKind.AddDomain or SqlSchemaMigrationOperationKind.DropDomain)
+            {
+                continue;
+            }
+
             steps.Add(Render(operation, currentSchema));
         }
 

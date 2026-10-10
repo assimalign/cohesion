@@ -324,6 +324,13 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     break;
                 case SqlSchemaMigrationOperationKind.AlterTable:
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect");
+                case SqlSchemaMigrationOperationKind.AddDomain or SqlSchemaMigrationOperationKind.DropDomain:
+                    // A SQL engine's domains are registered on the engine, not stored in the database
+                    // (phase E3): the step has no statement, and the engine that declares the database
+                    // registers the schema's domains when it builds.
+                    builder.Append("-- ").Append(operation.Kind == SqlSchemaMigrationOperationKind.AddDomain ? "Domain added: " : "Domain dropped: ")
+                        .Append(Identifier(operation.ObjectName)).Append(" (registered by the SQL engine; no statement)\n");
+                    break;
                 default:
                     throw Unsupported(operation, "the operation kind is unknown");
             }
@@ -379,8 +386,9 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         {
             if (!string.IsNullOrWhiteSpace(column.CustomType))
             {
-                throw new InvalidOperationException(
-                    $"Column '{column.Name}' uses custom type '{column.CustomType}', which the SQL DDL executor does not support yet.");
+                // A domain's name or a built-in type name as declared (phase E3); the compiled schema
+                // checked its shape, an identifier with up to two unsigned arguments.
+                return column.CustomType;
             }
 
             return column.Type switch

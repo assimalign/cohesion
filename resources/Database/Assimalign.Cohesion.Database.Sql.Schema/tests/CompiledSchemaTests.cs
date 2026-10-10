@@ -16,7 +16,7 @@ public class CompiledSchemaTests
     {
         SqlCompiledSchema schema = CompileOrders();
 
-        schema.Format.ShouldBe("cohesion/database-schema/v2");
+        schema.Format.ShouldBe("cohesion/database-schema/v3");
         schema.Name.ShouldBe("orders-db");
         schema.Tables.Select(table => table.Name).ShouldBe(["order_lines", "orders"]);
         schema.Tables[1].RowType.ShouldStartWith("Assimalign.Cohesion.Database.Sql.Schema.Tests:");
@@ -102,7 +102,6 @@ public class CompiledSchemaTests
         {
             database.Table<GenericRow<GenericValue<int[,], string[]>[]>>("arrays", table => table.Key(row => row.Id));
             database.Table<GenericContainer<int>.Nested<string>>("nested", table => table.Key(row => row.Id));
-            database.Type<GenericValue<decimal?[,], byte[][]>>(type => type.Decimal(18, 2));
         });
         const string local = "Assimalign.Cohesion.Database.Sql.Schema.Tests:Assimalign.Cohesion.Database.Sql.Schema.Tests.CompiledSchemaTests+";
         const string system = "System.Private.CoreLib:System.";
@@ -111,10 +110,20 @@ public class CompiledSchemaTests
             local + "GenericRow`1[" + local + "GenericValue`2[" + system + "Int32[,];" + system + "String[]][]]");
         schema.Tables[1].RowType.ShouldBe(
             local + "GenericContainer`1+Nested`1[" + system + "Int32;" + system + "String]");
-        schema.Types.ShouldHaveSingleItem().Name.ShouldBe(
-            local + "GenericValue`2[" + system + "Nullable`1[" + system + "Decimal][,];" + system + "Byte[][]]");
         schema.CanonicalDocument.ShouldNotContain("Version=");
         SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument).Hash.ShouldBe(schema.Hash);
+
+        // A declared type is a domain named for its CLR type's simple name (phase E3), which a generic
+        // type's is not: refused, naming the CLR type's identity.
+        SqlSchemaValidationException refused = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("generic-type", database =>
+        {
+            database.Table<Order>("orders", table => table.Key(order => order.Id));
+            database.Type<GenericValue<decimal?[,], byte[][]>>(type => type.Decimal(18, 2));
+        }));
+        SqlSchemaValidationError error = refused.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe(SqlSchemaValidationErrorCode.UnsupportedType);
+        error.Declaration.ShouldBe(local + "GenericValue`2[" + system + "Nullable`1[" + system + "Decimal][,];" + system + "Byte[][]]");
+        error.Message.ShouldContain("is not a SQL identifier");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: typed diagnostics name the offending declaration")]
@@ -245,7 +254,7 @@ public class CompiledSchemaTests
         SqlSchemaMigrationException exception = Should.Throw<SqlSchemaMigrationException>(
             () => SqlSchemaMigrationPlanner.Plan(current, desired));
 
-        exception.Message.ShouldContain("custom types or principals");
+        exception.Message.ShouldContain("changes principals");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Migration planner: column reordering is a destructive table alteration")]

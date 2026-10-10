@@ -15,7 +15,12 @@ internal sealed record SchemaSourceModel(
     IReadOnlyList<SchemaTableSource> Tables,
     IReadOnlyList<SchemaPrincipalSource> Principals);
 
-internal sealed record SchemaTypeSource(string TypeName, int? Precision, int? Scale);
+/// <summary>A <c>schema.Type&lt;T&gt;(t =&gt; t.Decimal(p, s))</c> declaration: a domain of the SQL engine (phase E3).</summary>
+/// <param name="TypeName">The CLR type's identity, which a column's member type is matched by.</param>
+/// <param name="SqlName">The domain's SQL name: the CLR type's simple name, as the runtime compiler names it.</param>
+/// <param name="Precision">The decimal precision.</param>
+/// <param name="Scale">The decimal scale.</param>
+internal sealed record SchemaTypeSource(string TypeName, string SqlName, int? Precision, int? Scale);
 
 internal sealed record SchemaTableSource(
     string Name,
@@ -26,7 +31,12 @@ internal sealed record SchemaTableSource(
     IReadOnlyList<SchemaReferenceSource> References,
     IReadOnlyList<SchemaCheckSource> Checks);
 
-internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable);
+/// <summary>A column a table declaration selects.</summary>
+/// <param name="Name">The member's name.</param>
+/// <param name="TypeName">The member's CLR type identity.</param>
+/// <param name="IsNullable">Whether the member can hold null.</param>
+/// <param name="SqlType">The SQL type <c>table.Column(selector, sqlType)</c> declares, as written; null when none does.</param>
+internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable, string? SqlType = null);
 
 internal sealed record SchemaReferenceSource(string Member, string TargetType);
 

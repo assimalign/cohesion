@@ -542,14 +542,17 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     private object? EvaluateCast(SqlBoundCast cast, object?[] row)
     {
+        object? value;
         try
         {
-            return SqlCastConverter.Convert(EvaluateCore(cast.Operand, row), cast.Cast);
+            value = EvaluateCore(cast.Operand, row);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
-            throw new DatabaseException($"CAST to {cast.Cast.TargetType} failed: operand cannot be represented exactly.", exception);
+            throw new DatabaseException($"CAST to {cast.TargetText} failed: operand cannot be represented exactly.", exception);
         }
+
+        return SqlCastConverter.Convert(value, cast, _cancellationToken);
     }
 
     /// <summary>

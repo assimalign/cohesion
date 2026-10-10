@@ -408,6 +408,18 @@ internal static class SqlFunctionResolver
         return cost;
     }
 
+    /// <summary>
+    /// Whether a parameter takes an argument of a storage type: a pseudo-type that admits it, the
+    /// same storage type, or one it widens to implicitly. A domain's check is held to it.
+    /// </summary>
+    /// <param name="parameter">The parameter's type.</param>
+    /// <param name="argument">The argument's storage type.</param>
+    /// <returns><see langword="true"/> when a call with the argument would resolve to the parameter.</returns>
+    internal static bool AcceptsType(SqlType parameter, DatabaseType argument)
+        => parameter.IsPseudo
+            ? !ReferenceEquals(parameter, SqlType.AnyNumeric) || IsNumeric(argument)
+            : Distance(argument, parameter.Storage.Type) >= 0;
+
     /// <summary>The steps of an implicit widening, 0 for the same type, -1 when there is none.</summary>
     private static int Distance(DatabaseType from, DatabaseType to)
     {

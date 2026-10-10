@@ -182,30 +182,96 @@ internal sealed class SqlSchemaProvisioner
     /// <param name="schema">The schema.</param>
     /// <returns>The first unsupported object, described for a message, or null.</returns>
     internal static string? DescribeUnsupported(SqlCompiledSchema schema)
+        => schema.Principals.Count > 0
+            ? $"principal '{schema.Principals[0].Name}', and principals and grants are refused until their DDL exists"
+            : null;
+
+    /// <summary>
+    /// The domain a schema's <c>schema.Type&lt;T&gt;</c> declares (phase E3): a domain over the
+    /// declared storage type, its precision and scale, without a check.
+    /// </summary>
+    /// <param name="type">The compiled type.</param>
+    /// <returns>The domain.</returns>
+    /// <exception cref="ArgumentException">The type's name cannot name a domain, or its storage type is not a SQL type.</exception>
+    internal static SqlType CreateDomain(CompiledSchemaType type)
+        => SqlType.CreateDomain(type.Name, SqlType.ForStorage(new DatabaseTypeInfo(type.StorageType, null, type.Precision, type.Scale)));
+
+    /// <summary>
+    /// Resolves the type a compiled column is declared with: its own storage type, or, for a column
+    /// declared with a SQL type (<c>table.Column(selector, sqlType)</c>, or a member of a
+    /// <c>schema.Type&lt;T&gt;</c> type), what that name resolves to in the engine's type catalog, as
+    /// the DDL that creates the column will resolve it.
+    /// </summary>
+    /// <param name="column">The compiled column.</param>
+    /// <param name="types">The engine's type catalog.</param>
+    /// <param name="domain">The domain's name when the column is of one; otherwise null.</param>
+    /// <returns>The storage type and its constraints.</returns>
+    /// <exception cref="DatabaseException">The declared type does not resolve, or its storage type is not the column's.</exception>
+    internal static DatabaseTypeInfo ResolveColumnType(CompiledSchemaColumn column, SqlTypeCatalog types, out string? domain)
     {
-        if (schema.Principals.Count > 0)
+        domain = null;
+        if (column.CustomType is not { } declared)
         {
-            return $"principal '{schema.Principals[0].Name}', and principals and grants are refused until their DDL exists";
+            return new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale);
         }
 
-        if (schema.Types.Count > 0)
+        if (types.Resolve(declared, out string? error) is not { } type)
         {
-            return $"custom type '{schema.Types[0].Name}', and custom types are refused until their DDL exists";
+            throw error is not null
+                ? new DatabaseException($"Column '{column.Name}' is declared with type '{declared}': {error}.")
+                : SqlEvaluationException.UnknownType(declared, $"Column '{column.Name}'");
+        }
+
+        if (type.Storage.Type != column.Type)
+        {
+            throw new DatabaseException(
+                $"Column '{column.Name}' is declared with type '{declared}', which is stored as {SqlType.NameOf(type.Storage.Type)}, " +
+                $"but its member is stored as {SqlType.NameOf(column.Type)}; declare a type whose storage is the member's.");
+        }
+
+        domain = type.IsDomain ? type.Name : null;
+        return type.Storage;
+    }
+
+    /// <summary>
+    /// Binds a compiled schema's types to the engine's type catalog, as the DDL that applies it will,
+    /// without touching a database: every domain the schema declares is the engine's (the build adds
+    /// a declared database's), and every column's declared type resolves to a type stored as its
+    /// member is. Phase 3 of the engine builder's build runs it before any file is touched, and an
+    /// imperative apply before any step runs.
+    /// </summary>
+    /// <param name="schema">The schema.</param>
+    /// <param name="types">The engine's type catalog.</param>
+    /// <exception cref="DatabaseException">A domain or a column's type does not bind; the message names it.</exception>
+    internal static void BindDeclaredTypes(SqlCompiledSchema schema, SqlTypeCatalog types)
+    {
+        foreach (CompiledSchemaType declared in schema.Types)
+        {
+            if (!types.TryGetDomain(declared.Name, out var registered) || registered.Storage.Type != declared.StorageType ||
+                registered.Storage.Precision != declared.Precision || registered.Storage.Scale != declared.Scale)
+            {
+                throw new DatabaseException(
+                    $"The schema declares domain '{declared.Name}' over {SqlType.ForStorage(new DatabaseTypeInfo(declared.StorageType, null, declared.Precision, declared.Scale)).Name}, " +
+                    "which this engine does not register with that base type; declare the database on the engine's builder " +
+                    "(SqlDatabaseEngineBuilder.AddDatabase), which registers the domains its schema declares, or register the domain " +
+                    "(SqlDatabaseEngineBuilder.Types).");
+            }
         }
 
         foreach (CompiledSchemaTable table in schema.Tables)
         {
             foreach (CompiledSchemaColumn column in table.Columns)
             {
-                if (!string.IsNullOrWhiteSpace(column.CustomType))
+                try
                 {
-                    return $"column '{table.Name}.{column.Name}' of custom type '{column.CustomType}', and custom-type " +
-                        "migrations are not supported yet";
+                    ResolveColumnType(column, types, out _);
+                }
+                catch (DatabaseException exception)
+                {
+                    throw new DatabaseException($"Table '{table.Name}': {exception.Message}", exception);
                 }
             }
         }
-
-        return null;
     }
 
     /// <summary>
@@ -237,8 +303,8 @@ internal sealed class SqlSchemaProvisioner
                 // The table as its CREATE TABLE will publish it: its declared columns and types, no
                 // column collation (the database default), and no data.
                 shape ??= new SqlCatalogTable(0, "dbo", table.Name, table.Columns
-                    .Select(static column => new SqlCatalogColumn(column.Name,
-                        new DatabaseTypeInfo(column.Type, column.MaxLength, column.Precision, column.Scale), column.IsNullable))
+                    .Select(column => new SqlCatalogColumn(column.Name,
+                        ResolveColumnType(column, functions.Types, out string? domain), column.IsNullable, domainName: domain))
                     .ToArray());
                 try
                 {
@@ -318,6 +384,7 @@ internal sealed class SqlSchemaProvisioner
                     "but compiled schemas currently address the 'dbo' schema only.");
             }
 
+            desiredTables.TryGetValue(catalogTable.Name, out CompiledSchemaTable? desiredTable);
             var columns = new List<CompiledSchemaColumn>(catalogTable.Columns.Count);
             foreach (SqlCatalogColumn column in catalogTable.Columns)
             {
@@ -328,16 +395,8 @@ internal sealed class SqlSchemaProvisioner
                         "which the compiled schema contract cannot represent yet.");
                 }
 
-                columns.Add(new CompiledSchemaColumn(
-                    column.Name,
-                    column.Type.Type,
-                    column.IsNullable,
-                    column.Type.MaxLength,
-                    column.Type.Precision,
-                    column.Type.Scale));
+                columns.Add(SnapshotColumn(column, desiredTable));
             }
-
-            desiredTables.TryGetValue(catalogTable.Name, out CompiledSchemaTable? desiredTable);
             CompiledSchemaKey? primaryKey = null;
             if (catalogTable.PrimaryKeyColumns.Count > 0)
             {
@@ -375,6 +434,25 @@ internal sealed class SqlSchemaProvisioner
             Array.Empty<CompiledSchemaType>(),
             tables,
             Array.Empty<CompiledSchemaPrincipal>());
+    }
+
+    /// <summary>
+    /// Reconstructs a live column's compiled form: the desired schema's own declaration when it
+    /// declares the column with a SQL type that resolves to the live column's type and domain, so
+    /// reconciliation plans no change for it, and otherwise the live type with its domain's name.
+    /// </summary>
+    private CompiledSchemaColumn SnapshotColumn(SqlCatalogColumn column, CompiledSchemaTable? desiredTable)
+    {
+        CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
+            candidate.CustomType is not null && string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
+        if (declared is not null && DescribeTypeDifference(declared, column) is null)
+        {
+            return new CompiledSchemaColumn(column.Name, declared.Type, column.IsNullable, declared.MaxLength, declared.Precision,
+                declared.Scale, declared.CustomType);
+        }
+
+        return new CompiledSchemaColumn(column.Name, column.Type.Type, column.IsNullable, column.Type.MaxLength, column.Type.Precision,
+            column.Type.Scale, column.DomainName);
     }
 
     /// <summary>
@@ -485,7 +563,7 @@ internal sealed class SqlSchemaProvisioner
     }
 
     // The first column of a table that differs from its declaration, described for a message.
-    private static string? DescribeColumnDifference(CompiledSchemaTable expected, SqlCatalogTable actual)
+    private string? DescribeColumnDifference(CompiledSchemaTable expected, SqlCatalogTable actual)
     {
         if (actual.Columns.Count != expected.Columns.Count)
         {
@@ -514,25 +592,15 @@ internal sealed class SqlSchemaProvisioner
                 return $"table '{expected.Name}': column {index + 1} is '{actualColumn.Name}', declared '{expectedColumn.Name}'";
             }
 
-            if (expectedColumn.Type != actualColumn.Type.Type ||
-                expectedColumn.MaxLength != actualColumn.Type.MaxLength ||
-                expectedColumn.Precision != actualColumn.Type.Precision ||
-                expectedColumn.Scale != actualColumn.Type.Scale)
+            if (DescribeTypeDifference(expectedColumn, actualColumn) is { } type)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
-                    $"{DescribeType(actualColumn.Type.Type, actualColumn.Type.MaxLength, actualColumn.Type.Precision, actualColumn.Type.Scale)}, " +
-                    $"declared {DescribeType(expectedColumn.Type, expectedColumn.MaxLength, expectedColumn.Precision, expectedColumn.Scale)}";
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' {type}";
             }
 
             if (expectedIsNullable != actualColumn.IsNullable)
             {
                 return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
                     $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
-            }
-
-            if (expectedColumn.CustomType is not null)
-            {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' is declared with custom type '{expectedColumn.CustomType}'";
             }
 
             if (actualColumn.DefaultLiteral is not null)
@@ -542,6 +610,36 @@ internal sealed class SqlSchemaProvisioner
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// How a live column's type differs from a compiled column's declared type, its domain included
+    /// (phase E3), described after the column's name; null when they agree.
+    /// </summary>
+    private string? DescribeTypeDifference(CompiledSchemaColumn expected, SqlCatalogColumn actual)
+    {
+        DatabaseTypeInfo type;
+        string? domain;
+        try
+        {
+            type = ResolveColumnType(expected, _database.Definitions.Functions.Types, out domain);
+        }
+        catch (DatabaseException exception)
+        {
+            return $"is declared with a type this engine does not resolve ({exception.Message})";
+        }
+
+        if (type.Type != actual.Type.Type || type.MaxLength != actual.Type.MaxLength ||
+            type.Precision != actual.Type.Precision || type.Scale != actual.Type.Scale)
+        {
+            return $"is {DescribeType(actual.Type.Type, actual.Type.MaxLength, actual.Type.Precision, actual.Type.Scale)}, " +
+                $"declared {DescribeType(type.Type, type.MaxLength, type.Precision, type.Scale)}";
+        }
+
+        return string.Equals(domain, actual.DomainName, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : $"is {(actual.DomainName is null ? "of no domain" : $"of domain '{actual.DomainName}'")}, " +
+              $"declared {(domain is null ? "with no domain" : $"of domain '{domain}'")}";
     }
 
     private static string DescribeType(DatabaseType type, int? maxLength, int? precision, int? scale)
@@ -669,6 +767,7 @@ internal sealed class SqlSchemaProvisioner
 
         try
         {
+            BindDeclaredTypes(schema, _database.Definitions.Functions.Types);
             BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions);
         }
         catch (DatabaseException invalid)

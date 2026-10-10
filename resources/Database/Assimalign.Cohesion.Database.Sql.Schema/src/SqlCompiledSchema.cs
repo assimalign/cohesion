@@ -16,8 +16,16 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// model-agnostic <c>CompiledSchema</c>, which carried an engine model and recomputed the
 /// canonical document and its hash on every read. The root keeps no schema type now: provisioning
 /// belongs to the SQL model, which owns this shape, its canonical document and its migration
-/// planner. Dropping the inherited <c>Model</c> changed the document, so its format is
+/// planner. Dropping the inherited <c>Model</c> changed the document, so its format became
 /// <c>cohesion/database-schema/v2</c>; a <c>v1</c> document no longer deserializes.
+/// </para>
+/// <para>
+/// <b>Format <c>v3</c> (phase E3).</b> A declared type (<c>schema.Type&lt;T&gt;</c>) is a domain of the
+/// SQL engine, so <see cref="CompiledSchemaType.Name"/> is its SQL name, the CLR type's simple name,
+/// where <c>v2</c> held the CLR type's identity; and a column may be declared with a SQL type
+/// (<c>table.Column(selector, sqlType)</c>), kept in <see cref="CompiledSchemaColumn.CustomType"/> as
+/// written. A <c>v2</c> document no longer deserializes, so a provisioner plans from the live catalog
+/// once, as it did for <c>v1</c>.
 /// </para>
 /// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
@@ -27,7 +35,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v2";
+    public const string CurrentFormat = "cohesion/database-schema/v3";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.
@@ -125,8 +133,11 @@ public sealed class SqlCompiledSchema
     }
 }
 
-/// <summary>Describes a compiled custom scalar type.</summary>
-/// <param name="Name">The stable custom type name.</param>
+/// <summary>
+/// Describes a compiled custom scalar type: a domain the schema declares (<c>schema.Type&lt;T&gt;</c>),
+/// which the SQL engine that provisions the schema registers over the storage type (phase E3).
+/// </summary>
+/// <param name="Name">The domain's SQL name: the CLR type's simple name, a SQL identifier.</param>
 /// <param name="StorageType">The underlying storage type.</param>
 /// <param name="Precision">The decimal precision.</param>
 /// <param name="Scale">The decimal scale.</param>
@@ -210,7 +221,11 @@ public sealed class CompiledSchemaTable
 /// <param name="MaxLength">The optional maximum length.</param>
 /// <param name="Precision">The optional decimal precision.</param>
 /// <param name="Scale">The optional decimal scale.</param>
-/// <param name="CustomType">The custom type name, when one is used.</param>
+/// <param name="CustomType">
+/// The SQL type the column is declared with, when it does not follow from the member's CLR type: a
+/// domain the schema declares, a domain the SQL engine registers, or a built-in type name with its
+/// arguments, as written (phase E3). The engine resolves it as its DDL does.
+/// </param>
 public sealed record CompiledSchemaColumn(
     string Name,
     DatabaseType Type,

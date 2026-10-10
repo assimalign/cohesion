@@ -54,7 +54,9 @@ internal sealed partial class SqlPlanExecutor
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
         var indexes = GetLiveIndexes(table);
-        var defaults = _definitions.Get(table).DefaultValues;
+        var bound = _definitions.Get(table);
+        var defaults = bound.DefaultValues;
+        var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         foreach (var sourceRow in sourceRows)
         {
@@ -77,9 +79,16 @@ internal sealed partial class SqlPlanExecutor
                 if (!assigned[ordinal])
                 {
                     // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
-                    values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : ResolveDefault(table.Columns[ordinal], null);
+                    values[ordinal] = defaults[ordinal] is { } boundDefault ? DefaultValue(boundDefault) : ResolveDefault(table.Columns[ordinal], null);
                 }
             }
+
+            // Every column of a domain is assigned by an INSERT, its default included (phase E3).
+            if (domainEvaluator is not null)
+            {
+                CheckDomains(bound, values, domainEvaluator);
+            }
+
             rows.Add((SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values));
         }
 
