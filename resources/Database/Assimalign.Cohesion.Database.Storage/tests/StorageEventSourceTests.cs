@@ -619,15 +619,22 @@ public sealed class StorageEventSourceTests
         long handleBytes = GC.GetAllocatedBytesForCurrentThread() - before;
         GC.KeepAlive(probe);
 
-        // Act
-        before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < Pins; i++)
+        // Act: the fewest bytes of three rounds. A pin path that allocates does so in every round,
+        // while the runtime can now and then charge an allocation of its own to this thread
+        // (Windows CI once read 484,800 bytes for 480,000 of handles, a one-off of 4,800).
+        long allocated = long.MaxValue;
+        for (int round = 0; round < 3; round++)
         {
-            pool.Pin((PageId)0L, stream).Dispose();
-        }
+            before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < Pins; i++)
+            {
+                pool.Pin((PageId)0L, stream).Dispose();
+            }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        _output.WriteLine($"{Pins} pin hits allocated {allocated} bytes; one handle is {handleBytes} bytes.");
+            long roundBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            _output.WriteLine($"Round {round}: {Pins} pin hits allocated {roundBytes} bytes; one handle is {handleBytes} bytes.");
+            allocated = Math.Min(allocated, roundBytes);
+        }
 
         // Assert: exactly the handles, as before the event source existed.
         handleBytes.ShouldBeGreaterThan(0);
