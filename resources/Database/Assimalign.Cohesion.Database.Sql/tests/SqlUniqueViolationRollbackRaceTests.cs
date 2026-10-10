@@ -1,0 +1,158 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+namespace Assimalign.Cohesion.Database.Sql.Tests;
+
+using Assimalign.Cohesion.Database.Execution;
+
+/// <summary>
+/// A multi-row INSERT that fails on a UNIQUE index rolls its statement bracket back, and the
+/// rollback restores every index page the statement changed in place: it clears each page and
+/// writes the page's pre-image back. Until #1371 it did so outside the tree's latch, so a seek that
+/// read the tree meanwhile saw cleared leaves and failed with "Page 0 is the file header" (an
+/// entry reference of zero), reported the root as index corruption, or silently returned no row
+/// for a committed key. The rollback now restores the pages under the tree latch.
+/// </summary>
+public sealed class SqlUniqueViolationRollbackRaceTests
+{
+    private const int SeededRows = 200;
+    private const int BatchRows = 40;
+
+    /// <summary>
+    /// Two writers insert 40 fresh keys and then a committed one, which fails each statement after
+    /// its 40 index inserts (and the leaf splits they cause); four readers seek committed keys
+    /// meanwhile. Against the code before #1371 every one-second run of this workload failed, within
+    /// about 45 ms on average, in all three ways above (20 of 20 runs, Release).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Unique violation: seeks racing failed multi-row inserts' bracket rollbacks read every committed key exactly once (#1371)")]
+    public async Task Seek_RacingUniqueViolationRollbacks_ShouldReadEveryCommittedKeyOnce()
+    {
+        // Arrange: 200 committed keys under a unique index.
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        {
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("rollback-race-db");
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
+            await setup.ExecuteAsync("CREATE UNIQUE INDEX ux_val ON t (val)");
+            for (int block = 0; block < SeededRows / 50; block++)
+            {
+                var values = Enumerable.Range(block * 50, 50).Select(value => $"({value}, {value})");
+                await setup.ExecuteAsync($"INSERT INTO t (id, val) VALUES {string.Join(", ", values)}");
+            }
+        }
+
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var race = new Race(stop);
+
+        // Act
+        var tasks = new List<Task>();
+        for (int writer = 0; writer < 2; writer++)
+        {
+            int seed = writer + 1;
+            tasks.Add(Task.Run(() => race.WriteAsync(database, seed)));
+        }
+
+        for (int reader = 0; reader < 4; reader++)
+        {
+            int seed = reader + 101;
+            tasks.Add(Task.Run(() => race.ReadAsync(database, seed)));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Assert: no seek failed or missed its key, and the race ran on both sides.
+        race.Failure.ShouldBeNull();
+        race.Rollbacks.ShouldBeGreaterThan(0);
+        race.Seeks.ShouldBeGreaterThan(0);
+    }
+
+    private sealed class Race(CancellationTokenSource stop)
+    {
+        private Exception? _failure;
+        private long _rollbacks;
+        private long _seeks;
+        private int _nextKey = 1_000_000;
+
+        public Exception? Failure => Volatile.Read(ref _failure);
+
+        public long Rollbacks => Interlocked.Read(ref _rollbacks);
+
+        public long Seeks => Interlocked.Read(ref _seeks);
+
+        private bool Running => !stop.IsCancellationRequested && Failure is null;
+
+        /// <summary>
+        /// Inserts batches of fresh keys that end in a committed key, so each statement fails on
+        /// the unique index after it has inserted the batch's index entries.
+        /// </summary>
+        public async Task WriteAsync(SqlDatabase database, int seed)
+        {
+            await using var session = await database.CreateSessionAsync();
+            var random = new Random(seed);
+            while (Running)
+            {
+                int first = Interlocked.Add(ref _nextKey, BatchRows) - BatchRows;
+                int duplicate = random.Next(SeededRows);
+                var rows = Enumerable.Range(first, BatchRows).Select(value => $"({value}, {value})").Append($"({duplicate}, {duplicate})");
+                try
+                {
+                    await session.ExecuteAsync($"INSERT INTO t (id, val) VALUES {string.Join(", ", rows)}", cancellationToken: TestTimeout.Token());
+                    Fail(new InvalidOperationException($"The batch ending in committed key {duplicate} was inserted."));
+                }
+                catch (SqlConstraintViolationException)
+                {
+                    Interlocked.Increment(ref _rollbacks);
+                }
+                catch (Exception exception)
+                {
+                    Fail(exception);
+                }
+            }
+        }
+
+        /// <summary>Seeks committed keys and checks each finds exactly its row.</summary>
+        public async Task ReadAsync(SqlDatabase database, int seed)
+        {
+            await using var session = await database.CreateSessionAsync();
+            var random = new Random(seed);
+            while (Running)
+            {
+                int key = random.Next(SeededRows);
+                try
+                {
+                    var result = await session.ExecuteAsync($"SELECT id FROM t WHERE val = {key}", cancellationToken: TestTimeout.Token());
+                    var ids = new List<int>();
+                    await foreach (var row in result.ShouldBeAssignableTo<QueryResultSet>()!.GetRowsAsync())
+                    {
+                        ids.Add(Convert.ToInt32(row.GetValue(0)));
+                    }
+
+                    if (ids.Count != 1 || ids[0] != key || session.LastStatementMetrics?.AccessPath != "seek:ux_val")
+                    {
+                        Fail(new InvalidOperationException(
+                            $"The seek of committed key {key} returned [{string.Join(", ", ids)}] through '{session.LastStatementMetrics?.AccessPath}'."));
+                    }
+
+                    Interlocked.Increment(ref _seeks);
+                }
+                catch (Exception exception)
+                {
+                    Fail(exception);
+                }
+            }
+        }
+
+        private void Fail(Exception exception) => Interlocked.CompareExchange(ref _failure, exception, null);
+    }
+}

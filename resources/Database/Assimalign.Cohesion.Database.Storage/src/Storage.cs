@@ -1396,6 +1396,26 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Pins a page of a latched structure for modification inside a transaction (see
+    /// <see cref="OpenPageForWrite(StorageTransaction, PageId)"/>), and enlists the structure's latch
+    /// with the transaction, so a rollback restores the page's pre-image only while it holds the
+    /// latch exclusively and the structure's readers never see the page half restored (#1371).
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page to modify.</param>
+    /// <param name="latch">The latch the structure's readers hold while they read the page; the caller holds it exclusively.</param>
+    /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
+    /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
+    public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId, StoragePageLatch latch)
+    {
+        var owner = ValidateTransaction(transaction);
+        EnlistLatch(owner, latch);
+        return TouchPage(owner, pageId);
+    }
+
+    /// <summary>
     /// Allocates a fresh page inside a transaction, covered by the write-ahead log.
     /// If the transaction rolls back, the page content reverts to its freshly
     /// allocated (empty) image; the allocation itself is not undone — a safe leak.
@@ -1407,6 +1427,48 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type)
     {
         var owner = ValidateTransaction(transaction);
+        return AllocateTouchedPage(owner, type);
+    }
+
+    /// <summary>
+    /// Allocates a fresh page for a latched structure inside a transaction (see
+    /// <see cref="AllocatePageForWrite(StorageTransaction, PageType)"/>), and enlists the
+    /// structure's latch with the transaction, as
+    /// <see cref="OpenPageForWrite(StorageTransaction, PageId, StoragePageLatch)"/> does.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="type">The type of page to allocate.</param>
+    /// <param name="latch">The latch the structure's readers hold while they read its pages; the caller holds it exclusively.</param>
+    /// <returns>A handle to the new pinned page.</returns>
+    /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, StoragePageLatch latch)
+    {
+        var owner = ValidateTransaction(transaction);
+        EnlistLatch(owner, latch);
+        return AllocateTouchedPage(owner, type);
+    }
+
+    /// <summary>
+    /// Enlists a structure's latch with a transaction that is about to change one of its pages,
+    /// after checking the caller holds it exclusively: a page a latched structure's readers read
+    /// changes only under the latch, the rollback's restore included.
+    /// </summary>
+    private static void EnlistLatch(StorageTransaction transaction, StoragePageLatch latch)
+    {
+        ArgumentNullException.ThrowIfNull(latch);
+
+        if (!latch.IsWriteHeld)
+        {
+            throw new InvalidOperationException(
+                $"Storage transaction {transaction.Sequence} cannot change a page of a latched structure without holding the structure's latch exclusively.");
+        }
+
+        transaction.EnlistLatch(latch);
+    }
+
+    private StoragePageHandle AllocateTouchedPage(StorageTransaction owner, PageType type)
+    {
         var handle = _pageManager!.AllocatePage(type);
 
         try
@@ -2336,12 +2398,22 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// in the buffer pool and appends a rollback record.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The rollback record is advisory: recovery redoes no change of a transaction without
     /// a commit record. Once the pages are restored the transaction therefore ends even
     /// when the record cannot be appended: its page write locks and its place in the
     /// active count are released before the append failure propagates, so a journal
     /// failure cannot leave the storage refusing every later checkpoint. A failure while
     /// restoring the pages leaves the transaction active, so the caller can retry.
+    /// </para>
+    /// <para>
+    /// The pages are restored in place, each cleared and then rewritten from its pre-image, so
+    /// the restore holds every latch the transaction enlisted (<see cref="StoragePageLatch"/>)
+    /// exclusively from the first page to the last. A latched structure's reader then sees the
+    /// structure as the transaction left it or as it was before, never a cleared page or a
+    /// parent restored before its child (#1371). The latches are released before the rollback
+    /// record is appended.
+    /// </para>
     /// </remarks>
     internal unsafe void RollbackTransaction(StorageTransaction transaction)
     {
@@ -2355,16 +2427,24 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 "the journal, so recovery redoes its changes.");
         }
 
-        foreach (var (pageId, preImage) in transaction.PreImages)
+        var latches = transaction.EnterLatchesForRestore();
+        try
         {
-            using var handle = _pageManager!.GetPage((PageId)pageId);
-            var page = new Span<byte>(handle.Page.Pointer, Page.Size);
+            foreach (var (pageId, preImage) in transaction.PreImages)
+            {
+                using var handle = _pageManager!.GetPage((PageId)pageId);
+                var page = new Span<byte>(handle.Page.Pointer, Page.Size);
 
-            // The content and the LSN of the page's last record together: the page as recovery
-            // rebuilds it, so the next transaction's delta names the right base.
-            LoadPreImage(preImage, page);
-            handle.MarkDirty();
-            _consistency?.RolledBack(pageId, page);
+                // The content and the LSN of the page's last record together: the page as recovery
+                // rebuilds it, so the next transaction's delta names the right base.
+                LoadPreImage(preImage, page);
+                handle.MarkDirty();
+                _consistency?.RolledBack(pageId, page);
+            }
+        }
+        finally
+        {
+            StorageTransaction.ExitLatches(latches);
         }
 
         // A commit that failed before its commit record may have journaled page records: recovery

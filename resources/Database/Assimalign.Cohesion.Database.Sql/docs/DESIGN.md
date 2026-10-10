@@ -1780,6 +1780,24 @@ description + exported registrations), the engine binds them.
   policy); the statement's bracket has rolled back, the session stays usable.
   Unique keys treat nulls as values (stricter than ANSI; consistent with the
   codec's nulls-first ordering — documented dialect decision).
+- **A failed statement's index pages are restored under each tree's latch** (#1371).
+  A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
+  `SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row's entries, splitting
+  leaves as it goes, before a later row fails the unique check; the coordinator then
+  rolls the statement bracket back, which rewrites each touched page in place from
+  its pre-image. Until #1371 that rewrite took no tree latch, and a concurrent seek
+  read cleared leaves: it failed with `StorageIOException` "Page 0 is the file header"
+  (a zeroed entry, visible to every snapshot, whose reference unpacks to page 0),
+  returned no row for a committed key, or reported the root as `IndexCorruptionException`.
+  Every one-second run of `SqlUniqueViolationRollbackRaceTests`' workload failed against
+  `f17d8bc0` (40 of 40, Release); none of 40, nor a 40-second run, fails now. The fix is
+  in the index and storage layers, not here: the tree's latch is a `StoragePageLatch`
+  the rollback holds while it restores (`Database.Indexing` DESIGN, "A rollback restores
+  the tree under its latch", which also records the open question of whether index
+  pages should be physically rolled back at all; PostgreSQL leaves an aborted
+  statement's index entries for later pruning). The executor's apply and rollback path
+  is unchanged, and a reclaimed-row skip in the seek (`TryReadRecord` returning false for
+  page 0) would only have hidden the torn read.
 - **Registrations re-export at persistence points**: index DDL itself, each
   checkpoint pass, and instance disposal — each compares against the stored set
   first, so an idle checkpoint writes nothing. Root splits no longer move a
@@ -2975,7 +2993,9 @@ pre-image, a free clearing the body) leaves the same torn bytes for every read. 
 read that confirms against the page write lock, which every bracket holds from its first touch of
 a page until it ends; the storage does not expose that check yet (a follow-up). PostgreSQL needs
 no second read because it reads a heap page under a share lock
-(`src/backend/access/heap/heapam.c:647`, `:1706`).
+(`src/backend/access/heap/heapam.c:647`, `:1706`). The index read before the row read has no
+such window since #1371: the rollback restores a tree's pages under the tree latch the seek's
+cursor holds ("Secondary indexes", above).
 The slot directory the read walks had a torn read of its own, below the decode: on ARM64 a scan
 beside an insert could see the new slot count before the slot's entry and fail with "Slotted page
 N is malformed" on a healthy page, which no re-read of the record reaches. The slotted page now

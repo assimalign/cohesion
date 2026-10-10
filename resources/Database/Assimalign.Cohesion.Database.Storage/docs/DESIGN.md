@@ -45,6 +45,10 @@ and phase 2 replaced the remaining six with sealed types.
   through them in other assemblies, so they cannot be internal, and every call on the per-page
   and per-record paths is now direct. The page manager is not disposable: the storage owns
   it, and its former `Dispose` did nothing.
+- **`StoragePageLatch` is sealed with a private constructor and `Create()`** (rule 1). Indexing
+  creates one per tree and passes it to the latched page-write overloads, so it is public; its
+  creation order, its owner check and its waiter count are internal (#1371, "A rollback restores
+  a latched structure under its latch").
 - **The buffer pool is internal.** `Storage.BufferPool` returns the internal
   `StorageBufferPool`; only the storage and its own tests read it.
 - **The unused `IStorageBackupManager` and `IStorageRecoveryManager` placeholders were
@@ -439,7 +443,9 @@ instead of dereferencing it:
   rollback's page restore or a page clear is overwriting — which is the content-isolation
   question page latches would answer; the layers above own it today (the SQL and key-value
   reads confirm a record that does not decode by reading it again, each model's DESIGN,
-  "Error model"). A reader that walks slots uses `TryReadSlot`,
+  "Error model"). A structure that guards its pages with its own latch has the rollback's
+  restore honor it ("A rollback restores a latched structure under its latch", #1371); slotted
+  record pages have no such latch. A reader that walks slots uses `TryReadSlot`,
   which reads the slot count and one snapshot of the slot entry and copies the record from
   that snapshot: a slot deleted or reverted between two separate reads would otherwise fail
   the read ("Reading a record through a reference", below).
@@ -883,6 +889,45 @@ the budget holds about 60–120 MB of it; the pages themselves are in the journa
 pages of a write transaction, with scratch files (`MaxScratchBufferSize`, 256 MiB,
 `src/Voron/StorageEnvironmentOptions.cs:272`), because its transactions are no-steal; a steal
 pool with a journal of images makes the journal the natural spill target.
+
+### A rollback restores a latched structure under its latch (#1371)
+
+A rollback restores each page in place: `LoadPreImage` clears the page outside its LSN and
+checksum (`PageImageCodec.TryApplyImage`) and writes the pre-image's runs back. Readers that hold
+only a pin can see that rewrite half done. For a slotted page the readers above cope (the slot
+read and the record confirmation, "The record layer"); for a B-tree node they did not. The index
+reads its nodes under a tree latch that every writer of the tree also took, except the rollback,
+which no tree latch reached: a SQL seek beside a failed multi-row `INSERT` read cleared leaves and
+followed an entry reference of zero to page 0, missed committed keys, or met a root that was no
+node (`Database.Indexing` DESIGN, "A rollback restores the tree under its latch", which has the
+failure rates).
+
+`StoragePageLatch` is that tree latch, owned by the storage so a rollback can take it. A structure
+whose readers take no page write lock passes its latch to
+`OpenPageForWrite(transaction, page, latch)` or `AllocatePageForWrite(transaction, type, latch)`.
+The storage refuses the write unless the calling thread holds the latch exclusively, and enlists
+the latch with the transaction (once per latch). `RollbackTransaction` then takes every enlisted
+latch exclusively before it restores the first page and releases them after the last one, before
+the rollback record is appended; a latch the rolling-back thread already holds exclusively is left
+as it is.
+
+- **Creation order, so no rollback deadlocks another.** Latches are taken in the order they were
+  created (`StoragePageLatch.Order`), not the order a transaction enlisted them, so two rollbacks
+  that enlisted the same latches never each hold one while waiting for the other
+  (`StoragePageLatchTests` holds the first latch while both roll back and checks the second is
+  free). A rollback otherwise waits only for the latch's readers and writers, and neither waits
+  for anything this rollback holds: a reader holds one latch and waits for nothing else, and a
+  writer whose page another bracket write-locks fails instead of waiting.
+- **The commit needs no latch.** A commit reads each page to compute its delta and writes only
+  the page's LSN field, which no structure reads.
+- **The overloads without a latch are unchanged**, and right for pages read under a pin
+  (records) or read by nothing until their owner publishes them (a new tree's root page).
+- **A design question stays open.** PostgreSQL and Voron never restore a page a reader can see:
+  PostgreSQL leaves an aborted transaction's index entries for later pruning, and Voron writes
+  into private page copies that a rollback discards. Moving index pages off physical rollback
+  needs a statement-level stamp or a logical statement undo, and a bracket that can commit some
+  pages while rolling back others, which this storage does not offer; the `Database.Indexing`
+  DESIGN records it for the owner.
 
 ### The debug consistency check (#1253)
 
