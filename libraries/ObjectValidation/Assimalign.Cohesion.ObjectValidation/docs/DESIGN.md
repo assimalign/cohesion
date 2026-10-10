@@ -119,11 +119,23 @@ two pattern rules bound what that input can cost.
   passed.
 - **The pattern is otherwise unchanged, quirks included.** It is case-sensitive outside a quoted local part,
   so `Ada@example.com` fails, and its `$` accepts one trailing line feed.
-- **`Matches` bounds a caller's pattern.** The library cannot tell whether a caller's pattern is linear, so
-  each match may run for one second (`MatchValidationRule.DefaultMatchTimeout`), whatever the process-wide
-  default. Web.Rewrite gives a string pattern the same budget. A match that runs out of time fails the rule.
-  The rule's catch-all would otherwise record the timeout as "not invoked", and the value would pass. The
-  library owns no `Matches` pattern of its own.
+- **`Matches` runs a caller's pattern in linear time when the non-backtracking engine supports it.** The rule
+  first builds the pattern with the caller's options plus `RegexOptions.NonBacktracking`. That engine runs in
+  time linear in the value's length, and for `IsMatch` it accepts the values the backtracking engine does; the
+  engines differ only in captures, which the rule does not read. So `^(a+)+$` costs microseconds on any input.
+  The engine rejects backreferences, lookarounds, atomic groups, conditionals, balancing groups and `\G`, and
+  the `RightToLeft` and `ECMAScript` options. For those the rule falls back to the backtracking engine. A
+  caller who passes `RegexOptions.NonBacktracking` gets no fallback: an unsupported construct throws
+  `NotSupportedException` from `Matches`. The library owns no `Matches` pattern of its own.
+- **Every match has a one-second budget** (`MatchValidationRule.DefaultMatchTimeout`), whatever the
+  process-wide default. Web.Rewrite gives a string pattern the same budget. It is what bounds a pattern only the
+  backtracking engine supports, and a backstop on the linear engine. A match that runs out of time fails the
+  rule. The rule's catch-all would otherwise record the timeout as "not invoked", and the value would pass.
+- **The budget is per match, not per validation.** `RuleForEach` runs the rule on every element, so a body of N
+  strings checked by a backtracking-only pattern can cost N seconds of CPU. Another item's `MaxLength` on the
+  collection does not prevent that, because a failing item does not stop the others (only `ValidationMode.Stop`
+  does). A profile that checks a client-sized collection should use a pattern the non-backtracking engine
+  supports.
 - **`Matches` builds its pattern once, where the profile declares the rule,** with the caller's options. An
   invalid pattern or option combination throws `ArgumentException` from `Matches`. Until #1377 the static
   `Regex.IsMatch` threw on every validation instead, the rule was recorded as "not invoked", and every value

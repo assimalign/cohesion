@@ -9,15 +9,17 @@ internal sealed class MatchValidationRule : ValidationRuleBase<string>
     /// How long one match of a caller's pattern may run before the rule fails.
     /// </summary>
     /// <remarks>
-    /// The library cannot tell whether a caller's pattern backtracks without bound on crafted input, and
-    /// Web.Validation runs the rule on request bodies (#1377).
+    /// A pattern the non-backtracking engine cannot take may backtrack without bound on crafted input, and
+    /// Web.Validation runs the rule on request bodies (#1377). The budget is per match: <c>RuleForEach</c> runs
+    /// the rule on every element, so a collection of N values may cost N budgets.
     /// </remarks>
     internal static readonly TimeSpan DefaultMatchTimeout = TimeSpan.FromSeconds(1);
 
     private readonly Regex _regex;
 
     /// <summary>
-    /// Builds the pattern once, with the caller's options.
+    /// Builds the pattern once, with the caller's options, for the non-backtracking engine when it supports the
+    /// pattern and for the backtracking engine otherwise.
     /// </summary>
     /// <param name="pattern">The caller's pattern.</param>
     /// <param name="options">The caller's options, or <see langword="null"/> for none.</param>
@@ -25,9 +27,31 @@ internal sealed class MatchValidationRule : ValidationRuleBase<string>
     /// <exception cref="ArgumentException">The pattern or the options are invalid.</exception>
     public MatchValidationRule(string pattern, RegexOptions? options = null, TimeSpan? matchTimeout = null)
     {
-        // An invalid pattern throws here, where the profile declares the rule. Before #1377 the static
-        // Regex.IsMatch threw on every validation instead, and the catch below reported "not invoked".
-        this._regex = new Regex(pattern, options ?? RegexOptions.None, matchTimeout ?? DefaultMatchTimeout);
+        this._regex = Create(pattern, options ?? RegexOptions.None, matchTimeout ?? DefaultMatchTimeout);
+    }
+
+    private static Regex Create(string pattern, RegexOptions options, TimeSpan matchTimeout)
+    {
+        // The non-backtracking engine runs in time linear in the value's length, and for IsMatch it accepts the
+        // values the backtracking engine does, so a pattern it supports cannot be made to backtrack. The timeout
+        // stays as a backstop.
+        try
+        {
+            return new Regex(pattern, options | RegexOptions.NonBacktracking, matchTimeout);
+        }
+        catch (NotSupportedException)
+        {
+            // A backreference, lookaround, atomic group, conditional, balancing group or \G.
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // RightToLeft or ECMAScript, which the engine does not take. An option set or timeout that is invalid
+            // for both engines throws again below.
+        }
+
+        // An invalid pattern throws here or above, where the profile declares the rule. Before #1377 the static
+        // Regex.IsMatch threw on every validation instead, and the catch in TryValidate reported "not invoked".
+        return new Regex(pattern, options, matchTimeout);
     }
 
 
