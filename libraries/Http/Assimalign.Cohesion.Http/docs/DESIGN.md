@@ -246,7 +246,14 @@ quirks.
   and `IndexOfInvalidControlCharacter` to each field line as it encodes it, on
   all three versions and in the `Http.ProtocolUpgrade` 101 writer, and refuses
   the head before writing a byte with an `HttpException` whose code is
-  `HttpErrorCode.InvalidResponseField`. A sender may not generate a value
+  `HttpErrorCode.InvalidResponseField`. The one refusal that comes after bytes
+  went out is a streamed response's trailer section, which follows its head and
+  body; the transport resets that stream. The code is the same in both cases, so
+  its documentation tells a caller to check `IHttpExchangeControl.HasResponseStarted`
+  before replacing the response, and each public member that throws it
+  (`IHttpExchangeControl`'s interim write and tunnel accept, and the interim
+  response, extended CONNECT, protocol upgrade, and response streaming features)
+  documents what the refusal leaves behind. A sender may not generate a value
   outside `field-content`, so the writers refuse every control character but
   HTAB, not only NUL, CR, and LF; they leave SP and HTAB at a value's ends
   alone, since those split nothing. Since #1376 the HTTP/2 and HTTP/3 decoders

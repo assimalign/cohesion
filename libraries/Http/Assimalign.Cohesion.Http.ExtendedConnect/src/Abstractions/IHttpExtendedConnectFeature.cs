@@ -82,5 +82,13 @@ public interface IHttpExtendedConnectFeature : IHttpFeature
     /// <paramref name="cancellationToken"/> was cancelled before the response head was written; the
     /// exchange is then reset when it ends.
     /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a header set on
+    /// <see cref="IHttpContext.Response"/> has a name that is not a token, or a value with a control
+    /// character other than HTAB — CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The transport checks
+    /// the head before it claims the stream, so nothing was written, the response has not started, and the
+    /// status the application set is restored: the exchange can still be answered with an ordinary
+    /// response. The accept is spent and cannot be retried.
+    /// </exception>
     ValueTask<Stream> AcceptAsync(CancellationToken cancellationToken = default);
 }

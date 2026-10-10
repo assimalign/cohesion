@@ -88,6 +88,13 @@ public interface IHttpExchangeControl
     /// <exception cref="System.InvalidOperationException">
     /// The final response has already started, so an interim response can no longer precede it.
     /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a field name in
+    /// <paramref name="headers"/> is not a token, or a value holds a control character other than HTAB —
+    /// CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The interim head is checked before any of it is
+    /// written, so nothing was written and the final response has not started; the exchange can still be
+    /// answered, and another interim response can still be written.
+    /// </exception>
     ValueTask WriteInterimResponseAsync(
         HttpStatusCode statusCode,
         IHttpHeaderCollection? headers = null,
@@ -156,8 +163,9 @@ public interface IHttpExchangeControl
     /// <remarks>
     /// <para>
     /// On an extended CONNECT, the first call latches the accept before any other guard runs. A call
-    /// that then fails — the exchange was cancelled, its response started, its stream was reset, or
-    /// writing the head failed or was cancelled — still uses the accept up: every later call throws
+    /// that then fails — the exchange was cancelled, its response started, its stream was reset, a
+    /// response field was refused, or writing the head failed or was cancelled — still uses the accept
+    /// up: every later call throws
     /// <see cref="System.InvalidOperationException"/>, and <see cref="CanAcceptTunnel"/> reports
     /// <see langword="false"/>. A call on an exchange that is not an extended CONNECT is refused
     /// without latching.
@@ -208,6 +216,14 @@ public interface IHttpExchangeControl
     /// <exception cref="System.OperationCanceledException">
     /// <paramref name="cancellationToken"/> was cancelled before the response head was written; the
     /// exchange is then reset when it ends.
+    /// </exception>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a response
+    /// field name is not a token, or a value holds a control character other than HTAB — CR, LF, and NUL
+    /// among them (RFC 9110 §5.1, §5.5). The head is checked before the stream is claimed, so nothing was
+    /// written, the response has not started, and the status set before the call is restored: the
+    /// exchange can still be answered with an ordinary response. The accept is spent and cannot be
+    /// retried.
     /// </exception>
     ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default);
 }
