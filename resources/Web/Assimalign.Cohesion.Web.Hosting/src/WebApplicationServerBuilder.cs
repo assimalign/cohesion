@@ -19,6 +19,16 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// </summary>
 public sealed class WebApplicationServerBuilder
 {
+    /// <summary>
+    /// The number of features the default server's exchanges carry besides the application's own:
+    /// the <c>IHttpMaxRequestBodySizeFeature</c> the first default interceptor attaches while the
+    /// request is parsed (see <see cref="ApplyDefaultInterceptors"/>), and the request id, response
+    /// completion and drain features the server installs before the pipeline runs. The other two
+    /// default interceptors attach a feature only to an upgrade or an extended CONNECT. Each
+    /// exchange's feature collection is sized for these plus the stamped application features (#1381).
+    /// </summary>
+    internal const int HostFeatureCount = 4;
+
     private readonly WebApplicationBuilder _builder;
     private readonly List<Action<IServiceProvider, HttpConnectionListenerOptions>> _configurations = new();
 
@@ -61,17 +71,21 @@ public sealed class WebApplicationServerBuilder
                 return new InactiveWebApplicationServer();
             }
 
+            // The pipeline is resolved first: building it counts the application features it stamps
+            // onto every exchange, which the listener needs to size each exchange's features.
+            IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
+            int featureCapacity = HostFeatureCount + _builder.StampedFeatureCount;
+
             IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
                 ApplyDefaultInterceptors(options);
+                options.ExchangeFeatureCapacity = featureCapacity;
 
                 foreach (var action in _configurations)
                 {
                     action.Invoke(serviceProvider, options);
                 }
             });
-
-            IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
 
             return new WebApplicationServer(new WebApplicationServerOptions
             {

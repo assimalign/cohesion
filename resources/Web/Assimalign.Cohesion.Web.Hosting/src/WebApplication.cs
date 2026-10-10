@@ -122,6 +122,10 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
             }
         }
 
+        // The default server sizes each exchange's feature collection for these, so stamping them
+        // never grows it.
+        _context.StampedFeatureCount = features.Length;
+
         if (features.Length > 0)
         {
             WebApplicationMiddleware pipeline = middleware;

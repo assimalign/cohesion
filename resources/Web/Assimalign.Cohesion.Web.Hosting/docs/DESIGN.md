@@ -802,6 +802,55 @@ failure such as an invalid route table fails `StartAsync` with nothing to roll b
 host `Failed`. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
 observe cancellation through `RequestCancelled`.
 
+### Sizing each exchange's feature collection (owner decision 36, #1381)
+
+Stamping used to grow each exchange's feature collection. Its dictionary starts with three slots and
+grows to 7, 17 and 37, copying into a new array each time, and that growth was nearly all of the
+stamping cost. The default server now tells the transport how many features an exchange carries,
+through the transport's generic `HttpConnectionListenerOptions.ExchangeFeatureCapacity`. The
+transport sizes every exchange's collection for that many features when it creates it. The
+transport learns a number, not which features this module installs (owner decision 20).
+
+The count is the application features the pipeline stamps plus
+`WebApplicationServerBuilder.HostFeatureCount`, the four features every exchange of the default
+server carries:
+
+| Feature | Installed by |
+| --- | --- |
+| `IHttpMaxRequestBodySizeFeature` | the first default interceptor, while the request is parsed |
+| `IWebRequestIdFeature` | the server's exchange telemetry, before the pipeline runs |
+| `IWebResponseCompletionFeature` | the server, before the pipeline runs |
+| `IWebServerDrainFeature` | the server, before the pipeline runs |
+
+- The pipeline build records how many features it stamps (`WebApplicationContext.StampedFeatureCount`).
+  The default server resolves the pipeline before it composes the listener, so the count is known.
+  A pipeline passed to `AddPipeline` stamps none, so the count is the host's four.
+- The count is set before user `UseServer` configurations run, as the default interceptors are. A
+  host whose middleware installs features on every exchange can raise it there:
+  `options.ExchangeFeatureCapacity += 2`.
+- Features only some exchanges carry are not counted: the upgrade and extended CONNECT features,
+  the route match and endpoint that routing installs on a matched request, and the TLS feature built
+  on first read. The dictionary rounds its size up to a prime, which often leaves room for them.
+  When it does not, the collection grows exactly as it did before.
+- `WebApplicationExchangeFeatureCapacityTests` pins the count. A plain request on HTTP/1.1 and HTTP/2
+  carries exactly as many features as the capacity, so the test fails if the server starts installing
+  another feature on every exchange without counting it.
+
+Measured with a loopback `HttpClient` in the same process, so the client's allocations are
+included, a plain `GET` through the default server allocates (median of five rounds of 20,000):
+
+| Application features | HTTP/1.1 before | HTTP/1.1 after | HTTP/2 before | HTTP/2 after |
+| --- | --- | --- | --- | --- |
+| 0 | 13,048 B | 12,920 B | 10,862 B | 10,724 B |
+| 4 | 13,608 B | 13,064 B | 11,440 B | 10,869 B |
+| 8 | 13,640 B | 13,264 B | 11,458 B | 11,069 B |
+| 16 | 14,792 B | 13,496 B | 12,608 B | 11,301 B |
+
+Sixteen application features now cost 576 B over none on HTTP/1.1, where they cost 1,744 B: the
+exchange allocates one dictionary of the right size instead of growing through four. An
+application with no features saves 128 B too, because the host's own four features no longer grow
+the collection past three slots.
+
 ## The pipeline terminal — endpoint dispatch and the bodyless 404 fallback (#881, #1054)
 
 `WebApplication`'s pipeline `Build()` composes the innermost middleware — the

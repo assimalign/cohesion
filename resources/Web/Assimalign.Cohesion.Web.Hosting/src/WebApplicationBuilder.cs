@@ -60,6 +60,12 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     internal void OwnEndpointCertificate(X509Certificate2 certificate) => _context.EndpointCertificates.Add(certificate);
 
     /// <summary>
+    /// Gets the number of application features the built pipeline stamps onto every exchange; zero
+    /// until the pipeline is built (see <see cref="WebApplicationContext.StampedFeatureCount"/>).
+    /// </summary>
+    internal int StampedFeatureCount => _context.StampedFeatureCount;
+
+    /// <summary>
     /// Gets or sets the endpoint a plain entry-point application binds when neither its code nor
     /// its configuration declares a listener. Tests substitute an ephemeral port.
     /// </summary>

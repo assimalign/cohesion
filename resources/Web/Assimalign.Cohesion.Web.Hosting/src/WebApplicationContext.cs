@@ -35,6 +35,14 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 
     internal List<X509Certificate2> EndpointCertificates { get; } = new();
 
+    /// <summary>
+    /// Gets or sets the number of application features the built pipeline stamps onto every
+    /// exchange. It stays zero until the pipeline is built, and when a pipeline passed to
+    /// <c>AddPipeline</c> replaces it, since that pipeline stamps none. The default server sizes
+    /// each exchange's feature collection with it (#1381).
+    /// </summary>
+    internal int StampedFeatureCount { get; set; }
+
     internal WebApplicationContext()
     {
     }
