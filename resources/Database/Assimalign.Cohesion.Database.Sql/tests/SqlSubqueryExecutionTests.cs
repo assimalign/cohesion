@@ -499,7 +499,7 @@ public sealed class SqlSubqueryExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "subquery-tests" });
+        => SqlDatabaseEngine.Create("subquery-tests", new SqlDatabaseEngineOptions());
 
     private static async Task SeedMembershipAsync(SqlDatabaseSession session)
     {

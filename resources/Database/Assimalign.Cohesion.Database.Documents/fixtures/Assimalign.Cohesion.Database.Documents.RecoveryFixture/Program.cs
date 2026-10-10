@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Execution;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
-await using var engine = DocumentDatabaseEngine.Create(new()
+await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
 {
     RootPath = args[1],
     CheckpointInterval = TimeSpan.FromHours(1),

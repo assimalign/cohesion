@@ -52,7 +52,7 @@ public sealed class DocumentEngineCompositionTests
         server.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
         server.Starts.ShouldBe(0);
         frozen.Message.ShouldBe("Engine composition is frozen; workers and servers attach only before it completes.");
-        Should.Throw<InvalidOperationException>(() => builder.EngineName = "late");
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
         Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => first!));
         Should.Throw<InvalidOperationException>(() => builder.Build());
         first.Disposals.ShouldBe(1);
@@ -137,7 +137,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task Create_WithoutBuilder_ShouldCompleteCompositionAtOnce()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "standalone" });
+        await using var engine = DocumentDatabaseEngine.Create("standalone", new DocumentDatabaseEngineOptions());
         var worker = new RecordingWorker(engine);
 
         // Act
@@ -188,7 +188,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task Build_ServerForAnotherEngine_ShouldBeRefusedAndReleased()
     {
         // Arrange
-        await using var other = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "other" });
+        await using var other = DocumentDatabaseEngine.Create("other", new DocumentDatabaseEngineOptions());
         var server = new RecordingServer(other);
         var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
@@ -209,7 +209,7 @@ public sealed class DocumentEngineCompositionTests
     public async Task Build_RefusedServerFailsToRelease_ShouldAggregateTheRefusalAndTheCleanup()
     {
         // Arrange
-        await using var other = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "other" });
+        await using var other = DocumentDatabaseEngine.Create("other", new DocumentDatabaseEngineOptions());
         var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
         var builder = DocumentDatabaseEngine.CreateBuilder("document-engine");
         DocumentDatabaseEngine? product = null;
@@ -292,7 +292,7 @@ public sealed class DocumentEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "Engine 'document-engine': a worker factory returned null." : "Engine 'document-engine': a server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Document engine 'document-engine': a worker factory returned null." : "Document engine 'document-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
@@ -305,8 +305,8 @@ public sealed class DocumentEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<DocumentDatabaseEngine>("contract");
-        var engine = DocumentDatabaseEngine.CreateUncomposed(new DocumentDatabaseEngineOptions { EngineName = "contract" });
+        var state = new DatabaseEngineBuilderState<DocumentDatabaseEngine>("contract", DocumentDatabaseEngine.ModelName);
+        var engine = DocumentDatabaseEngine.CreateUncomposed("contract", new DocumentDatabaseEngineOptions());
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];
         state.AddWorker(product => Made(workers, new RecordingWorker(product, product.Name + "/first")));
@@ -355,32 +355,40 @@ public sealed class DocumentEngineCompositionTests
     public void Create_BlankEngineName_ShouldBeRefused(string name)
     {
         // Act
-        var direct = Should.Throw<ArgumentException>(() => DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = name }));
+        var direct = Should.Throw<ArgumentException>(() => DocumentDatabaseEngine.Create(name, new DocumentDatabaseEngineOptions()));
         var builder = Should.Throw<ArgumentException>(() => DocumentDatabaseEngine.CreateBuilder(name));
 
-        // Assert: the document engine accepted a blank name before the root base; the builder
-        // names the engine once and refuses a blank name before anything is composed.
-        direct.ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.EngineName));
+        // Assert: Create, the builder and the verb each take the engine name once, and refuse a
+        // blank one before anything is created or registered.
+        direct.ParamName.ShouldBe("name");
         builder.ParamName.ShouldBe("name");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Composition: an engine name changed on the builder fails the build before the engine exists")]
-    public void Build_EngineNameChanged_ShouldFailBeforeTheEngineExists()
+    /// <summary>
+    /// The options carry no engine name (B3 of the engine extensibility design): the engine is named
+    /// once, by the builder or by Create, and every option refusal names it, so a host that builds
+    /// several engines says which one was misconfigured.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Composition: an option refusal names the engine, from the builder and from Create")]
+    public void Build_InvalidOption_ShouldNameTheEngine()
     {
         // Arrange
         var builder = DocumentDatabaseEngine.CreateBuilder("named");
         DocumentDatabaseEngine? product = null;
         builder.AddWorker(engine => new RecordingWorker(product = engine));
-        string seeded = builder.EngineName!;
-        builder.EngineName = "renamed";
+        builder.Options.CheckpointJournalSize = -1;
 
         // Act
-        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
+            DocumentDatabaseEngine.Create("direct", new DocumentDatabaseEngineOptions { MaintenanceInterval = TimeSpan.Zero }));
 
-        // Assert
-        seeded.ShouldBe("named");
-        builder.Name.ShouldBe("named");
-        failure.Message.ShouldStartWith("The engine builder for 'named' has its options' EngineName set to 'renamed'.", Case.Sensitive);
+        // Assert: refused before the engine existed, the option and the value kept.
+        built.ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.CheckpointJournalSize));
+        built.ActualValue.ShouldBe(-1L);
+        built.Message.ShouldStartWith("Document engine 'named': CheckpointJournalSize must not be negative.", Case.Sensitive);
+        direct.ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.MaintenanceInterval));
+        direct.Message.ShouldStartWith("Document engine 'direct': MaintenanceInterval must be positive.", Case.Sensitive);
         product.ShouldBeNull();
     }
 

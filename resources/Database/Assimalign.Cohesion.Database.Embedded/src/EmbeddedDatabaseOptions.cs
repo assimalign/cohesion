@@ -10,7 +10,7 @@ public sealed class EmbeddedDatabaseOptions
     /// <summary>
     /// Gets the engines to embed, in registration order. Add engines created from
     /// their model factories, for example
-    /// <c>KeyValueDatabaseEngine.Create(new() { RootPath = dataPath })</c>.
+    /// <c>KeyValueDatabaseEngine.Create("local", new() { RootPath = dataPath })</c>.
     /// </summary>
     public IList<DatabaseEngine> Engines { get; } = new List<DatabaseEngine>();
 }

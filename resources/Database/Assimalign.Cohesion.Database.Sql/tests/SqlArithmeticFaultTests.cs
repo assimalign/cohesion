@@ -583,7 +583,7 @@ public sealed class SqlArithmeticFaultTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "arithmetic-faults" });
+        => SqlDatabaseEngine.Create("arithmetic-faults", new SqlDatabaseEngineOptions());
 
     private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {

@@ -63,9 +63,8 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
         }
 
         // Arrange: a table of wide, randomly ordered keys over the smallest pool.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("create-index-memory", new SqlDatabaseEngineOptions
         {
-            EngineName = "create-index-memory",
             RootPath = _rootPath,
             BufferPoolCapacity = PoolBytes,
             CheckpointInterval = TimeSpan.FromHours(1),

@@ -33,11 +33,12 @@ internal sealed class BlobServerHarness : IAsyncDisposable
 
     public static async Task<BlobServerHarness> StartAsync(
         Action<BlobDatabaseServerOptions>? configure = null,
-        Action<BlobDatabaseEngineOptions>? configureEngine = null)
+        Action<BlobDatabaseEngineOptions>? configureEngine = null,
+        string engineName = "blob-wire")
     {
-        var engineOptions = new BlobDatabaseEngineOptions { EngineName = "blob-wire" };
+        var engineOptions = new BlobDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
-        var engine = BlobDatabaseEngine.Create(engineOptions);
+        var engine = BlobDatabaseEngine.Create(engineName, engineOptions);
         var database = await engine.CreateDatabaseAsync(DatabaseName);
         await AutocommitContainer.CreateAsync(database, ContainerName, TestTimeout.Token());
         return await StartAsync(engine, configure);

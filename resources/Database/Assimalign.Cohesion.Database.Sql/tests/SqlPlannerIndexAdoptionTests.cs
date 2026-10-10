@@ -23,7 +23,7 @@ public sealed class SqlPlannerIndexAdoptionTests
 {
     private static async Task<(SqlDatabaseEngine Engine, SqlDatabase Database, SqlDatabaseSession Session)> CreateAsync(string name)
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name });
+        var engine = SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync(name + "-db");
         var session = await database.CreateSessionAsync();
         return (engine, database, session);

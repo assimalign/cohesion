@@ -6,7 +6,7 @@ node, relationship and traversal operations of `GraphDatabase`. A session execut
 subset described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
 ```csharp
-await using var engine = GraphDatabaseEngine.Create(new() { RootPath = "graphs" });
+await using var engine = GraphDatabaseEngine.Create("people-graph", new() { RootPath = "graphs" });
 var graph = await engine.CreateDatabaseAsync("people");
 await using var session = await graph.CreateSessionAsync();
 await session.ExecuteAsync("INSERT (a:Person {name:'Ada'})-[r:KNOWS]->(b:Person {name:'Grace'})");
@@ -16,12 +16,13 @@ await using var result = await session.ExecuteAsync(
 ```
 
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
-enforcement and node-property index creation. `AddGraph(name, engine => ...)`
-captures construction through `IDatabaseApplicationBuilder` and returns that builder.
-The callback runs at Build with the sealed `GraphDatabaseEngineBuilder`. Workers and
-servers register as nested factories typed over `GraphDatabaseEngine`; the built engine
-owns their products. Creating the engine starts its four built-in maintenance workers;
-application Start starts the nested servers.
+enforcement and node-property index creation. `AddGraph(name, graph => ...)` captures
+construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback
+configures the sealed `GraphDatabaseEngineBuilder`: its `Options` (copied at build), the databases
+it declares (`AddDatabase(name)`: opened or created by the build, never dropped while declared), a
+server from options (`AddServer(options => ...)`), and deferred worker and server factories typed
+over `GraphDatabaseEngine`. The built engine owns their products. Creating the engine starts its
+four built-in maintenance workers; application Start starts the nested servers.
 
 The engine, database, session, transaction, server and builder are sealed types; the first
 five are leaves of the area root's bases (`DatabaseEngine`, `DatabaseInstance`,

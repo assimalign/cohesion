@@ -53,7 +53,7 @@ public sealed class SqlLanguageConformanceTests
             parsed.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error, clause);
             executionCase.ContainsClause(parsed.SqlExpression).ShouldBeTrue($"The {clause} case must actually contain that clause.");
 
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile" });
+            await using var engine = SqlDatabaseEngine.Create("sql-profile", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("audit");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             foreach (string setup in executionCase.Setup)
@@ -85,7 +85,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("SELECT CAST(42 AS TEXT) FROM t WHERE id = 1;", "42", DatabaseType.String)]
     public async Task Cast_AuditedValidConversion_ShouldReturnTargetValueAndMetadata(string sql, object expected, DatabaseType type)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-cast" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-cast", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, _seed[0]);
@@ -107,7 +107,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("COUNT(*) + 1")]
     public async Task Select_AuditedAggregateForms_ShouldExecuteWithGroupingValidation(string projection)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-aggregate" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-aggregate", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
@@ -141,7 +141,7 @@ public sealed class SqlLanguageConformanceTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Partial clauses: defaults backfill or reject atomically and ORDER BY aliases and ordinals execute")]
     public async Task PartialForms_DefaultsAndOrdering_ShouldMatchMeasuredBoundaries()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-partial" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-partial", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
@@ -175,7 +175,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("id AS value, age AS value")]
     public async Task OrderBy_ExpandedOrDuplicateProjection_ShouldResolveOrdinals(string projection)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-projection" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-projection", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -189,7 +189,7 @@ public sealed class SqlLanguageConformanceTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: same-name alias uses its computed projection without recursion")]
     public async Task OrderBy_AliasSharingItsOperandName_ShouldUseComputedOutput()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-self" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-self", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -204,7 +204,7 @@ public sealed class SqlLanguageConformanceTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: grouped nested alias wins over a source column")]
     public async Task OrderBy_GroupedAliasCollision_ShouldPreferAggregateOutput()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-group" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-group", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -227,7 +227,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("SELECT age AS years FROM ordering_rows WHERE years > 0 ORDER BY years;", "Unknown column 'years'.")]
     public async Task OrderBy_InvalidAliasBinding_ShouldFailPrecisely(string query, string message)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-invalid" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-invalid", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }

@@ -272,11 +272,12 @@ public sealed class SqlDatabaseEngineBuilder
   `JournalSizeLimit`, `BufferPoolCapacity`, `PageWriteBackInterval`, `PageWriteBackBatchSize`,
   `MaintenanceInterval` and `ExpressionNestingLimit` (`SqlDatabaseEngineBuilder.cs:51-189`). Build
   copies it, so a later mutation cannot reach a running engine. `SqlDatabaseEngine.Create(options)`
-  copies too, which fixes a live defect [Certain]: the engine keeps the caller's object
+  (`Create(name, options)` since B3) copies too, which fixes a live defect [Certain]: the engine keeps the caller's object
   (`Sql/src/SqlDatabaseEngine.cs:93`) and the write-back worker reads `PageWriteBackBatchSize` on
   every pass (`Sql/src/Internal/SqlPageWriteBackWorker.cs:37`).
 - Until B3 removes `EngineName` from the options types, a builder whose `Options.EngineName`
-  differs from `Name` fails Build.
+  differs from `Name` fails Build. *Landed in B3:* `EngineName` left the five options types, and
+  this check with it.
 - The two `AddServer` overloads differ only by delegate type. [Certain, composition-first
   designer's probe] `server => server.Listen(...)` binds the `Action` overload and
   `engine => SqlDatabaseServer.Create(engine, ...)` binds the `Func` overload. `Listen` is
@@ -474,7 +475,7 @@ SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken); 
 ```
 
 Embedded engines get provisioning for the first time: today it exists only as a Hosting service.
-`SqlDatabaseEngine.Create(options)` stays as the standard-library-only path, so the 286 test call
+`SqlDatabaseEngine.Create(options)` (`Create(name, options)` since B3) stays as the standard-library-only path, so the 286 test call
 sites that use it need no rewrite beyond B3's name move.
 
 ### 3.11 The other four models (B3)
@@ -485,6 +486,43 @@ in B1, because the root seam change touches every verb. In B3 each builder gains
 and `AddServer(Action<XServerOptions>)` where the model has a server. `Functions` and `Types`
 appear only where a model has an expression language that needs them: SQL now, Graph when GQL
 gains functions (`Graph.Language/src/GqlLanguageProfile.cs:47` declares none).
+
+*Landed in B3.* The KeyValue, Graph, Documents and Blob builders lost their mirrored properties
+for `Options`, which `Build` copies and checks before anything is created; `Build()` bridges a new
+`BuildAsync(CancellationToken)`. `AddDatabase(name)` goes through the shared builder state, which
+hands the names to the engine after composition (each engine's internal `Declare`, the SQL
+engine's shape) and then opens each, or creates it on `DatabaseNotFoundException`, disposing the
+engine on any failure; the built engine refuses to drop a declared database with the SQL wording,
+now one shared copy (`Database/shared/DatabaseDeclarations.cs`). `AddServer(Action<XServerOptions>)`
+exists for KeyValue, Graph and Blob; Documents has no server, so it keeps only the factory overload.
+The `AddServer(Func)` and `AddWorker` parameters are named `factory`. The three servers now keep a
+copy of their options taken at creation, as `SqlDatabaseServer` does: each read its caller's
+object live before (`KeyValueDatabaseServer` passed it to every session, which read
+`AuthenticationTimeout` and `IdleTimeout` per connection, and the accept loop read `MaxSessions`;
+Graph and Blob the same). `EngineName` left all five options types: `XDatabaseEngine.Create(name,
+options)` (which copies its options on every model now) and `CreateBuilder(name)` name the engine,
+and every option refusal names it (`DatabaseEngineOptionChecks`, shared: `Graph engine 'g':
+CheckpointInterval must be positive.`). The SQL nesting-limit refusal's parameter is now the option
+(`ExpressionNestingLimit`), as every other option's is, instead of `options`. Call sites that set no
+name kept the model's former default (`sql-engine`, `keyvalue-engine`, `graph-engine`,
+`document-engine`, `blob-engine`), so test-visible names did not change.
+
+*B3 review.* Three differences between the models surfaced once the five builders took the same
+inputs, and were closed in B3. (1) The name rule Graph, Documents and Blob always applied (a
+database name is a single file-name component, because its files live in a directory named for
+it) is now shared (`Database/shared/DatabaseFileNames.cs`) and applied by the SQL and key-value
+engines too, in their create, open and drop cores: before, `AddDatabase("../x")` or
+`CreateDatabaseAsync("../x")` on those two wrote files beside the root path, and a SQL
+`DropDatabaseAsync("../x")` deleted that directory without checking it was a database. Every
+builder's `AddDatabase` also checks the rule at the call, so a name the engine would refuse fails
+before the engine exists. (2) SQL and key-value now refuse a `PageWriteBackInterval` or
+`PageWriteBackBatchSize` that is not positive, as the other three did: a zero interval spun the
+worker's wait, and a zero batch failed every write-back pass until the failure policy took the
+databases offline. (3) The builder state's own refusals (frozen composition, the one build
+attempt, a factory that returned null) start with the model as every other B3 message does
+(`Graph engine 'g': composition is frozen after a build attempt.`). A declared database whose files
+cannot be read fails the build with the storage layer's `StorageException`, which is not a
+`DatabaseException`; the builders document it.
 
 ### 3.12 The separation rule
 
@@ -1183,6 +1221,14 @@ state, `AddServer(Action<XServerOptions>)` for KeyValue, Graph and Blob; `Engine
 options types (`Create(name, options)`, 286 SQL call sites and the other models', mechanical);
 Studio's `StudioEngines.cs:62-84`. *Gates:* every model suite at its current count, the
 KeyValuePair, Graph and Blob client suites, Studio `--smoke`, the templates.
+*Landed in B3* (§3.11 has what changed): Studio composes all five engines through
+`CreateBuilder(name)` and `Options.RootPath`; its typed fields stay P7's. Each of the four models
+gained `XEngineDeclarationTests` (create and open paths, drop refused, duplicate refused, a build
+canceled while it opens its databases disposes the engine, the options snapshot with the public
+option count, and, for the three with a server, `AddServer(options => …)` and the server's own
+copy of its options), and every composition suite's interim "options name another engine" test
+became "an option refusal names the engine". Neither the templates nor the cohesion-examples
+programs set `EngineName` or call the four verbs, so neither changed.
 
 **E1: the engine-owned bound expression tree.** Internal; no API change. `SqlPlanner*`,
 `SqlExpressionEvaluator`, `SqlPlanExecutor*`, `SqlBoundTableCache`, `SqlPersistedExpression`.
@@ -1449,6 +1495,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
     *Landed in B1 part 1:* the root seam is `AddEngine(name, factory)`, Hosting reserves the name at
     registration, the five verbs take `(string name, Action<XEngineBuilder>)`, and every
     `CreateBuilder` takes the name.
+
+    *Landed in B3:* the "one source of truth" holds. `EngineName` left the five options types, so
+    the interim Build check that `Options.EngineName` equals `Name` is gone; a standalone engine is
+    `XDatabaseEngine.Create(name, options)`.
 53. **Imperative apply.** Keep `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)` public for tools,
     Studio and tests? *Recommend:* keep, on the sealed leaf.
     > Agree
@@ -1476,6 +1526,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
     (`DatabaseObjectLockedException`, operation `APPLY SCHEMA`), because the engine's next build would
     plan it away or refuse it as destructive; and the drop refusal names the engine and says to
     remove the declaration first.
+
+    *Landed in B3:* the drop refusal covers the four other models' declared databases
+    (`AddDatabase(name)`), with the same message, now one shared copy. The collation half has no
+    counterpart there: their databases carry no collation.
 57. **Schema lambdas.** Delete `SqlSchemaBuilder.Function<…>`, `Trigger<…>` and `Extension`, their
     compiled records, and the SDK canonicalizer? None has ever executed. *Recommend:* delete in B1.
     > Agree

@@ -21,7 +21,7 @@ public sealed class DocumentEngineTests
     [Fact]
     public async Task Nested_arrays_scalars_and_mixed_shapes_round_trip_without_changing_bytes()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -39,7 +39,7 @@ public sealed class DocumentEngineTests
     [Fact]
     public async Task Versions_are_conditional_and_never_reused_after_delete()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -60,7 +60,7 @@ public sealed class DocumentEngineTests
     [InlineData(IsolationLevel.ReadCommitted, 2)]
     public async Task Explicit_transactions_have_the_requested_visibility(IsolationLevel isolation, int expected)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var writer = await database.CreateSessionAsync();
         var collection = await writer.CreateCollectionAsync("items");
@@ -76,7 +76,7 @@ public sealed class DocumentEngineTests
     [Fact]
     public async Task Explicit_rollback_and_session_disposal_undo_all_document_mutations()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -102,7 +102,7 @@ public sealed class DocumentEngineTests
     public async Task RollbackAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionAndItsWritesIntact()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -128,7 +128,7 @@ public sealed class DocumentEngineTests
     [Fact]
     public async Task Snapshot_write_conflicts_abort_and_do_not_overwrite_newer_content()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var old = await database.CreateSessionAsync();
         var collection = await old.CreateCollectionAsync("items");
@@ -148,7 +148,7 @@ public sealed class DocumentEngineTests
     [Fact]
     public async Task Schema_owned_collection_refuses_drop_and_index_ddl_and_adhoc_is_mutable()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using (var setup = await database.CreateSessionAsync())
         {
@@ -185,7 +185,7 @@ public sealed class DocumentEngineTests
     [InlineData(true)]
     public async Task Transactions_older_than_index_ddl_cannot_mutate_or_drop_the_collection(bool drop)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -214,7 +214,7 @@ public sealed class DocumentEngineTests
         Directory.CreateDirectory(root);
         try
         {
-            var engine = DocumentDatabaseEngine.Create(new() { RootPath = root, Durability = StorageCommitDurability.Grouped });
+            var engine = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root, Durability = StorageCommitDurability.Grouped });
             engine.State.ShouldBe(EngineState.Running);
             engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(4);
             var database = await engine.CreateDatabaseAsync("saved");
@@ -227,7 +227,7 @@ public sealed class DocumentEngineTests
             engine.Dispose();
             await engine.DisposeAsync();
             engine.State.ShouldBe(EngineState.Disposed);
-            await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root });
             var names = new List<string>();
             await foreach (var item in reopened.GetDatabasesAsync()) { names.Add(item.Name.ToString()); }
             names.ShouldBe(["saved"]);
@@ -249,7 +249,7 @@ public sealed class DocumentEngineTests
     [InlineData("x\\y")]
     public async Task Database_names_cannot_escape_the_engine_directory(string name)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(name));
     }
 
@@ -262,7 +262,7 @@ public sealed class DocumentEngineTests
         {
             // Arrange: a closed database with an index, its index pages rewritten into
             // the layout engines before #1194 wrote (entries ordered by key alone).
-            await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
                 await using var session = await database.CreateSessionAsync();
@@ -275,7 +275,7 @@ public sealed class DocumentEngineTests
             var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
             // Act
-            await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root });
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
 
             // Assert: the coded refusal, with the index manager's as its cause; the
@@ -302,7 +302,7 @@ public sealed class DocumentEngineTests
         try
         {
             // Arrange: a closed database whose page 0 names storage format 2, the format before #1253.
-            await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
                 await using var session = await database.CreateSessionAsync();
@@ -314,7 +314,7 @@ public sealed class DocumentEngineTests
             var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
             // Act
-            await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root });
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
 
             // Assert: the storage's coded refusal, named for the database; nothing written.
@@ -341,7 +341,7 @@ public sealed class DocumentEngineTests
     public async Task TryGetDatabase_OutVarAndBaseTypedOut_ShouldBindTheTypedAndTheBaseLookups()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
 
         // Act
@@ -369,7 +369,7 @@ public sealed class DocumentEngineTests
     public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
     {
         // Arrange
-        var engine = DocumentDatabaseEngine.Create(new());
+        var engine = DocumentDatabaseEngine.Create("document-engine", new());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
         var canceledOpen = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("test", canceled.Token));
@@ -435,9 +435,8 @@ public sealed class DocumentEngineTests
 
         static async Task<DocumentDatabaseEngine> CreateWithWritesAsync(string name, int databases)
         {
-            var engine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions
+            var engine = DocumentDatabaseEngine.Create(name, new DocumentDatabaseEngineOptions
             {
-                EngineName = name,
                 StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
                 CheckpointInterval = TimeSpan.FromHours(1),
                 PageWriteBackInterval = TimeSpan.FromHours(1),

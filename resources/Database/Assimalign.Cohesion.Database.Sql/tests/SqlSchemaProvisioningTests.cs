@@ -540,9 +540,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
     }
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        => SqlDatabaseEngine.Create("schema-tests", new SqlDatabaseEngineOptions
         {
-            EngineName = "schema-tests",
             RootPath = _rootPath,
         });
 

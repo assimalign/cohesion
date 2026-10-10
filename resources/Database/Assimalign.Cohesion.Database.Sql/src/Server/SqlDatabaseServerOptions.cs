@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <remarks>
 /// The options deliberately carry no engine: servers are per-model and the
 /// composition root supplies the single engine directly
-/// (<see cref="SqlDatabaseServer.Create"/>, or the <c>engineBuilder.AddServer(factory)</c>
-/// builder verb).
+/// (<see cref="SqlDatabaseServer.Create"/>, or the
+/// <c>engineBuilder.AddServer(configure)</c> and <c>engineBuilder.AddServer(factory)</c> builder verbs).
 /// </remarks>
 public sealed class SqlDatabaseServerOptions
 {

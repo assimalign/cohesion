@@ -71,13 +71,12 @@ public sealed class SqlDatabaseEngineBuilder
     private readonly List<SqlDatabaseBuilder> _databases = [];
 
     /// <summary>Initializes a builder for the engine of that name.</summary>
-    /// <param name="name">The engine name, which <see cref="Options"/>' engine name starts as.</param>
+    /// <param name="name">The engine name.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     internal SqlDatabaseEngineBuilder(string name)
     {
-        _state = new(name);
-        _options.EngineName = name;
+        _state = new(name, SqlDatabaseEngine.ModelName);
         Functions = new SqlFunctionCollection(_state.EnsureMutable);
         Types = new SqlTypeCollection();
     }
@@ -93,10 +92,9 @@ public sealed class SqlDatabaseEngineBuilder
     /// Gets the engine's settings: storage, durability, checkpoints, worker cadences and limits.
     /// </summary>
     /// <remarks>
-    /// Values only. <see cref="BuildAsync"/> checks them and keeps a copy, so a change made after
-    /// the build began never reaches the engine. Their <see cref="SqlDatabaseEngineOptions.EngineName"/>
-    /// starts as <see cref="Name"/>, and the build refuses any other value; it leaves the options
-    /// when the engine is named only by its builder.
+    /// Values only, with no engine name: the engine is <see cref="Name"/>. <see cref="BuildAsync"/>
+    /// checks them and keeps a copy, so a change made after the build began never reaches the
+    /// engine.
     /// </remarks>
     public SqlDatabaseEngineOptions Options => _options;
 
@@ -130,7 +128,10 @@ public sealed class SqlDatabaseEngineBuilder
     /// </param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, or not a single file-name component (the
+    /// database's files live in a directory named for it): refused here, before anything is created.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A build was attempted, or the engine already declares a database of that name (ignoring case,
     /// as database names compare).
@@ -142,13 +143,13 @@ public sealed class SqlDatabaseEngineBuilder
     public SqlDatabaseEngineBuilder AddDatabase(string name, Action<SqlDatabaseBuilder>? configure = null)
     {
         _state.EnsureMutable();
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        DatabaseFileNames.ThrowIfNotSingleComponent(name);
         var databaseName = new DatabaseName(name);
         foreach (SqlDatabaseBuilder declared in _databases)
         {
             if (declared.Name == databaseName)
             {
-                throw new InvalidOperationException($"SQL engine '{Name}' already declares database '{declared.Name}'.");
+                throw DatabaseDeclarations.AlreadyDeclared(SqlDatabaseEngine.ModelName, Name, declared.Name);
             }
         }
 
@@ -177,6 +178,7 @@ public sealed class SqlDatabaseEngineBuilder
     /// <param name="schema">The schema declaration.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
+    /// <exception cref="ArgumentException">The schema's name is not a single file-name component.</exception>
     /// <exception cref="InvalidOperationException">
     /// A build was attempted, or the engine already declares a database of the schema's name.
     /// </exception>
@@ -272,14 +274,13 @@ public sealed class SqlDatabaseEngineBuilder
     /// <param name="cancellationToken">Observed between the phases and by each provisioning step.</param>
     /// <returns>The operational engine, every declared database provisioned and its servers still stopped.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A build was already attempted; <see cref="Options"/> name another engine than
-    /// <see cref="Name"/>; a factory returned null; or the engine refused a product (a duplicate
-    /// worker name, a product returned twice, a server that fronts another engine).
+    /// A build was already attempted; a factory returned null; or the engine refused a product (a
+    /// duplicate worker name, a product returned twice, a server that fronts another engine).
     /// </exception>
-    /// <exception cref="ArgumentException">An option is invalid (see <see cref="SqlDatabaseEngine.Create"/>).</exception>
+    /// <exception cref="ArgumentException">A server's options are invalid (see <see cref="SqlDatabaseServer.Create"/>).</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// An option is outside its range (see <see cref="SqlDatabaseEngine.Create"/>); checked before
-    /// anything is created.
+    /// anything is created, and the refusal names the engine.
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
     /// A declared database was refused before anything was created (<c>COHSQLP001</c>, a declared
@@ -296,8 +297,7 @@ public sealed class SqlDatabaseEngineBuilder
         // Phase 1: the options, copied, then the copy checked, before anything is compiled or
         // created; a change racing the build cannot reach the engine unchecked.
         SqlDatabaseEngineOptions options = _options.Snapshot();
-        _state.ThrowIfRenamed(options.EngineName);
-        SqlDatabaseEngine.ValidateOptions(options);
+        SqlDatabaseEngine.ValidateOptions(Name, options);
         cancellationToken.ThrowIfCancellationRequested();
 
         // Phase 2: the function catalog, frozen. Registration closed when the build began
@@ -317,7 +317,7 @@ public sealed class SqlDatabaseEngineBuilder
 
         // Phases 4 and 5: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = SqlDatabaseEngine.CreateUncomposed(options, functions);
+        var engine = SqlDatabaseEngine.CreateUncomposed(Name, options, functions);
         _state.Complete(engine, engine.Compose, SqlDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 6: each declared database, in declaration order.

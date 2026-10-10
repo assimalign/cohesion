@@ -18,10 +18,10 @@ internal static class KeyValueTestHarness
     public static async Task<(KeyValueDatabaseEngine Engine, KeyValueDatabase Database)> CreateAsync(
         Action<KeyValueDatabaseEngineOptions>? configure = null)
     {
-        var options = new KeyValueDatabaseEngineOptions { EngineName = "kv-tests" };
+        var options = new KeyValueDatabaseEngineOptions();
         configure?.Invoke(options);
 
-        var engine = KeyValueDatabaseEngine.Create(options);
+        var engine = KeyValueDatabaseEngine.Create("kv-tests", options);
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 
         return (engine, database);

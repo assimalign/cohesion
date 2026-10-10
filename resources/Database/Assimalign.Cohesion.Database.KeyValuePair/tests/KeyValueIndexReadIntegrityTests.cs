@@ -145,9 +145,8 @@ public sealed class KeyValueIndexReadIntegrityTests
     }
 
     private static KeyValueDatabaseEngine CreateEngine(FaultInjectingJournalStorageStrategy? strategy)
-        => KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        => KeyValueDatabaseEngine.Create("kv-index-reads", new KeyValueDatabaseEngineOptions
         {
-            EngineName = "kv-index-reads",
             StorageStrategy = strategy,
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),

@@ -381,7 +381,7 @@ public sealed class SqlCascadeDeleteDepthTests
     private static CancellationToken Timeout() => TestTimeout.Token(timeoutSeconds);
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cascade-depth" });
+        => SqlDatabaseEngine.Create("cascade-depth", new SqlDatabaseEngineOptions());
 
     private static (T? Result, Exception? Failure) RunOnThread<T>(int stackKilobytes, Func<T> work)
     {

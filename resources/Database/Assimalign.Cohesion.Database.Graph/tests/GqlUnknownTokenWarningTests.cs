@@ -40,7 +40,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_UnknownTokenInsideTransaction_ShouldWarnAndKeepTransactionAsync(string gql, string code, IsolationLevel isolation)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var database = session.Database;
         var transaction = await session.BeginTransactionAsync(isolation, CancellationToken.None);
@@ -75,7 +75,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_SeveralUnknownNames_ShouldWarnOncePerNameAndKindAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         const string gql = "MATCH (a:Missing)-[r:Gone]->(b:Missing), (c:Keep) WHERE a IS LABELED Other AND c:Missing RETURN a.name";
 
@@ -108,7 +108,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_KnownNamesOrInvalidStatement_ShouldNotWarnAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
 
         // Act
@@ -130,7 +130,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_LabelDefinedLater_ShouldResolveAtTheStatementSnapshotAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var database = session.Database;
         await using var other = await database.CreateSessionAsync(CancellationToken.None);
@@ -164,7 +164,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_WriteNamingUnknownToken_ShouldMatchNothingWithoutFailingAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var database = session.Database;
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);
@@ -205,7 +205,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_ReadWithoutProjectionNamingUnknownLabel_ShouldWarnAndKeepTransactionAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var node = new GqlNodePattern("n", ["Missing"], new Dictionary<string, object?>());
         var statement = new GqlQueryStatement(
@@ -236,7 +236,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_PathRequestNamingUnknownToken_ShouldWarnAsync(string gql, string code)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);
 
@@ -260,7 +260,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task GetIndexesAsync_UnknownLabel_ShouldReturnEmptyWithWarningAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var database = session.Database;
         var schema = GraphSchema.Open(database, session);
@@ -323,7 +323,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Plan_RequiredUnknownName_ShouldMatchNothingAsync(string gql, bool matchesNothing)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         var database = session.Database;
 
@@ -339,7 +339,7 @@ public sealed class GqlUnknownTokenWarningTests
     public async Task Execute_LongUnknownName_ShouldCutTheQuotedNameAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
         string name = new('L', 10_000);
 

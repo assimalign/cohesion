@@ -88,7 +88,7 @@ public sealed class BlobProcessTests
             var fields = ready.Split('|');
             fields.Length.ShouldBe(3);
             long committedLength = long.Parse(fields[1], CultureInfo.InvariantCulture);
-            await using var reopened = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { RootPath = root });
+            await using var reopened = BlobDatabaseEngine.Create("blob-engine", new BlobDatabaseEngineOptions { RootPath = root });
             var database = await reopened.OpenDatabaseAsync("existing", timeout.Token);
             var container = await AutocommitContainer.GetAsync(database, "objects", timeout.Token);
             (await container.GetPropertiesAsync("committed", timeout.Token))!.Value.Length.ShouldBe(committedLength);

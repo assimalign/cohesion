@@ -124,7 +124,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task CreateIndex_OverExistingRows_ShouldBuildAndPersist()
     {
         // Arrange: rows first, index second (the DDL-blocking build path).
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-build", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-build", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("build-db");
 
         await using (var session = await database.CreateSessionAsync())
@@ -143,7 +143,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
 
         // Act: restart — registrations re-attach the tree.
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-build", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-build", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("build-db");
 
@@ -157,7 +157,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task CreateUniqueIndex_WithDuplicateRows_ShouldFailCompletely()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-dup" });
+        await using var engine = SqlDatabaseEngine.Create("ix-dup", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("dup-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -183,7 +183,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task DropIndex_ShouldRemoveIndex_AndIndexedColumnsAreGuarded()
     {
         // Arrange
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-drop", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-drop", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("drop-db");
 
         await using (var session = await database.CreateSessionAsync())
@@ -213,7 +213,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
 
         // Restart: still gone.
-        await using var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-drop", RootPath = _rootPath });
+        await using var reopenedEngine = SqlDatabaseEngine.Create("ix-drop", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var reopened = await reopenedEngine.OpenDatabaseAsync("drop-db");
         reopened.Catalog.GetIndexes(ObjectIdOf(reopened, "t")).ShouldBeEmpty();
     }
@@ -224,7 +224,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task Update_IndexedColumn_ShouldMoveEntry()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-update" });
+        await using var engine = SqlDatabaseEngine.Create("ix-update", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("update-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -245,7 +245,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task Delete_IndexedRow_ShouldTombstoneEntryUnderSnapshots()
     {
         // Arrange: a reader pins a snapshot before the delete commits.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-delete" });
+        await using var engine = SqlDatabaseEngine.Create("ix-delete", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("delete-db");
         await using var writerSession = await database.CreateSessionAsync();
         await using var readerSession = await database.CreateSessionAsync();
@@ -279,7 +279,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task Insert_UniqueViolation_ShouldFailStatementOnly()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-unique" });
+        await using var engine = SqlDatabaseEngine.Create("ix-unique", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("unique-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -303,7 +303,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task ConcurrentInserts_SameUniqueKey_ShouldSerializeThroughKeyLock()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-race" });
+        await using var engine = SqlDatabaseEngine.Create("ix-race", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("race-db");
         await using var first = await database.CreateSessionAsync();
         await using var second = await database.CreateSessionAsync();
@@ -347,7 +347,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     {
         // Arrange: one committed row; a transaction then inserts one and deletes
         // the other.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-rollback" });
+        await using var engine = SqlDatabaseEngine.Create("ix-rollback", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("rollback-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -375,7 +375,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // records become durable through a later committed statement (journal
         // ordering) — the classic unproven-writer crash window.
         var strategy = new CrashCaptureSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-crash", StorageStrategy = strategy });
+        var engine = SqlDatabaseEngine.Create("ix-crash", new SqlDatabaseEngineOptions { StorageStrategy = strategy });
         var database = await engine.CreateDatabaseAsync("crash-db");
 
         var session = await database.CreateSessionAsync();
@@ -393,7 +393,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
 
         // Act: crash (capture durable images without a clean shutdown), reopen.
         var crashed = strategy.CaptureDurableImages();
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-crash-reopen", StorageStrategy = crashed });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-crash-reopen", new SqlDatabaseEngineOptions { StorageStrategy = crashed });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("crash-db");
 
@@ -416,7 +416,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task FailedStatement_AfterRootSplits_ShouldLeaveIndexesUsable()
     {
         // Arrange: two small indexes (single-leaf trees).
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-failed-split", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-failed-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("failed-split-db");
 
         await using (var session = await database.CreateSessionAsync())
@@ -444,7 +444,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
 
         // Restart: the registered roots still reach every entry.
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-failed-split", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-failed-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("failed-split-db");
 
@@ -458,7 +458,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // Arrange: enough entries to split the root at least once (a leaf holds
         // ~250 int keys), inserted AFTER the index exists so the write path — not
         // the build — drives the splits.
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-split", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("split-db");
         long registeredRoot;
 
@@ -481,7 +481,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
 
         // Act
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-split", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("split-db");
 
@@ -501,9 +501,8 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // The checkpoint worker is held off, so no persistence point re-exports it
         // before the crash.
         var strategy = new CrashCaptureSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        var engine = SqlDatabaseEngine.Create("ix-crash-split", new SqlDatabaseEngineOptions
         {
-            EngineName = "ix-crash-split",
             StorageStrategy = strategy,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -524,7 +523,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         RootPageOf(database, "ix_t_id").ShouldBe(registeredRoot);
 
         var crashed = strategy.CaptureDurableImages();
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-crash-split-reopen", StorageStrategy = crashed });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-crash-split-reopen", new SqlDatabaseEngineOptions { StorageStrategy = crashed });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("crash-split-db");
 
@@ -550,7 +549,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task DropTable_WithIndexes_ShouldDropIndexes()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-droptable" });
+        await using var engine = SqlDatabaseEngine.Create("ix-droptable", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("droptable-db");
         await using var session = await database.CreateSessionAsync();
 

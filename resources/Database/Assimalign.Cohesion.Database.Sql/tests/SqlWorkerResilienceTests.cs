@@ -39,7 +39,7 @@ public sealed class SqlWorkerResilienceTests
     {
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -204,7 +204,7 @@ public sealed class SqlWorkerResilienceTests
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var stalled = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -263,7 +263,7 @@ public sealed class SqlWorkerResilienceTests
     {
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
@@ -320,7 +320,7 @@ public sealed class SqlWorkerResilienceTests
         var options = Options(strategy);
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
@@ -367,7 +367,7 @@ public sealed class SqlWorkerResilienceTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         await InsertAsync(failing, 0, 10);
@@ -447,7 +447,7 @@ public sealed class SqlWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; one writer holds a row lock in
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var faults = strategy.Faults(Failing);
         await InsertAsync(failing, 0, 1);
@@ -533,7 +533,7 @@ public sealed class SqlWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms and records a failure for a database whose
         // page writes fail.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -586,7 +586,7 @@ public sealed class SqlWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -657,7 +657,7 @@ public sealed class SqlWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -722,7 +722,7 @@ public sealed class SqlWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = 0;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var database = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -769,7 +769,7 @@ public sealed class SqlWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -818,7 +818,7 @@ public sealed class SqlWorkerResilienceTests
         var clock = new ManualTimeProvider();
         var options = Options(new FaultInjectingJournalSqlStorageStrategy());
         options.TimeProvider = clock;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         await CreateAsync(engine, Failing);
         await CreateAsync(engine, Healthy);
         var worker = (SqlVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -882,7 +882,7 @@ public sealed class SqlWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = (SqlVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -932,8 +932,8 @@ public sealed class SqlWorkerResilienceTests
         builder.Options.JournalSizeLimit = 512L * 1024 * 1024;
 
         // Act
-        await using var engine = SqlDatabaseEngine.Create(new());
-        await using var timeOnly = SqlDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new());
+        await using var timeOnly = SqlDatabaseEngine.Create("sql-engine", new() { CheckpointJournalSize = 0 });
         await using var built = builder.Build();
 
         // Assert: a hundred seconds across at least three failed passes (owner decision 42), and
@@ -950,15 +950,15 @@ public sealed class SqlWorkerResilienceTests
         built.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(30));
         built.WorkerFailureMinimumPasses.ShouldBe(4);
         built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureWindow = TimeSpan.Zero }))
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new() { WorkerFailureWindow = TimeSpan.Zero }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureMinimumPasses = 0 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new() { WorkerFailureMinimumPasses = 0 }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureMinimumPasses));
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { JournalSizeLimit = -1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new() { JournalSizeLimit = -1 }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.JournalSizeLimit));
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.JournalSizeLimit));
     }
 
@@ -997,7 +997,7 @@ public sealed class SqlWorkerResilienceTests
             var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
             var options = Options(strategy);
             options.CheckpointJournalSize = PaceJournalSize;
-            await using var engine = SqlDatabaseEngine.Create(options);
+            await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
             var failing = await CreateAsync(engine, Failing);
             var healthy = await CreateAsync(engine, Healthy);
             var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);

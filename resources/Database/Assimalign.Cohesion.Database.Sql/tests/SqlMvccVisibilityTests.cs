@@ -49,7 +49,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Scan_UncommittedWriter_ShouldBeInvisibleToOtherSessions()
     {
         // Arrange: two sessions over one database.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-dirty" });
+        await using var engine = SqlDatabaseEngine.Create("vis-dirty", new SqlDatabaseEngineOptions());
         var (database, writerSession) = await CreateDatabaseAsync(engine, "dirty-db");
         await using var _ = writerSession;
         await using var readerSession = await database.CreateSessionAsync();
@@ -72,7 +72,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Scan_SnapshotIsolation_ShouldHoldBeginTimeView()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-snapshot" });
+        await using var engine = SqlDatabaseEngine.Create("vis-snapshot", new SqlDatabaseEngineOptions());
         var (database, readerSession) = await CreateDatabaseAsync(engine, "snapshot-db");
         await using var _ = readerSession;
         await using var writerSession = await database.CreateSessionAsync();
@@ -97,7 +97,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Scan_ReadCommitted_ShouldRefreshPerStatement()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-rc" });
+        await using var engine = SqlDatabaseEngine.Create("vis-rc", new SqlDatabaseEngineOptions());
         var (database, readerSession) = await CreateDatabaseAsync(engine, "rc-db");
         await using var _ = readerSession;
         await using var writerSession = await database.CreateSessionAsync();
@@ -119,7 +119,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Delete_Tombstone_ShouldRespectSnapshots()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-delete" });
+        await using var engine = SqlDatabaseEngine.Create("vis-delete", new SqlDatabaseEngineOptions());
         var (database, readerSession) = await CreateDatabaseAsync(engine, "delete-db");
         await using var _ = readerSession;
         await using var writerSession = await database.CreateSessionAsync();
@@ -143,7 +143,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Update_VersionChain_ShouldExposeExactlyOneVersionPerSnapshot()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-update" });
+        await using var engine = SqlDatabaseEngine.Create("vis-update", new SqlDatabaseEngineOptions());
         var (database, readerSession) = await CreateDatabaseAsync(engine, "update-db");
         await using var _ = readerSession;
         await using var writerSession = await database.CreateSessionAsync();
@@ -172,7 +172,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Scan_OwnWrites_ShouldBeVisibleExactlyOnce()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-own" });
+        await using var engine = SqlDatabaseEngine.Create("vis-own", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateDatabaseAsync(engine, "own-db");
         await using var _ = session;
 
@@ -200,7 +200,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task Rollback_StampedMutations_ShouldRevertToCommittedState()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-revert" });
+        await using var engine = SqlDatabaseEngine.Create("vis-revert", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateDatabaseAsync(engine, "revert-db");
         await using var _ = session;
 
@@ -228,7 +228,7 @@ public sealed class SqlMvccVisibilityTests
         // Arrange: a strategy whose durable images can travel to a second engine.
         var strategy = new CrashCaptureSqlStorageStrategy();
 
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-restart", StorageStrategy = strategy }))
+        await using (var engine = SqlDatabaseEngine.Create("vis-restart", new SqlDatabaseEngineOptions { StorageStrategy = strategy }))
         {
             var (_, session) = await CreateDatabaseAsync(engine, "restart-db");
             await using var _ = session;
@@ -242,7 +242,7 @@ public sealed class SqlMvccVisibilityTests
 
         // Act: reopen from the durable images (clean close flushed everything).
         var reopened = strategy.CaptureDurableImages();
-        await using var restarted = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-restart-2", StorageStrategy = reopened });
+        await using var restarted = SqlDatabaseEngine.Create("vis-restart-2", new SqlDatabaseEngineOptions { StorageStrategy = reopened });
         var database = await restarted.OpenDatabaseAsync("restart-db");
         await using var restartedSession = await database.CreateSessionAsync();
 
@@ -260,7 +260,7 @@ public sealed class SqlMvccVisibilityTests
         // Arrange: commit one row, leave a second uncommitted, then "crash" by
         // capturing the durable images without disposing the engine.
         var strategy = new CrashCaptureSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-crash", StorageStrategy = strategy });
+        var engine = SqlDatabaseEngine.Create("vis-crash", new SqlDatabaseEngineOptions { StorageStrategy = strategy });
         var (_, session) = await CreateDatabaseAsync(engine, "crash-db");
 
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -272,7 +272,7 @@ public sealed class SqlMvccVisibilityTests
         // Act: crash — the durable images are what a dead process leaves behind.
         var crashImages = strategy.CaptureDurableImages();
 
-        await using var recovered = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-crash-2", StorageStrategy = crashImages });
+        await using var recovered = SqlDatabaseEngine.Create("vis-crash-2", new SqlDatabaseEngineOptions { StorageStrategy = crashImages });
         var database = await recovered.OpenDatabaseAsync("crash-db");
         await using var recoveredSession = await database.CreateSessionAsync();
 
@@ -293,7 +293,7 @@ public sealed class SqlMvccVisibilityTests
     public async Task SchemaEvolution_OnStampedRecords_ShouldKeepWorking()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "vis-ddl" });
+        await using var engine = SqlDatabaseEngine.Create("vis-ddl", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateDatabaseAsync(engine, "ddl-db");
         await using var _ = session;
 

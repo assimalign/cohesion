@@ -30,11 +30,12 @@ internal sealed class GraphServerHarness : IAsyncDisposable
 
     public static async Task<GraphServerHarness> StartAsync(
         Action<GraphDatabaseServerOptions>? configure = null,
-        Action<GraphDatabaseEngineOptions>? configureEngine = null)
+        Action<GraphDatabaseEngineOptions>? configureEngine = null,
+        string engineName = "graph-wire")
     {
-        var engineOptions = new GraphDatabaseEngineOptions { EngineName = "graph-wire" };
+        var engineOptions = new GraphDatabaseEngineOptions();
         configureEngine?.Invoke(engineOptions);
-        var engine = GraphDatabaseEngine.Create(engineOptions);
+        var engine = GraphDatabaseEngine.Create(engineName, engineOptions);
         await engine.CreateDatabaseAsync(DatabaseName);
 
         var listener = new InMemoryConnectionListener();

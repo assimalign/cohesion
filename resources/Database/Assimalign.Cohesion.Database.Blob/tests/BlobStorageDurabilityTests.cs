@@ -22,7 +22,7 @@ public sealed class BlobStorageDurabilityTests
         var options = new BlobDatabaseEngineOptions { RootPath = physical ? FileSystemPath.Parse(directory) : (FileSystemPath?)null, Durability = configured };
         try
         {
-            await using (var engine = BlobDatabaseEngine.Create(options))
+            await using (var engine = BlobDatabaseEngine.Create("blob-engine", options))
             {
                 var database = await engine.CreateDatabaseAsync("db");
                 database.DataStorage.SupportsDurableFlush.ShouldBe(physical);
@@ -40,7 +40,7 @@ public sealed class BlobStorageDurabilityTests
             }
             if (physical)
             {
-                await using var reopened = BlobDatabaseEngine.Create(options);
+                await using var reopened = BlobDatabaseEngine.Create("blob-engine", options);
                 var database = await reopened.OpenDatabaseAsync("db");
                 database.DataStorage.CommitDurability.ShouldBe(expected);
             }
@@ -59,7 +59,7 @@ public sealed class BlobStorageDurabilityTests
     [InlineData(StorageCommitDurability.Grouped)]
     public async Task ExplicitDurabilityOnMemory_ShouldRejectBeforeDatabasePublication(StorageCommitDurability durability)
     {
-        await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { Durability = durability });
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new BlobDatabaseEngineOptions { Durability = durability });
         var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("memory-store"));
         failure.Message.ShouldContain("BlobStorage");
         failure.Message.ShouldContain("memory-store");

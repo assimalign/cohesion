@@ -23,7 +23,7 @@ public sealed class SqlAddColumnExecutionTests
     public async Task ExecuteAsync_OlderRowSnapshot_ShouldSeeOriginalRowsAndCompleteDefaults()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-column-mvcc" });
+        await using var engine = SqlDatabaseEngine.Create("add-column-mvcc", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("additions", cancellationToken: CancellationToken.None);
         await using var reader = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
@@ -64,9 +64,8 @@ public sealed class SqlAddColumnExecutionTests
     {
         // Arrange
         var storage = new CrashCaptureSqlStorageStrategy();
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using (var engine = SqlDatabaseEngine.Create("add-column-restart", new SqlDatabaseEngineOptions
         {
-            EngineName = "add-column-restart",
             StorageStrategy = storage,
         }))
         {
@@ -88,9 +87,8 @@ public sealed class SqlAddColumnExecutionTests
         }
 
         // Act
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var reopened = SqlDatabaseEngine.Create("add-column-reopened", new SqlDatabaseEngineOptions
         {
-            EngineName = "add-column-reopened",
             StorageStrategy = storage.CaptureDurableImages(),
         });
         var restored = await reopened.OpenDatabaseAsync("additions", cancellationToken: CancellationToken.None);
@@ -117,7 +115,7 @@ public sealed class SqlAddColumnExecutionTests
     public async Task ExecuteAsync_SchemaOwnedTable_ShouldRejectDefaultedAdditionAndPreserveRows()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-column-owner" });
+        await using var engine = SqlDatabaseEngine.Create("add-column-owner", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("additions", cancellationToken: CancellationToken.None);
         var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "additions", false, [],
             [new CompiledSchemaTable("additions", "Tests.Additions",

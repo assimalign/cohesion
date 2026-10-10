@@ -434,7 +434,7 @@ public sealed class DatabaseClientEventSourceTests
 
         public static async Task<LoopbackServer> StartAsync(string database, DatabaseAuthenticator? authenticator = null)
         {
-            var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "client-event-source" });
+            var engine = SqlDatabaseEngine.Create("client-event-source", new SqlDatabaseEngineOptions());
             var instance = await engine.CreateDatabaseAsync(database);
             await using (var session = await instance.CreateSessionAsync())
             {

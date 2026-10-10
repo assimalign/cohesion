@@ -442,7 +442,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         // Act
         var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
-            SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { ExpressionNestingLimit = limit }));
+            SqlDatabaseEngine.Create("nesting-range", new SqlDatabaseEngineOptions { ExpressionNestingLimit = limit }));
         var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
         var frozen = Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
 
@@ -450,12 +450,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         builder.Options.ExpressionNestingLimit.ShouldBe(limit);
         foreach (var failure in new[] { direct, built })
         {
-            failure.ParamName.ShouldBe("options");
+            failure.ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.ExpressionNestingLimit));
             failure.ActualValue.ShouldBe(limit);
-            failure.Message.ShouldStartWith("ExpressionNestingLimit must be between 32 and 4096 levels.", Case.Sensitive);
+            failure.Message.ShouldStartWith("SQL engine 'nesting-range': ExpressionNestingLimit must be between 32 and 4096 levels.", Case.Sensitive);
         }
 
-        frozen.Message.ShouldBe("Engine 'nesting-range': composition is frozen after a build attempt.");
+        frozen.Message.ShouldBe("SQL engine 'nesting-range': composition is frozen after a build attempt.");
     }
 
     /// <summary>
@@ -501,7 +501,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var built = builder.Build();
         builder.Options.ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit;
         var options = new SqlDatabaseEngineOptions { ExpressionNestingLimit = 40 };
-        await using var created = SqlDatabaseEngine.Create(options);
+        await using var created = SqlDatabaseEngine.Create("sql-engine", options);
         options.ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit;
 
         foreach (var engine in new[] { built, created })
@@ -1190,7 +1190,6 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     {
         var options = new SqlDatabaseEngineOptions
         {
-            EngineName = "expression-depth",
             ExpressionNestingLimit = limit,
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),
@@ -1201,7 +1200,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             options.RootPath = rootPath;
         }
 
-        return SqlDatabaseEngine.Create(options);
+        return SqlDatabaseEngine.Create("expression-depth", options);
     }
 
     private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)

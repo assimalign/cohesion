@@ -113,7 +113,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
             ], []);
 
     private SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "schema-constraints", RootPath = _rootPath });
+        => SqlDatabaseEngine.Create("schema-constraints", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
     private static async Task<long> CountAsync(SqlDatabaseSession session, string table)
     {

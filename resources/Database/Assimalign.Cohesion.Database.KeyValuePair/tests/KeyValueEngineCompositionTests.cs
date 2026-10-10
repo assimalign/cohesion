@@ -51,7 +51,7 @@ public sealed class KeyValueEngineCompositionTests
         server.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
         server.Starts.ShouldBe(0);
         frozen.Message.ShouldBe("Engine composition is frozen; workers and servers attach only before it completes.");
-        Should.Throw<InvalidOperationException>(() => builder.EngineName = "late");
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
         Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => first!));
         Should.Throw<InvalidOperationException>(() => builder.Build());
         first.Disposals.ShouldBe(1);
@@ -102,7 +102,7 @@ public sealed class KeyValueEngineCompositionTests
     public async Task Create_WithoutBuilder_ShouldCompleteCompositionAtOnce()
     {
         // Arrange
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "standalone" });
+        await using var engine = KeyValueDatabaseEngine.Create("standalone", new KeyValueDatabaseEngineOptions());
         var worker = new RecordingWorker(engine);
 
         // Act
@@ -153,7 +153,7 @@ public sealed class KeyValueEngineCompositionTests
     public async Task Build_ServerForAnotherEngine_ShouldBeRefusedAndReleased()
     {
         // Arrange
-        await using var other = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "other" });
+        await using var other = KeyValueDatabaseEngine.Create("other", new KeyValueDatabaseEngineOptions());
         var server = new RecordingServer(other);
         var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
@@ -174,7 +174,7 @@ public sealed class KeyValueEngineCompositionTests
     public async Task Build_RefusedServerFailsToRelease_ShouldAggregateTheRefusalAndTheCleanup()
     {
         // Arrange
-        await using var other = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "other" });
+        await using var other = KeyValueDatabaseEngine.Create("other", new KeyValueDatabaseEngineOptions());
         var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
         var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
         KeyValueDatabaseEngine? product = null;
@@ -246,7 +246,7 @@ public sealed class KeyValueEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "Engine 'keyvalue-engine': a worker factory returned null." : "Engine 'keyvalue-engine': a server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Key-value engine 'keyvalue-engine': a worker factory returned null." : "Key-value engine 'keyvalue-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
@@ -275,7 +275,7 @@ public sealed class KeyValueEngineCompositionTests
         worker.ShouldNotBeNull().Disposals.ShouldBe(1);
         server.ShouldNotBeNull().Stops.ShouldBe(1);
         Should.Throw<InvalidOperationException>(() => builder.Build());
-        Should.Throw<InvalidOperationException>(() => builder.RootPath = null);
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a compose method that breaks the builder state's contract fails the build, runs no later factory and releases every product once")]
@@ -287,8 +287,8 @@ public sealed class KeyValueEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine>("contract");
-        var engine = KeyValueDatabaseEngine.CreateUncomposed(new KeyValueDatabaseEngineOptions { EngineName = "contract" });
+        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine>("contract", KeyValueDatabaseEngine.ModelName);
+        var engine = KeyValueDatabaseEngine.CreateUncomposed("contract", new KeyValueDatabaseEngineOptions());
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];
         state.AddWorker(product => Made(workers, new RecordingWorker(product, product.Name + "/first")));
@@ -359,34 +359,80 @@ public sealed class KeyValueEngineCompositionTests
     public void Create_BlankEngineName_ShouldBeRefused(string name)
     {
         // Act
-        var direct = Should.Throw<ArgumentException>(() => KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = name }));
+        var direct = Should.Throw<ArgumentException>(() => KeyValueDatabaseEngine.Create(name, new KeyValueDatabaseEngineOptions()));
         var builder = Should.Throw<ArgumentException>(() => KeyValueDatabaseEngine.CreateBuilder(name));
         var verb = Should.Throw<ArgumentException>(() => new RecordingApplicationBuilder().AddKeyValue(name, _ => { }));
 
-        // Assert: the builder and the verb name the engine once, and refuse a blank name before
-        // anything is registered.
-        direct.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.EngineName));
+        // Assert: Create, the builder and the verb each take the engine name once, and refuse a
+        // blank one before anything is created or registered.
+        direct.ParamName.ShouldBe("name");
         builder.ParamName.ShouldBe("name");
         verb.ParamName.ShouldBe("name");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: an engine name changed on the builder fails the build before the engine exists")]
-    public void Build_EngineNameChanged_ShouldFailBeforeTheEngineExists()
+    /// <summary>
+    /// The options carry no engine name (B3 of the engine extensibility design): the engine is named
+    /// once, by the builder or by Create, and every option refusal names it, so a host that builds
+    /// several engines says which one was misconfigured.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: an option refusal names the engine, from the builder and from Create")]
+    public void Build_InvalidOption_ShouldNameTheEngine()
     {
         // Arrange
         var builder = KeyValueDatabaseEngine.CreateBuilder("named");
         KeyValueDatabaseEngine? product = null;
         builder.AddWorker(engine => new RecordingWorker(product = engine));
-        string seeded = builder.EngineName!;
-        builder.EngineName = "renamed";
+        builder.Options.CheckpointJournalSize = -1;
 
         // Act
-        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
+            KeyValueDatabaseEngine.Create("direct", new KeyValueDatabaseEngineOptions { MaintenanceInterval = TimeSpan.Zero }));
 
-        // Assert
-        seeded.ShouldBe("named");
-        builder.Name.ShouldBe("named");
-        failure.Message.ShouldStartWith("The engine builder for 'named' has its options' EngineName set to 'renamed'.", Case.Sensitive);
+        // Assert: refused before the engine existed, the option and the value kept.
+        built.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.CheckpointJournalSize));
+        built.ActualValue.ShouldBe(-1L);
+        built.Message.ShouldStartWith("Key-value engine 'named': CheckpointJournalSize must not be negative.", Case.Sensitive);
+        direct.ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.MaintenanceInterval));
+        direct.Message.ShouldStartWith("Key-value engine 'direct': MaintenanceInterval must be positive.", Case.Sensitive);
+        product.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The write-back worker's cadence and batch size are refused when not positive, as the Graph,
+    /// Documents and Blob engines refuse them: a zero interval spun the worker's wait, and a zero
+    /// batch failed every pass in the storage until the failure policy took the databases offline.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a write-back interval or batch size that is not positive is refused, naming the engine")]
+    [InlineData(nameof(KeyValueDatabaseEngineOptions.PageWriteBackInterval))]
+    [InlineData(nameof(KeyValueDatabaseEngineOptions.PageWriteBackBatchSize))]
+    public void Build_PageWriteBackNotPositive_ShouldBeRefused(string option)
+    {
+        // Arrange
+        var builder = KeyValueDatabaseEngine.CreateBuilder("write-back");
+        KeyValueDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        var options = new KeyValueDatabaseEngineOptions();
+        if (option == nameof(KeyValueDatabaseEngineOptions.PageWriteBackInterval))
+        {
+            builder.Options.PageWriteBackInterval = TimeSpan.Zero;
+            options.PageWriteBackInterval = TimeSpan.FromSeconds(-1);
+        }
+        else
+        {
+            builder.Options.PageWriteBackBatchSize = 0;
+            options.PageWriteBackBatchSize = -1;
+        }
+
+        // Act
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("write-back-direct", options));
+
+        // Assert: refused before the engine existed.
+        built.ParamName.ShouldBe(option);
+        built.Message.ShouldStartWith($"Key-value engine 'write-back': {option} must be positive.", Case.Sensitive);
+        direct.ParamName.ShouldBe(option);
+        direct.Message.ShouldStartWith($"Key-value engine 'write-back-direct': {option} must be positive.", Case.Sensitive);
         product.ShouldBeNull();
     }
 

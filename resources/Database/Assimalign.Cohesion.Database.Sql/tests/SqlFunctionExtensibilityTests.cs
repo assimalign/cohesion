@@ -38,7 +38,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         // Act
         builder.Functions.Add(slugify).Add(new ClampFunction());
         await using var engine = await builder.BuildAsync();
-        await using var standard = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-functions-standard" });
+        await using var standard = SqlDatabaseEngine.Create("sql-functions-standard", new SqlDatabaseEngineOptions());
 
         // Assert
         builder.Functions.Select(function => function.Name).Distinct().Take(9)

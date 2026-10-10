@@ -21,7 +21,7 @@ public sealed class KeyValueDatabaseScopeTests
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Scope: A session cannot address another database")]
     public async Task Session_ShouldRemainBoundToOneDatabase()
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "scope" });
+        await using var engine = KeyValueDatabaseEngine.Create("scope", new KeyValueDatabaseEngineOptions());
         var first = await engine.CreateDatabaseAsync("first");
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();
@@ -74,7 +74,7 @@ public sealed class KeyValueDatabaseScopeTests
     [InlineData("SHUTDOWN")]
     public async Task Session_ShouldRejectServerScope(string statement)
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "scope" });
+        await using var engine = KeyValueDatabaseEngine.Create("scope", new KeyValueDatabaseEngineOptions());
         var first = await engine.CreateDatabaseAsync("first");
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();

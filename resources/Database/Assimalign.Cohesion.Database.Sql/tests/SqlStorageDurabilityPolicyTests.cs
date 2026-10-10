@@ -29,7 +29,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability? durability)
     {
         var options = new SqlDatabaseEngineOptions { Durability = durability };
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var database = await engine.CreateDatabaseAsync("memory-default");
         await using var session = await database.CreateSessionAsync();
 
@@ -61,7 +61,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
     public async Task PhysicalBacking_ShouldDeriveOrHonorDurablePolicy(
         StorageCommitDurability? configured, StorageCommitDurability expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             RootPath = _rootPath,
             Durability = configured,
@@ -87,7 +87,7 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability durability, bool openExisting)
     {
         var strategy = new NonDurableStorageStrategy();
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             StorageStrategy = strategy,
             Durability = durability,

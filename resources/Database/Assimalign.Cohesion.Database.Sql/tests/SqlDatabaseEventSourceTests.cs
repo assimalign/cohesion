@@ -77,7 +77,7 @@ public sealed class SqlDatabaseEventSourceTests
         long currentWhileOpen;
 
         // Act
-        await using (var harness = await ServerTestHarness.StartAsync(configureEngine: options => options.EngineName = engineName))
+        await using (var harness = await ServerTestHarness.StartAsync(engineName: engineName))
         {
             await using var client = await harness.DialAsync();
             await client.HandshakeAsync();
@@ -119,7 +119,7 @@ public sealed class SqlDatabaseEventSourceTests
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
         long rejectedBefore = SqlDatabaseEventSource.Log.TotalRejectedSessions;
-        await using var harness = await ServerTestHarness.StartAsync(options => options.MaxSessions = 1, options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(options => options.MaxSessions = 1, engineName: engineName);
         await using var first = await harness.DialAsync();
         await first.HandshakeAsync();
 
@@ -152,7 +152,7 @@ public sealed class SqlDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
         await using var harness = await ServerTestHarness.StartAsync(
             options => options.Authenticator = refusal == "AuthenticationFailed" ? new RejectingAuthenticator() : null,
-            options => options.EngineName = engineName);
+            engineName: engineName);
         if (refusal == "DatabaseOffline")
         {
             var open = await harness.Engine.OpenDatabaseAsync(ServerTestHarness.DatabaseName);
@@ -204,7 +204,7 @@ public sealed class SqlDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await ServerTestHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act: send nothing.
@@ -234,7 +234,7 @@ public sealed class SqlDatabaseEventSourceTests
                 options.Authenticator = new StallingAuthenticator();
                 options.AuthenticationTimeout = TimeSpan.FromSeconds(2);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -259,7 +259,7 @@ public sealed class SqlDatabaseEventSourceTests
         // the 256-character payload bound.
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await ServerTestHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -284,14 +284,14 @@ public sealed class SqlDatabaseEventSourceTests
         string rootPath = Path.Combine(Path.GetTempPath(), "cohesion-sql-events", Guid.NewGuid().ToString("N"));
         try
         {
-            await using (var creating = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName, RootPath = rootPath }))
+            await using (var creating = SqlDatabaseEngine.Create(engineName, new SqlDatabaseEngineOptions { RootPath = rootPath }))
             {
                 var created = await creating.CreateDatabaseAsync("format-db");
                 await created.Catalog.SetRecordSpaceFormatVersionAsync(3);
             }
 
             using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName, RootPath = rootPath });
+            await using var engine = SqlDatabaseEngine.Create(engineName, new SqlDatabaseEngineOptions { RootPath = rootPath });
             await using var listener = new InMemoryConnectionListener();
             await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
             await server.StartAsync();
@@ -336,7 +336,7 @@ public sealed class SqlDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await ServerTestHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200), engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -360,7 +360,7 @@ public sealed class SqlDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await ServerTestHarness.StartAsync(configureEngine: options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
@@ -397,7 +397,7 @@ public sealed class SqlDatabaseEventSourceTests
         // Arrange
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var harness = await ServerTestHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(options => options.Authenticator = new FaultingAuthenticator(), engineName: engineName);
         await using var client = await harness.DialAsync();
 
         // Act
@@ -433,7 +433,7 @@ public sealed class SqlDatabaseEventSourceTests
                 options.Authenticator = authenticator;
                 options.ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100);
             },
-            options => options.EngineName = engineName);
+            engineName: engineName);
         await using var client = await harness.DialAsync();
         await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, ServerTestHarness.DatabaseName, "ada").Encode());
         await client.ExpectAsync(ProtocolMessageType.Authenticate);
@@ -476,7 +476,7 @@ public sealed class SqlDatabaseEventSourceTests
     {
         // Arrange: a disabled source. Disposing the last listener already disables it; the explicit
         // disable below is redundant but harmless.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = UniqueEngineName() });
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
         var session = new StubServerSession();
         var failure = new InvalidOperationException("failure");
         using (var listener = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose))
@@ -527,7 +527,7 @@ public sealed class SqlDatabaseEventSourceTests
         // Arrange: a real TCP listener; the in-memory driver cannot reset a connection.
         string engineName = UniqueEngineName();
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName });
+        await using var engine = SqlDatabaseEngine.Create(engineName, new SqlDatabaseEngineOptions());
         await engine.CreateDatabaseAsync(ServerTestHarness.DatabaseName);
         TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
         await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
@@ -577,7 +577,7 @@ public sealed class SqlDatabaseEventSourceTests
         using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
         await using var inner = new InMemoryConnectionListener();
         var listener = new DisposeFailingConnectionListener(inner);
-        await using var harness = await ServerTestHarness.StartAsync(options => options.Listener = listener, options => options.EngineName = engineName);
+        await using var harness = await ServerTestHarness.StartAsync(options => options.Listener = listener, engineName: engineName);
         long currentBefore = SqlDatabaseEventSource.Log.CurrentServerSessions;
 
         // Act: a session that terminates cleanly, whose cleanup then meets the failing disposal.

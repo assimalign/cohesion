@@ -26,7 +26,7 @@ public sealed class GraphApplicationBuilderTests
         {
             configured++;
             options.Name.ShouldBe("registered");
-            options.Durability = StorageCommitDurability.Grouped;
+            options.Options.Durability = StorageCommitDurability.Grouped;
         }).ShouldBeSameAs(builder);
 
         configured.ShouldBe(0);
@@ -70,7 +70,7 @@ public sealed class GraphApplicationBuilderTests
             engine.Workers.ShouldContain(worker);
             engine.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
             server.ShouldNotBeNull().Starts.ShouldBe(0);
-            Should.Throw<InvalidOperationException>(() => builder.EngineName = "late");
+            Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
             Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => worker));
             Should.Throw<InvalidOperationException>(() => builder.Build());
         }
@@ -99,7 +99,7 @@ public sealed class GraphApplicationBuilderTests
         worker.ShouldNotBeNull().Disposals.ShouldBe(1);
         server.ShouldNotBeNull().Stops.ShouldBe(1);
         Should.Throw<InvalidOperationException>(() => builder.Build());
-        Should.Throw<InvalidOperationException>(() => builder.RootPath = null);
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
     }
 
     [Theory]
@@ -125,7 +125,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public void ServerForAnotherEngine_ShouldBeRejectedAndDisposedWithoutOwningThatEngine()
     {
-        using var other = GraphDatabaseEngine.Create(new());
+        using var other = GraphDatabaseEngine.Create("graph-engine", new());
         var server = new RecordingServer(other);
         var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         builder.AddServer(_ => server);
@@ -145,9 +145,9 @@ public sealed class GraphApplicationBuilderTests
             using var strategy = new RecordingStorageStrategy(directory);
             strategy.CreateStorage(new DatabaseName("existing"), StorageCommitDurability.Synchronous).Dispose();
             var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
-            builder.StorageStrategy = strategy;
-            builder.RootPath = FileSystemPath.Parse(ignoredRoot);
-            builder.Durability = StorageCommitDurability.Synchronous;
+            builder.Options.StorageStrategy = strategy;
+            builder.Options.RootPath = FileSystemPath.Parse(ignoredRoot);
+            builder.Options.Durability = StorageCommitDurability.Synchronous;
 
             await using (var engine = builder.Build())
             {
@@ -174,7 +174,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public async Task EmptyDatabaseName_ShouldBeRejectedAtEveryEngineEntryPoint()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default));
         await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(default));
         await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync(default));
@@ -196,6 +196,44 @@ public sealed class GraphApplicationBuilderTests
 
         Should.Throw<InvalidOperationException>(() => builder.Factory.ShouldNotBeNull()(new RecordingContext()));
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - AddGraph: a declared database is open when the verb's factory returns, and the engine refuses to drop it")]
+    public async Task AddGraph_WithDeclaredDatabase_ShouldOpenItInsideBuildAndRefuseItsDrop()
+    {
+        // Arrange
+        var builder = new RecordingBuilder();
+        builder.AddGraph("graph-declared", graph => graph.AddDatabase("social"));
+
+        // Act: the verb's factory is what application Build runs.
+        await using var engine = (GraphDatabaseEngine)builder.Factory.ShouldNotBeNull()(new RecordingContext());
+        var refusal = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await engine.DropDatabaseAsync("SOCIAL"));
+
+        // Assert
+        engine.TryGetDatabase("social", out GraphDatabase? _).ShouldBeTrue();
+        refusal.Operation.ShouldBe("DROP DATABASE");
+        refusal.Message.ShouldStartWith("Graph engine 'graph-declared' declares database 'social'", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - AddGraph: a declared name the model refuses fails the verb's factory before the engine exists")]
+    public void AddGraph_WithInvalidDeclaredName_ShouldFailBeforeTheEngineExists()
+    {
+        // Arrange
+        var builder = new RecordingBuilder();
+        GraphDatabaseEngine? product = null;
+        builder.AddGraph("graph-invalid", graph =>
+        {
+            graph.AddWorker(engine => new RecordingWorker(product = engine));
+            graph.AddDatabase("..");
+        });
+
+        // Act
+        var failure = Should.Throw<ArgumentException>(() => builder.Factory.ShouldNotBeNull()(new RecordingContext()));
+
+        // Assert: refused at the declaration, where the engine's own open used to refuse it after
+        // the engine, its workers and its servers were created.
+        failure.ParamName.ShouldBe("name");
+        product.ShouldBeNull();
     }
 
     private sealed class RecordingBuilder : IDatabaseApplicationBuilder

@@ -32,7 +32,7 @@ public sealed class SqlEngineGroupCommitWindowTests
         };
 
         // Act / Assert
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(options))
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", options))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.GroupCommitWindow));
         Directory.Exists(root).ShouldBeFalse();
     }
@@ -44,12 +44,12 @@ public sealed class SqlEngineGroupCommitWindowTests
         var longest = Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow;
 
         // Act / Assert
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             GroupCommitWindow = longest + TimeSpan.FromTicks(1),
         })).ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.GroupCommitWindow));
 
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { GroupCommitWindow = longest });
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions { GroupCommitWindow = longest });
         engine.EngineOptions.GroupCommitWindow.ShouldBe(longest);
     }
 }

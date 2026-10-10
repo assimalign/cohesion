@@ -86,7 +86,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
     public async Task Scan_TwoTables_ShouldUseDisjointOwnerChains()
     {
         // Arrange: one large table, one one-row table.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "chains" });
+        await using var engine = SqlDatabaseEngine.Create("chains", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("chains-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -115,7 +115,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
     public async Task DropTable_ShouldReleaseChainPages()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "chains-drop" });
+        await using var engine = SqlDatabaseEngine.Create("chains-drop", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("drop-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -145,7 +145,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
     public async Task Restart_FileBacked_ShouldRebuildChains()
     {
         // Arrange: committed rows across two tables, clean engine shutdown.
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "chains-restart", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("chains-restart", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("restart-db");
 
         await using (var session = await database.CreateSessionAsync())
@@ -159,7 +159,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
         await engine.DisposeAsync();
 
         // Act
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "chains-restart", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("chains-restart", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("restart-db");
         await using var verifySession = await reopened.CreateSessionAsync();

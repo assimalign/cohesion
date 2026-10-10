@@ -763,15 +763,44 @@ replaces eager `AddKeyValueDatabase` and the sibling application `AddKeyValueSer
 The verb registers a dependency-free factory and returns the application builder. The engine name
 is its first argument (owner decision 52 of 2026-10-09): the verb reserves it through the root
 seam's named `AddEngine(name, factory)`, so a duplicate fails at the call, and the builder created
-for it reports it as `Name`; its `EngineName` starts as that name and the build refuses any other
-value until B3 removes it.
-Application Build executes its callback; the model builder exposes all existing
-options, including `FileSystemPath? RootPath`, and freezes them on its one Build
-attempt. It constructs the engine before invoking nested `AddWorker` and `AddServer`
+for it reports it as `Name`. No options type carries the name (B3 of the engine extensibility
+design).
+Application Build executes its callback. The builder has the SQL builder's engine-level shape
+(B3):
+
+- `Options` is the engine's `KeyValueDatabaseEngineOptions`, values only, `FileSystemPath?
+  RootPath` included. `Build` copies it before anything is created and checks the copy, so a
+  change made after the build began never reaches the engine; the fourteen properties that
+  mirrored the options on the builder are gone.
+- `AddDatabase(name)` declares a database the engine owns. The build opens it, or creates it when
+  `OpenDatabaseAsync` throws the root's `DatabaseNotFoundException`, in declaration order, after
+  the workers and servers are attached; a failure disposes the engine. A second declaration of the
+  same name (ignoring case) is refused at the call, and the built engine refuses to drop a declared
+  database with `DatabaseObjectLockedException` (owner decision 56 of 2026-10-09), through the
+  wording the SQL engine uses (`DatabaseDeclarations`, compiled from the root's shared source).
+  A name that is not a single file-name component (`..`, `a/b`, a name holding a character the
+  platform refuses in a file name) is refused at the call too, before the engine exists.
+- The engine applies that name rule in its create, open and drop cores, after the root base's
+  checks (`DatabaseFileNames`, shared with every model; the B3 review). A database's files live in
+  a directory named for it under `RootPath`, so before the rule `CreateDatabaseAsync("../x")` wrote
+  a file set beside the root.
+- `PageWriteBackInterval` and `PageWriteBackBatchSize` must be positive, as on every other model
+  since the B3 review: a zero interval spun the write-back worker's wait, and a zero batch failed
+  every pass in the storage until the failure policy took the databases offline.
+- `AddServer(Action<KeyValueDatabaseServerOptions>)` creates a `KeyValueDatabaseServer` over the
+  engine from options the callback configures, and disposes the listener the options carry when
+  the server cannot be created; `AddServer(Func<KeyValueDatabaseEngine, DatabaseServer> factory)`
+  and `AddWorker(factory)` take any product.
+- `Build()` bridges `BuildAsync(CancellationToken)` on the thread pool; the token is observed
+  before the engine is created and before each declared database.
+
+It constructs the engine before invoking nested `AddWorker` and `AddServer`
 factories. No DI or configuration enters this model package. Direct
-`KeyValueDatabaseEngine.Create(options)` stays available, and its composition is
-complete when it returns: an engine created without its builder takes no worker or
-server.
+`KeyValueDatabaseEngine.Create(name, options)` stays available, keeps a copy of its options, and
+its composition is complete when it returns: an engine created without its builder takes no
+worker or server and declares no database. Every option refusal names the engine and the option
+(`Key-value engine '{name}': CheckpointJournalSize must not be negative.`), so a host that builds
+several engines says which one was misconfigured.
 
 The engine's worker pumps are the root `DatabaseEngine`'s: every worker, built-in or
 factory-supplied, is a `DatabaseEngineWorker`, which the engine pumps and quiesces
@@ -791,7 +820,7 @@ engine, `AddWorker(Func<KeyValueDatabaseEngine, DatabaseEngineWorker>)` and
 no cast (`KeyValueDatabaseServer.Create(engine, options)`). This reverses the
 phase-29 ruling that kept the factories on the root interfaces and had server
 callbacks cast to the model engine once, to avoid ambiguous overloads: a sealed
-builder has one overload of each, typed. `Build()` returns the engine. The builder runs the shared `DatabaseEngineBuilderState`, which
+builder has one factory overload of each, typed (B3 added `AddServer(Action<KeyValueDatabaseServerOptions>)`, which binds by delegate type, as the SQL builder's does). `Build()` returns the engine. The builder runs the shared `DatabaseEngineBuilderState`, which
 hands the products to the engine's internal `Compose` method one factory at a time;
 the engine attaches each through the root base, which refuses a product attached
 twice, a server that fronts another engine, and a worker whose name another worker
@@ -866,8 +895,9 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   was an inner exception of the engine's; one failure stays flat. The
   engine's guards check the name, then disposal, then the token (disposal used to
   come first, and `TryGetDatabase` did not check the name), `GetDatabasesAsync` checks
-  disposal when it is called, and a blank `EngineName` is refused by `Create` and
-  `Build` (`ArgumentException`, parameter `EngineName`). A worker's blank name is
+  disposal when it is called, and a blank engine name is refused by `Create` and
+  `CreateBuilder` (`ArgumentException`, parameter `name`; it was the options'
+  `EngineName` until B3). A worker's blank name is
   refused by its own constructor inside its factory ("A worker must have a diagnostic
   name." is gone), and the engine disposes every worker last attached first, factory
   workers before the built-in ones (it used to dispose the checkpointer first).

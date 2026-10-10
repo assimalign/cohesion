@@ -73,7 +73,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     public async Task ExecuteAsync_LeftoverText_ShouldReportSyntaxErrorWithoutMutation(string sql)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness" });
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("completeness");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -102,7 +102,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     public async Task ExecuteAsync_UnsupportedAlterTableAction_ShouldFailAtParseTime(string sql, string action)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-alter" });
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness-alter", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("completeness");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -142,7 +142,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     public async Task ExecuteAsync_MalformedDdl_ShouldFailAtParseTimeWithoutSchemaChange(string sql)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-ddl" });
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness-ddl", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("completeness");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -160,7 +160,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     public async Task ExecuteAsync_NestedUnaryMinus_ShouldNegateTwice()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-unary" });
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness-unary", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("completeness");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: true);
@@ -210,7 +210,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         foreach (bool withRows in new[] { false, true })
         {
             // Arrange
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-functions" });
+            await using var engine = SqlDatabaseEngine.Create("sql-completeness-functions", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("completeness");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             await SeedAsync(session, withRows);
@@ -232,7 +232,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     public async Task ExecuteAsync_LowercaseUnknownFunction_ShouldNameItAsWritten()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-spelling" });
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness-spelling", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("completeness");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: false);
@@ -253,7 +253,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     public async Task ExecuteAsync_DeclaredNonExecutingFunction_ShouldNotBeRejectedAsUnknown()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-declared" });
+        await using var engine = SqlDatabaseEngine.Create("sql-completeness-declared", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("completeness");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session, withRows: false);

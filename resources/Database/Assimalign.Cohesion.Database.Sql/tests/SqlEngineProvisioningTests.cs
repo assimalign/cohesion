@@ -159,7 +159,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         drift.Message.ShouldStartWith("COHSQLP003: SQL engine 'verify', database 'sales': the declared schema (hash ", Case.Sensitive);
         drift.Message.ShouldContain($"the database records schema hash {Sales.Compile().Hash}");
         missing.Message.ShouldStartWith("COHSQLP003: SQL engine 'verify', database 'archive': the database does not exist.", Case.Sensitive);
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "verify", RootPath = _rootPath });
+        await using var reopened = SqlDatabaseEngine.Create("verify", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var sales = await reopened.OpenDatabaseAsync("sales");
         sales.Catalog.TryGetTable("dbo", "orders", out var orders).ShouldBeTrue();
         sales.Catalog.GetIndexes(orders.ObjectId).ShouldHaveSingleItem().IsPrimaryKey.ShouldBeTrue();
@@ -170,7 +170,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task BuildAsync_ProvisioningFails_ShouldDisposeTheEngineAndJoinItsWorkers()
     {
         // Arrange: an existing database created with another collation than the one declared.
-        await using (var seeding = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "seed", RootPath = _rootPath }))
+        await using (var seeding = SqlDatabaseEngine.Create("seed", new SqlDatabaseEngineOptions { RootPath = _rootPath }))
         {
             await seeding.CreateDatabaseAsync("sales", Collation.CaseInsensitive);
         }
@@ -208,7 +208,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     public async Task BuildAsync_DeclaredCollationMatches_ShouldOpenTheDatabase()
     {
         // Arrange
-        await using (var seeding = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "seed", RootPath = _rootPath }))
+        await using (var seeding = SqlDatabaseEngine.Create("seed", new SqlDatabaseEngineOptions { RootPath = _rootPath }))
         {
             await seeding.CreateDatabaseAsync("people", Collation.CaseInsensitive);
         }
@@ -384,7 +384,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         adopt.Message.ShouldBe(
             "COHSQLP005: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
             "was not created by this schema. Nothing was changed.");
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "policy", RootPath = _rootPath });
+        await using var reopened = SqlDatabaseEngine.Create("policy", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var sales = await reopened.OpenDatabaseAsync("sales");
         sales.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeTrue();
     }
@@ -505,7 +505,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Act
         await using var engine = await builder.BuildAsync();
-        await using var other = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "direct" });
+        await using var other = SqlDatabaseEngine.Create("direct", new SqlDatabaseEngineOptions());
         var created = SqlDatabaseServer.Create(other, direct);
         captured!.MaxSessions = 0;
         direct.MaxSessions = 0;
@@ -526,11 +526,11 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         var builder = SqlDatabaseEngine.CreateBuilder("snapshot");
         builder.Options.PageWriteBackBatchSize = 64;
         builder.Options.MaintenanceInterval = TimeSpan.FromMinutes(7);
-        var options = new SqlDatabaseEngineOptions { EngineName = "created", PageWriteBackBatchSize = 64 };
+        var options = new SqlDatabaseEngineOptions { PageWriteBackBatchSize = 64 };
 
         // Act
         await using var built = await builder.BuildAsync();
-        await using var created = SqlDatabaseEngine.Create(options);
+        await using var created = SqlDatabaseEngine.Create("created", options);
         builder.Options.PageWriteBackBatchSize = 1;
         builder.Options.MaintenanceInterval = TimeSpan.FromSeconds(1);
         options.PageWriteBackBatchSize = 1;
@@ -554,7 +554,6 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         string rootPath = Path.Combine(_rootPath, "unused-root");
         var options = new SqlDatabaseEngineOptions
         {
-            EngineName = "every-option",
             RootPath = rootPath,
             StorageStrategy = strategy,
             Durability = Assimalign.Cohesion.Database.Storage.StorageCommitDurability.None,
@@ -574,11 +573,11 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         };
 
         // Act
-        await using var engine = SqlDatabaseEngine.Create(options);
+        await using var engine = SqlDatabaseEngine.Create("every-option", options);
         var copy = engine.EngineOptions;
 
         // Assert
-        copy.EngineName.ShouldBe(options.EngineName);
+        engine.Name.ShouldBe("every-option");
         copy.Durability.ShouldBe(options.Durability);
         copy.GroupCommitWindow.ShouldBe(options.GroupCommitWindow);
         copy.CheckpointInterval.ShouldBe(options.CheckpointInterval);
@@ -596,7 +595,64 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         copy.RootPath.ShouldNotBeNull();
         copy.RootPath.ShouldBe(options.RootPath);
         copy.StorageStrategy.ShouldBeSameAs(strategy);
-        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(14);
+
+        // Every property, the internal ones included: an option added to either set fails here
+        // until Snapshot copies it and this test checks it.
+        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(13);
+        typeof(SqlDatabaseEngineOptions)
+            .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+            .Length.ShouldBe(16);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that is not a single file-name component is refused at the declaration")]
+    [InlineData("..")]
+    [InlineData("../escaped")]
+    [InlineData("nested/escaped")]
+    [InlineData("nested\\escaped")]
+    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    {
+        // Arrange
+        var builder = CreateBuilder("names");
+        int configured = 0;
+
+        // Act
+        var refusal = Should.Throw<ArgumentException>(() => builder.AddDatabase(name, _ => configured++));
+        await using var engine = await builder.BuildAsync(TestTimeout.Token());
+
+        // Assert: refused before its callback ran and before anything exists, so the build that
+        // follows declares nothing and nothing is written outside the root.
+        refusal.ParamName.ShouldBe("name");
+        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        configured.ShouldBe(0);
+        engine.DeclaredDatabases.ShouldBeEmpty();
+        Directory.Exists(Path.Combine(Path.GetDirectoryName(_rootPath)!, "escaped")).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: the engine refuses a database name that reaches outside its root path")]
+    public async Task DatabaseCores_NameOutsideTheRoot_ShouldBeRefused()
+    {
+        // Arrange: a directory beside the engine's root, which a "../victim" drop used to delete
+        // (the strategy combined the name with the root path as given, and the drop does not
+        // check that the database exists first).
+        string root = Path.Combine(_rootPath, "root");
+        string victim = Path.Combine(_rootPath, "victim");
+        Directory.CreateDirectory(victim);
+        await using var engine = SqlDatabaseEngine.Create("escape", new SqlDatabaseEngineOptions { RootPath = root });
+
+        // Act
+        var create = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync("../escaped"));
+        var collated = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync("../escaped", Collation.Binary));
+        var open = await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(".."));
+        var drop = await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync("../victim"));
+
+        // Assert: nothing outside the root was created, opened or deleted.
+        create.ParamName.ShouldBe("name");
+        collated.ParamName.ShouldBe("name");
+        open.ParamName.ShouldBe("name");
+        drop.ParamName.ShouldBe("name");
+        drop.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        Directory.Exists(Path.Combine(_rootPath, "escaped")).ShouldBeFalse();
+        Directory.Exists(victim).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a database is declared once per engine, and a reusable schema must name it")]

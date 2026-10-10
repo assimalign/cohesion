@@ -30,7 +30,7 @@ internal sealed class GraphClientTestHarness : IAsyncDisposable
 
     internal static async Task<GraphClientTestHarness> StartAsync()
     {
-        var engine = GraphDatabaseEngine.Create(new());
+        var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         var listener = new InMemoryConnectionListener();
         var server = GraphDatabaseServer.Create(engine, new() { Listener = listener, ShutdownDrainTimeout = TimeSpan.FromSeconds(2) });

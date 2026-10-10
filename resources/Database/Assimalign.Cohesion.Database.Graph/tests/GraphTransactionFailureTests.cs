@@ -34,7 +34,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_FailureThenWriteThenRollback_ShouldLeaveGraphUnchanged(string failing, string code, IsolationLevel isolation)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'k'})-[:LINK]->(:Keep {name: 'j'})");
@@ -67,7 +67,7 @@ public sealed class GraphTransactionFailureTests
     public async Task Operations_OnFaultedTransaction_ShouldBeRefusedUntilRollback()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var seed = await database.CreateNodeAsync(session, ["Keep"]);
@@ -113,7 +113,7 @@ public sealed class GraphTransactionFailureTests
     public async Task CommitAsync_AfterFailedStatement_ShouldThrowAndCommitNothing()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -140,7 +140,7 @@ public sealed class GraphTransactionFailureTests
     public async Task DisposeAsync_FaultedTransaction_ShouldEndTransactionAndReturnSessionToAutocommit()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -163,7 +163,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_PartiallyAppliedStatementFails_ShouldUndoTheWholeTransaction()
     {
         // Arrange: Required demands an Int64 'age' on every Required node, so the second node of the insert fails.
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
@@ -190,7 +190,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_FaultedTransaction_ShouldNotBlockOtherWriters()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var failed = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -213,7 +213,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_AutocommitFailure_ShouldLeaveSessionUsable()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep)");
@@ -234,7 +234,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_RepeatedRefusals_ShouldKeepOriginalCause()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -255,7 +255,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_ParseFailureInsideTransaction_ShouldAbortTransaction()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -280,7 +280,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_CanceledInsideTransaction_ShouldAbortTransaction()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
@@ -311,7 +311,7 @@ public sealed class GraphTransactionFailureTests
     public async Task DisposeAsync_SessionWithFaultedTransaction_ShouldEndTransaction()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -333,7 +333,7 @@ public sealed class GraphTransactionFailureTests
     public async Task TypedOperations_InvalidArgumentsInsideTransaction_ShouldLeaveTransactionActive()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var seed = await database.CreateNodeAsync(session, ["Keep"]);
@@ -369,7 +369,7 @@ public sealed class GraphTransactionFailureTests
     public async Task RollbackAsync_AfterEnd_ShouldBeNoOpUnlessCommitted()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var rolledBack = await session.BeginTransactionAsync();
@@ -395,7 +395,7 @@ public sealed class GraphTransactionFailureTests
     public async Task EndAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionActive()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -424,7 +424,7 @@ public sealed class GraphTransactionFailureTests
     public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -450,7 +450,7 @@ public sealed class GraphTransactionFailureTests
     public async Task CommitAsync_AgainAfterAbortedCommit_ShouldReportTheCodedCause()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -485,7 +485,7 @@ public sealed class GraphTransactionFailureTests
     public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -524,7 +524,7 @@ public sealed class GraphTransactionFailureTests
     public async Task DisposeAsync_SessionWithRunningStatement_ShouldAbortItAndReportItsCause()
     {
         // Arrange: another transaction holds the writer lock, so the session's statement waits.
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         var session = await database.CreateSessionAsync();
@@ -559,7 +559,7 @@ public sealed class GraphTransactionFailureTests
     public async Task CommitAsync_WhileStatementRuns_ShouldBeRefusedAndLeaveTheTransactionActive()
     {
         // Arrange: another transaction holds the writer lock, so the statement waits.
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var session = await database.CreateSessionAsync();
@@ -592,7 +592,7 @@ public sealed class GraphTransactionFailureTests
     public async Task BeginTransactionAsync_WhileActiveOrClosed_ShouldRefuseBeforeTheIsolationLevel()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -621,7 +621,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_OnClosedSession_ShouldRefuseWithOneMessage()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
@@ -656,7 +656,7 @@ public sealed class GraphTransactionFailureTests
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -697,7 +697,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
@@ -734,7 +734,7 @@ public sealed class GraphTransactionFailureTests
     public async Task ExecuteAsync_WhileAnotherStatementRuns_ShouldBeRefusedAndLeaveItRunning()
     {
         // Arrange: another transaction holds the writer lock, so the session's statement waits.
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var session = await database.CreateSessionAsync();
@@ -778,7 +778,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
@@ -808,7 +808,7 @@ public sealed class GraphTransactionFailureTests
         await other.DisposeAsync();
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -834,7 +834,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
@@ -853,7 +853,7 @@ public sealed class GraphTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -877,7 +877,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -895,7 +895,7 @@ public sealed class GraphTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -919,7 +919,7 @@ public sealed class GraphTransactionFailureTests
     public async Task RollbackAsync_UndoDeferred_ShouldHoldWriterLockUntilThePurgePassAndKeepCheckpointsRunning()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -964,7 +964,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange: a rollback whose undo could not touch the pages another storage bracket held,
         // and a writer waiting for the lock.
-        await using var engine = GraphDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -1000,7 +1000,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
-        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        var engine = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("graph");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -1019,7 +1019,7 @@ public sealed class GraphTransactionFailureTests
 
         // Act: the close retries the undo, which fails the same way.
         var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
-        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        await using var reopened = GraphDatabaseEngine.Create("graph-engine", QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -1040,7 +1040,7 @@ public sealed class GraphTransactionFailureTests
     public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 

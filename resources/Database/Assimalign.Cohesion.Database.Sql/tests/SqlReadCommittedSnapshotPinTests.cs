@@ -255,7 +255,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "rc-snapshot-pin" });
+        => SqlDatabaseEngine.Create("rc-snapshot-pin", new SqlDatabaseEngineOptions());
 
     private static async Task<SqlDatabase> CreateDatabaseAsync(SqlDatabaseEngine engine, bool indexed)
     {

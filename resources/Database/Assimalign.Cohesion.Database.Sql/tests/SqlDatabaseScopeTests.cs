@@ -20,7 +20,7 @@ public sealed class SqlDatabaseScopeTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Scope: A session cannot address another database")]
     public async Task Session_ShouldRemainBoundToOneDatabase()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "scope" });
+        await using var engine = SqlDatabaseEngine.Create("scope", new SqlDatabaseEngineOptions());
         var first = await engine.CreateDatabaseAsync("first");
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();
@@ -63,7 +63,7 @@ public sealed class SqlDatabaseScopeTests
     [InlineData("SHUTDOWN")]
     public async Task Session_ShouldRejectServerScope(string statement)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "scope" });
+        await using var engine = SqlDatabaseEngine.Create("scope", new SqlDatabaseEngineOptions());
         var first = await engine.CreateDatabaseAsync("first");
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();

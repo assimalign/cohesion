@@ -707,13 +707,27 @@ is implemented as `AddDocuments(name, engine => ...)` on
 `IDatabaseApplicationBuilder`. This replaces `AddDocumentDatabase`. The engine name is the
 verb's first argument (owner decision 52 of 2026-10-09): the verb reserves it through the root
 seam's named `AddEngine(name, factory)`, so a duplicate fails at the call, and the builder
-created for it reports it as `Name`; its `EngineName` starts as that name and the build refuses any
-other value until B3 removes it. The model callback
+created for it reports it as `Name`; no options type carries the name (B3 of the engine extensibility design). The model callback
 runs during application Build and receives the sealed `DocumentDatabaseEngineBuilder`.
-It configures the complete option set, including `FileSystemPath? RootPath`,
-durability, identity and worker intervals; it neither binds configuration nor
-accesses a service container. Retained builder options and factories reject
-mutation after the first engine Build attempt.
+It sets the engine's settings on `Options`, a `DocumentDatabaseEngineOptions` with the complete
+option set, including `FileSystemPath? RootPath`, durability and worker intervals; it neither
+binds configuration nor accesses a service container. Since B3 the builder has the SQL builder's
+engine-level shape:
+
+- `Options` is values only. `Build` copies it before anything is created and checks the copy, so a
+  change made after the build began never reaches the engine; the properties that mirrored the
+  options on the builder are gone.
+- `AddDatabase(name)` declares a database the engine owns. The build opens it, or creates it when
+  `OpenDatabaseAsync` throws the root's `DatabaseNotFoundException`, in declaration order, after the
+  workers and servers are attached; a failure disposes the engine. A second declaration of the same
+  name (ignoring case) is refused at the call, and the built engine refuses to drop a declared
+  database with `DatabaseObjectLockedException` (owner decision 56 of 2026-10-09), worded as the
+  SQL engine words it.
+- The model has no server of its own, so there is no `AddServer(options => ...)`; a server
+  factory still composes any `DatabaseServer` over the engine.
+- `Build()` bridges `BuildAsync(CancellationToken)` on the thread pool; the token is observed
+  before the engine is created and before each declared database. Factories and declarations
+  reject mutation after the first build attempt.
 
 `AddWorker` and `AddServer` take factories typed over the engine
 (`Func<DocumentDatabaseEngine, DatabaseEngineWorker>`,
@@ -727,7 +741,9 @@ on subsequent construction failure. Nested servers must front that exact engine.
 The application snapshots each engine's Servers for start/stop; disposing the
 engine disposes its servers and custom workers.
 
-`DocumentDatabaseEngine.Create(options)` remains the standalone entry point.
+`DocumentDatabaseEngine.Create(name, options)` remains the standalone entry point; it keeps a copy of
+its options, and every option refusal names the engine and the option
+(`Document engine '{name}': CheckpointJournalSize must not be negative.`).
 Application factory registrations are application-owned; instance registrations
 remain caller-owned, including their nested components. All four named database
 operations now take `DatabaseName`, with the existing implicit string conversion
@@ -839,8 +855,8 @@ session leaf.
   in "One or more document databases failed to close." when there are several. The engine's
   guards check an empty name, then disposal, then the token, and the model's
   single-file-name-component rule after them (it checked the whole name, then the token, then
-  disposal); `GetDatabasesAsync` checks disposal when it is called; a blank `EngineName` is
-  refused by `Create` and `Build` (`ArgumentException`, parameter `EngineName`); a worker whose
+  disposal); `GetDatabasesAsync` checks disposal when it is called; a blank engine name is refused by `Create` and
+  `CreateBuilder` (`ArgumentException`, parameter `name`; it was the options' `EngineName` until B3); a worker whose
   name another worker of the engine has is refused (the model never checked names); and each
   worker's pump thread is named for the worker (it was `{engine}/{kind}`).
 - **Unchanged for Documents**, though the bases now carry it: the "already active" message (the

@@ -5,7 +5,8 @@ versioned UTF-8 JSON documents. Each session is bound to one database. The engin
 supports document CRUD, an explicit OQL query and index-DDL subset, secondary B+Tree indexes,
 snapshot and read-committed transactions, and durable file or in-memory storage.
 
-The public entry point is `DocumentDatabaseEngine.Create(options)`. A created database is a
+The public entry points are `DocumentDatabaseEngine.Create(name, options)` and the builder from
+`DocumentDatabaseEngine.CreateBuilder(name)`; no options type carries the engine name. A created database is a
 `DocumentDatabase`; open a `DocumentDatabaseSession`, create or get a collection through it, and
 use the `DocumentCollection` methods. Collection operations exist only on the session
 (`session.CreateCollectionAsync` and its siblings; owner decision 32): they run in the session's
@@ -26,7 +27,7 @@ decides the unconfirmed commit (#1243). `BufferPoolCapacity` (32 MiB), `Checkpoi
 operations".
 
 ```csharp
-await using var engine = DocumentDatabaseEngine.Create(new());
+await using var engine = DocumentDatabaseEngine.Create("shop-documents", new());
 var database = await engine.CreateDatabaseAsync("shop");
 await using var session = await database.CreateSessionAsync();
 var orders = await session.CreateCollectionAsync("orders");
@@ -37,8 +38,10 @@ var result = await session.ExecuteAsync("SELECT o.customer.name FROM orders o WH
 
 `AddDocuments(name, engine => ...)` captures engine construction on the root
 `IDatabaseApplicationBuilder` and returns that application builder. During Build,
-the callback configures the sealed `DocumentDatabaseEngineBuilder`, including deferred worker
-and server factories typed over `DocumentDatabaseEngine`. The application owns the resulting
+the callback configures the sealed `DocumentDatabaseEngineBuilder`: its `Options` (copied at
+build), the databases it declares (`AddDatabase(name)`: opened or created by the build, never
+dropped while declared), and deferred worker and server factories typed over
+`DocumentDatabaseEngine`. The application owns the resulting
 engine and its nested components. The model has no Hosting dependency. Standalone Create
 remains available; all four built-in workers start with engine creation and stop when the
 engine is disposed.

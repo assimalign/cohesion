@@ -26,7 +26,7 @@ public sealed class SqlSubqueryBindingDiagnosticTests
     public async Task Execute_UnqualifiedOuterReference_ShouldReturnUnsupportedDiagnostic(string sql, bool emptyOuter)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "subquery-binding" });
+        await using var engine = SqlDatabaseEngine.Create("subquery-binding", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE outer_rows (outer_key INT);", cancellationToken: CancellationToken.None);

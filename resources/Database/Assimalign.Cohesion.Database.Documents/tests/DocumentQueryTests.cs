@@ -20,7 +20,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Nested_paths_arrays_and_missing_fields_keep_document_shapes()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -45,7 +45,7 @@ public sealed class DocumentQueryTests
     [InlineData(128)]
     public async Task Query_parsing_accepts_the_same_document_depth_as_storage(int depth)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -66,7 +66,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Mixed_shape_grouping_aggregates_and_having_are_deterministic()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -90,7 +90,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Arrays_objects_and_mixed_scalar_types_have_structural_group_keys()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -109,7 +109,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Grouping_resolves_iteration_aliases_and_preserves_constant_scalar_types()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -132,7 +132,7 @@ public sealed class DocumentQueryTests
     [InlineData("score >= @minimum", false)]
     public async Task Eligible_equality_and_ranges_use_indexes_and_match_scan_results(string predicate, bool equality)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -166,7 +166,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Nested_array_indexes_remain_correct_after_replace_delete_and_rollback()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -191,7 +191,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Index_ddl_uses_the_same_quoted_property_path_grammar_as_where()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -214,7 +214,7 @@ public sealed class DocumentQueryTests
         Directory.CreateDirectory(root);
         try
         {
-            await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root }))
             {
                 var seedDatabase = await engine.CreateDatabaseAsync("test");
                 await using var seedSession = await seedDatabase.CreateSessionAsync();
@@ -229,7 +229,7 @@ public sealed class DocumentQueryTests
                 }, CancellationToken.None);
             }
 
-            await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = DocumentDatabaseEngine.Create("document-engine", new() { RootPath = root });
             var database = await reopened.OpenDatabaseAsync("test");
             const string query = "SELECT name FROM items WHERE \"postal-code\" = 2";
 
@@ -247,7 +247,7 @@ public sealed class DocumentQueryTests
     [InlineData("score = @minimum", "\uD800\uDC00")]
     public async Task String_index_order_matches_ordinal_utf16_for_supplementary_characters(string predicate, string minimum)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -269,7 +269,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Boolean_index_ranges_do_not_match_other_scalar_domains()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -289,7 +289,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Null_missing_and_or_predicates_keep_scan_semantics_when_indexes_exist()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -307,7 +307,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Ordering_ties_follow_identity_and_scalar_documents_round_trip()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         var collection = await session.CreateCollectionAsync("items");
@@ -327,7 +327,7 @@ public sealed class DocumentQueryTests
     [InlineData("SELECT name FROM items HAVING name = 'a'")]
     public async Task Invalid_aggregate_contexts_are_rejected_before_execution(string query)
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         await session.CreateCollectionAsync("items");
@@ -337,7 +337,7 @@ public sealed class DocumentQueryTests
     [Fact]
     public async Task Direct_requests_cannot_bypass_parse_diagnostics()
     {
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
         await session.CreateCollectionAsync("items");

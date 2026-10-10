@@ -18,7 +18,7 @@ public sealed class GraphQueryTests
     [InlineData("CREATE")]
     public async Task InsertionProjectionAndPropertyPredicates_ExecuteEveryAdvertisedClause(string verb)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("queries");
         await using var session = await database.CreateSessionAsync();
         var created = await Rows(session, $"{verb} (a:Person {{name: 'Alice', age: 42, active: TRUE, optional: NULL}}) RETURN a");
@@ -48,7 +48,7 @@ public sealed class GraphQueryTests
     [InlineData("(a:Person {name: 'Bob'})-[r:KNOWS]-(b)", "Bob", "Alice")]
     public async Task PatternDirections_PreserveStoredRelationshipEndpoints(string pattern, string first, string second)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("directions");
         await using var session = await database.CreateSessionAsync();
         var inserted = (await Rows(session, "INSERT (a:Person {name: 'Alice'})-[r:KNOWS {weight: 2}]->(b:Person {name: 'Bob'}) RETURN a, r, b")).Single();
@@ -67,7 +67,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task MatchCreate_ReusesBoundEndpointsAndDoesNotDuplicateNodes()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("bound");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Person {name: 'Alice'}), (:Person {name: 'Bob'})");
@@ -83,7 +83,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task FiniteMatch_OnCycleAllowsRepeatedNodesAndNeverRepeatsARelationship()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("cycle");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (a:Vertex {name: 'A'})-[:LINK]->(b:Vertex {name: 'B'})-[:LINK]->(c:Vertex {name: 'C'})-[:LINK]->(a)");
@@ -102,7 +102,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task SelfLoop_IsEmittedOnceAndCannotFillTwoHops()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("loop");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (a:Vertex {name: 'A'})-[r:LINK]->(a)");
@@ -117,7 +117,7 @@ public sealed class GraphQueryTests
     [InlineData("MATCH (a)-[:LINK]->(b:Vertex)-[:LINK]->(c) WHERE 'B' = b.name RETURN a.name, b.name, c.name")]
     public async Task MultiHopPlan_AnchorsAtAnIndexedMiddleNodeAndReturnsCorrectPath(string query)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("indexed");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (a:Vertex {name: 'A'})-[:LINK]->(b:Vertex {name: 'B'})-[:LINK]->(c:Vertex {name: 'C'}), (:Vertex {name: 'D'})");
@@ -135,7 +135,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task PropertyIndex_IsMaintainedForEveryInsertionAndDeletionPath()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("maintained");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Person {name: 'seed'})");
@@ -161,7 +161,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task RestrictedDelete_RollsBackEarlierDeletesInTheSameStatement()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("restricted");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Person {name: 'isolated'}), (a:Person {name: 'connected'})-[:LINK]->(b:Other {name: 'target'})");
@@ -174,7 +174,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task DetachDelete_IsAtomicWithEndpointAdjacencyAndRollback()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("detach");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (a:Vertex {name: 'A'})-[:LINK]->(b:Vertex {name: 'B'})-[:LINK]->(c:Vertex {name: 'C'}), (b)-[:LINK]->(b)");
@@ -197,7 +197,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task ExplicitRelationshipDelete_AllowsRestrictedNodeDelete()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("explicit");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (a:Vertex {name: 'A'})-[r:LINK]->(b:Vertex {name: 'B'})");
@@ -213,7 +213,7 @@ public sealed class GraphQueryTests
     [InlineData("INSERT (a)-[r]->(b)", "COHDBG001")]
     public async Task BindingAndSchemaDiagnostics_HaveStableCodes(string query, string code)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("diagnostics");
         await using var session = await database.CreateSessionAsync();
         var exception = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query));
@@ -224,7 +224,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task DirectParsedRequest_CannotBypassUnsupportedClauseDiagnostics()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("capability");
         await using var session = await database.CreateSessionAsync();
         var parsed = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH (a) RETURN a LIMIT 2");
@@ -235,7 +235,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task FiniteFloatingPointLiterals_AreComparableAcrossTheirAcceptedRange()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("numeric");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Number {value: 1e100}), (:Number {value: 1e-100}), (:Number {value: 2e-100})");
@@ -254,7 +254,7 @@ public sealed class GraphQueryTests
     [Fact]
     public async Task NumericIndexCandidateCollisions_PreserveExactIntegerEquality()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("integer-collision");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Number {value: 9007199254740992}), (:Number {value: 9007199254740993})");
@@ -270,7 +270,7 @@ public sealed class GraphQueryTests
     [Fact(DisplayName = "Cohesion Test [Graph] - Direct AST: direction and shape rules cannot be bypassed")]
     public async Task Execute_DirectAst_ShouldEnforceDirectionAndShapeRules()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("ast-bounds");
         await using var session = await database.CreateSessionAsync();
         GqlNodePattern node = new("a", [], new Dictionary<string, object?>());

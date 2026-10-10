@@ -41,7 +41,7 @@ public sealed class KeyValueWorkerResilienceTests
     {
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -205,7 +205,7 @@ public sealed class KeyValueWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var stalled = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -264,7 +264,7 @@ public sealed class KeyValueWorkerResilienceTests
     {
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
@@ -321,7 +321,7 @@ public sealed class KeyValueWorkerResilienceTests
         var options = Options(strategy);
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
@@ -366,7 +366,7 @@ public sealed class KeyValueWorkerResilienceTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         await PutAsync(failing, 0, 10);
@@ -444,7 +444,7 @@ public sealed class KeyValueWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; one writer holds the database writer lock in
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
@@ -528,7 +528,7 @@ public sealed class KeyValueWorkerResilienceTests
         using var deadline = new CancellationTokenSource(Timeout);
         CancellationToken token = deadline.Token;
         var interval = TimeSpan.FromMilliseconds(20);
-        await using var engine = KeyValueDatabaseEngine.Create(new()
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new()
         {
             CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
         });
@@ -593,7 +593,7 @@ public sealed class KeyValueWorkerResilienceTests
         string root = Path.Combine(Path.GetTempPath(), "cohesion-kv-reopen-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await using var engine = KeyValueDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", onDisk ? new() { RootPath = root } : new());
             var database = await engine.CreateDatabaseAsync(Failing);
             await PutAsync(database, 0, 20);
             var session = await database.CreateSessionAsync();
@@ -655,7 +655,7 @@ public sealed class KeyValueWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms and records a failure for a database whose
         // page writes fail.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await engine.CreateDatabaseAsync(Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -708,7 +708,7 @@ public sealed class KeyValueWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -779,7 +779,7 @@ public sealed class KeyValueWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
@@ -844,7 +844,7 @@ public sealed class KeyValueWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = 0;
         options.JournalSizeLimit = 4 * PaceJournalSize;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var database = await engine.CreateDatabaseAsync(Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -891,7 +891,7 @@ public sealed class KeyValueWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -940,7 +940,7 @@ public sealed class KeyValueWorkerResilienceTests
         var clock = new ManualTimeProvider();
         var options = Options(new FaultInjectingJournalStorageStrategy());
         options.TimeProvider = clock;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         await engine.CreateDatabaseAsync(Failing);
         await engine.CreateDatabaseAsync(Healthy);
         var worker = (KeyValueVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -1004,7 +1004,7 @@ public sealed class KeyValueWorkerResilienceTests
         options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var failing = await engine.CreateDatabaseAsync(Failing);
         var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = (KeyValueVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
@@ -1049,13 +1049,13 @@ public sealed class KeyValueWorkerResilienceTests
         // Arrange
         var defaults = new KeyValueDatabaseEngineOptions();
         var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
-        builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
-        builder.WorkerFailureMinimumPasses = 4;
-        builder.JournalSizeLimit = 512L * 1024 * 1024;
+        builder.Options.WorkerFailureWindow = TimeSpan.FromSeconds(30);
+        builder.Options.WorkerFailureMinimumPasses = 4;
+        builder.Options.JournalSizeLimit = 512L * 1024 * 1024;
 
         // Act
-        await using var engine = KeyValueDatabaseEngine.Create(new());
-        await using var timeOnly = KeyValueDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new());
+        await using var timeOnly = KeyValueDatabaseEngine.Create("keyvalue-engine", new() { CheckpointJournalSize = 0 });
         await using var built = builder.Build();
 
         // Assert: a hundred seconds across at least three failed passes (owner decision 42), and
@@ -1072,15 +1072,15 @@ public sealed class KeyValueWorkerResilienceTests
         built.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(30));
         built.WorkerFailureMinimumPasses.ShouldBe(4);
         built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { WorkerFailureWindow = TimeSpan.Zero }))
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new() { WorkerFailureWindow = TimeSpan.Zero }))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.WorkerFailureWindow));
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { WorkerFailureMinimumPasses = 0 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new() { WorkerFailureMinimumPasses = 0 }))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.WorkerFailureMinimumPasses));
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { JournalSizeLimit = -1 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new() { JournalSizeLimit = -1 }))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.JournalSizeLimit));
-        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.JournalSizeLimit));
     }
 
@@ -1119,7 +1119,7 @@ public sealed class KeyValueWorkerResilienceTests
             var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
             var options = Options(strategy);
             options.CheckpointJournalSize = PaceJournalSize;
-            await using var engine = KeyValueDatabaseEngine.Create(options);
+            await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
             var failing = await engine.CreateDatabaseAsync(Failing);
             var healthy = await engine.CreateDatabaseAsync(Healthy);
             var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);

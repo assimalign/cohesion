@@ -136,7 +136,7 @@ public sealed class SqlIndexReadIntegrityTests
     }
 
     private static SqlDatabaseEngine CreateEngine(FaultInjectingJournalSqlStorageStrategy? strategy)
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        => SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
             StorageStrategy = strategy,
             CheckpointInterval = TimeSpan.FromHours(1),

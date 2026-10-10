@@ -91,7 +91,7 @@ public sealed class OqlExecutionConformanceTests
                 parsed.Diagnostics.ShouldBeEmpty(context);
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
-                await using var engine = DocumentDatabaseEngine.Create(new());
+                await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
                 var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
                 var collection = await session.CreateCollectionAsync("items", cancellationToken);
@@ -141,7 +141,7 @@ public sealed class OqlExecutionConformanceTests
     public async Task Execute_InvalidAggregateContext_ReturnsIntendedErrorAsync(string statement, string message)
     {
         new OqlQueryParser().Parse(statement).Diagnostics.ShouldBeEmpty();
-        await using var engine = DocumentDatabaseEngine.Create(new());
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);

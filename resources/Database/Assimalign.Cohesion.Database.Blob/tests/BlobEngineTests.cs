@@ -21,7 +21,7 @@ public sealed class BlobEngineTests
     [Fact]
     public async Task Streaming_publish_is_atomic_and_metadata_is_preserved_across_replacement()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         byte[] original = Encoding.UTF8.GetBytes("original");
@@ -58,7 +58,7 @@ public sealed class BlobEngineTests
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: its container and blob operations join its transaction, which rolls back and commits chunks and catalog")]
     public async Task BeginTransactionAsync_SessionContainerOperations_ShouldRollBackAndCommitChunksAndCatalog()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "item", "old"u8.ToArray());
@@ -99,7 +99,7 @@ public sealed class BlobEngineTests
     public async Task RollbackAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionAndItsWritesIntact()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
@@ -128,7 +128,7 @@ public sealed class BlobEngineTests
     [InlineData(IsolationLevel.ReadCommitted, "after")]
     public async Task Session_reads_observe_requested_isolation(IsolationLevel level, string expected)
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "item", "before"u8.ToArray());
@@ -143,7 +143,7 @@ public sealed class BlobEngineTests
     [Fact]
     public async Task Stale_snapshot_writer_fails_without_losing_newer_version()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "item", "before"u8.ToArray());
@@ -162,7 +162,7 @@ public sealed class BlobEngineTests
     [Fact]
     public async Task Cancelled_stream_is_never_published()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         using var cancellation = new CancellationTokenSource();
@@ -177,7 +177,7 @@ public sealed class BlobEngineTests
     [Fact]
     public async Task Deleted_blob_releases_pages_after_read_snapshot_closes()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "large", new byte[100_000]);
@@ -196,7 +196,7 @@ public sealed class BlobEngineTests
     [Fact]
     public async Task Schema_owned_container_drop_has_sql_ownership_semantics()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         await database.Catalog.SaveContainerAsync(new BlobContainerMetadata(Guid.NewGuid(), "managed", DatabaseObjectOwner.Schema, "MediaSchema"), context);
@@ -216,7 +216,7 @@ public sealed class BlobEngineTests
     [Fact]
     public async Task Container_drop_is_transactional_and_stale_handles_cannot_address_recreated_container()
     {
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         var original = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(original, "item", new byte[20_000]);
@@ -237,7 +237,7 @@ public sealed class BlobEngineTests
         string path = Path.Combine(Path.GetTempPath(), "cohesion-blob-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var engine = BlobDatabaseEngine.Create(new() { RootPath = path });
+            var engine = BlobDatabaseEngine.Create("blob-engine", new() { RootPath = path });
             engine.Workers.Select(worker => worker.Kind).ShouldBe([
                 DatabaseEngineWorkerKind.WriteAheadFlush, DatabaseEngineWorkerKind.PageWriteBack,
                 DatabaseEngineWorkerKind.Checkpoint, DatabaseEngineWorkerKind.VersionPurge]);
@@ -250,7 +250,7 @@ public sealed class BlobEngineTests
             engine.Dispose();
             engine.State.ShouldBe(EngineState.Disposed);
             await Should.ThrowAsync<ObjectDisposedException>(async () => await container.OpenReadAsync("item"));
-            await using var reopened = BlobDatabaseEngine.Create(new() { RootPath = path });
+            await using var reopened = BlobDatabaseEngine.Create("blob-engine", new() { RootPath = path });
             var names = new List<string>();
             await foreach (var item in reopened.GetDatabasesAsync()) { names.Add(item.Name.ToString()); }
             names.ShouldBe(["Media"]);
@@ -286,7 +286,7 @@ public sealed class BlobEngineTests
         string root = Path.Combine(Path.GetTempPath(), "cohesion-blob-reopen-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await using var engine = BlobDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            await using var engine = BlobDatabaseEngine.Create("blob-engine", onDisk ? new() { RootPath = root } : new());
             var database = await engine.CreateDatabaseAsync("media");
             var files = await AutocommitContainer.CreateAsync(database, "files");
             await WriteAsync(files, "small", "small"u8.ToArray());
@@ -347,7 +347,7 @@ public sealed class BlobEngineTests
         try
         {
             // Arrange: a closed database whose page 0 names storage format 2, the format before #1253.
-            await using (var engine = BlobDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = BlobDatabaseEngine.Create("blob-engine", new() { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
                 var container = await AutocommitContainer.CreateAsync(database, "files");
@@ -358,7 +358,7 @@ public sealed class BlobEngineTests
             var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
             // Act
-            await using var reopened = BlobDatabaseEngine.Create(new() { RootPath = root });
+            await using var reopened = BlobDatabaseEngine.Create("blob-engine", new() { RootPath = root });
             var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
 
             // Assert: the storage's coded refusal, named for the database; nothing written.
@@ -385,7 +385,7 @@ public sealed class BlobEngineTests
     public async Task TryGetDatabase_OutVarAndBaseTypedOut_ShouldBindTheTypedAndTheBaseLookups()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new());
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
 
         // Act
@@ -413,7 +413,7 @@ public sealed class BlobEngineTests
     public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
     {
         // Arrange
-        var engine = BlobDatabaseEngine.Create(new());
+        var engine = BlobDatabaseEngine.Create("blob-engine", new());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
         var canceledOpen = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("test", canceled.Token));
@@ -479,9 +479,8 @@ public sealed class BlobEngineTests
 
         static async Task<BlobDatabaseEngine> CreateWithWritesAsync(string name, int databases)
         {
-            var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions
+            var engine = BlobDatabaseEngine.Create(name, new BlobDatabaseEngineOptions
             {
-                EngineName = name,
                 StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
                 CheckpointInterval = TimeSpan.FromHours(1),
                 PageWriteBackInterval = TimeSpan.FromHours(1),

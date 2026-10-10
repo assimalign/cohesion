@@ -73,7 +73,7 @@ public sealed class SqlBoundExpressionTests
     public async Task ExecuteAsync_FailingTermBehindShortCircuit_ShouldFailOnlyWhenReached(string term, string failure)
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-deferred" });
+        await using var engine = SqlDatabaseEngine.Create("sql-bound-deferred", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("bound");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT)");
@@ -102,7 +102,7 @@ public sealed class SqlBoundExpressionTests
     {
         // Arrange
         const string query = "SELECT id FROM t WHERE ('a' IN (SELECT s FROM u)) || 'x' = 'falsex'";
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-in-collation" });
+        await using var engine = SqlDatabaseEngine.Create("sql-bound-in-collation", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("bound");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT)");
@@ -127,7 +127,7 @@ public sealed class SqlBoundExpressionTests
     public async Task ExecuteAsync_Check_ShouldEvaluateTheTreeBoundOncePerTableVersion()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-check" });
+        await using var engine = SqlDatabaseEngine.Create("sql-bound-check", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("bound");
         await using var first = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await using var second = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
@@ -157,7 +157,7 @@ public sealed class SqlBoundExpressionTests
     public async Task ExecuteAsync_AddColumnDefault_ShouldReadTheValueBoundOncePerTableVersion()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-default" });
+        await using var engine = SqlDatabaseEngine.Create("sql-bound-default", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("bound");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT)");
@@ -191,7 +191,7 @@ public sealed class SqlBoundExpressionTests
     public async Task ExecuteAsync_UnconvertibleDefault_ShouldFailOnlyWhenUsed()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-bound-default-failure" });
+        await using var engine = SqlDatabaseEngine.Create("sql-bound-default-failure", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("bound");
         await database.Catalog.CreateTableAsync("dbo", "d",
         [

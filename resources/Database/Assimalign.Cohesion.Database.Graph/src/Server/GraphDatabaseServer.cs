@@ -54,6 +54,9 @@ public sealed class GraphDatabaseServer : DatabaseServer
     private GraphDatabaseServer(GraphDatabaseEngine engine, GraphDatabaseServerOptions options)
         : base(engine)
     {
+        // The server keeps a copy, checked here, as the engine keeps a copy of its options (B3 of
+        // the engine extensibility design): the sessions read the limits and timeouts live.
+        options = options.Snapshot();
         if (options.Listener is null)
         {
             throw new ArgumentException("A connection listener is required.", nameof(options));
@@ -74,6 +77,12 @@ public sealed class GraphDatabaseServer : DatabaseServer
     /// </summary>
     public new GraphDatabaseEngine Engine => _engine;
 
+    /// <summary>
+    /// Gets the server's own copy of the options it was created with, as
+    /// <see cref="GraphDatabaseEngine.EngineOptions"/> exposes the engine's.
+    /// </summary>
+    internal GraphDatabaseServerOptions ServerOptions => _options;
+
     /// <inheritdoc />
     public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
 
@@ -82,7 +91,10 @@ public sealed class GraphDatabaseServer : DatabaseServer
     /// is inert until <see cref="DatabaseServer.StartAsync"/> is called.
     /// </summary>
     /// <param name="engine">The Graph engine the server fronts. The composition root owns and disposes the engine.</param>
-    /// <param name="options">The composition options. Requires a configured <see cref="GraphDatabaseServerOptions.Listener"/>.</param>
+    /// <param name="options">
+    /// The composition options. Requires a configured <see cref="GraphDatabaseServerOptions.Listener"/>.
+    /// The server keeps a copy, so a later change to this object does not reach it.
+    /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>

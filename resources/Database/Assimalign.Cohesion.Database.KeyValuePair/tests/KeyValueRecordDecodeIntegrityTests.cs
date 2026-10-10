@@ -117,9 +117,8 @@ public sealed class KeyValueRecordDecodeIntegrityTests
     }
 
     private static KeyValueDatabaseEngine CreateEngine()
-        => KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        => KeyValueDatabaseEngine.Create("kv-record-decode", new KeyValueDatabaseEngineOptions
         {
-            EngineName = "kv-record-decode",
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),

@@ -107,7 +107,7 @@ public sealed class GqlProfileExecutionTests
                 var statement = new GqlQueryParser().Parse(executionCase.Statement).ShouldBeOfType<GqlQueryStatement>();
                 statement.Diagnostics.ShouldBeEmpty($"{clause}: {executionCase.Statement}");
                 UsesClause(clause, statement.GqlExpression).ShouldBeTrue($"The {clause} case must exercise its clause: {executionCase.Statement}");
-                await using var engine = GraphDatabaseEngine.Create(new());
+                await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
                 var database = await engine.CreateDatabaseAsync("audit", token);
                 await using var session = await database.CreateSessionAsync(token);
                 await GraphSchema.Open(database, session).SaveLabelAsync(new(_personLabelId, "Person"), token);
@@ -143,7 +143,7 @@ public sealed class GqlProfileExecutionTests
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
     {
         new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("boundary", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var error = await Should.ThrowAsync<DatabaseParseException>(async () =>

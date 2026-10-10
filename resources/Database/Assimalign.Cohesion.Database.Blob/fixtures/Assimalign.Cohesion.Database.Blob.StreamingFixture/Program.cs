@@ -44,9 +44,8 @@ internal static class Program
     }
 
     private static BlobDatabaseEngine CreateEngine(string root)
-        => BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions
+        => BlobDatabaseEngine.Create("blob-process-fixture", new BlobDatabaseEngineOptions
         {
-            EngineName = "blob-process-fixture",
             RootPath = root,
             CheckpointInterval = TimeSpan.FromHours(1),
 

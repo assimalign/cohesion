@@ -18,7 +18,7 @@ public sealed class SqlAddColumnLayoutTests
     public async Task AddColumn_DefaultThenDropOtherColumn_ShouldPreserveValues()
     {
         // Arrange: the old rows have no stored component for extra.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-layout" });
+        await using var engine = SqlDatabaseEngine.Create("add-layout", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("layout");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT, obsolete TEXT, payload TEXT);");
@@ -49,7 +49,7 @@ public sealed class SqlAddColumnLayoutTests
     public async Task AddColumn_AfterDropSameName_ShouldUseNewDefault()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-readd" });
+        await using var engine = SqlDatabaseEngine.Create("add-readd", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("readd");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT, extra INT);");
@@ -75,7 +75,7 @@ public sealed class SqlAddColumnLayoutTests
     public async Task AddColumn_NotNullAfterDelete_ShouldKeepOlderSnapshotReadable()
     {
         // Arrange: the snapshot pins a version which DELETE removes from the current table.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-deleted-version" });
+        await using var engine = SqlDatabaseEngine.Create("add-deleted-version", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("deleted-version");
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await using var reader = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);

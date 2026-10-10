@@ -16,7 +16,7 @@ public sealed class GraphDatabaseScopeTests
     [InlineData("MATCH (a:Person) AT other RETURN a")]
     public async Task Every_operation_checks_database_binding_and_Gql_cannot_reach_server_scope(string command)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         await using var session = await own.CreateSessionAsync();
@@ -50,7 +50,7 @@ public sealed class GraphDatabaseScopeTests
     public async Task CreateNodeAsync_NullOrForeignSession_ShouldRefuseByArgumentOrCode()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
         await using var foreign = await other.CreateSessionAsync();

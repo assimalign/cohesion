@@ -74,7 +74,7 @@ public sealed class SqlTemporalKeyIdentityTests
     {
         // Arrange: identical rows behind a scan, a maintained index, a built
         // index, and (one value per tick count) a primary key and its scan twin.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-timestamp" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-timestamp", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-timestamp");
         await using var session = await database.CreateSessionAsync();
         object?[][] keyed = [[1, Noon], [4, Utc(Noon.AddHours(-1))], [6, Local(Noon.AddHours(1))], [8, Utc(Noon.AddHours(2))]];
@@ -102,7 +102,7 @@ public sealed class SqlTemporalKeyIdentityTests
     public async Task TimestampWithTimeZone_SeeksAndScans_ShouldAgreeAcrossOffsets()
     {
         // Arrange.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-instant" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-instant", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-instant");
         await using var session = await database.CreateSessionAsync();
         object?[][] keyed =
@@ -132,7 +132,7 @@ public sealed class SqlTemporalKeyIdentityTests
     {
         // Arrange: the temporal component both inside the equality prefix
         // (tenant, at) and as the range column after it.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-composite" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-composite", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-composite");
         await using var session = await database.CreateSessionAsync();
         foreach (string table in new[] { "scanned", "indexed" })
@@ -189,7 +189,7 @@ public sealed class SqlTemporalKeyIdentityTests
     public async Task UniqueTimestamp_ShouldRejectEqualTicksOfAnotherKind()
     {
         // Arrange.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-unique-ts" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-unique-ts", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-unique-ts");
         await using var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE unique_ts (id INT, ts TIMESTAMP UNIQUE)");
@@ -228,7 +228,7 @@ public sealed class SqlTemporalKeyIdentityTests
     public async Task UniqueTimestampWithTimeZone_ShouldRejectSameInstantAtAnotherOffset()
     {
         // Arrange.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-unique-at" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-unique-at", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-unique-at");
         await using var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE unique_at (id INT, at TIMESTAMPTZ UNIQUE)");
@@ -263,7 +263,7 @@ public sealed class SqlTemporalKeyIdentityTests
     {
         // Arrange: parents keyed by TIMESTAMP and TIMESTAMPTZ, children that
         // reference them with equal values in another kind or offset.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-references" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-references", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-references");
         await using var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE days (ts TIMESTAMP PRIMARY KEY)");
@@ -297,7 +297,7 @@ public sealed class SqlTemporalKeyIdentityTests
     public async Task Rows_ShouldKeepWrittenKindAndOffset_WhileKeysHoldIdentity()
     {
         // Arrange.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-roundtrip" });
+        await using var engine = SqlDatabaseEngine.Create("temporal-roundtrip", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("temporal-roundtrip");
         await using var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE t (id INT, ts TIMESTAMP, at TIMESTAMPTZ)");
@@ -330,7 +330,7 @@ public sealed class SqlTemporalKeyIdentityTests
         // Arrange: committed rows at two offsets, an uncommitted writer whose
         // records become durable through a later commit, then a crash.
         var strategy = new CrashCaptureSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-crash", StorageStrategy = strategy });
+        var engine = SqlDatabaseEngine.Create("temporal-crash", new SqlDatabaseEngineOptions { StorageStrategy = strategy });
         var database = await engine.CreateDatabaseAsync("crash-db");
         var session = await database.CreateSessionAsync();
         await ExecuteAsync(session, "CREATE TABLE t (id INT, at TIMESTAMPTZ)");
@@ -343,7 +343,7 @@ public sealed class SqlTemporalKeyIdentityTests
         await ExecuteAsync(flusher, "INSERT INTO t VALUES (4, @p)", P(At(Instant, 9)));
 
         // Act.
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "temporal-crash-reopen", StorageStrategy = strategy.CaptureDurableImages() });
+        var reopenedEngine = SqlDatabaseEngine.Create("temporal-crash-reopen", new SqlDatabaseEngineOptions { StorageStrategy = strategy.CaptureDurableImages() });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("crash-db");
 

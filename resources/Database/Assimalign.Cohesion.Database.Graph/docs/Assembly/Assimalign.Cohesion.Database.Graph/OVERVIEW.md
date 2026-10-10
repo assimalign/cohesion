@@ -1,12 +1,14 @@
 # Graph public API
 
-- `GraphDatabaseEngine.Create(options)` creates an operational engine, a sealed leaf of the root
+- `GraphDatabaseEngine.Create(name, options)` creates an operational engine, a sealed leaf of the root
   `DatabaseEngine`, whose lifecycle the base defines; `Workers` exposes the four maintenance
   duties. Dispose the engine to flush and release all databases. `CreateDatabaseAsync`,
   `OpenDatabaseAsync`, `GetDatabasesAsync` and `TryGetDatabase` return the typed `GraphDatabase`.
-- `GraphDatabaseEngine.CreateBuilder(name)` returns the sealed `GraphDatabaseEngineBuilder`: options
-  and nested component factories typed over the engine, for standalone construction or a
-  hosting-aware engine factory.
+- `GraphDatabaseEngine.CreateBuilder(name)` returns the sealed `GraphDatabaseEngineBuilder`:
+  `Options` (copied at build), `AddDatabase(name)` (opened or created by the build, never dropped
+  while declared), `AddServer(options => ...)` and nested component factories typed over the
+  engine, and `Build`/`BuildAsync`, for standalone construction or a hosting-aware engine factory.
+  No options type carries the engine name.
 - `GraphDatabase` (a `DatabaseInstance`) takes an explicit `GraphDatabaseSession` in its node,
   relationship and traversal operations; the session's `BeginTransactionAsync` returns
   `GraphDatabaseTransaction`. `GraphNode` and `GraphRelationship` are immutable record structs with

@@ -47,7 +47,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_NodeLabelExpression_ShouldSelectExactRowsAsync(string gql, string expected)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
@@ -71,7 +71,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_EdgeLabelExpression_ShouldSelectExactRowsAsync(string gql, string expected)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
@@ -94,7 +94,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_EitherDirectionEdge_ShouldMatchBothOrientationsAsync(string edge)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:A {name: 'A'})-[:T]->(:B {name: 'B'})");
         var loopDatabase = await engine.CreateDatabaseAsync("loop", CancellationToken.None);
         await using var loop = await loopDatabase.CreateSessionAsync(CancellationToken.None);
@@ -119,7 +119,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_DirectedAbbreviatedEdge_ShouldKeepItsDirectionAsync(string edge, string expected)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:A {name: 'A'})-[:T]->(:B {name: 'B'})");
 
         // Act
@@ -137,7 +137,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Plan_LabelExpressionWithIndex_ShouldAnchorOnlyConjunctionsAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("anchors", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(
@@ -170,7 +170,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_InsertLabelConjunction_ShouldCreateOneNodeWithBothLabelsAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:A), (:B)");
 
         // Act
@@ -204,7 +204,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_GuessingInsertion_ShouldFailWithoutWritingAsync(string gql)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:A {name: 'a'}), (:B {name: 'b'})");
 
         // Act
@@ -236,7 +236,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_WhitespaceInsertName_ShouldFailWithoutWritingAsync(string gql)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:A {name: 'a'}), (:B {name: 'b'})");
 
         // Act
@@ -278,7 +278,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_UnknownLabelOrType_ShouldMatchNothingAndWarnAsync(string gql, string expected, string code, string name)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
@@ -298,7 +298,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_LabeledPredicate_ShouldFilterLikeThePatternAsync()
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
@@ -330,7 +330,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_LabeledPredicateOverUnusableVariable_ShouldFailAsync(string gql, string code)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
@@ -357,7 +357,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_CypherArrow_ShouldFailWithoutEffectAsync(string terminator)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:Person {name: 'Alice'})-[:KNOWS]->(:Person {name: 'Bob'}), (:P {name: 'p'})");
         string separator = Terminator(terminator);
         string[] statements =
@@ -402,7 +402,7 @@ public sealed class GqlLabelDirectionExecutionTests
     public async Task Execute_UnsupportedEdge_ShouldFailWithoutEffectAsync(string gql, string code)
     {
         // Arrange
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine, "INSERT (:Person {name: 'Alice'})-[:KNOWS]->(:Person {name: 'Bob'})");
 
         // Act

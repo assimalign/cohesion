@@ -38,7 +38,7 @@ public sealed class SqlLineCommentExecutionTests
 
         foreach (bool typed in new[] { false, true })
         {
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-line-comment-delete" });
+            await using var engine = SqlDatabaseEngine.Create("sql-line-comment-delete", new SqlDatabaseEngineOptions());
             await using var session = await SeedAsync(engine);
 
             // Act
@@ -67,7 +67,7 @@ public sealed class SqlLineCommentExecutionTests
 
         foreach (bool typed in new[] { false, true })
         {
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-line-comment-update" });
+            await using var engine = SqlDatabaseEngine.Create("sql-line-comment-update", new SqlDatabaseEngineOptions());
             await using var session = await SeedAsync(engine);
 
             // Act
@@ -97,7 +97,7 @@ public sealed class SqlLineCommentExecutionTests
     {
         // Arrange
         string sql = "DELETE FROM t WHERE id = 1 -- c" + Terminator(terminator) + "DELETE FROM t;";
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-line-comment-leftover" });
+        await using var engine = SqlDatabaseEngine.Create("sql-line-comment-leftover", new SqlDatabaseEngineOptions());
         await using var session = await SeedAsync(engine);
 
         // Act

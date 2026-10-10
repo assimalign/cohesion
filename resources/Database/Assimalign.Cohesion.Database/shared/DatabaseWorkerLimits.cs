@@ -51,6 +51,10 @@ internal static class DatabaseWorkerLimits
     /// <param name="workerFailureWindowName">The worker failure window option's name, for the exception.</param>
     /// <param name="workerFailureMinimumPassesName">The minimum of failed passes option's name, for the exception.</param>
     /// <param name="journalSizeLimitName">The journal size limit option's name, for the exception.</param>
+    /// <param name="engine">
+    /// The engine, as <see cref="DatabaseEngineOptionChecks.Describe"/> names it, which each refusal's
+    /// message starts with.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
     /// The worker failure window is not positive or is longer than
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>; the minimum of failed passes is less
@@ -58,16 +62,21 @@ internal static class DatabaseWorkerLimits
     /// journal size.
     /// </exception>
     internal static void Validate(TimeSpan workerFailureWindow, int workerFailureMinimumPasses, long journalSizeLimit, long checkpointJournalSize,
-        string workerFailureWindowName, string workerFailureMinimumPassesName, string journalSizeLimitName)
+        string workerFailureWindowName, string workerFailureMinimumPassesName, string journalSizeLimitName, string engine)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(workerFailureWindow, TimeSpan.Zero, workerFailureWindowName);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(workerFailureWindow, DatabaseEngine.MaximumWorkerFailureWindow, workerFailureWindowName);
-        ArgumentOutOfRangeException.ThrowIfLessThan(workerFailureMinimumPasses, 1, workerFailureMinimumPassesName);
-        ArgumentOutOfRangeException.ThrowIfNegative(journalSizeLimit, journalSizeLimitName);
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(workerFailureWindow, engine, workerFailureWindowName);
+        if (workerFailureWindow > DatabaseEngine.MaximumWorkerFailureWindow)
+        {
+            throw DatabaseEngineOptionChecks.Refuse(engine, workerFailureWindowName, workerFailureWindow,
+                $"must be at most {DatabaseEngine.MaximumWorkerFailureWindow}.");
+        }
+
+        DatabaseEngineOptionChecks.ThrowIfNotPositive(workerFailureMinimumPasses, engine, workerFailureMinimumPassesName);
+        DatabaseEngineOptionChecks.ThrowIfNegative(journalSizeLimit, engine, journalSizeLimitName);
         if (journalSizeLimit > 0 && journalSizeLimit < checkpointJournalSize)
         {
-            throw new ArgumentOutOfRangeException(journalSizeLimitName, journalSizeLimit,
-                $"A journal size limit must be zero (the default) or at least the checkpoint journal size ({checkpointJournalSize} bytes): " +
+            throw DatabaseEngineOptionChecks.Refuse(engine, journalSizeLimitName, journalSizeLimit,
+                $"must be zero (the default) or at least the checkpoint journal size ({checkpointJournalSize} bytes): " +
                 "a journal would otherwise pass it before it is due for a checkpoint.");
         }
     }

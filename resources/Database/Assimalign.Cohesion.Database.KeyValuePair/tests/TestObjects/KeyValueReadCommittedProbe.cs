@@ -47,7 +47,7 @@ internal static class KeyValueReadCommittedProbe
     /// <returns>The counts.</returns>
     internal static async Task<KeyValueReadCommittedProbeCounts> RunAsync(TimeSpan duration, int readers = 4, int writers = 2)
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "rc-command-probe" });
+        await using var engine = KeyValueDatabaseEngine.Create("rc-command-probe", new KeyValueDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("probe");
         await using (var setup = await database.CreateSessionAsync())
         {

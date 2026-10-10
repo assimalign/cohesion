@@ -179,7 +179,7 @@ public sealed class SqlUnaryPlusExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "unary-plus" });
+        => SqlDatabaseEngine.Create("unary-plus", new SqlDatabaseEngineOptions());
 
     private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine, bool withRow)
     {

@@ -94,7 +94,7 @@ public sealed class SqlTransactionControlTests
     [Fact]
     public async Task TransactionStateErrors_ShouldReturnStableDiagnosticsAndPreserveScope()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "transaction-diagnostics" });
+        await using var engine = SqlDatabaseEngine.Create("transaction-diagnostics", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
 
@@ -123,7 +123,7 @@ public sealed class SqlTransactionControlTests
     [Fact]
     public async Task TypedRequestWithParseErrors_ShouldNotExecuteRecoveredTransactionCommand()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "typed-control" });
+        await using var engine = SqlDatabaseEngine.Create("typed-control", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("BEGIN");
@@ -141,7 +141,7 @@ public sealed class SqlTransactionControlTests
     [Fact]
     public async Task ExplicitTransactionDdl_ShouldFailClosedAndLeaveTransactionUsable()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ddl-diagnostics" });
+        await using var engine = SqlDatabaseEngine.Create("ddl-diagnostics", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("app");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT)");

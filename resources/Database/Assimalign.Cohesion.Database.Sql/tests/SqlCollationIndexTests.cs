@@ -20,7 +20,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: folded seeks and ranges preserve original row text")]
     public async Task Seek_FoldedColumns_ShouldAgreeWithScanAndExpressionOverrides()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("collation-seeks", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (id INT, name TEXT COLLATE case_accent_insensitive)");
@@ -58,7 +58,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: UNIQUE index rejects folded duplicates on insert and update")]
     public async Task Unique_FoldedKeys_ShouldRejectInsertUpdateAndBackfillDuplicates()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("collation-unique", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (id INT, name TEXT COLLATE case_insensitive UNIQUE)");
@@ -83,7 +83,7 @@ public sealed class SqlCollationIndexTests
         string root = Path.Combine(Path.GetTempPath(), "cohesion-collation", Guid.NewGuid().ToString("N"));
         try
         {
-            await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = root }))
+            await using (var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("restart", Collation.CaseInsensitive, CancellationToken.None);
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -91,7 +91,7 @@ public sealed class SqlCollationIndexTests
                 await Execute(session, "INSERT INTO t VALUES ('Alice', 'Alice', 'Élodie')");
                 await Execute(session, "CREATE INDEX ix_accent ON t(accent)");
             }
-            await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = root }))
+            await using (var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions { RootPath = root }))
             {
                 var database = await engine.OpenDatabaseAsync("restart", CancellationToken.None);
                 var catalog = database.Catalog;
@@ -124,7 +124,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: binary default stays isolated from a folded database")]
     public async Task Database_Defaults_ShouldRemainIsolatedAndBinaryWhenUnspecified()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         foreach (bool folded in new[] { true, false })
         {
             var database = folded
@@ -146,7 +146,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: linguistic indexes and non-string column overrides reject clearly")]
     public async Task Index_NonByteCollation_ShouldRejectBeforePublishingEmptyIndex()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("unsupported", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (name TEXT COLLATE invariant)");

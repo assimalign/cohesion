@@ -493,10 +493,10 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         => Table(database, table).Constraints.Single(constraint => constraint.Name == name);
 
     private static SqlDatabaseEngine CreateEngine(string name)
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name });
+        => SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions());
 
     private static SqlDatabaseEngine CreateEngine(string name, string rootPath)
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name, RootPath = rootPath });
+        => SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions { RootPath = rootPath });
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {

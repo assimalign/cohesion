@@ -36,7 +36,7 @@ public sealed class SqlEngineContractTests
     public async Task CreateDatabaseAsync_TypedMembers_ShouldHandOutTheSqlDatabase()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "typed" });
+        await using var engine = SqlDatabaseEngine.Create("typed", new SqlDatabaseEngineOptions());
 
         // Act
         SqlDatabase created = await engine.CreateDatabaseAsync("orders", TestTimeout.Token());
@@ -75,7 +75,7 @@ public sealed class SqlEngineContractTests
     public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
     {
         // Arrange
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "guards" });
+        var engine = SqlDatabaseEngine.Create("guards", new SqlDatabaseEngineOptions());
         await engine.CreateDatabaseAsync("kept", TestTimeout.Token());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
@@ -151,9 +151,8 @@ public sealed class SqlEngineContractTests
 
         static async Task<SqlDatabaseEngine> CreateWithWritesAsync(string name, int databases)
         {
-            var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+            var engine = SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions
             {
-                EngineName = name,
                 StorageStrategy = new FaultInjectingJournalSqlStorageStrategy(durable: true),
                 CheckpointInterval = TimeSpan.FromHours(1),
                 PageWriteBackInterval = TimeSpan.FromHours(1),
@@ -196,7 +195,7 @@ public sealed class SqlEngineContractTests
         string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-reopen-" + Guid.NewGuid().ToString("N"));
         try
         {
-            await using var engine = SqlDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            await using var engine = SqlDatabaseEngine.Create("sql-engine", onDisk ? new() { RootPath = root } : new());
             var database = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
             await using (var setup = await database.CreateSessionAsync(TestTimeout.Token()))
             {
@@ -263,7 +262,7 @@ public sealed class SqlEngineContractTests
     {
         // Arrange: a database with rows and a checkpoint due, whose data fsync will stall.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("closing", QuietOptions(strategy));
         var database = await CreateWithRowsAsync(engine);
         database.DataStorage.CheckpointJournalSize = 1;
         database.CatalogStorage.CheckpointJournalSize = 1;
@@ -312,7 +311,7 @@ public sealed class SqlEngineContractTests
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = SqlDatabaseEngine.Create("closing", QuietOptions(strategy));
         var database = await CreateWithRowsAsync(engine);
         var faults = strategy.Faults("held");
         faults.StallDataFlushes();
@@ -342,7 +341,6 @@ public sealed class SqlEngineContractTests
     // Quiet workers: the tests run the passes they need themselves.
     private static SqlDatabaseEngineOptions QuietOptions(FaultInjectingJournalSqlStorageStrategy strategy) => new()
     {
-        EngineName = "closing",
         StorageStrategy = strategy,
         CheckpointInterval = TimeSpan.FromHours(1),
         PageWriteBackInterval = TimeSpan.FromHours(1),

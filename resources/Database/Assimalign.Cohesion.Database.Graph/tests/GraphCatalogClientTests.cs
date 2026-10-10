@@ -21,7 +21,7 @@ public sealed class GraphCatalogClientTests
     public async Task Execute_ShowCatalog_ShouldReturnTypedMetadataOverTcp()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("own", timeout.Token);
         await using var session = await database.CreateSessionAsync(timeout.Token);
         var schema = GraphSchema.Open(database, session);
@@ -60,7 +60,7 @@ public sealed class GraphCatalogClientTests
     public async Task Execute_WithTwoDatabases_ShouldKeepMetadataScoped()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         foreach (var name in new[] { "own", "other" })
         {
             var database = await engine.CreateDatabaseAsync(name, timeout.Token);
@@ -92,7 +92,7 @@ public sealed class GraphCatalogClientTests
     public async Task Execute_CatalogMutation_ShouldReturnReadOnlyDiagnostic(string statement)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await engine.CreateDatabaseAsync("own", timeout.Token);
         var listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
         await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });
@@ -114,7 +114,7 @@ public sealed class GraphCatalogClientTests
     public async Task Stop_WhenStarted_ShouldReleaseListenerAndKeepEngine()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await engine.CreateDatabaseAsync("own", timeout.Token);
         var listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
         await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });

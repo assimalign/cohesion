@@ -434,7 +434,7 @@ public sealed class SqlSystemViewTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "system-views" });
+        => SqlDatabaseEngine.Create("system-views", new SqlDatabaseEngineOptions());
 
     private static async Task CreateConstrainedTablesAsync(SqlDatabaseSession session)
     {

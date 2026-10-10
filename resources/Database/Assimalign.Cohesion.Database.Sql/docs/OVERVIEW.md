@@ -96,7 +96,7 @@ shared storage, with DDL flowing through the relational catalog
 ```csharp
 // A data machine: operational from Create (background workers running), no
 // start ceremony; dispose to durably flush and close.
-await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = dataDirectory });
+await using var engine = SqlDatabaseEngine.Create("app-sql", new SqlDatabaseEngineOptions { RootPath = dataDirectory });
 
 var database = await engine.CreateDatabaseAsync("app");
 await using var session = await database.CreateSessionAsync();
@@ -147,5 +147,5 @@ SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken);
 ```
 
 The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded
-SQL. `SqlDatabaseEngine.Create(options)` also remains available for standalone use.
+SQL. `SqlDatabaseEngine.Create(name, options)` also remains available for standalone use.
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.

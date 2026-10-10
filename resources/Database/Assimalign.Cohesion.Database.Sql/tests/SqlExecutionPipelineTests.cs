@@ -41,9 +41,8 @@ public class SqlExecutionPipelineTests : IDisposable
 
     private async Task<SqlDatabaseEngine> CreateEngine()
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        var engine = SqlDatabaseEngine.Create("test-engine", new SqlDatabaseEngineOptions
         {
-            EngineName = "test-engine",
             RootPath = _rootPath
         });
         return engine;
@@ -370,7 +369,7 @@ public class SqlExecutionPipelineTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: in-memory strategy works without a root path")]
     public async Task Engine_InMemoryStrategy_ShouldExecuteSql()
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "memory" });
+        var engine = SqlDatabaseEngine.Create("memory", new SqlDatabaseEngineOptions());
         await using var _ = engine;
 
         var db = await engine.CreateDatabaseAsync("mem-db");

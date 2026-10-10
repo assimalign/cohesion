@@ -184,7 +184,7 @@ public sealed class KeyValueStorageOperationsTests
         const string name = "data-fails";
         const string control = "control";
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         var controlDatabase = await engine.CreateDatabaseAsync(control);
         await using var session = await database.CreateSessionAsync();
@@ -230,7 +230,7 @@ public sealed class KeyValueStorageOperationsTests
         // Arrange: dirty data pages, and a transaction with a pending write.
         const string name = "catalog-fails";
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        await using var engine = KeyValueDatabaseEngine.Create(QuietOptions(strategy));
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync(name);
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -288,13 +288,13 @@ public sealed class KeyValueStorageOperationsTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var options = new KeyValueDatabaseEngineOptions { StorageStrategy = strategy, BufferPoolCapacity = 2 * 1024 * 1024 };
-        var engine = KeyValueDatabaseEngine.Create(options);
+        var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var created = await engine.CreateDatabaseAsync("sized");
         int createdPages = created.DataStorage.BufferPoolCapacity;
         await engine.DisposeAsync();
 
         // Act
-        await using var reopenedEngine = KeyValueDatabaseEngine.Create(options);
+        await using var reopenedEngine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var reopened = await reopenedEngine.OpenDatabaseAsync("sized");
 
         // Assert
@@ -307,10 +307,10 @@ public sealed class KeyValueStorageOperationsTests
     {
         // Arrange
         var builder = KeyValueDatabaseEngine.CreateBuilder("keyvalue-engine");
-        long defaultPool = builder.BufferPoolCapacity;
-        long defaultSize = builder.CheckpointJournalSize;
-        builder.BufferPoolCapacity = 2 * 1024 * 1024;
-        builder.CheckpointJournalSize = 8 * 1024 * 1024;
+        long defaultPool = builder.Options.BufferPoolCapacity;
+        long defaultSize = builder.Options.CheckpointJournalSize;
+        builder.Options.BufferPoolCapacity = 2 * 1024 * 1024;
+        builder.Options.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
         await using var engine = builder.Build();
@@ -338,7 +338,7 @@ public sealed class KeyValueStorageOperationsTests
         };
 
         // Act
-        var error = Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(options));
+        var error = Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", options));
 
         // Assert
         error.ParamName.ShouldBe(checkpointJournalSize < 0 ? nameof(KeyValueDatabaseEngineOptions.CheckpointJournalSize) : nameof(KeyValueDatabaseEngineOptions.BufferPoolCapacity));

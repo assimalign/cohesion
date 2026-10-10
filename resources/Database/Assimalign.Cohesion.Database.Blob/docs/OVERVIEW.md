@@ -1,15 +1,17 @@
 # Blob database engine
 
 `Assimalign.Cohesion.Database.Blob` implements named databases, containers, and streamed
-objects. Create an engine with `BlobDatabaseEngine.Create`; a null `RootPath` selects memory,
+objects. Create an engine with `BlobDatabaseEngine.Create(name, options)`; a null `RootPath` selects memory,
 and a path selects durable files. `AddBlob(name, engine => ...)` captures
 construction through the root `IDatabaseApplicationBuilder` and returns that builder.
-At Build the callback configures the sealed `BlobDatabaseEngineBuilder`, including deferred
+At Build the callback configures the sealed `BlobDatabaseEngineBuilder`: its `Options` (copied at
+build), the databases it declares (`AddDatabase(name)`: opened or created by the build, never
+dropped while declared), a server from options (`AddServer(options => ...)`), and deferred
 nested worker and server factories typed over `BlobDatabaseEngine`. The application owns the
 resulting engine and its nested components. The feature has no Hosting reference.
 
 ```csharp
-await using var engine = BlobDatabaseEngine.Create(new() { RootPath = "data" });
+await using var engine = BlobDatabaseEngine.Create("media-blob", new() { RootPath = "data" });
 var database = await engine.CreateDatabaseAsync("media");
 await using var session = await database.CreateSessionAsync();
 var container = await session.CreateContainerAsync("images");

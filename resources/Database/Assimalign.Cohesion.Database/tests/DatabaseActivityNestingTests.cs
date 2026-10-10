@@ -52,9 +52,8 @@ public sealed class DatabaseActivityNestingTests
         string root = Path.Combine(Path.GetTempPath(), "wf-trace-int-nesting", Guid.NewGuid().ToString("N"));
         try
         {
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+            await using var engine = SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions
             {
-                EngineName = name,
                 RootPath = root,
                 Durability = StorageCommitDurability.Grouped,
                 GroupCommitWindow = TimeSpan.FromTicks(1),
