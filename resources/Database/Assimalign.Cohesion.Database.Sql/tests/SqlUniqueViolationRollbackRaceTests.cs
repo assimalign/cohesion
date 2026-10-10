@@ -105,7 +105,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         race.Reads.ShouldBeGreaterThan(0);
     }
 
-    private static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+    private static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create("unique-violation-rollback-race", new SqlDatabaseEngineOptions
     {
         CheckpointInterval = TimeSpan.FromHours(1),
         PageWriteBackInterval = TimeSpan.FromHours(1),

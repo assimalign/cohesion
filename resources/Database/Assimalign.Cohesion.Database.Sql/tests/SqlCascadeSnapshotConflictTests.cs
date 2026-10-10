@@ -441,7 +441,7 @@ public sealed class SqlCascadeSnapshotConflictTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cascade-snapshot-conflict" });
+        => SqlDatabaseEngine.Create("cascade-snapshot-conflict", new SqlDatabaseEngineOptions());
 
     /// <summary>A parent <c>p(1)</c> with one cascading child <c>c(10, 1)</c>.</summary>
     private static async Task<SqlDatabase> CreateDatabaseAsync(SqlDatabaseEngine engine)
