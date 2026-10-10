@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,31 +27,56 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private readonly SqlStorage _storage;
-    private readonly ISqlCatalog _catalog;
-    private readonly IIndexManager _indexManager;
-    private readonly IReadOnlyDictionary<string, object?>? _parameters;
+    private readonly SqlCatalog _catalog;
+    private readonly BTreeIndexManager _indexManager;
+    private readonly SqlBoundTableCache _definitions;
 
     /// <summary>
-    /// Values materialized by the enclosing subquery plan, scoped to the input plan it
-    /// wraps. Null outside a subquery plan; saved and restored around nesting.
+    /// The values this statement's subquery plans materialized, by slot: each slot is filled
+    /// while the input plan its subquery belongs to runs. Null until the statement runs its first
+    /// subquery plan.
     /// </summary>
-    private IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
+    private SqlSubqueryValues? _subqueryValues;
 
-    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, IReadOnlyDictionary<string, object?>? parameters)
+    /// <summary>Initializes an executor for one statement.</summary>
+    /// <param name="storage">The database's data storage.</param>
+    /// <param name="catalog">The database's catalog.</param>
+    /// <param name="indexManager">The database's index manager.</param>
+    /// <param name="definitions">
+    /// The database's bound table versions: the bound CHECK predicates and DEFAULT values every
+    /// write and every read of a missing trailing field use.
+    /// </param>
+    /// <remarks>
+    /// The executor takes no parameter values: the planner bound each parameter's supplied value
+    /// into the plan's expressions (<see cref="SqlBoundParameter"/>), so nothing looks one up by
+    /// name while the statement runs.
+    /// </remarks>
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
-        _parameters = parameters;
+        _definitions = definitions;
     }
+
+    /// <summary>
+    /// The evaluator a plan's bound expressions run with: the statement's subquery values, and its
+    /// cancellation token only when the engine registers an application function, the only kind of
+    /// function that reads the token from its context. A statement of an engine with the standard
+    /// library alone therefore shares the evaluator without subquery values and allocates none,
+    /// whatever its token, as before functions carried a context.
+    /// </summary>
+    private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken)
+        => SqlExpressionEvaluator.ForExecution(subqueryValues,
+            _definitions.Functions.Catalog.HasApplicationFunctions ? cancellationToken : default);
 
     /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
     /// what one statement's maintenance loop works with.
     /// </summary>
-    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, IIndex Index, int[] KeyOrdinals)
+    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, BTreeIndex Index, int[] KeyOrdinals)
     {
-        internal RecordVersionIndex Versions { get; } = new(Index);
+        internal BTreeRecordVersionIndex Versions { get; } = BTreeRecordVersionIndex.Create(Index);
     }
 
     internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -100,7 +126,7 @@ internal sealed partial class SqlPlanExecutor
 
     private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
 
         // The access path narrows the candidate set; the full WHERE stays the
@@ -120,7 +146,7 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private static QueryResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
-        IReadOnlyList<SqlOrderByColumn> orderBy, long? limit, long? offset,
+        IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections)
     {
@@ -160,7 +186,7 @@ internal sealed partial class SqlPlanExecutor
     /// once for aliases and ordinals, matching grouped-query ordering semantics.
     /// </summary>
     private static List<object?[]> ProjectAndSortRows(List<object?[]> matches,
-        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlOrderByColumn> orderBy,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots)
     {
         if (matches.Count == 0)
@@ -169,6 +195,8 @@ internal sealed partial class SqlPlanExecutor
         }
         if (outputSlots is { Count: > 0 })
         {
+            // The ordering keys were bound with the outputs at the ordinals after the source row
+            // (SqlPlanner.BindOrdering), which is the source relation's width.
             int projectionStart = matches[0].Length;
             var rows = new List<object?[]>(matches.Count);
             foreach (var source in matches)
@@ -178,40 +206,46 @@ internal sealed partial class SqlPlanExecutor
                 Project(source).CopyTo(row, projectionStart);
                 rows.Add(row);
             }
-            return SortRows(rows, orderBy, evaluator.ForOrdering(projections, outputSlots, projectionStart))
+            return SortRows(rows, orderBy, evaluator)
                 .Select(row => row[projectionStart..]).ToList();
         }
         if (orderBy.Count > 0)
         {
             matches = SortRows(matches, orderBy, evaluator);
         }
-        return matches.Select(Project).ToList();
+
+        var projected = new List<object?[]>(matches.Count);
+        foreach (var row in matches)
+        {
+            projected.Add(Project(row));
+        }
+        return projected;
 
         object?[] Project(object?[] row)
         {
             var output = new object?[projections.Count];
-            for (int i = 0; i < projections.Count; i++)
+            for (int i = 0; i < output.Length; i++)
             {
                 var projection = projections[i];
                 output[i] = projection.ColumnOrdinal is int ordinal ? row[ordinal]
-                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row), projection.Type);
             }
             return output;
         }
     }
 
-    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlOrderByColumn> orderBy,
+    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator)
     {
         // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
-        var keyed = rows.Select(row => (Row: row, Keys: orderBy.Select(o => evaluator.Evaluate(o.Expression, row)).ToArray()));
+        var keyed = rows.Select(row => (Row: row, Keys: EvaluateKeys(row)));
 
         IOrderedEnumerable<(object?[] Row, object?[] Keys)>? ordered = null;
 
         for (int i = 0; i < orderBy.Count; i++)
         {
             int index = i;
-            var collation = evaluator.ResolveCollation(orderBy[index].Expression);
+            var collation = orderBy[index].Collation.Resolve(evaluator.SubqueryValues);
             var comparer = Comparer<object?>.Create((left, right) => (left, right) switch
             {
                 (null, null) => 0,
@@ -234,15 +268,35 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        return ordered!.Select(x => x.Row).ToList();
+        try
+        {
+            return ordered!.Select(x => x.Row).ToList();
+        }
+        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException inner)
+        {
+            // The runtime sort wraps a throwing comparer in InvalidOperationException.
+            // Two keys the value order cannot compare are a statement error, so the
+            // comparer's own DatabaseException is the failure, not a session-ending fault.
+            ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
 
+        object?[] EvaluateKeys(object?[] row)
+        {
+            var keys = new object?[orderBy.Count];
+            for (int i = 0; i < keys.Length; i++)
+            {
+                keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
+            }
+            return keys;
+        }
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
     private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator)
-        => rows.Distinct(new GroupKeyComparer(projections.Select(projection => projection.ColumnOrdinal is int ordinal
-            ? evaluator.ResolveColumnCollation(ordinal) : evaluator.ResolveCollation(projection.Expression)).ToArray())).ToList();
+        => rows.Distinct(new GroupKeyComparer(projections.Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues))
+            .ToArray())).ToList();
 
     // ── DML ────────────────────────────────────────────────────────────
     //
@@ -270,12 +324,20 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
+        // binds the values with no columns in scope, so no reference can resolve to an ordinal the
+        // empty row they are evaluated against does not have.
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var values = new List<object?[]>(plan.Rows.Count);
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            values.Add(valueRow.Select(expression => evaluator.Evaluate(expression, Array.Empty<object?>())).ToArray());
+            var row = new object?[valueRow.Length];
+            for (int i = 0; i < row.Length; i++)
+            {
+                row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>());
+            }
+            values.Add(row);
         }
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken).ConfigureAwait(false);
     }
@@ -287,7 +349,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
@@ -312,7 +374,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             replacements.Add((pageId, slotIndex, values, updated,
-                SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence)));
+                SqlRowCodec.Encode(plan.Table, updated, statement.Transaction.Sequence)));
         }
 
         // Row locks come before the constraint reads, not after them: the
@@ -394,7 +456,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
 
         // Lock the directly targeted rows as one sorted batch before the cascade
@@ -411,7 +473,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var target in targets)
         {
             await CollectCascadeDeletesAsync(plan.Table, target.Location, target.Values, deletions, scannedTables, released,
-                arrivedBy: null, statement, cancellationToken).ConfigureAwait(false);
+                statement, cancellationToken).ConfigureAwait(false);
         }
 
         // Every deleted row releases the references it held; the shared locks are
@@ -533,8 +595,9 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Builds an index key from a row's values: one order-preserving component
-    /// per key column, transformed under the column's effective collation
-    /// (null components participate — nulls sort first and count as key values).
+    /// per key column, transformed under the column's effective collation and
+    /// temporal identity (null components participate — nulls sort first and
+    /// count as key values).
     /// </summary>
     private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
     {
@@ -542,7 +605,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (int ordinal in keyOrdinals)
         {
-            SqlRowCodec.AppendValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+            SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
@@ -662,17 +725,14 @@ internal sealed partial class SqlPlanExecutor
     /// uniqueness-discipline precedent applied to row updates.)
     /// </summary>
     /// <exception cref="TransactionAbortedException">The row was modified by a concurrently committed transaction.</exception>
+    /// <exception cref="StorageCorruptionException">
+    /// The row's slot holds a record too short for its version stamps. <c>ReadRow</c> fails on a
+    /// deleted slot, so a short record is a live slot's, and it is damaged, not a reclaimed version
+    /// to retry against (#1362).
+    /// </exception>
     private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
     {
-        var record = _storage.ReadRow(pageId, slotIndex);
-
-        if (record.Length < SqlRowCodec.StampHeaderSize)
-        {
-            throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': the target row version was reclaimed by a concurrent transaction. Retry the transaction.");
-        }
-
-        var (_, deleter) = SqlRowCodec.ReadStamps(record.Span);
+        var (_, deleter) = ReadVersionStamps(table, pageId, slotIndex);
 
         if (deleter != TransactionSequence.None && deleter != self)
         {
@@ -682,11 +742,34 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
+    /// Reads the writer and deleter stamps of the row version in a slot. The caller holds the
+    /// row's exclusive lock, so the slot holds a live version the purge cannot reclaim.
+    /// </summary>
+    /// <exception cref="StorageCorruptionException">
+    /// The slot holds a record too short for its version stamps: damage, not a version to retry
+    /// against (#1362).
+    /// </exception>
+    private (TransactionSequence Writer, TransactionSequence Deleter) ReadVersionStamps(SqlCatalogTable table, PageId pageId, int slotIndex)
+    {
+        var record = _storage.ReadRow(pageId, slotIndex);
+
+        if (record.Length < SqlRowCodec.StampHeaderSize)
+        {
+            throw new StorageCorruptionException(
+                pageId,
+                $"The row record in slot {slotIndex} of page {(long)pageId} of table '{table.Schema}.{table.Name}' holds " +
+                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+        }
+
+        return SqlRowCodec.ReadStamps(record.Span);
+    }
+
+    /// <summary>
     /// Stamps the record's deleter with the statement's transaction sequence —
     /// the same-length in-place tombstone write — and records it in the
     /// version-store ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(SqlStatementContext statement, IStorageTransaction bracket, PageId pageId, int slotIndex)
+    private void TombstoneVersion(SqlStatementContext statement, StorageTransaction bracket, PageId pageId, int slotIndex)
     {
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
@@ -695,6 +778,47 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // ── DDL ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Awaits one catalog self-commit of a DDL statement that changes what a reopened database
+    /// shows (it publishes, alters or removes a definition) and records it on the statement once
+    /// its commit returned. The session reads the record when the statement meets an offline
+    /// storage: a statement that already committed such a change is unconfirmed, because the
+    /// change survives the reopen; one that committed none is refused like any other statement
+    /// (#1272). A commit whose own record was written before its flush failed is unconfirmed
+    /// either way (<c>StorageOfflineException.CommitRecordWritten</c>).
+    /// </summary>
+    /// <remarks>
+    /// A durable step nothing can reach before the catalog publishes it is not recorded: CREATE
+    /// TABLE's identity reservation persists only the object-id counter, and the index trees CREATE
+    /// TABLE, ADD CONSTRAINT and CREATE INDEX build before their catalog commit are orphaned pages
+    /// until it. A statement that failed after them leaves a reopened database without the table or
+    /// index, so it is refused, and a retry is safe.
+    /// </remarks>
+    /// <param name="statement">The DDL statement.</param>
+    /// <param name="commit">The self-commit.</param>
+    /// <returns>A task that completes once the bracket committed.</returns>
+    private static async ValueTask SelfCommitAsync(SqlStatementContext statement, ValueTask commit)
+    {
+        await commit.ConfigureAwait(false);
+        statement.Metrics.RecordSelfCommit();
+    }
+
+    /// <summary>
+    /// Awaits one catalog self-commit of a DDL statement that changes what a reopened database shows
+    /// and records it on the statement once its commit returned (see
+    /// <see cref="SelfCommitAsync(SqlStatementContext, ValueTask)"/>).
+    /// </summary>
+    /// <typeparam name="T">The commit's result.</typeparam>
+    /// <param name="statement">The DDL statement.</param>
+    /// <param name="commit">The self-commit.</param>
+    /// <returns>The commit's result.</returns>
+    private static async ValueTask<T> SelfCommitAsync<T>(SqlStatementContext statement, ValueTask<T> commit)
+    {
+        T result = await commit.ConfigureAwait(false);
+        statement.Metrics.RecordSelfCommit();
+        return result;
+    }
 
     private async Task<QueryResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -708,14 +832,35 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Drops a column and rewrites the table's rows to the new positional layout —
-    /// row records are positional, so removing a middle column requires splicing
-    /// every stored row (ADD COLUMN, by contrast, is O(1): missing trailing
-    /// components decode as null). Runs under the table's Exclusive lock: the
-    /// intent-lock matrix makes the rewrite wait for in-flight row writers (and
-    /// them for it), so no writer's uncommitted version can be rewritten from
-    /// under it.
+    /// Drops a column as a catalog-only change (#1241): the catalog marks the column's
+    /// physical ordinal dropped in one self-committed record and no stored version is
+    /// read or written. Every version keeps the dropped component, which every decode
+    /// skips (<see cref="SqlRowCodec.Decode"/>), and versions written afterwards store
+    /// NULL there, or nothing when no live column follows. This is PostgreSQL's DROP COLUMN: <c>ATExecDropColumn</c>
+    /// (<c>src/backend/commands/tablecmds.c:9355</c>) reaches <c>RemoveAttributeById</c>,
+    /// which sets <c>attisdropped</c> and rewrites no tuple
+    /// (<c>src/backend/catalog/heap.c:1692-1732</c>).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The statement takes the table's Exclusive lock, so in-flight row writers finish
+    /// first and later ones see the new definition (a writer bound to the old one fails
+    /// with "changed while the statement was waiting"), and the constraint checks read
+    /// a stable definition. It holds no apply gate and scans nothing: the work is O(1)
+    /// in the table's size and no other table's writer waits on it.
+    /// </para>
+    /// <para>
+    /// The one durable step is the catalog commit. A crash before it leaves the old
+    /// definition, one after it the new one, and every stored version decodes correctly
+    /// under either, because no physical ordinal is reused. For the same reason a SELECT
+    /// that takes no table lock and overlaps the drop reads every value in its own
+    /// column whichever definition it bound. One bound before the drop still sees the
+    /// dropped column, with the values of the versions its snapshot sees; a version written
+    /// after the drop is never visible to it, because the statement's snapshot is taken
+    /// before it binds (<see cref="SqlStatementContext"/>) and every later writer waits for
+    /// this statement's Exclusive lock.
+    /// </para>
+    /// </remarks>
     private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
@@ -729,66 +874,14 @@ internal sealed partial class SqlPlanExecutor
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
-        before = current;
-        EnsureCanDropColumn(before, plan.ColumnName);
+        EnsureCanDropColumn(current, plan.ColumnName);
 
-        int droppedOrdinal = -1;
-        for (int i = 0; i < before.Columns.Count; i++)
-        {
-            if (string.Equals(before.Columns[i].Name, plan.ColumnName, StringComparison.OrdinalIgnoreCase))
-            {
-                droppedOrdinal = i;
-                break;
-            }
-        }
-
-        // The rewrite walks EVERY stored version — visible or not — because the
-        // whole record space must stay decodable on the new positional layout;
-        // stamps are preserved so visibility is unchanged by the DDL.
-        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)>();
-        if (droppedOrdinal >= 0)
-        {
-            foreach (var (location, values, writer, deleter) in ScanVersions(before, cancellationToken))
-            {
-                targets.Add((location.PageId, location.SlotIndex, values, writer, deleter));
-            }
-        }
-
-        var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
-
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
-        {
-            foreach (var (pageId, slotIndex, values, writer, deleter) in targets)
-            {
-                var spliced = new object?[values.Length - 1];
-                for (int i = 0, j = 0; i < values.Length; i++)
-                {
-                    if (i != droppedOrdinal)
-                    {
-                        spliced[j++] = values[i];
-                    }
-                }
-
-                byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced, writer);
-
-                if (deleter != TransactionSequence.None)
-                {
-                    record = SqlRowCodec.WithDeleter(record, deleter);
-                }
-
-                try
-                {
-                    _storage.UpdateRow(bracket, pageId, slotIndex, record);
-                }
-                catch (SlottedPageException)
-                {
-                    _storage.DeleteRow(bracket, pageId, slotIndex);
-                    _storage.InsertRow(bracket, updated.ObjectId, record);
-                }
-            }
-
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
-        }, cancellationToken).ConfigureAwait(false);
+        // The authoritative step: the catalog checks the drop again under its own lock
+        // and commits it. Bind the published version before the statement completes, as
+        // every DDL does, so no later write parses its definitions.
+        var updated = await SelfCommitAsync(statement, _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken)).ConfigureAwait(false);
+        _definitions.Get(updated);
+        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
     private async Task<QueryResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -825,7 +918,7 @@ internal sealed partial class SqlPlanExecutor
         // second, all under the exclusive lock so no writer maintains a ghost.
         var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
 
-        await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken)).ConfigureAwait(false);
 
         foreach (var metadata in droppedIndexes)
         {
@@ -837,8 +930,8 @@ internal sealed partial class SqlPlanExecutor
 
         // Release the table's record chain: per-object pages make the drop a
         // page-directory walk instead of a garbage legacy. Rides the statement
-        // bracket like every DDL row effect (DROP COLUMN's rewrite precedent) —
-        // the catalog entry itself is already self-committed, so the release is
+        // bracket like every DDL row effect — the catalog entry itself is
+        // already self-committed, so the release is
         // not undone by rolling back the enclosing transaction; a crash before
         // the bracket proves out restores the pages as an unreachable, safely
         // leaked chain (the catalog no longer references the object).
@@ -911,6 +1004,8 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
+            // Durable, but not a self-commit the session counts (#1272): the tree is orphaned pages
+            // until the catalog commit below describes it, so a failure here leaves no index.
             await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
             {
                 var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
@@ -952,14 +1047,14 @@ internal sealed partial class SqlPlanExecutor
         // cannot leave a described index without a tree registration (or the
         // reverse). A crash before this write leaves only orphaned tree pages —
         // a safe leak, never a re-attached index.
-        var registrations = ((IIndexRegistry)_indexManager).ExportRegistrations();
-        await _catalog.CreateIndexAsync(
+        var registrations = _indexManager.ExportRegistrations();
+        await SelfCommitAsync(statement, _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
                 statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
                 statement.ProvisioningSchema),
             registrations,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken)).ConfigureAwait(false);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -1006,7 +1101,7 @@ internal sealed partial class SqlPlanExecutor
         // manager lookup: catalog names are case-insensitive, directory names
         // are exact.
         var remaining = new List<BTreeIndexRegistration>();
-        foreach (var registration in ((IIndexRegistry)_indexManager).ExportRegistrations())
+        foreach (var registration in _indexManager.ExportRegistrations())
         {
             if (!(registration.ObjectId == plan.Table.ObjectId &&
                   string.Equals(registration.Definition.Name, metadata.Name, StringComparison.Ordinal)))
@@ -1015,7 +1110,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        await _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken)).ConfigureAwait(false);
 
         if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
         {
@@ -1097,13 +1192,14 @@ internal sealed partial class SqlPlanExecutor
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> SeekRows(
         SqlCatalogTable table,
         SqlIndexSeekPath seek,
-        IIndex index,
+        BTreeIndex index,
         SqlStatementContext statement,
         CancellationToken cancellationToken,
         TransactionSnapshot? snapshotOverride = null)
     {
         var range = BuildSeekRange(table, seek);
         var snapshot = snapshotOverride ?? statement.Snapshot;
+        var defaults = _definitions.Get(table).DefaultValues;
 
         // The cursor materializes under the tree's read latch; synchronous
         // drain is the in-process fast path.
@@ -1117,25 +1213,19 @@ internal sealed partial class SqlPlanExecutor
 
                 var (pageId, slotIndex) = SqlRecordLocation.Unpack(cursor.CurrentEntryReference);
 
-                ReadOnlyMemory<byte> record;
-                try
-                {
-                    record = _storage.ReadRow(pageId, slotIndex);
-                }
-                catch (StorageException)
-                {
-                    continue; // reclaimed beneath an invisible entry: skip
-                }
-                catch (ArgumentOutOfRangeException)
+                // Only a row reclaimed beneath the entry is skipped; a page that fails its
+                // checksum or cannot be read (#1342), or a row that does not decode (#1362),
+                // fails the statement.
+                if (!_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record))
                 {
                     continue;
                 }
 
-                var values = DecodeRow(record.Span, table, out var writer, out var deleter);
+                var values = DecodeRow(record, pageId, slotIndex, table, defaults, out var writer, out var deleter);
 
                 if (values is null)
                 {
-                    continue;
+                    continue; // reclaimed before the read that confirmed a failed decode
                 }
 
                 if (!snapshot.IsVisible(writer))
@@ -1159,10 +1249,11 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Encodes the seek's key range: the equality prefix (encoded exactly like
-    /// the maintenance path encodes keys), extended by the optional range bounds
-    /// on the next key column. Prefix semantics ride the codec's
-    /// order-preservation: every composite key starting with prefix P sorts in
-    /// [P, successor(P)), where successor increments the last non-0xFF byte.
+    /// the maintenance path encodes keys, temporal identity included), extended
+    /// by the optional range bounds on the next key column. Prefix semantics
+    /// ride the codec's order-preservation: every composite key starting with
+    /// prefix P sorts in [P, successor(P)), where successor increments the last
+    /// non-0xFF byte.
     /// </summary>
     private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
     {
@@ -1171,7 +1262,7 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < seek.EqualityValues.Count; i++)
         {
             int ordinal = FindColumnOrdinal(table, seek.Index.ColumnNames[i]);
-            SqlRowCodec.AppendValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
+            SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
@@ -1225,7 +1316,7 @@ internal sealed partial class SqlPlanExecutor
     private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation)
     {
         var writer = new DatabaseKeyWriter();
-        SqlRowCodec.AppendValue(writer, type, value, collation);
+        SqlRowCodec.AppendKeyValue(writer, type, value, collation);
         byte[] component = writer.ToArray();
 
         var combined = new byte[prefix.Length + component.Length];
@@ -1289,17 +1380,20 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Scans every stored version of the table's rows — visible or not — with
-    /// its stamps. DDL row rewrites use this: the whole record space must stay
-    /// decodable across a layout change, so tombstoned and concurrent versions
-    /// rewrite too, stamps preserved. The scan is scoped to the table's record
-    /// chain (per-object pages), so its cost is O(table), not O(database); the
-    /// object-id prefix filter below stays as defense in depth.
+    /// its stamps, decoded through <paramref name="table"/>. Index builds use
+    /// this: an index must carry an entry for every version an older snapshot
+    /// can still read, with the version's own stamps. The scan is scoped to the
+    /// table's record chain (per-object pages), so its cost is O(table), not
+    /// O(database). Every record the scan meets is the table's: one whose object-id
+    /// prefix names another object, or that does not decode, fails the scan with
+    /// <see cref="StorageCorruptionException"/> rather than being skipped (#1362).
     /// </summary>
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)> ScanVersions(
         SqlCatalogTable table,
         CancellationToken cancellationToken,
         SqlStatementMetrics? metrics = null)
     {
+        var defaults = _definitions.Get(table).DefaultValues;
         using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
         while (iterator.MoveNext())
@@ -1307,8 +1401,9 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             var unit = iterator.Current;
-            var values = DecodeRow(unit.Data.Span, table, out var writer, out var deleter);
+            var values = DecodeRow(unit.Data, unit.PageId, unit.SlotIndex, table, defaults, out var writer, out var deleter);
 
+            // Null only when the slot was reclaimed before the read that confirmed a failed decode.
             if (values is not null)
             {
                 if (metrics is not null)
@@ -1392,6 +1487,14 @@ internal sealed partial class SqlPlanExecutor
                 },
                 _ => throw new DatabaseException($"Column type {column.Type.Type} cannot store values yet."),
             };
+        }
+        catch (OverflowException exception) when (column.Type.Type is DatabaseType.Int8 or DatabaseType.Int16
+            or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal)
+        {
+            // ISO store assignment: a value the numeric column cannot hold is a numeric
+            // value out of range (SQLSTATE 22003), the same fault as an overflowing result.
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"value '{Convert.ToString(value, CultureInfo.InvariantCulture)}' does not fit column '{column.Name}' of type {column.Type.Type}.", exception);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
         {

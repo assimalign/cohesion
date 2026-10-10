@@ -41,8 +41,8 @@ public sealed class ResourceCommandHostingTests
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
             mounts: null, settings: null, references: null,
             bootstrapCredential: Encoding.UTF8.GetBytes(token), applicationTrustKey: identity.PublicKey, ambientValues: null));
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "commands" });
-        await using var analytics = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "analytics" });
+        await using var engine = SqlDatabaseEngine.Create("commands", new SqlDatabaseEngineOptions());
+        await using var analytics = SqlDatabaseEngine.Create("analytics", new SqlDatabaseEngineOptions());
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceCommandHostingTests).Assembly);
         builder.AddEngine(engine);
         builder.AddEngine(analytics);
@@ -67,7 +67,7 @@ public sealed class ResourceCommandHostingTests
                 catch (HttpRequestException) when (!cancellation.IsCancellationRequested) { }
                 await Task.Delay(20, cancellation.Token);
             }
-            using IDatabaseCommandClient client = DatabaseCommandClient.Create(new Uri(endpoint, "/cohesion/v1"), token);
+            using DatabaseCommandClient client = DatabaseCommandClient.Create(new Uri(endpoint, "/cohesion/v1"), token);
             byte[] payload = Encoding.UTF8.GetBytes("""{"database":"orders","engine":"commands"}""");
             var command = new ClientCommand("create-orders", "database.add-database", "appa", "commands/orders", payload);
 
@@ -134,5 +134,40 @@ public sealed class ResourceCommandHostingTests
         {
             await ((IHost)application).StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Commands: add-database cannot claim a database the engine's builder declares")]
+    public async Task ExecuteCommandAsync_WithDeclaredDatabaseName_ShouldRejectAndLeaveTheDeclarationOwner()
+    {
+        // Arrange: the model verb's engine declares 'sales', so its build created it before any
+        // command can arrive (engine extensibility design §5.6; owner decision 56).
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceCommandHostingTests).Assembly);
+        builder.AddSql("commands", sql => sql.AddDatabase("sales"));
+        await using DatabaseApplication application = builder.Build();
+        IResourceControlPlane plane = builder.ControlPlane.ShouldNotBeNull();
+        DatabaseEngine engine = application.Context.Engines.ShouldHaveSingleItem();
+        engine.TryGetDatabase("sales", out _).ShouldBeTrue();
+        var declared = new RuntimeCommand("claim-sales", "database.add-database", "appa", "commands/SALES",
+            Encoding.UTF8.GetBytes("""{"database":"SALES","engine":"commands"}"""));
+        var undeclared = new RuntimeCommand("create-orders", "database.add-database", "appa", "orders",
+            Encoding.UTF8.GetBytes("""{"database":"orders"}"""));
+
+        // Act
+        ResourceCommandRejectedException refusal = await Should.ThrowAsync<ResourceCommandRejectedException>(
+            () => plane.ExecuteCommandAsync(declared, CancellationToken.None).AsTask());
+        await plane.ExecuteCommandAsync(undeclared, CancellationToken.None);
+        bool created = engine.TryGetDatabase("orders", out _);
+        await plane.DeleteCommandAsync(undeclared, CancellationToken.None);
+
+        // Assert: the names compare ignoring case, the refused command is not recorded, the sole
+        // engine still serves an undeclared name, and the declaration still refuses the drop.
+        refusal.Detail.ShouldBe(
+            "database.add-database cannot claim existing database 'SALES' on engine 'commands'; it was not created by this declaration.");
+        created.ShouldBeTrue();
+        plane.Commands.ShouldBeEmpty();
+        engine.TryGetDatabase("orders", out _).ShouldBeFalse();
+        engine.TryGetDatabase("sales", out _).ShouldBeTrue();
+        await Should.ThrowAsync<DatabaseObjectLockedException>(() => engine.DropDatabaseAsync("sales").AsTask());
     }
 }

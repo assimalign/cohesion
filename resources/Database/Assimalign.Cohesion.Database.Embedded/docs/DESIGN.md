@@ -10,9 +10,10 @@ The facade can only be thin because of an invariant this project *enforces by ex
 
 ## Decisions
 
-- **Composition only.** `EmbeddedDatabase` registers engines, looks them up by name or model, and disposes them in reverse registration order. It does not proxy engine operations — consumers work with `IDatabaseEngine`/`IDatabase` directly, so embedded and hosted code paths stay identical.
-- **No DI.** Repo rule: `*.Hosting` is the only DI seam. Embedded consumers new up engines from their factories (`{Model}DatabaseEngine.Create(options)`); resources with DI wire this in their own hosting layer.
-- **Engine-name uniqueness enforced at composition**, ordinal-ignore-case, matching `IDatabaseEngine.Name` semantics elsewhere.
+- **Composition only.** `EmbeddedDatabase` registers engines, looks them up by name or model, and disposes them in reverse registration order. It does not proxy engine operations — consumers work with `DatabaseEngine`/`DatabaseInstance` (or a model's sealed leaves, `SqlDatabaseEngine` and the rest) directly, so embedded and hosted code paths stay identical.
+- **No DI.** Repo rule: `*.Hosting` is the only DI seam. Embedded consumers new up engines from their factories (`{Model}DatabaseEngine.Create(name, options)`, or the model's engine builder); resources with DI wire this in their own hosting layer.
+- **Engine-name uniqueness enforced at composition**, ordinal-ignore-case, matching `DatabaseEngine.Name` semantics elsewhere.
+- **Typed over the root engine base (concrete-types plan, phase 6, #1262).** `EmbeddedDatabaseOptions.Engines`, `EmbeddedDatabase.Engines` and both `TryGetEngine` overloads name `DatabaseEngine`, the root base every model engine derives from; the `IDatabaseEngine` interface they named is deleted (plan §5.2). `TryGetEngine`'s engine is `[MaybeNullWhen(false)]`: null when the lookup fails. A caller that knows the model casts the engine it gets back to the model's sealed engine.
 - **Best-effort disposal with aggregation.** One failing engine must not leak the others' file handles; failures are collected and rethrown as `AggregateException`.
 
 ## Non-goals
@@ -28,6 +29,8 @@ Pure composition; no reflection, no discovery. Consumers reference engine packag
 ## Phase 29 root-contract migration
 
 The embedded test engine now implements the root's `DatabaseName` operations and
-read-only `Servers` observation. Embedded composition continues to own the engines
+read-only `Servers` observation; since phase 6 of the concrete-types plan it derives from the
+root `DatabaseEngine` base and implements only its protected cores, its disposal core recording
+the disposal order (`database-area.md`, "Test doubles"). Embedded composition continues to own the engines
 explicitly supplied to `EmbeddedDatabase`; this existing aggregate is separate
 from the hosting builder's instance-borrowed registration contract.

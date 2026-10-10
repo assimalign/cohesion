@@ -11,7 +11,14 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// payload. The payload bound is enforced from the header before any payload
 /// allocation — an untrusted length prefix can never drive memory use.
 /// </summary>
-internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
+/// <remarks>
+/// This is the reader that touches the transport, so it is the one that writes each frame it read
+/// to the <c>Assimalign.Cohesion.Database.Protocol</c> event source (<c>FrameRead</c>, under the
+/// <c>Frames</c> keyword): every other reader decorates one of these through its public member, so
+/// each wire frame is reported once. The core is already asynchronous, so the trace adds one
+/// enabled check per frame and nothing else while no listener takes it.
+/// </remarks>
+internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
 {
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
@@ -24,7 +31,7 @@ internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
     }
 
     /// <inheritdoc />
-    public async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
     {
         int headerRead = await ReadUpToAsync(_header, ProtocolFrameHeader.Size, cancellationToken).ConfigureAwait(false);
 
@@ -47,6 +54,7 @@ internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
 
         if (header.PayloadLength == 0)
         {
+            ProtocolEventSource.Log.FrameRead(header.Type, 0);
             return new ProtocolFrame(header.Type, ReadOnlyMemory<byte>.Empty);
         }
 
@@ -58,11 +66,12 @@ internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
             throw new ProtocolException("The connection ended inside a frame payload.");
         }
 
+        ProtocolEventSource.Log.FrameRead(header.Type, payload.Length);
         return new ProtocolFrame(header.Type, payload);
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    protected override ValueTask DisposeAsyncCore()
     {
         if (!_leaveOpen)
         {

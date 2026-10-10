@@ -15,6 +15,9 @@ public class GqlQueryParserTests
     [InlineData("MATCH ()-[r:KNOWS]->() RETURN r")]
     [InlineData("MATCH (a)<-[r:KNOWS]-(b) RETURN a, r, b")]
     [InlineData("MATCH (a)-[r]-(b) RETURN a, r, b")]
+    [InlineData("MATCH (a)<-[r]->(b) RETURN a")]
+    [InlineData("MATCH (a)->(b)<-(c)-(d)<->(e) RETURN a, e")]
+    [InlineData("MATCH (n:A|B)-[r:T|U]->(m IS !C) WHERE n IS LABELED A AND r:T RETURN n")]
     [InlineData("MATCH (a)-[r]->(b)-[s]->(c) RETURN a, r, b, s, c")]
     [InlineData("MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) INSERT (a)-[r:KNOWS]->(b) RETURN r")]
     [InlineData("MATCH (a) WHERE a.age >= 18 AND a.name <> 'Bob' RETURN a.name AS name")]
@@ -29,6 +32,10 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a)-[r]->(b) DELETE r, a")]
     [InlineData("match (a:Person {\"with space\": 'it''s fine'}) return a.\"with space\";")]
     [InlineData("/* outer /* inner */ */ MATCH (a) -- comment\n RETURN a")]
+    // ISO comments after a pattern keep their meaning when whitespace separates them, and a ')'
+    // that closes a predicate is not a pattern element (#1139).
+    [InlineData("MATCH (a)-[r]->(b) -- note\nRETURN a")]
+    [InlineData("MATCH (a) WHERE (a.age > 1)-- note\nRETURN a")]
     [InlineData("CREATE (a:Person {limit: 2, count: 3, value: 'OPTIONAL MATCH'}) RETURN a.limit")]
     public void SupportedCorpus_ParsesWithoutDiagnostics(string source)
     {
@@ -42,7 +49,9 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a RETURN a", "GQL0002")]
     [InlineData("MATCH a RETURN a", "GQL0002")]
     [InlineData("MATCH (a)-[r->(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)<-[r]->(b) RETURN a", "GQL0002")]
+    [InlineData("MATCH (a)<--(b) RETURN a", "GQL0002")]
+    [InlineData("MATCH (a)<-->(b) RETURN a", "GQL0002")]
+    [InlineData("MATCH (a)-[r]-->(b) RETURN a", "GQL0008")]
     [InlineData("MATCH (a)-[r]-> RETURN a", "GQL0002")]
     [InlineData("MATCH (a)", "GQL0002")]
     [InlineData("MATCH (a) RETURN", "GQL0002")]
@@ -119,6 +128,10 @@ public class GqlQueryParserTests
         path.Relationships[0].Direction.ShouldBe(GqlPatternDirection.Incoming);
         path.Relationships[0].Properties["weight"].ShouldBe(2L);
         path.Relationships[1].Direction.ShouldBe(GqlPatternDirection.Undirected);
+        path.Nodes[0].LabelExpression.ShouldBe(new GqlLabelName("Person"));
+        path.Relationships[0].LabelExpression.ShouldBe(new GqlLabelName("KNOWS"));
+        path.Nodes[1].LabelExpression.ShouldBeNull();
+        path.Relationships[1].LabelExpression.ShouldBeNull();
         query.Projections.ShouldBe([new GqlProjection("a"), new GqlProjection("r"), new GqlProjection("b", "name", "friend")]);
     }
 
@@ -126,13 +139,38 @@ public class GqlQueryParserTests
     public void PredicateAst_PreservesConjunctionAndNormalizedComparison()
     {
         var query = Parse("MATCH (a) WHERE a.age >= 18 AND a.name <> 'Bob' RETURN a").GqlExpression;
-        var conjunction = query.Predicate.ShouldBeOfType<GqlBinaryExpression>();
-        conjunction.Operator.ShouldBe("AND");
-        var age = conjunction.Left.ShouldBeOfType<GqlBinaryExpression>();
+        var conjunction = query.Predicate.ShouldBeOfType<GqlLogicalExpression>();
+        conjunction.Operator.ShouldBe(GqlLogicalOperator.And);
+        conjunction.Operands.Count.ShouldBe(2);
+        var age = conjunction.Operands[0].ShouldBeOfType<GqlBinaryExpression>();
         age.Operator.ShouldBe(">=");
         age.Left.ShouldBeOfType<GqlPropertyExpression>().Property.ShouldBe("age");
         age.Right.ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(18L);
-        conjunction.Right.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("!=");
+        conjunction.Operands[1].ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("!=");
+    }
+
+    /// <summary>
+    /// An AND chain is one n-ary node, as Neo4j's Ands: a group that opens the chain merges into it,
+    /// a group in a later position stays nested, and a single comparison is not wrapped.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Predicates: an AND chain is one n-ary node")]
+    public void Parse_AndChain_ShouldBuildOneLogicalNode()
+    {
+        // Act
+        var chain = Parse("MATCH (a) WHERE a.x = 1 AND a.x = 2 AND a.x = 3 AND a.x = 4 RETURN a").GqlExpression.Predicate;
+        var opening = Parse("MATCH (a) WHERE (a.x = 1 AND a.x = 2) AND a.x = 3 RETURN a").GqlExpression.Predicate;
+        var later = Parse("MATCH (a) WHERE a.x = 1 AND (a.x = 2 AND a.x = 3) RETURN a").GqlExpression.Predicate;
+        var single = Parse("MATCH (a) WHERE ((a.x = 1)) RETURN a").GqlExpression.Predicate;
+
+        // Assert
+        chain.ShouldBeOfType<GqlLogicalExpression>().Operands.Count.ShouldBe(4);
+        var merged = opening.ShouldBeOfType<GqlLogicalExpression>();
+        merged.Operands.Count.ShouldBe(3);
+        merged.Operands.ShouldAllBe(operand => operand is GqlBinaryExpression);
+        var nested = later.ShouldBeOfType<GqlLogicalExpression>();
+        nested.Operands.Count.ShouldBe(2);
+        nested.Operands[1].ShouldBeOfType<GqlLogicalExpression>().Operands.Count.ShouldBe(2);
+        single.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("=");
     }
 
     [Fact]
@@ -171,17 +209,23 @@ public class GqlQueryParserTests
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
     }
 
-    [Fact]
-    public void DeepPredicateAndLongPath_ReturnBoundDiagnostics()
+    /// <summary>
+    /// A path pattern keeps its 64-relationship bound (GQL0005). Predicates have no count or depth
+    /// limit (#1139 follow-up): a 10,000-comparison AND chain is one node, and parentheses nest
+    /// as deep as the stack allows (GqlLabelChainParserTests covers the stack).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Bounds: only the 64-relationship path is bounded")]
+    public void Parse_LongPredicateAndLongPath_ShouldBoundOnlyThePath()
     {
-        Parse("MATCH (a) WHERE " + new string('(', 129) + "a.x = 1" + new string(')', 129) + " RETURN a")
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0005");
         Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 65)) + " RETURN a")
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0005");
-        Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 129)) + " RETURN a")
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0005");
-        Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 128)) + " RETURN a")
-            .Diagnostics.ShouldBeEmpty();
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
+        Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 64)) + " RETURN a").Diagnostics.ShouldBeEmpty();
+        var chain = Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 10_000)) + " RETURN a");
+        chain.Diagnostics.ShouldBeEmpty();
+        chain.GqlExpression.Predicate.ShouldBeOfType<GqlLogicalExpression>().Operands.Count.ShouldBe(10_000);
+        var deep = Parse("MATCH (a) WHERE " + new string('(', 300) + "a.x = 1" + new string(')', 300) + " RETURN a");
+        deep.Diagnostics.ShouldBeEmpty();
+        deep.GqlExpression.Predicate.ShouldBeOfType<GqlBinaryExpression>();
     }
 
     [Fact]

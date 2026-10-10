@@ -21,21 +21,13 @@ internal sealed class KeyValueIndexMaintenanceWorker : DatabaseEngineWorker
     private readonly KeyValueDatabaseEngine _engine;
 
     internal KeyValueIndexMaintenanceWorker(KeyValueDatabaseEngine engine)
+        : base(engine.Name + "/index-maintenance", DatabaseEngineWorkerKind.IndexMaintenance, engine.EngineOptions.MaintenanceInterval)
     {
         _engine = engine;
     }
 
     /// <inheritdoc />
-    public override string Name => _engine.Name + "/index-maintenance";
-
-    /// <inheritdoc />
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-    /// <inheritdoc />
-    public override TimeSpan Interval => _engine.EngineOptions.MaintenanceInterval;
-
-    /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Stub: the index layer has no compaction to drive yet.
     }

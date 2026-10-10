@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Storage;
 /// The rule recovery lives by: <b>a transaction committed if and only if its commit
 /// record is durable in the journal.</b> Everything else — a begin without a commit,
 /// an explicit rollback, a torn tail — is aborted, and its versions must be purged
-/// (<see cref="IVersionStore.PurgeWriterAsync"/>) before the store serves snapshots.
+/// (<see cref="VersionStore.PurgeWriterAsync"/>) before the store serves snapshots.
 /// </remarks>
 public static class TransactionRecovery
 {
@@ -22,24 +22,63 @@ public static class TransactionRecovery
     /// </summary>
     /// <param name="journal">The storage journal to analyze.</param>
     /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
-    public static TransactionRecoveryPlan Analyze(IStorageJournal journal)
+    public static TransactionRecoveryPlan Analyze(StorageJournal journal) => Analyze(journal, []);
+
+    /// <summary>
+    /// Reads the journal and classifies every transaction sequence it mentions, and every
+    /// writer the storage's checkpoint anchor recorded as in flight.
+    /// </summary>
+    /// <param name="journal">The storage journal to analyze.</param>
+    /// <param name="checkpointActiveTransactions">
+    /// The sequences the last checkpoint recorded in the storage's file header
+    /// (<see cref="Storage.CheckpointActiveTransactions"/>): the coordinator's in-flight
+    /// writers, the only transactions whose row versions can be in the data pages, in any
+    /// number (a header slot chains anchor pages for those it cannot hold). Each one is
+    /// classified exactly like a sequence a checkpoint record lists: aborted unless the
+    /// journal holds its commit record. The anchor is what still names them when the
+    /// checkpoint's own record was lost after the journal truncation. A reader is not
+    /// listed and needs no classification; one that became a writer after the checkpoint
+    /// was announced again with a begin record, which the journal scan classifies.
+    /// </param>
+    /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
+    /// <remarks>
+    /// <see cref="TransactionRecoveryPlan.MaxSequence"/> covers what the journal and the
+    /// anchor name. A reader whose begin record a checkpoint truncated is in neither, so it
+    /// is no floor for new sequences; the storage's own sequence floor
+    /// (<see cref="Storage.ReserveTransactionSequence"/> resumes above it) is.
+    /// </remarks>
+    public static TransactionRecoveryPlan Analyze(StorageJournal journal, IEnumerable<long> checkpointActiveTransactions)
     {
         ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(checkpointActiveTransactions);
 
         var committed = new HashSet<TransactionSequence>();
         var seen = new HashSet<TransactionSequence>();
         ulong maxSequence = 0;
 
-        IEnumerable<JournalRecord> records = journal is StorageJournal streaming
-            ? streaming.ReadSequential()
-            : journal.ReadAll();
-        foreach (var record in records)
+        foreach (long anchored in checkpointActiveTransactions)
         {
-            // A checkpoint record's payload lists the transaction sequences that
-            // were still active when the journal was truncated — their begin
-            // records were dropped by the truncation, so the checkpoint is their
-            // classification anchor: an active sequence with no later commit
-            // record is aborted, exactly as if its begin record survived.
+            if (anchored <= 0)
+            {
+                continue;
+            }
+
+            var anchoredSequence = new TransactionSequence((ulong)anchored);
+            seen.Add(anchoredSequence);
+
+            if (anchoredSequence.Value > maxSequence)
+            {
+                maxSequence = anchoredSequence.Value;
+            }
+        }
+
+        foreach (var record in journal.ReadSequential())
+        {
+            // A checkpoint record's payload lists the writers that were still in
+            // flight when the journal was truncated — their begin records were
+            // dropped by the truncation, so the checkpoint is their classification
+            // anchor: a listed sequence with no later commit record is aborted,
+            // exactly as if its begin record survived.
             if (record.Type == JournalRecordType.Checkpoint)
             {
                 var payload = record.Payload.Span;

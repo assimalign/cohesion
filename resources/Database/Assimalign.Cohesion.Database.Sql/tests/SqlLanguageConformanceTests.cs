@@ -53,7 +53,7 @@ public sealed class SqlLanguageConformanceTests
             parsed.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error, clause);
             executionCase.ContainsClause(parsed.SqlExpression).ShouldBeTrue($"The {clause} case must actually contain that clause.");
 
-            await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile" });
+            await using var engine = SqlDatabaseEngine.Create("sql-profile", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("audit");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             foreach (string setup in executionCase.Setup)
@@ -85,7 +85,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("SELECT CAST(42 AS TEXT) FROM t WHERE id = 1;", "42", DatabaseType.String)]
     public async Task Cast_AuditedValidConversion_ShouldReturnTargetValueAndMetadata(string sql, object expected, DatabaseType type)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-cast" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-cast", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, _seed[0]);
@@ -107,7 +107,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("COUNT(*) + 1")]
     public async Task Select_AuditedAggregateForms_ShouldExecuteWithGroupingValidation(string projection)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-aggregate" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-aggregate", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
@@ -141,7 +141,7 @@ public sealed class SqlLanguageConformanceTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Partial clauses: defaults backfill or reject atomically and ORDER BY aliases and ordinals execute")]
     public async Task PartialForms_DefaultsAndOrdering_ShouldMatchMeasuredBoundaries()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-partial" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-partial", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
@@ -175,7 +175,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("id AS value, age AS value")]
     public async Task OrderBy_ExpandedOrDuplicateProjection_ShouldResolveOrdinals(string projection)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-projection" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-projection", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -189,7 +189,7 @@ public sealed class SqlLanguageConformanceTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: same-name alias uses its computed projection without recursion")]
     public async Task OrderBy_AliasSharingItsOperandName_ShouldUseComputedOutput()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-self" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-self", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -204,7 +204,7 @@ public sealed class SqlLanguageConformanceTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: grouped nested alias wins over a source column")]
     public async Task OrderBy_GroupedAliasCollision_ShouldPreferAggregateOutput()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-group" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-group", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -227,7 +227,7 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("SELECT age AS years FROM ordering_rows WHERE years > 0 ORDER BY years;", "Unknown column 'years'.")]
     public async Task OrderBy_InvalidAliasBinding_ShouldFailPrecisely(string query, string message)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-invalid" });
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-order-invalid", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
@@ -324,7 +324,7 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlDropTableExpression,
             async (session, _) =>
             {
-                ((SqlDatabaseInstance)session.Database).Catalog.TryGetTable("dbo", "t", out var dropped).ShouldBeFalse();
+                session.Database.Catalog.TryGetTable("dbo", "t", out var dropped).ShouldBeFalse();
                 dropped.ShouldBeNull();
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT * FROM t;")))
                     .Message.ShouldContain("does not exist", Case.Sensitive);
@@ -334,7 +334,7 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlCreateIndexExpression { IsUnique: true },
             async (session, _) =>
             {
-                var catalog = ((SqlDatabaseInstance)session.Database).Catalog;
+                var catalog = session.Database.Catalog;
                 catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
                 catalog.GetIndexes(table!.ObjectId).ShouldContain(index => index.Name == "ix_name" && index.IsUnique);
                 await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO t VALUES (4, 'Ada', 1);"));
@@ -344,7 +344,7 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlDropIndexExpression,
             async (session, _) =>
             {
-                var catalog = ((SqlDatabaseInstance)session.Database).Catalog;
+                var catalog = session.Database.Catalog;
                 catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
                 catalog.GetIndexes(table!.ObjectId).ShouldNotContain(index => index.Name == "ix_age");
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE age = 36;", [[1]]);
@@ -419,14 +419,14 @@ public sealed class SqlLanguageConformanceTests
     private static ExecutionCase Query(string statement, Func<SqlQueryExpression, bool> containsClause, object?[][] expected)
         => new(statement, _seed, containsClause, async (_, result) => CheckRows(await ReadRowsAsync(result), expected));
 
-    private static ExecutionCase ForeignKeyCase(string statement, SqlReferentialAction action, Func<IDatabaseSession, QueryResult, Task> verify)
+    private static ExecutionCase ForeignKeyCase(string statement, SqlReferentialAction action, Func<SqlDatabaseSession, QueryResult, Task> verify)
         => new(statement, _seed, expression => expression is SqlCreateTableExpression create &&
             create.Constraints.Any(constraint => constraint.Kind == SqlConstraintKind.ForeignKey && constraint.ReferencedTable is not null && constraint.OnDelete == action), verify);
 
     private static bool HasConstraint(SqlQueryExpression expression, SqlConstraintKind kind)
         => expression is SqlCreateTableExpression create && create.Constraints.Any(constraint => constraint.Kind == kind);
 
-    private static async Task VerifyAlterAsync(IDatabaseSession session, QueryResult result)
+    private static async Task VerifyAlterAsync(SqlDatabaseSession session, QueryResult result)
     {
         result.Status.ShouldBe(QueryResultStatus.Success);
         await ExpectRowsAsync(session, "SELECT id, name, age, extra FROM t ORDER BY id;",
@@ -446,7 +446,7 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(session, "SELECT * FROM t WHERE id = 1;", [[1, "Ada", 36]]);
     }
 
-    private static async Task VerifyUniqueAsync(IDatabaseSession session, QueryResult result)
+    private static async Task VerifyUniqueAsync(SqlDatabaseSession session, QueryResult result)
     {
         result.Status.ShouldBe(QueryResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
@@ -458,7 +458,7 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
     }
 
-    private static async Task VerifyReferenceAsync(IDatabaseSession session, QueryResult result)
+    private static async Task VerifyReferenceAsync(SqlDatabaseSession session, QueryResult result)
     {
         result.Status.ShouldBe(QueryResultStatus.Success);
         await ExecuteAsync(session, "INSERT INTO c VALUES (1), (NULL);");
@@ -469,7 +469,7 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
     }
 
-    private static async Task VerifyBeginAsync(IDatabaseSession session, QueryResult result)
+    private static async Task VerifyBeginAsync(SqlDatabaseSession session, QueryResult result)
     {
         result.Status.ShouldBe(QueryResultStatus.Success);
         session.CurrentTransaction.ShouldNotBeNull().State.ShouldBe(TransactionState.Active);
@@ -481,10 +481,10 @@ public sealed class SqlLanguageConformanceTests
         await ExpectRowsAsync(observer, "SELECT COUNT(*) FROM t;", [[3L]]);
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task ExpectRowsAsync(IDatabaseSession session, string statement, object?[][] expected)
+    private static async Task ExpectRowsAsync(SqlDatabaseSession session, string statement, object?[][] expected)
         => CheckRows(await RowsAsync(session, statement), expected);
 
     /// <summary>Prevents correct-order expectations from passing when the executor merely preserves input order.</summary>
@@ -503,7 +503,7 @@ public sealed class SqlLanguageConformanceTests
         for (int i = 0; i < expected.Length; i++) { actual[i].ShouldBe(expected[i]); }
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
         => await ReadRowsAsync(await ExecuteAsync(session, statement));
 
     private static async Task<List<object?[]>> ReadRowsAsync(QueryResult queryResult)
@@ -527,5 +527,5 @@ public sealed class SqlLanguageConformanceTests
         string Statement,
         string[] Setup,
         Func<SqlQueryExpression, bool> ContainsClause,
-        Func<IDatabaseSession, QueryResult, Task> Verify);
+        Func<SqlDatabaseSession, QueryResult, Task> Verify);
 }

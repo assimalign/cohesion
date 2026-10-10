@@ -24,6 +24,7 @@ public sealed class SqlInExpression : SqlExpression
         Values = values;
         Subquery = subquery;
         IsNegated = isNegated;
+        Depth = 1 + System.Math.Max(operand.Depth, System.Math.Max(DepthOf(values), subquery?.ExpressionDepth ?? 0));
     }
 
     /// <summary>

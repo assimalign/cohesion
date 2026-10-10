@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A database-scoped MATCH request that projects one path or bound graph entity.</summary>
 /// <remarks>
-/// Execute through <see cref="IDatabaseSession.ExecuteAsync(QueryRequest, System.Threading.CancellationToken)"/>.
+/// Execute through <see cref="DatabaseSession.ExecuteAsync(QueryRequest, System.Threading.CancellationToken)"/>.
 /// A named path retains traversal order; a node becomes a one-node path, and a relationship becomes
 /// a path containing its source and target nodes in stored direction. Scalar and multiple projections,
 /// catalog statements, and mutations are rejected before execution.
@@ -35,6 +35,10 @@ public sealed class GraphPathsQueryRequest : QueryRequest<GqlQueryStatement>
     /// <returns>The parsed path request.</returns>
     /// <exception cref="ArgumentException">The statement text is empty.</exception>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
+    /// <exception cref="DatabaseException">
+    /// The text nests deeper than the calling thread's stack lets the parser follow:
+    /// <c>COHDBG008</c>, statement too complex.
+    /// </exception>
     public static GraphPathsQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)
         => new(GraphQueryRequest.FromGql(gql, parameters).Statement, parameters);
 }

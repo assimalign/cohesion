@@ -11,6 +11,11 @@ using Assimalign.Cohesion.FileSystem;
 /// Serializes offset I/O over a legacy stream. A Stream has no durable-flush
 /// contract, so this adapter must reject durable requests regardless of its type.
 /// </summary>
+/// <remarks>
+/// Every member that touches the stream — reads, writes, the length, growth and flushes —
+/// takes the same gate, so no operation can observe or replace the stream's storage
+/// while another is using it.
+/// </remarks>
 internal sealed class StreamFileHandle : IFileSystemFileHandle
 {
     private readonly Stream _stream;
@@ -25,7 +30,22 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
         _stream = stream;
     }
 
-    public long Length => _stream.Length;
+    // Length and SetLength take the gate like every read and write. Growing a MemoryStream
+    // past its capacity copies its array into a new one, and a write that lands in the old
+    // array after its region was copied is lost (#1157 review).
+    public long Length
+    {
+        get
+        {
+            _gate.Wait();
+            try
+            {
+                return _stream.Length;
+            }
+            finally { _gate.Release(); }
+        }
+    }
+
     public bool SupportsDurableFlush => false;
 
     public int Read(Span<byte> buffer, long offset)
@@ -72,7 +92,32 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
         finally { _gate.Release(); }
     }
 
-    public void SetLength(long length) => _stream.SetLength(length);
+    public void SetLength(long length)
+    {
+        _gate.Wait();
+        try
+        {
+            _stream.SetLength(length);
+
+            // A checkpoint truncates an in-memory journal to zero. A MemoryStream keeps its buffer
+            // through SetLength, and the buffer doubles as the stream grows, so an in-memory
+            // database would otherwise hold up to twice its checkpoint journal size for its
+            // lifetime once its journal first passed it (#1254 review).
+            if (length == 0 && _stream is MemoryStream { Capacity: > 0 } memory)
+            {
+                try
+                {
+                    memory.Capacity = 0;
+                }
+                catch (NotSupportedException)
+                {
+                    // A MemoryStream over a caller's fixed array cannot grow, so it has nothing
+                    // to release.
+                }
+            }
+        }
+        finally { _gate.Release(); }
+    }
 
     public void Flush(bool durable)
     {
@@ -80,7 +125,13 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
         {
             throw new NotSupportedException("A Stream does not carry a durable-flush contract. Open an IFileSystemFileHandle instead.");
         }
-        _stream.Flush();
+
+        _gate.Wait();
+        try
+        {
+            _stream.Flush();
+        }
+        finally { _gate.Release(); }
     }
 
     public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
@@ -89,7 +140,18 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
         {
             throw new NotSupportedException("A Stream does not carry a durable-flush contract. Open an IFileSystemFileHandle instead.");
         }
-        return new ValueTask(_stream.FlushAsync(cancellationToken));
+
+        return FlushGatedAsync(cancellationToken);
+    }
+
+    private async ValueTask FlushGatedAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
     }
 
     public void Dispose() => _stream.Dispose();

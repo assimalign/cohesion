@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,215 +9,585 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-/// <summary>Verifies engine composition ownership and deferred lifecycle behavior.</summary>
+/// <summary>
+/// The SQL engine builder composes through the engine's compose method over the root
+/// <see cref="DatabaseEngine"/> base (concrete-types plan, step P4.0 and phase 4, #1260): the
+/// factories run one at a time as their products are attached, the base makes the attach checks
+/// (the worker-name uniqueness and the pump threads named for their workers, which the SQL
+/// engine already had), and the shared builder state disposes whatever a failed build leaves
+/// unowned and fails a compose method that breaks its contract.
+/// </summary>
 public sealed class SqlEngineCompositionTests
 {
-    [Fact]
-    public async Task Build_ShouldRunAndQuiesceAnInterfaceWorker()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: products attach in order, a later factory sees the earlier product, and the engine and builder freeze")]
+    public async Task Build_WithWorkerAndServerFactories_ShouldAttachInOrderAndFreeze()
     {
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        var worker = new ProbeWorker();
-        IDatabaseEngine? observed = null;
-        builder.AddWorker(engine => { observed = engine; return worker; });
-        observed.ShouldBeNull();
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("composed");
+        RecordingWorker? first = null;
+        RecordingWorker? second = null;
+        RecordingServer? server = null;
+        bool secondSawFirst = false;
+        builder.AddWorker(engine => first = new RecordingWorker(engine, engine.Name + "/first"));
+        builder.AddWorker(engine =>
+        {
+            secondSawFirst = engine.Workers.Contains(first!);
+            return second = new RecordingWorker(engine, engine.Name + "/second");
+        });
+        builder.AddServer(engine => server = new RecordingServer(engine));
+        first.ShouldBeNull();
+        server.ShouldBeNull();
 
+        // Act
         var engine = builder.Build();
-        observed.ShouldBeSameAs(engine);
-        engine.Workers.ShouldContain(worker);
-        worker.Started.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
+        bool started = first.ShouldNotBeNull().Started.Wait(TimeSpan.FromSeconds(10));
+        var frozen = Should.Throw<InvalidOperationException>(() => engine.Compose([new RecordingWorker(engine, "late")], []));
         await engine.DisposeAsync();
-        worker.Stopped.ShouldBeTrue();
-        worker.Disposed.ShouldBeTrue();
+
+        // Assert
+        started.ShouldBeTrue();
+        secondSawFirst.ShouldBeTrue();
+        engine.Workers.Count.ShouldBe(7);
+        engine.Workers.Skip(5).ShouldBe(new DatabaseEngineWorker[] { first, second.ShouldNotBeNull() });
+        engine.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
+        server.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
+        server.Starts.ShouldBe(0);
+        frozen.Message.ShouldBe("Engine composition is frozen; workers and servers attach only before it completes.");
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
+        Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => first!));
+        Should.Throw<InvalidOperationException>(() => builder.Build());
+        first.Disposals.ShouldBe(1);
+        second.Disposals.ShouldBe(1);
+        server.Stops.ShouldBe(1);
     }
 
-    [Fact]
-    public async Task Build_ShouldFreezeOptionsAndRejectASecondAttempt()
+    /// <summary>
+    /// The root engine base runs each worker's pump on a thread named for the worker (concrete-types
+    /// plan §6.4, engine composition), as the SQL engine already named its pumps, so two workers of
+    /// one kind still pump on threads named apart.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: each worker's pump thread is named for the worker")]
+    public async Task Build_WorkersOfOneKind_ShouldPumpEachOnAThreadNamedForIt()
     {
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.EngineName = "frozen";
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("pumps");
+        RecordingWorker? first = null;
+        RecordingWorker? second = null;
+        builder.AddWorker(engine => first = new RecordingWorker(engine, engine.Name + "/first"));
+        builder.AddWorker(engine => second = new RecordingWorker(engine, engine.Name + "/second"));
+
+        // Act
         await using var engine = builder.Build();
-        Should.Throw<InvalidOperationException>(() => builder.EngineName = "changed");
-        Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => new ProbeWorker()));
-        Should.Throw<InvalidOperationException>(() => builder.Build());
-        engine.Name.ShouldBe("frozen");
+        bool started = first.ShouldNotBeNull().Started.Wait(TimeSpan.FromSeconds(10))
+            && second.ShouldNotBeNull().Started.Wait(TimeSpan.FromSeconds(10));
+
+        // Assert
+        started.ShouldBeTrue();
+        first.Kind.ShouldBe(second!.Kind);
+        first.ThreadName.ShouldBe("pumps/first");
+        second.ThreadName.ShouldBe("pumps/second");
+        engine.Workers.Take(5).Select(worker => worker.Name).ShouldBe(new[]
+        {
+            "pumps/wal-flush",
+            "pumps/page-writeback",
+            "pumps/checkpoint",
+            "pumps/version-purge",
+            "pumps/index-maintenance",
+        });
     }
 
-    [Fact]
-    public void FailedFactory_ShouldDisposeEngineAndForbidRetry()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: each factory sees every product attached before it, and the server factories run after every worker")]
+    public async Task Build_WorkerAndServerFactories_ShouldSeeEveryProductAttachedBeforeThem()
     {
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        IDatabaseEngine? created = null;
-        builder.AddServer(engine => { created = engine; throw new InvalidOperationException("factory"); });
-        Should.Throw<InvalidOperationException>(() => builder.Build()).Message.ShouldBe("factory");
-        created.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
-        Should.Throw<InvalidOperationException>(() => builder.Build());
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        RecordingWorker? first = null;
+        RecordingWorker? second = null;
+        RecordingServer? server = null;
+        List<string> observations = [];
+        builder.AddWorker(engine => first = new RecordingWorker(engine, engine.Name + "/first"));
+        builder.AddWorker(engine =>
+        {
+            observations.Add($"second worker: first attached={engine.Workers.Contains(first!)}");
+            return second = new RecordingWorker(engine, engine.Name + "/second");
+        });
+        builder.AddServer(engine =>
+        {
+            observations.Add($"first server: workers attached={engine.Workers.Contains(first!) && engine.Workers.Contains(second!)}");
+            return server = new RecordingServer(engine);
+        });
+        builder.AddServer(engine =>
+        {
+            observations.Add($"second server: first attached={engine.Servers.Contains(server!)}");
+            return new RecordingServer(engine);
+        });
+
+        // Act
+        await using var engine = builder.Build();
+
+        // Assert
+        observations.ShouldBe(new[]
+        {
+            "second worker: first attached=True",
+            "first server: workers attached=True",
+            "second server: first attached=True",
+        });
+        engine.Servers.Count.ShouldBe(2);
     }
 
-    [Fact]
-    public async Task WrongServerEngine_ShouldDisposeRejectedServerAndConstructedEngine()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: an engine created without its builder takes no worker or server")]
+    public async Task Create_WithoutBuilder_ShouldCompleteCompositionAtOnce()
     {
-        await using var other = SqlDatabaseEngine.Create(new());
-        var server = new ProbeServer(other);
-        IDatabaseEngine? created = null;
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.AddServer(engine => { created = engine; return server; });
-        Should.Throw<InvalidOperationException>(() => builder.Build());
-        server.Disposals.ShouldBe(1);
-        created.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("standalone", new SqlDatabaseEngineOptions());
+        var worker = new RecordingWorker(engine);
+
+        // Act
+        var refusal = Should.Throw<InvalidOperationException>(() => engine.Compose([worker], []));
+
+        // Assert
+        refusal.Message.ShouldStartWith("Engine composition is frozen", Case.Sensitive);
+        engine.Workers.Count.ShouldBe(5);
+        engine.Workers.ShouldNotContain(worker);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a server returned twice is refused and released once, by the engine")]
+    public void Build_RepeatedServer_ShouldBeRefusedAndReleasedOnceByTheEngine()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        RecordingServer? server = null;
+        SqlDatabaseEngine? product = null;
+        builder.AddServer(engine => server = new RecordingServer(product = engine));
+        builder.AddServer(_ => server!);
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert: the engine owned the server, so only its disposal released it.
+        failure.Message.ShouldBe("A composition product cannot be registered twice.");
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+        server.ShouldNotBeNull().Stops.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a built-in worker a factory returns is refused and left to the engine")]
+    public void Build_BuiltInWorkerReturned_ShouldBeRefusedAndLeftToTheEngine()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        builder.AddWorker(engine => (product = engine).Workers[2]);
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldBe("A composition product cannot be registered twice.");
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a server for another engine is refused and released without touching that engine")]
+    public async Task Build_ServerForAnotherEngine_ShouldBeRefusedAndReleased()
+    {
+        // Arrange
+        await using var other = SqlDatabaseEngine.Create("other", new SqlDatabaseEngineOptions());
+        var server = new RecordingServer(other);
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        builder.AddServer(engine => { product = engine; return server; });
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldBe("A nested server must front its owning engine.");
+        server.Stops.ShouldBe(1);
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+        other.State.ShouldBe(EngineState.Running);
+        other.Servers.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a refused server that fails to release is reported with the refusal, and the engine is disposed")]
+    public async Task Build_RefusedServerFailsToRelease_ShouldAggregateTheRefusalAndTheCleanup()
+    {
+        // Arrange
+        await using var other = SqlDatabaseEngine.Create("other", new SqlDatabaseEngineOptions());
+        var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        builder.AddServer(engine => { product = engine; return server; });
+
+        // Act
+        var failure = Should.Throw<AggregateException>(() => builder.Build());
+
+        // Assert: the refusal first, then the cleanup that failed.
+        failure.InnerExceptions.Select(exception => exception.Message).ShouldBe(new[]
+        {
+            "A nested server must front its owning engine.",
+            "The listener would not close.",
+        });
+        server.Stops.ShouldBe(1);
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
         other.State.ShouldBe(EngineState.Running);
     }
 
-    [Fact]
-    public async Task DisposalFailure_ShouldStillDisposeEveryServerAndQuiesceWorkers()
+    /// <summary>
+    /// The root engine base refuses a worker whose name another worker of the engine has, built-in
+    /// or custom, ordinal and ignoring case (concrete-types plan §6.4, engine composition), with the
+    /// message the SQL engine's own attach used. The refused worker and the engine are disposed.
+    /// </summary>
+    /// <param name="duplicate">The name of the second worker: a built-in worker's, or the first custom worker's, in another case.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Composition: a worker named like another worker, built-in or custom, is refused, disposed, and the engine disposed")]
+    [InlineData("NAMED/Checkpoint")]
+    [InlineData("named/CUSTOM")]
+    public void Build_DuplicateWorkerName_ShouldBeRefusedAndDisposed(string duplicate)
     {
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        var worker = new ProbeWorker();
-        ProbeServer? first = null;
-        builder.AddWorker(_ => worker);
-        builder.AddServer(engine => first = new ProbeServer(engine));
-        builder.AddServer(engine => new ProbeServer(engine) { FailDisposal = true });
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("named");
+        RecordingWorker? custom = null;
+        RecordingWorker? worker = null;
+        SqlDatabaseEngine? product = null;
+        builder.AddWorker(engine => custom = new RecordingWorker(product = engine, "named/custom"));
+        builder.AddWorker(engine => worker = new RecordingWorker(engine, duplicate));
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert: names compare ordinal, ignoring case.
+        failure.Message.ShouldBe($"Worker name '{duplicate}' is already registered.");
+        worker.ShouldNotBeNull().Disposals.ShouldBe(1);
+        custom.ShouldNotBeNull().Disposals.ShouldBe(1);
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a worker with a blank name fails inside its factory, and the engine is disposed")]
+    public void Build_BlankWorkerName_ShouldFailInsideTheFactory()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine, " "));
+
+        // Act / Assert: the worker's constructor refuses the name; there is no product to dispose.
+        Should.Throw<ArgumentException>(() => builder.Build()).ParamName.ShouldBe("name");
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Composition: a factory that returns null disposes the engine")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Build_NullProduct_ShouldDisposeTheEngine(bool worker)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        if (worker)
+        {
+            builder.AddWorker(engine => { product = engine; return null!; });
+        }
+        else
+        {
+            builder.AddServer(engine => { product = engine; return null!; });
+        }
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldBe(worker ? "SQL engine 'sql-engine': a worker factory returned null." : "SQL engine 'sql-engine': a server factory returned null.");
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Composition: a compose method that breaks the builder state's contract fails the build, runs no later factory and releases every product once")]
+    [InlineData("skips-servers", "The compose method returned before it attached every product.", 2, 0)]
+    [InlineData("buffers-workers", "The compose method read past a product it did not attach.", 1, 0)]
+    [InlineData("buffers-servers", "The compose method read past a product it did not attach.", 2, 1)]
+    [InlineData("reads-workers-twice", "The compose method read a product sequence twice.", 2, 0)]
+    [InlineData("servers-before-workers", "The compose method requested a server before it attached every worker.", 1, 0)]
+    public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
+    {
+        // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
+        var state = new DatabaseEngineBuilderState<SqlDatabaseEngine>("contract", SqlDatabaseEngine.ModelName);
+        var engine = SqlDatabaseEngine.CreateUncomposed("contract", new SqlDatabaseEngineOptions());
+        List<RecordingWorker> workers = [];
+        List<RecordingServer> servers = [];
+        state.AddWorker(product => Made(workers, new RecordingWorker(product, product.Name + "/first")));
+        state.AddWorker(product => Made(workers, new RecordingWorker(product, product.Name + "/second")));
+        state.AddServer(product => Made(servers, new RecordingServer(product)));
+        Action<IEnumerable<DatabaseEngineWorker>, IEnumerable<DatabaseServer>> compose = scenario switch
+        {
+            "skips-servers" => (w, _) => engine.Compose(w, []),
+            "buffers-workers" => (w, s) => engine.Compose(w.ToList(), s),
+            "buffers-servers" => (w, s) => engine.Compose(w, Buffered(s)),
+            "reads-workers-twice" => (w, s) => engine.Compose(w.Concat(w), s),
+            "servers-before-workers" => (w, s) => engine.Compose(w.Take(1), s),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => state.Complete(engine, compose, SqlDatabaseEngine.ReleaseRefusedWorkerAsync));
+
+        // Assert: an attached product is released by the engine, an unattached one by the state.
+        failure.Message.ShouldBe(message);
+        engine.State.ShouldBe(EngineState.Disposed);
+        workers.Count.ShouldBe(workersMade);
+        servers.Count.ShouldBe(serversMade);
+        workers.ShouldAllBe(worker => worker.Disposals == 1);
+        servers.ShouldAllBe(server => server.Stops == 1);
+
+        static T Made<T>(List<T> made, T product)
+        {
+            made.Add(product);
+            return product;
+        }
+
+        // Buffers the sequence when it is first read, not when the compose method is called.
+        static IEnumerable<T> Buffered<T>(IEnumerable<T> sequence)
+        {
+            foreach (var item in sequence.ToList())
+            {
+                yield return item;
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Composition: a blank engine name is refused before the engine is created")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_BlankEngineName_ShouldBeRefused(string name)
+    {
+        // Act
+        var direct = Should.Throw<ArgumentException>(() => SqlDatabaseEngine.Create(name, new SqlDatabaseEngineOptions()));
+        var builder = Should.Throw<ArgumentException>(() => SqlDatabaseEngine.CreateBuilder(name));
+        var verb = Should.Throw<ArgumentException>(() => new RecordingApplicationBuilder().AddSql(name, _ => { }));
+
+        // Assert: Create, the builder and the verb each take the engine name once, and refuse a
+        // blank one before anything is created or registered.
+        direct.ParamName.ShouldBe("name");
+        builder.ParamName.ShouldBe("name");
+        verb.ParamName.ShouldBe("name");
+    }
+
+    /// <summary>
+    /// The options carry no engine name (B3 of the engine extensibility design): the engine is named
+    /// once, by the builder or by Create, and every option refusal names it, so a host that builds
+    /// several engines says which one was misconfigured.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: an option refusal names the engine, from the builder and from Create")]
+    public void Build_InvalidOption_ShouldNameTheEngine()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("named");
+        SqlDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        builder.Options.CheckpointJournalSize = -1;
+
+        // Act
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
+            SqlDatabaseEngine.Create("direct", new SqlDatabaseEngineOptions { MaintenanceInterval = TimeSpan.Zero }));
+
+        // Assert: refused before the engine existed, the option and the value kept.
+        built.ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.CheckpointJournalSize));
+        built.ActualValue.ShouldBe(-1L);
+        built.Message.ShouldStartWith("SQL engine 'named': CheckpointJournalSize must not be negative.", Case.Sensitive);
+        direct.ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.MaintenanceInterval));
+        direct.Message.ShouldStartWith("SQL engine 'direct': MaintenanceInterval must be positive.", Case.Sensitive);
+        product.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The write-back worker's cadence and batch size are refused when not positive, as the Graph,
+    /// Documents and Blob engines refuse them: a zero interval spun the worker's wait, and a zero
+    /// batch failed every pass in the storage until the failure policy took the databases offline.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Composition: a write-back interval or batch size that is not positive is refused, naming the engine")]
+    [InlineData(nameof(SqlDatabaseEngineOptions.PageWriteBackInterval))]
+    [InlineData(nameof(SqlDatabaseEngineOptions.PageWriteBackBatchSize))]
+    public void Build_PageWriteBackNotPositive_ShouldBeRefused(string option)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("write-back");
+        SqlDatabaseEngine? product = null;
+        builder.AddWorker(engine => new RecordingWorker(product = engine));
+        var options = new SqlDatabaseEngineOptions();
+        if (option == nameof(SqlDatabaseEngineOptions.PageWriteBackInterval))
+        {
+            builder.Options.PageWriteBackInterval = TimeSpan.Zero;
+            options.PageWriteBackInterval = TimeSpan.FromSeconds(-1);
+        }
+        else
+        {
+            builder.Options.PageWriteBackBatchSize = 0;
+            options.PageWriteBackBatchSize = -1;
+        }
+
+        // Act
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("write-back-direct", options));
+
+        // Assert: refused before the engine existed.
+        built.ParamName.ShouldBe(option);
+        built.Message.ShouldStartWith($"SQL engine 'write-back': {option} must be positive.", Case.Sensitive);
+        direct.ParamName.ShouldBe(option);
+        direct.Message.ShouldStartWith($"SQL engine 'write-back-direct': {option} must be positive.", Case.Sensitive);
+        product.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A component that fails to close is reported in the root engine base's one aggregate, "One or
+    /// more components of engine '{name}' failed to close." (concrete-types plan §6.4), for the
+    /// SQL engine's former "Engine disposal encountered failures.".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a component that fails to close is reported in the engine's one aggregate, and the rest still close")]
+    public async Task DisposeAsync_ServerFailsToClose_ShouldReportTheEngineAggregate()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("closing");
+        RecordingServer? server = null;
+        RecordingWorker? worker = null;
+        builder.AddWorker(engine => worker = new RecordingWorker(engine));
+        builder.AddServer(engine => server = new RecordingServer(engine) { StopFailure = new InvalidOperationException("The listener would not close.") });
         var engine = builder.Build();
-        worker.Started.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
-        await Should.ThrowAsync<AggregateException>(async () => await engine.DisposeAsync());
-        first.ShouldNotBeNull().Disposals.ShouldBe(1);
-        worker.Stopped.ShouldBeTrue();
-        worker.Disposed.ShouldBeTrue();
-        await engine.DisposeAsync();
-        first.Disposals.ShouldBe(1);
+        var database = await engine.CreateDatabaseAsync("closing");
+
+        // Act
+        var failure = await Should.ThrowAsync<AggregateException>(async () => await engine.DisposeAsync());
+
+        // Assert
+        failure.Message.ShouldStartWith("One or more components of engine 'closing' failed to close.", Case.Sensitive);
+        failure.InnerExceptions.ShouldHaveSingleItem().Message.ShouldBe("The listener would not close.");
+        worker.ShouldNotBeNull().Disposals.ShouldBe(1);
+        engine.State.ShouldBe(EngineState.Disposed);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateSessionAsync());
     }
 
-    [Fact]
-    public void RepeatedServerProduct_ShouldDisposeOnlyOnceDuringCompensation()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a failing server factory disposes the engine and the builder refuses another build")]
+    public void Build_FailingFactory_ShouldDisposeTheEngineAndForbidRetry()
     {
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        ProbeServer? server = null;
-        builder.AddServer(engine => server = new ProbeServer(engine));
-        builder.AddServer(_ => server!);
-        Should.Throw<InvalidOperationException>(() => builder.Build());
-        server.ShouldNotBeNull().Disposals.ShouldBe(1);
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        SqlDatabaseEngine? product = null;
+        builder.AddServer(engine => { product = engine; throw new InvalidOperationException("factory"); });
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+        var retry = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldBe("factory");
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+        retry.Message.ShouldBe("SQL engine 'sql-engine': the builder supports one build attempt.");
     }
 
-    [Fact]
-    public void CallbackBuildingEarly_ShouldCompensateItsUnreturnedEngine()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: AddSql disposes an engine its configuration built and abandoned")]
+    public void AddSql_ConfigurationThatBuildsPrematurely_ShouldNotLeakItsEngine()
     {
+        // Arrange
         var application = new RecordingApplicationBuilder();
-        IDatabaseEngine? early = null;
-        application.AddSql((context, builder) => early = builder.Build());
-        Should.Throw<InvalidOperationException>(() => application.MaterializeEngine());
+        SqlDatabaseEngine? early = null;
+        application.AddSql("premature", builder => early = builder.Build());
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => application.MaterializeEngine());
+
+        // Assert
+        failure.Message.ShouldBe("SQL engine 'premature': the builder supports one build attempt.");
         early.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
-    [Fact]
-    public void SynchronousCleanup_ShouldAvoidTheCallersSynchronizationContext()
+    /// <summary>
+    /// The builder state disposes a rejected product on the thread pool, so a server whose stop
+    /// awaits never posts back to the caller's synchronization context, which a synchronous
+    /// <see cref="SqlDatabaseEngineBuilder.Build"/> blocks.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: the cleanup of a failed build never posts to the caller's synchronization context")]
+    public void Build_RefusedServerStopYields_ShouldNotUseTheCallersSynchronizationContext()
     {
-        using var other = SqlDatabaseEngine.Create(new());
-        var rejected = new ProbeServer(other) { YieldBeforeDisposal = true };
-        var builder = SqlDatabaseEngine.CreateBuilder();
+        // Arrange
+        using var other = SqlDatabaseEngine.Create("other", new SqlDatabaseEngineOptions());
+        var rejected = new YieldingServer(other);
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
         builder.AddServer(_ => rejected);
+        var valid = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        var accepted = default(YieldingServer);
+        valid.AddServer(engine => accepted = new YieldingServer(engine));
         var original = SynchronizationContext.Current;
+
         try
         {
             SynchronizationContext.SetSynchronizationContext(new RejectingSynchronizationContext());
-            Should.Throw<InvalidOperationException>(() => builder.Build());
-            rejected.Disposals.ShouldBe(1);
 
-            var valid = SqlDatabaseEngine.CreateBuilder();
-            valid.AddServer(engine => new ProbeServer(engine) { YieldBeforeDisposal = true });
+            // Act
+            var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
             valid.Build().Dispose();
+
+            // Assert
+            failure.Message.ShouldBe("A nested server must front its owning engine.");
         }
         finally
         {
             SynchronizationContext.SetSynchronizationContext(original);
         }
+
+        rejected.Stops.ShouldBe(1);
+        accepted.ShouldNotBeNull().Stops.ShouldBe(1);
     }
 
-    [Fact]
-    public async Task ThrowingCancellationCallback_ShouldStillJoinWorkersBeforeDisposal()
+    /// <summary>
+    /// A cancellation callback that throws when the engine stops its pumps does not skip the joins:
+    /// the engine waits for the worker's pump to end before it releases the worker, and reports the
+    /// callback's failure in its aggregate.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: a throwing cancellation callback still lets the engine join every pump before it releases the workers")]
+    public async Task DisposeAsync_CancellationCallbackThrows_ShouldJoinThePumpBeforeReleasingTheWorker()
     {
-        var worker = new CancellationFailureWorker();
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.AddWorker(_ => worker);
+        // Arrange
+        CancellationFailureWorker? worker = null;
+        var builder = SqlDatabaseEngine.CreateBuilder("sql-engine");
+        builder.AddWorker(engine => worker = new CancellationFailureWorker(engine.Name + "/cancellation-failure"));
         var engine = builder.Build();
-        worker.Started.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
+        worker.ShouldNotBeNull().Waiting.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+
+        // Act
         Task disposal = Task.Run(async () => await engine.DisposeAsync());
-        try
-        {
-            worker.Cancelled.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
-            disposal.IsCompleted.ShouldBeFalse();
-            worker.Disposed.ShouldBeFalse();
-        }
-        finally
-        {
-            worker.AllowStop.Set();
-        }
-        await Should.ThrowAsync<AggregateException>(() => disposal.WaitAsync(TimeSpan.FromSeconds(5)));
-        worker.Disposed.ShouldBeTrue();
-        worker.Stopped.ShouldBeTrue();
+        bool cancelled = worker.Cancelled.Wait(TimeSpan.FromSeconds(10));
+        bool completedBeforeTheWorkerStopped = disposal.IsCompleted;
+        bool releasedBeforeTheWorkerStopped = worker.Released;
+        worker.AllowStop.Set();
+        var failure = await Should.ThrowAsync<AggregateException>(() => disposal.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Assert
+        cancelled.ShouldBeTrue();
+        completedBeforeTheWorkerStopped.ShouldBeFalse();
+        releasedBeforeTheWorkerStopped.ShouldBeFalse();
+        worker.Released.ShouldBeTrue();
+        worker.StoppedBeforeRelease.ShouldBeTrue();
+        failure.Flatten().InnerExceptions.ShouldContain(exception => exception.Message == "The cancellation callback failed.");
     }
 
-    private sealed class ProbeWorker : IDatabaseEngineWorker, IDisposable
+    // A server whose stop awaits before it completes, which posts its continuation to the current
+    // synchronization context unless the caller runs it on the thread pool.
+    private sealed class YieldingServer : DatabaseServer
     {
-        public string Name => "interface-worker";
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
-        public TimeSpan Interval => TimeSpan.FromMilliseconds(1);
-        public ManualResetEventSlim Started { get; } = new();
-        public bool Stopped { get; private set; }
-        public bool Disposed { get; private set; }
-        public void Run(CancellationToken cancellationToken)
-        {
-            Started.Set();
-            cancellationToken.WaitHandle.WaitOne();
-            Stopped = true;
-        }
-        public void Dispose() { Disposed = true; Started.Dispose(); }
-    }
+        private int _stops;
 
-    private sealed class ProbeServer : IDatabaseServer
-    {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ProbeServer"/> class.
-        /// </summary>
-        /// <param name="engine">The engine the server's context reports as its owner.</param>
-        public ProbeServer(IDatabaseEngine engine)
+        public YieldingServer(DatabaseEngine engine)
+            : base(engine)
         {
-            Context = new ProbeContext(engine);
         }
 
-        public IDatabaseServerContext Context { get; }
-        public bool FailDisposal { get; init; }
-        public bool YieldBeforeDisposal { get; init; }
-        public int Disposals { get; private set; }
-        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public async ValueTask DisposeAsync()
+        public int Stops => Volatile.Read(ref _stops);
+
+        public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
+
+        protected override Task StartCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        protected override async Task StopCoreAsync(CancellationToken cancellationToken)
         {
-            if (YieldBeforeDisposal)
-            {
-                await Task.Yield();
-            }
-            Disposals++;
-            if (FailDisposal)
-            {
-                throw new InvalidOperationException("server disposal");
-            }
+            await Task.Yield();
+            Interlocked.Increment(ref _stops);
         }
-    }
-
-    private sealed class ProbeContext : IDatabaseServerContext
-    {
-        private readonly IDatabaseEngine _engine;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ProbeContext"/> class.
-        /// </summary>
-        /// <param name="engine">The engine the context reports as its owner.</param>
-        public ProbeContext(IDatabaseEngine engine)
-        {
-            _engine = engine;
-        }
-
-        public IDatabaseEngine Engine => _engine;
-        public IReadOnlyCollection<IDatabaseServerSession> Sessions => [];
     }
 
     private sealed class RejectingSynchronizationContext : SynchronizationContext
@@ -225,37 +596,51 @@ public sealed class SqlEngineCompositionTests
             => throw new InvalidOperationException("Cleanup captured the caller's synchronization context.");
     }
 
-    private sealed class CancellationFailureWorker : IDatabaseEngineWorker, IDisposable
+    // A worker whose trigger wait registers a cancellation callback that throws, and whose pump
+    // ends only once the test allows it, so the test can watch the engine wait for it.
+    private sealed class CancellationFailureWorker : DatabaseEngineWorker
     {
-        public string Name => "cancellation-failure";
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
-        public TimeSpan Interval => TimeSpan.FromMilliseconds(1);
-        public ManualResetEventSlim Started { get; } = new();
-        public ManualResetEventSlim Cancelled { get; } = new();
-        public ManualResetEventSlim AllowStop { get; } = new();
-        public bool Stopped { get; private set; }
-        public bool Disposed { get; private set; }
+        private bool _stopped;
+        private bool _released;
+        private bool _stoppedBeforeRelease;
 
-        public void Run(CancellationToken cancellationToken)
+        public CancellationFailureWorker(string name)
+            : base(name, DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromHours(1))
+        {
+        }
+
+        public ManualResetEventSlim Waiting { get; } = new();
+
+        public ManualResetEventSlim Cancelled { get; } = new();
+
+        public ManualResetEventSlim AllowStop { get; } = new();
+
+        public bool Released => Volatile.Read(ref _released);
+
+        public bool StoppedBeforeRelease => Volatile.Read(ref _stoppedBeforeRelease);
+
+        protected override void RunIterationCore(CancellationToken cancellationToken)
+        {
+        }
+
+        protected override void WaitForTrigger(CancellationToken cancellationToken)
         {
             using var registration = cancellationToken.Register(() =>
             {
                 Cancelled.Set();
-                throw new InvalidOperationException("custom cancellation callback failed");
+                throw new InvalidOperationException("The cancellation callback failed.");
             });
-            Started.Set();
+            Waiting.Set();
             cancellationToken.WaitHandle.WaitOne();
             AllowStop.Wait();
-            Stopped = true;
+            Volatile.Write(ref _stopped, true);
         }
 
-        public void Dispose()
+        protected override ValueTask DisposeAsyncCore()
         {
-            Stopped.ShouldBeTrue();
-            Disposed = true;
-            Started.Dispose();
-            Cancelled.Dispose();
-            AllowStop.Dispose();
+            Volatile.Write(ref _stoppedBeforeRelease, Volatile.Read(ref _stopped));
+            Volatile.Write(ref _released, true);
+            return ValueTask.CompletedTask;
         }
     }
 }

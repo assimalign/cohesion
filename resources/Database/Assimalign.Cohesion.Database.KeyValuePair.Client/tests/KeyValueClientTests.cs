@@ -143,11 +143,33 @@ public class KeyValueClientTests
             Text((await reused.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout()))!.Value.Value).ShouldBe("v");
         }
 
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Pooling: a disposed connection refuses commands after the pool rents its session again")]
+    public async Task GetAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException()
+    {
+        // Arrange: one pooled session, so the second connect re-rents the first's.
+        await using var harness = await KeyValueClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
+        var first = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+        await first.PutAsync(Bytes("k"), Bytes("v"), KeyValueClientTestHarness.Timeout());
+        await first.DisposeAsync();
+        await using var second = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+
+        // Act: the stale handle is refused, and a second dispose must not return the new rental.
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+            await first.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout()));
+        await first.DisposeAsync();
+
+        // Assert: the second rental still owns the one session.
+        first.IsOpen.ShouldBeFalse();
+        second.IsOpen.ShouldBeTrue();
+        Text((await second.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout()))!.Value.Value).ShouldBe("v");
+        harness.Server.Sessions.Count.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Telemetry: the observer sees command text, counts, and failures")]
-    public async Task Observer_AroundCommands_ShouldRecordOutcomes()
+    public async Task PutAsync_WithRecordingObserver_ShouldRecordOutcomes()
     {
         // Arrange
         var observer = new RecordingObserver();
@@ -166,6 +188,26 @@ public class KeyValueClientTests
         observer.Executed[1].RowCount.ShouldBe(1);      // get returned the entry
         observer.Executed[2].AffectedCount.ShouldBe(1); // delete removed it
         observer.Failed.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Telemetry: an observer overrides only the hooks it needs, and a throwing hook faults no command")]
+    public async Task PutAsync_WithPartialThrowingObserver_ShouldNotFaultCommands()
+    {
+        // Arrange
+        var observer = new ExecutedOnlyObserver();
+        await using var harness = await KeyValueClientTestHarness.StartAsync(observer: observer);
+        await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+
+        // Act
+        long etag = await connection.PutAsync(Bytes("k"), Bytes("v"), KeyValueClientTestHarness.Timeout());
+        KeyValueClientEntry? entry = await connection.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout());
+
+        // Assert: the base's empty hooks ran for the rest, and the throwing hook changed no result.
+        entry.ShouldNotBeNull();
+        entry.Value.ETag.ShouldBe(etag);
+        Text(entry.Value.Value).ShouldBe("v");
+        observer.Executed.ShouldBe(2);
+        connection.IsOpen.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Errors: an authentication rejection maps to AuthenticationFailure")]
@@ -199,9 +241,21 @@ public class KeyValueClientTests
                 KeyValueClientTestHarness.Timeout()));
     }
 
-    private sealed class RejectingAuthenticator : IDatabaseAuthenticator
+    private sealed class RejectingAuthenticator : DatabaseAuthenticator
     {
-        public ValueTask<bool> AuthenticateAsync(string database, string principal, ReadOnlyMemory<byte> evidence, System.Threading.CancellationToken cancellationToken = default)
+        protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, System.Threading.CancellationToken cancellationToken)
             => ValueTask.FromResult(false);
+    }
+
+    // Overrides one hook; the base's empty bodies cover the other two.
+    private sealed class ExecutedOnlyObserver : KeyValueClientObserver
+    {
+        internal int Executed { get; private set; }
+
+        protected internal override void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
+        {
+            Executed++;
+            throw new InvalidOperationException("The observer failed.");
+        }
     }
 }

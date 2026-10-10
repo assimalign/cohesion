@@ -1,42 +1,48 @@
 # Assimalign.Cohesion.Database.Execution — Overview
 
-The model-agnostic execution substrate of the Cohesion Data Platform: the
-request/result families every engine speaks (`QueryRequest`, `QueryResult`,
-`QueryResultSet`, `QueryRow`, `QueryColumn`), the per-execution context
-(`QueryExecutionContext`), the composable pipeline (`IQueryPipeline`,
-`IQueryPipelineStage`, `QueryPipelineBuilder`), and the transaction boundary seam
-(`IQueryTransactionScope`) whose semantics the pipeline enforces.
+The model-agnostic request/result vocabulary of the Cohesion Data Platform: the
+families every engine speaks (`QueryRequest`, `QueryResult`, `QueryResultSet`,
+`QueryRow`, `QueryColumn`) and the outcome status (`QueryResultStatus`).
 
 ## Scope
 
-- **Request/result contracts** — abstract families model engines subclass; plus the
-  concrete `QueryStatementResult` for non-row-returning statements.
-- **Execution context** — request, transaction scope, request-abort token,
-  diagnostics accumulation, and an item bag for engine state between stages.
-- **Pipeline** — middleware-shaped stages composed around a terminal executor;
-  stages observe, wrap, or short-circuit execution (retry, tracing, timeouts,
-  plan caching).
-- **Transaction boundaries** — implicit (auto-commit) scopes commit on success and
-  roll back on failure/exception/cancellation, with errors propagating after the
-  rollback; explicit scopes belong to their session.
+- **Request contracts** — `QueryRequest` carries a parsed `QueryStatement` and
+  optional parameters; `QueryRequest<TStatement>` gives a model its typed statement
+  view. Each model engine subclasses them (`SqlQueryRequest`, the Documents, Graph and
+  KeyValuePair requests).
+- **Result contracts** — `QueryResult` reports a status, an affected count and
+  diagnostics; `QueryResultSet` streams `QueryRow`s described by `QueryColumn`s. Each
+  model engine supplies its own leaves.
+
+Execution itself — planning, operators, transaction brackets — lives in each model
+engine. The shared execution pipeline this project used to hold (`IQueryPipeline`,
+`QueryPipelineBuilder`, `QueryExecutionContext`, `IQueryTransactionScope`) had no
+consumer and was deleted under the concrete-first program (#1255, #1257).
 
 ## Dependencies
 
 `Database.Language` (statements, diagnostics) and `Database.Types`. Deliberately
 **below** the area contract root — the root's session surface
-(`IDatabaseSession.ExecuteAsync`) is typed in this project's terms, so nothing here
-may reference root types (transaction identity, engine contracts). Engines adapt
-their transaction manager to `IQueryTransactionScope`.
+(`DatabaseSession.ExecuteAsync`) is typed in this project's terms, so nothing here
+may reference root types (transaction identity, engine contracts).
 
 ## Usage
 
 ```csharp
-var pipeline = new QueryPipelineBuilder()
-    .Use(tracingStage)
-    .Build((context, ct) => executor.RunAsync(context, ct));
+// A model engine's request: the typed statement view over the shared base.
+public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
+{
+    // ...
+}
 
-var context = new QueryExecutionContext(request, transactionScope, sessionToken);
-var result = await pipeline.ExecuteAsync(context);
+QueryResult result = await session.ExecuteAsync(SqlQueryRequest.FromSql("SELECT 1"));
+if (result is QueryResultSet rows)
+{
+    await foreach (QueryRow row in rows.GetRowsAsync())
+    {
+        // ...
+    }
+}
 ```
 
-See [DESIGN.md](DESIGN.md) for the boundary rules and the decisions behind them.
+See [DESIGN.md](DESIGN.md) for the decisions behind the shape.

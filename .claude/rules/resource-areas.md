@@ -89,7 +89,7 @@ in the same file applies everywhere, see `general-rules.md`). Violations fail th
   hosting-family prefix from that set: same-area assemblies
   legitimately arrive in its resolved closure transitively through the sanctioned area-root
   reference (e.g. `Assimalign.Cohesion.Database` aggregates its child roots — `Database.Types`/
-  `Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance` — so
+  `Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security` — so
   `Database.Hosting → Database` pulls them all in — that is the root's own composition, not a
   hosting violation).
 - `COHAM001`, `COHRES003`, and `COHRES004` are checked in two layers: the direct/transitive
@@ -273,8 +273,10 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   build rollback and disposal continue past a failure and aggregate it, which its tests pin).
   Moving them into the container needs the provider to continue-and-aggregate first. Its
   `Services` registry (reflection-free options, closed registrations) and its ownership of the
-  built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine`
-  shims still forward to the private engine registry rather than to `Services`.
+  built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine(DatabaseEngine)`
+  and `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)` shims still
+  forward to the private engine registry rather than to `Services`, which reserves each engine
+  name at registration (owner decision 52 of 2026-10-09).
 
 ## What every area is expected to provide
 
@@ -286,7 +288,7 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   packages of generic base abstractions and default implementations pulled into the parent root
   for maintainability, testability, and separation of concerns (precedent:
   `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Language`/`Storage`/
-  `Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance`). **The dependency arrow always
+  `Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`). **The dependency arrow always
   points root → child; a child root never references the root** — that is what keeps each child
   independently consumable, and it means a child owns its own vocabulary (value types, enums)
   and its own exception root (`StorageException`, `ProtocolException` inherit `Exception`, not

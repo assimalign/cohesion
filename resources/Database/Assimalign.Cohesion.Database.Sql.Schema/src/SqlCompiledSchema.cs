@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 
 using Assimalign.Cohesion.Database.Sql.Schema.Internal;
@@ -8,45 +10,65 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
 /// <summary>Represents an immutable, validated schema for the SQL engine model.</summary>
-public sealed class SqlCompiledSchema : CompiledSchema
+/// <remarks>
+/// <para>
+/// <b>Standalone</b> (owner decisions 50 and 59 of 2026-10-09). It used to derive the area root's
+/// model-agnostic <c>CompiledSchema</c>, which carried an engine model and recomputed the
+/// canonical document and its hash on every read. The root keeps no schema type now: provisioning
+/// belongs to the SQL model, which owns this shape, its canonical document and its migration
+/// planner. Dropping the inherited <c>Model</c> changed the document, so its format is
+/// <c>cohesion/database-schema/v2</c>; a <c>v1</c> document no longer deserializes.
+/// </para>
+/// <para>
+/// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
+/// is read, and kept: the schema is immutable, so they never change.
+/// </para>
+/// </remarks>
+public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v1";
+    public const string CurrentFormat = "cohesion/database-schema/v2";
+
+    // Computed once, on first read: the schema is immutable. Two threads that race the first read
+    // compute the same strings, so the race costs only the duplicate work.
+    private string? _canonicalDocument;
+    private string? _hash;
 
     /// <summary>Initializes an immutable compiled schema.</summary>
     /// <param name="format">The document format.</param>
     /// <param name="name">The logical database name.</param>
-    /// <param name="model">The owning engine model.</param>
     /// <param name="allowsDestructiveChanges">Whether destructive migrations are permitted.</param>
     /// <param name="types">The custom scalar types.</param>
     /// <param name="tables">The relational tables.</param>
-    /// <param name="functions">The database functions.</param>
-    /// <param name="triggers">The database triggers.</param>
     /// <param name="principals">The database-scoped principals.</param>
-    /// <param name="extensions">The model-specific extensions.</param>
+    /// <exception cref="SqlSchemaValidationException">The values do not satisfy the compiled-schema contract.</exception>
     [JsonConstructor]
     public SqlCompiledSchema(
         string format,
         string name,
-        EngineModel model,
         bool allowsDestructiveChanges,
         IReadOnlyList<CompiledSchemaType> types,
         IReadOnlyList<CompiledSchemaTable> tables,
-        IReadOnlyList<CompiledSchemaFunction> functions,
-        IReadOnlyList<CompiledSchemaTrigger> triggers,
-        IReadOnlyList<CompiledSchemaPrincipal> principals,
-        IReadOnlyList<CompiledSchemaExtension> extensions)
-        : base(format, name, model, allowsDestructiveChanges)
+        IReadOnlyList<CompiledSchemaPrincipal> principals)
     {
+        Format = format;
+        Name = name;
+        AllowsDestructiveChanges = allowsDestructiveChanges;
         Types = Snapshot(types, "schema.types", static value => value.Name);
         Tables = Snapshot(tables, "schema.tables", static value => value.Name);
-        Functions = Snapshot(functions, "schema.functions", static value => value.Name);
-        Triggers = Snapshot(triggers, "schema.triggers", static value => value.Name);
         Principals = Snapshot(principals, "schema.principals", static value => value.Name);
-        Extensions = Snapshot(extensions, "schema.extensions", static value => value.Name);
 
         SqlCompiledSchemaValidator.Validate(this);
     }
+
+    /// <summary>Gets the schema document format identifier.</summary>
+    public string Format { get; }
+
+    /// <summary>Gets the name of the logical database this schema targets.</summary>
+    public string Name { get; }
+
+    /// <summary>Gets whether applying this schema may perform destructive operations.</summary>
+    public bool AllowsDestructiveChanges { get; }
 
     /// <summary>Gets the custom types in stable name order.</summary>
     public IReadOnlyList<CompiledSchemaType> Types { get; }
@@ -54,21 +76,23 @@ public sealed class SqlCompiledSchema : CompiledSchema
     /// <summary>Gets the tables in stable name order.</summary>
     public IReadOnlyList<CompiledSchemaTable> Tables { get; }
 
-    /// <summary>Gets the functions in stable name order.</summary>
-    public IReadOnlyList<CompiledSchemaFunction> Functions { get; }
-
-    /// <summary>Gets the triggers in stable name order.</summary>
-    public IReadOnlyList<CompiledSchemaTrigger> Triggers { get; }
-
     /// <summary>Gets the database-scoped principals in stable name order.</summary>
     public IReadOnlyList<CompiledSchemaPrincipal> Principals { get; }
 
-    /// <summary>Gets model-specific extension values in stable name order.</summary>
-    public IReadOnlyList<CompiledSchemaExtension> Extensions { get; }
-
-    /// <summary>Gets the stable canonical serialization of the SQL schema.</summary>
+    /// <summary>
+    /// Gets the stable canonical serialization of the SQL schema. Two schemas with the same
+    /// canonical document are the same schema; it is what <see cref="Hash"/> is computed over and
+    /// what the catalog records for drift detection. Computed once, on first read.
+    /// </summary>
     [JsonIgnore]
-    public override string CanonicalDocument => SqlCompiledSchemaSerializer.Serialize(this);
+    public string CanonicalDocument => _canonicalDocument ??= SqlCompiledSchemaSerializer.Serialize(this);
+
+    /// <summary>
+    /// Gets the lowercase hexadecimal SHA-256 of the UTF-8 <see cref="CanonicalDocument"/>.
+    /// Computed once, on first read.
+    /// </summary>
+    [JsonIgnore]
+    public string Hash => _hash ??= Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalDocument)));
 
     private static IReadOnlyList<T> Snapshot<T>(
         IReadOnlyList<T>? values,
@@ -273,40 +297,6 @@ public sealed record CompiledSchemaConstraint(
     public IReadOnlyList<string> ReferencedColumns { get; } = CompiledSchemaSnapshots.Copy(ReferencedColumns);
 }
 
-/// <summary>Describes a compiled function parameter.</summary>
-/// <param name="Name">The parameter name.</param>
-/// <param name="Type">The storage type.</param>
-/// <param name="CustomType">The custom type name, when one is used.</param>
-public sealed record CompiledSchemaParameter(string Name, DatabaseType Type, string? CustomType = null);
-
-/// <summary>Describes a compiled function.</summary>
-/// <param name="Name">The function name.</param>
-/// <param name="Parameters">The ordered parameters.</param>
-/// <param name="ResultType">The result storage type.</param>
-/// <param name="CustomResultType">The custom result type name.</param>
-/// <param name="Body">The canonical function expression.</param>
-public sealed record CompiledSchemaFunction(
-    string Name,
-    IReadOnlyList<CompiledSchemaParameter> Parameters,
-    DatabaseType ResultType,
-    string? CustomResultType,
-    CompiledSchemaExpression Body)
-{
-    /// <summary>Gets the immutable ordered parameters.</summary>
-    public IReadOnlyList<CompiledSchemaParameter> Parameters { get; } = CompiledSchemaSnapshots.Copy(Parameters);
-}
-
-/// <summary>Describes a compiled trigger.</summary>
-/// <param name="Name">The stable trigger name.</param>
-/// <param name="Table">The target table.</param>
-/// <param name="Event">The triggering event.</param>
-/// <param name="Body">The canonical trigger expression.</param>
-public sealed record CompiledSchemaTrigger(
-    string Name,
-    string Table,
-    SqlTriggerEvent Event,
-    CompiledSchemaExpression Body);
-
 /// <summary>Describes a compiled database-scoped principal.</summary>
 /// <param name="Name">The database-scoped principal name.</param>
 /// <param name="Grants">The principal grants.</param>
@@ -328,11 +318,6 @@ public sealed record CompiledSchemaGrant(SqlPermission Permission, IReadOnlyList
         Objects,
         static (left, right) => StringComparer.Ordinal.Compare(left, right));
 }
-
-/// <summary>Describes a model-specific schema extension.</summary>
-/// <param name="Name">The extension name.</param>
-/// <param name="Value">The canonical extension value.</param>
-public sealed record CompiledSchemaExtension(string Name, string Value);
 
 /// <summary>Contains the portable canonical form of an analyzable expression.</summary>
 /// <param name="CanonicalText">The normalized expression AST text.</param>

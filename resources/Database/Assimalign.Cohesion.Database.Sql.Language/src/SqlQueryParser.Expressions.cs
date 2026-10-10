@@ -10,20 +10,32 @@ public sealed partial class SqlQueryParser
     // ── Expression parsing (recursive descent with precedence) ─────────
     //
     //   ParseExpression         → ParseOr
-    //   ParseOr                 → ParseAnd (OR ParseAnd)*
-    //   ParseAnd                → ParseNot (AND ParseNot)*
+    //   ParseOr                 → ParseAnd (OR ParseAnd)*      one n-ary node per chain
+    //   ParseAnd                → ParseNot (AND ParseNot)*     one n-ary node per chain
     //   ParseNot                → NOT? ParseComparison
-    //   ParseComparison         → ParseAddition ((=|<>|<|>|<=|>=) ParseAddition
+    //   ParseComparison         → ParseComparisonCore
+    //                            (an infix ~ after IS NULL, IN, LIKE or BETWEEN reports COHDBL001)
+    //   ParseComparisonCore     → ParseAddition ((=|<>|<|>|<=|>=) ParseAddition
     //                            | IS [NOT] NULL
     //                            | [NOT] BETWEEN ... AND ...
     //                            | [NOT] IN (...)
     //                            | [NOT] LIKE ...)?
+    //                            (op ANY|SOME|ALL (...) reports COHDBL001 and is skipped)
     //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
+    //                            (an infix ~, ~*, ~~, !~ ... here reports COHDBL001)
     //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
-    //   ParseUnary              → (-|~)? ParseCollate
+    //   ParseUnary              → (-|+|~) ParseUnary | ParseCollate
+    //                            (a prefix ~ reports COHDBL001; a + directly before a
+    //                            numeric literal is part of the literal, see ParsePrimary)
     //   ParseCollate            → ParsePrimary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
+    //                            (a ~ here, as in LIKE ~'x' or DEFAULT ~1, goes to ParseUnary)
+    //
+    // An operand a node encloses is parsed through ParseOperand, and a node built over an
+    // operand parsed before it is checked with Nest (an AND/OR chain also with TryOpenChain):
+    // together they bound the tree at the configured nesting limit (SqlQueryParser.Nesting.cs,
+    // #1151).
 
     private SqlExpression ParseExpression(ref TokenLexer lexer)
     {
@@ -32,34 +44,69 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParseOr(ref TokenLexer lexer)
     {
-        var left = ParseAnd(ref lexer);
-
-        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OR"))
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var right = ParseAnd(ref lexer);
-            left = new SqlBinaryExpression(left, SqlBinaryOperator.Or, right,
-                Location.Create(1, 1, pos, pos));
-        }
-
-        return left;
+        var first = ParseAnd(ref lexer);
+        return !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OR")
+            ? ParseLogicalChain(ref lexer, first, SqlLogicalOperator.Or)
+            : first;
     }
 
     private SqlExpression ParseAnd(ref TokenLexer lexer)
     {
-        var left = ParseNot(ref lexer);
+        var first = ParseNot(ref lexer);
+        return !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND")
+            ? ParseLogicalChain(ref lexer, first, SqlLogicalOperator.And)
+            : first;
+    }
 
-        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND"))
+    /// <summary>
+    /// Parses the rest of an <c>AND</c> or <c>OR</c> chain into one n-ary node, PostgreSQL's
+    /// shape (#1151): the chain is one level of the tree however many terms it has, so a
+    /// 10,000-term predicate parses, and every walker iterates its terms instead of recursing
+    /// once per term. Binary nodes made such a chain as deep as it was long.
+    /// </summary>
+    /// <remarks>
+    /// A parenthesized chain of the same operator that opens the chain merges into it, so
+    /// <c>(a AND b) AND c</c> is the node <c>a AND b AND c</c> builds, exactly as left
+    /// associativity read it before; one in a later position, <c>a AND (b AND c)</c>, stays a
+    /// nested node. The tree is therefore the one the binary form had, with each run of links
+    /// collapsed, and the canonical text the renderer stores for it is unchanged.
+    /// <para>
+    /// Parsing a chain costs its own terms only. The chain takes over the operand list of the
+    /// chain it absorbs rather than copying it, and tracks the deepest operand as it adds each
+    /// one, so <c>((X AND t) AND t) ... AND t</c> is linear in its length however many
+    /// parentheses wrap <c>X</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="lexer">The lexer, at the chain's first operator.</param>
+    /// <param name="first">The first operand, parsed before the chain was known.</param>
+    /// <param name="op">The chain's operator.</param>
+    private SqlExpression ParseLogicalChain(ref TokenLexer lexer, SqlExpression first, SqlLogicalOperator op)
+    {
+        int position = lexer.Current.Position;
+        var opening = first is SqlLogicalExpression group && group.Operator == op ? group : null;
+
+        // The deepest operand so far: the first, or the deepest one of the chain it absorbs.
+        int operandDepth = opening is null ? first.Depth : opening.Depth - 1;
+        if (!TryOpenChain(ref lexer, operandDepth))
         {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var right = ParseNot(ref lexer);
-            left = new SqlBinaryExpression(left, SqlBinaryOperator.And, right,
-                Location.Create(1, 1, pos, pos));
+            return first;
         }
 
-        return left;
+        // The absorbed chain is dropped, so its list is taken over rather than copied: a copy
+        // per pair of parentheses made the parse cost terms times parentheses.
+        List<SqlExpression> operands = opening is null ? [first] : opening.DetachOperands();
+
+        string keyword = op == SqlLogicalOperator.And ? "AND" : "OR";
+        var rule = op == SqlLogicalOperator.And ? OperandRule.Not : OperandRule.And;
+        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, keyword))
+        {
+            Advance(ref lexer);
+            var operand = ParseOperand(ref lexer, rule);
+            operands.Add(operand);
+            operandDepth = Math.Max(operandDepth, operand.Depth);
+        }
+
+        return Nest(ref lexer, new SqlLogicalExpression(op, operands, operandDepth, Location.Create(1, 1, position, position)));
     }
 
     private SqlExpression ParseNot(ref TokenLexer lexer)
@@ -75,7 +122,7 @@ public sealed partial class SqlQueryParser
                 return ParseExists(ref lexer, isNegated: true, pos);
             }
 
-            var operand = ParseNot(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Not);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Not,
                 Location.Create(1, 1, pos, pos));
         }
@@ -84,6 +131,21 @@ public sealed partial class SqlQueryParser
     }
 
     private SqlExpression ParseComparison(ref TokenLexer lexer)
+    {
+        var result = ParseComparisonCore(ref lexer);
+
+        // IS NULL, IN (...), LIKE and BETWEEN complete without returning to the additive
+        // loop, so an infix ~ after them fell to the leftover-token check with a generic
+        // SQL0003 instead of naming the operator (#1101).
+        while (IsInfixTilde(ref lexer))
+        {
+            RejectInfixTilde(ref lexer, afterPredicate: true);
+        }
+
+        return result;
+    }
+
+    private SqlExpression ParseComparisonCore(ref TokenLexer lexer)
     {
         var left = ParseAddition(ref lexer);
 
@@ -107,35 +169,30 @@ public sealed partial class SqlQueryParser
             {
                 Advance(ref lexer);
             }
-            return new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos));
+            else
+            {
+                RejectIsPredicate(ref lexer, pos, negated);
+            }
+            return Nest(ref lexer, new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos)));
         }
 
         // [NOT] BETWEEN ... AND ...
         bool notBefore = false;
         if (IsKeyword(ref lexer, "NOT"))
         {
-            // Peek ahead to see if it's NOT BETWEEN, NOT IN, or NOT LIKE
-            // We need to save state to backtrack. Since we can't save ref struct state,
-            // we'll check the next keyword by pattern.
-            // For now, handle NOT BETWEEN/IN/LIKE by consuming NOT then checking.
-            var savedPos = lexer.Current.Position;
             notBefore = true;
             Advance(ref lexer);
 
-            if (IsAtEnd(ref lexer))
-            {
-                return left;
-            }
-
             if (!IsKeyword(ref lexer, "BETWEEN") && !IsKeyword(ref lexer, "IN") && !IsKeyword(ref lexer, "LIKE"))
             {
-                // It was NOT something_else, treat as a logical NOT on a comparison
-                // This shouldn't normally happen in this position, fall through
-                // by creating a NOT unary on whatever follows
-                var rest = ParseComparison(ref lexer);
-                return new SqlBinaryExpression(left, SqlBinaryOperator.And,
-                    new SqlUnaryExpression(rest, SqlUnaryOperator.Not, Location.Create(1, 1, savedPos, savedPos)),
-                    Location.Create(1, 1, savedPos, savedPos));
+                // x NOT y is not a predicate. It used to parse as x AND NOT y, so SQLite's
+                // postfix a NOT NULL filtered out every row and flag NOT FALSE matched only
+                // TRUE rows (#1068). The token after NOT stays in place, so the leftover
+                // check finds it already reported.
+                AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
+                    ? "Expected BETWEEN, IN or LIKE after NOT before the end of the statement."
+                    : $"Expected BETWEEN, IN or LIKE after NOT but found {DescribeToken(ref lexer)}; write IS NOT NULL, or put NOT before the whole predicate.");
+                return left;
             }
         }
 
@@ -143,14 +200,11 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var low = ParseAddition(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND"))
-            {
-                Advance(ref lexer);
-            }
+            var low = ParseOperand(ref lexer, OperandRule.Addition);
+            ExpectKeyword(ref lexer, "AND", "AND between the BETWEEN bounds");
 
-            var high = ParseAddition(ref lexer);
-            return new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos));
+            var high = ParseOperand(ref lexer, OperandRule.Addition);
+            return Nest(ref lexer, new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos)));
         }
 
         // [NOT] IN (...)
@@ -166,33 +220,29 @@ public sealed partial class SqlQueryParser
                 if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
                 {
                     var subquery = ParseSubquery(ref lexer);
-                    if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                    {
-                        Advance(ref lexer);
-                    }
+                    Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
 
-                    return new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos));
+                    return Nest(ref lexer, new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos)));
                 }
 
                 // Value list
                 var values = new List<SqlExpression>();
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
                 {
-                    values.Add(ParseExpression(ref lexer));
+                    values.Add(ParseOperand(ref lexer, OperandRule.Expression));
                     while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
                     {
                         Advance(ref lexer);
-                        values.Add(ParseExpression(ref lexer));
+                        values.Add(ParseOperand(ref lexer, OperandRule.Expression));
                     }
                 }
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    Advance(ref lexer);
-                }
+                Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
 
-                return new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos));
+                return Nest(ref lexer, new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos)));
             }
-            return new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos));
+
+            AddExpectedDiagnostic(ref lexer, "'(' after IN");
+            return Nest(ref lexer, new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos)));
         }
 
         // [NOT] LIKE pattern
@@ -200,8 +250,20 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var pattern = ParseCollate(ref lexer);
-            return new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos));
+            var pattern = ParseOperand(ref lexer, OperandRule.Collate);
+            if (IsWord(ref lexer, "ESCAPE"))
+            {
+                // Without this check the escape clause was left behind, and in a select
+                // list ESCAPE even became the column alias (#1068).
+                AddSyntaxDiagnostic(ref lexer,
+                    "LIKE ... ESCAPE is not supported by the SQL surface; '%' and '_' in a LIKE pattern are always wildcards.");
+                Advance(ref lexer);
+                if (CanStartOperand(ref lexer))
+                {
+                    ParseOperand(ref lexer, OperandRule.Collate); // recover past the escape character
+                }
+            }
+            return Nest(ref lexer, new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos)));
         }
 
         // Standard comparison operators
@@ -210,11 +272,74 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseAddition(ref lexer);
-            return new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos));
+            var right = SkipQuantifiedComparison(ref lexer) ?? ParseOperand(ref lexer, OperandRule.Addition);
+            return Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
         }
 
         return left;
+    }
+
+    /// <summary>
+    /// Skips the quantified operand of <c>op ANY|SOME|ALL (subquery)</c> after reporting the
+    /// construct once. It used to parse as a call to a function named ANY whose argument was a
+    /// SELECT, so it also reported "Expected ')' after the ANY arguments" (#1101).
+    /// </summary>
+    /// <returns>A placeholder that never executes, or <see langword="null"/> when no quantifier is current.</returns>
+    private SqlLiteralExpression? SkipQuantifiedComparison(ref TokenLexer lexer)
+    {
+        if (!(IsWord(ref lexer, "ANY") || IsWord(ref lexer, "SOME") || IsWord(ref lexer, "ALL")) ||
+            !TryPeekToken(lexer, out string next, out _) || next != "(")
+        {
+            return null;
+        }
+
+        int start = lexer.Current.Position;
+        string quantifier = CurrentText(ref lexer).ToUpperInvariant();
+        RequireSkippedConstruct(start, start + quantifier.Length, $"{quantifier} quantified comparison");
+        Advance(ref lexer);
+        SkipParenthesized(ref lexer);
+        return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, start));
+    }
+
+    /// <summary>
+    /// Rejects an IS predicate other than <c>IS [NOT] NULL</c>. The ISO boolean test
+    /// (<c>IS [NOT] TRUE|FALSE|UNKNOWN</c>) and distinct predicate
+    /// (<c>IS [NOT] DISTINCT FROM</c>) used to parse as <c>IS NULL</c> with their operand
+    /// left behind, so <c>DELETE ... WHERE flag IS TRUE</c> deleted the NULL rows (#1068).
+    /// The rest of the predicate is consumed for recovery.
+    /// </summary>
+    private void RejectIsPredicate(ref TokenLexer lexer, int start, bool negated)
+    {
+        string form = negated ? "IS NOT" : "IS";
+        if (IsWord(ref lexer, "TRUE") || IsWord(ref lexer, "FALSE") || IsWord(ref lexer, "UNKNOWN"))
+        {
+            string test = CurrentText(ref lexer).ToUpperInvariant();
+            AddSyntaxDiagnostic(start, lexer.Current.Position + lexer.Current.Value.Length,
+                $"The {form} {test} predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
+            Advance(ref lexer);
+            return;
+        }
+
+        if (IsKeyword(ref lexer, "DISTINCT"))
+        {
+            int end = lexer.Current.Position + lexer.Current.Value.Length;
+            Advance(ref lexer);
+            if (IsKeyword(ref lexer, "FROM"))
+            {
+                end = lexer.Current.Position + lexer.Current.Value.Length;
+                Advance(ref lexer);
+            }
+
+            AddSyntaxDiagnostic(start, end,
+                $"The {form} DISTINCT FROM predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
+            if (CanStartOperand(ref lexer))
+            {
+                ParseOperand(ref lexer, OperandRule.Addition); // recover past the comparand
+            }
+            return;
+        }
+
+        AddSyntaxDiagnostic(ref lexer, $"Expected NULL after {form}.");
     }
 
     private static SqlBinaryOperator? GetComparisonOperator(ref TokenLexer lexer)
@@ -250,6 +375,11 @@ public sealed partial class SqlQueryParser
             {
                 op = SqlBinaryOperator.Concat;
             }
+            else if (IsInfixTilde(ref lexer))
+            {
+                RejectInfixTilde(ref lexer, afterPredicate: false);
+                continue;
+            }
             else
             {
                 break;
@@ -257,8 +387,8 @@ public sealed partial class SqlQueryParser
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseMultiplication(ref lexer);
-            left = new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos));
+            var right = ParseOperand(ref lexer, OperandRule.Multiplication);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos)));
         }
 
         return left;
@@ -290,29 +420,56 @@ public sealed partial class SqlQueryParser
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseUnary(ref lexer);
-            left = new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos));
+            var right = ParseOperand(ref lexer, OperandRule.Unary);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos)));
         }
 
         return left;
     }
 
+    // The operand of a sign is itself a unary expression, so - -1 is 1 and + -a is -a, as in
+    // ISO SQL.
     private SqlExpression ParseUnary(ref TokenLexer lexer)
     {
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Minus)
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParseCollate(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Unary);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
                 Location.Create(1, 1, pos, pos));
         }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Tilde)
+        // ISO unary plus. Directly before a numeric literal the sign stays part of the
+        // literal (ParsePrimary folds it), so ORDER BY +1 remains the ordinal 1; on any
+        // other operand it is an operator. +a and +(1 + 2) used to be parse errors because
+        // the AST had no unary plus (#1068).
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Plus && !IsSignedNumericLiteral(lexer))
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParseCollate(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Unary);
+            return new SqlUnaryExpression(operand, SqlUnaryOperator.Plus,
+                Location.Create(1, 1, pos, pos));
+        }
+
+        // ~ is recognized but outside the executable scalar subset. The evaluator used to
+        // return NULL for a NULL operand and throw per row otherwise, so SELECT ~NULL and
+        // ~ over an empty table succeeded (#1101). The node is kept for recovery only; the
+        // error means it never executes.
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Tilde)
+        {
+            // A run of prefix operators, ~ ~a, is one construct and one diagnostic.
+            var pos = lexer.Current.Position;
+            int end = pos + 1;
+            while (Advance(ref lexer) && lexer.Current.Type == TokenType.Tilde)
+            {
+                end = lexer.Current.Position + 1;
+            }
+
+            AddUnsupportedSurfaceDiagnostic(pos, end,
+                "The prefix ~ operator (bitwise NOT) is not supported by the SQL surface.");
+            var operand = ParseOperand(ref lexer, OperandRule.Unary);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
         }
@@ -320,22 +477,90 @@ public sealed partial class SqlQueryParser
         return ParseCollate(ref lexer);
     }
 
-    private SqlExpression ParsePrimary(ref TokenLexer lexer)
+    /// <summary>
+    /// Whether the current <c>+</c> directly precedes a numeric literal, comments aside. Such a
+    /// sign is part of the literal rather than a unary plus, which keeps <c>ORDER BY +1</c> an
+    /// ordinal and gives <c>+1</c> the same tree as <c>1</c>.
+    /// </summary>
+    private static bool IsSignedNumericLiteral(TokenLexer lexer)
+        => lexer.Current.Type == TokenType.Plus && AdvancePastComments(ref lexer) &&
+           lexer.Current.Type is TokenType.Integer or TokenType.Float;
+
+    /// <summary>
+    /// Whether an infix <c>~</c> operator starts at the current token: <c>~</c> itself, or
+    /// <c>!</c> directly followed by <c>~</c> (PostgreSQL's negated <c>!~</c> forms).
+    /// </summary>
+    private static bool IsInfixTilde(ref TokenLexer lexer)
     {
-        if (IsAtEnd(ref lexer))
+        if (lexer.Current.Type == TokenType.Tilde)
         {
-            return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
-                Location.Create(1, 1, 0, 0));
+            return true;
         }
 
+        var next = lexer;
+        return lexer.Current.Type == TokenType.Bang && next.MoveNext() &&
+               next.Current.Type == TokenType.Tilde && next.Current.Position == lexer.Current.Position + 1;
+    }
+
+    /// <summary>
+    /// Rejects an infix <c>~</c>, PostgreSQL's regular-expression match, and its family
+    /// <c>~*</c>, <c>!~</c>, <c>!~*</c> and the LIKE forms <c>~~</c>, <c>~~*</c>, <c>!~~</c>,
+    /// <c>!~~*</c>, each as one operator. The dialect has no rule for them, so they used to
+    /// fall to the leftover-token check with a generic message, or report twice. It is checked
+    /// wherever an additive operator may follow an operand, and after a comparison predicate.
+    /// The right operand is parsed for recovery and no node is built (#1101).
+    /// </summary>
+    /// <param name="lexer">The lexer, at the operator.</param>
+    /// <param name="afterPredicate">Whether the operator follows a whole comparison predicate.</param>
+    private void RejectInfixTilde(ref TokenLexer lexer, bool afterPredicate)
+    {
+        int start = lexer.Current.Position;
+        if (lexer.Current.Type == TokenType.Bang)
+        {
+            Advance(ref lexer); // to the adjacent ~
+        }
+
+        int end = lexer.Current.Position + 1;
+        Advance(ref lexer);
+        if (lexer.Current.Type == TokenType.Tilde && lexer.Current.Position == end)
+        {
+            end++;
+            Advance(ref lexer);
+        }
+        if (lexer.Current.Type == TokenType.Asterisk && lexer.Current.Position == end)
+        {
+            end++;
+            Advance(ref lexer);
+        }
+
+        string spelling = _sourceText.Substring(start, end - start);
+        string meaning = spelling.Contains("~~", StringComparison.Ordinal) ? "LIKE match" : "regular-expression match";
+        AddUnsupportedSurfaceDiagnostic(start, end,
+            $"The infix {spelling} operator ({meaning}) is not supported by the SQL surface.");
+        if (CanStartOperand(ref lexer))
+        {
+            ParseOperand(ref lexer, afterPredicate ? OperandRule.Addition : OperandRule.Multiplication);
+        }
+    }
+
+    private SqlExpression ParsePrimary(ref TokenLexer lexer)
+    {
         var pos = lexer.Current.Position;
+
+        // Whatever the primary is, it sits one level below the nodes that enclose it; the nodes
+        // inside it (a call's arguments, a CASE's branches) record themselves as they are entered.
+        EnterLeaf();
+
+        if (IsAtEnd(ref lexer))
+        {
+            return MissingExpression(ref lexer, pos);
+        }
 
         // Preserve a signed numeric token as a literal. ORDER BY binding must
         // distinguish +1 from a larger constant expression such as +1 + 1.
         if (lexer.Current.Type == TokenType.Plus)
         {
-            var next = lexer;
-            if (AdvancePastComments(ref next) && next.Current.Type is TokenType.Integer or TokenType.Float)
+            if (IsSignedNumericLiteral(lexer))
             {
                 Advance(ref lexer);
                 string value = CurrentText(ref lexer);
@@ -436,24 +661,25 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
 
-            // Subquery: (SELECT ...)
+            // Subquery: (SELECT ...). Its parentheses are its syntax, not grouping: the
+            // subquery is a node, which ParseSubquery counts as a level of the tree.
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
             {
                 var subSelect = ParseSubquery(ref lexer);
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    Advance(ref lexer);
-                }
+                Expect(ref lexer, TokenType.RightParen, "')' after the subquery");
 
                 return new SqlSubqueryExpression(subSelect, Location.Create(1, 1, pos, pos));
             }
 
-            // Parenthesized expression
-            var inner = ParseExpression(ref lexer);
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+            // Parenthesized expression: a level of recursion, though not of the tree.
+            if (!TryEnterParenthesis(ref lexer, pos))
             {
-                Advance(ref lexer);
+                return NestingPlaceholder(pos);
             }
+
+            var inner = ParseExpression(ref lexer);
+            _parenthesisDepth--;
+            Expect(ref lexer, TokenType.RightParen, "')'");
 
             return inner;
         }
@@ -472,10 +698,35 @@ public sealed partial class SqlQueryParser
             return ParseColumnRefOrFunction(ref lexer);
         }
 
-        // Fallback: consume and return a null literal
-        Advance(ref lexer);
+        // Rules that take a primary directly, such as the LIKE pattern or a column DEFAULT,
+        // reported ~ as a missing expression instead of naming the operator (#1101).
+        if (lexer.Current.Type == TokenType.Tilde)
+        {
+            return ParseUnary(ref lexer);
+        }
+
+        return MissingExpression(ref lexer, pos);
+    }
+
+    /// <summary>
+    /// Reports a token that cannot start an expression — a ';', ')', the end of the
+    /// text, or ':' in an unsupported <c>:name</c> parameter — and returns a NULL
+    /// placeholder so parsing stays total. The token is left in place: callers resume at
+    /// it and the statement-level leftover check (#1068) finds it already reported.
+    /// Silently consuming it here once turned <c>WHERE id = :id</c> into
+    /// <c>WHERE id = NULL</c> and <c>SET a = :a</c> into an unconditional NULL write.
+    /// </summary>
+    private SqlLiteralExpression MissingExpression(ref TokenLexer lexer, int position)
+    {
+        if (!HasErrorAt(position))
+        {
+            AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
+                ? "Expected an expression before the end of the statement."
+                : $"Expected an expression but found {DescribeToken(ref lexer)}.");
+        }
+
         return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
-            Location.Create(1, 1, pos, pos));
+            Location.Create(1, 1, position, position));
     }
 
     private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer)
@@ -562,11 +813,15 @@ public sealed partial class SqlQueryParser
 
         var args = new List<SqlExpression>();
 
-        if (IsAggregateFunction(name) && (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL")))
+        // Which names are aggregates is the engine's catalog to say (an application registers its
+        // own), so the parser recognizes DISTINCT, ALL and ORDER BY inside any call. No aggregate
+        // executes them yet, and PostgreSQL refuses them on a function that is not an aggregate
+        // (parse_func.c), so every call reports them here.
+        if (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL"))
         {
             string modifier = CurrentText(ref lexer).ToUpperInvariant();
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + modifier.Length,
-                $"The {modifier} modifier inside SQL aggregate functions is not supported.");
+                $"The {modifier} modifier inside SQL function calls is not supported.");
             Advance(ref lexer);
         }
 
@@ -575,32 +830,84 @@ public sealed partial class SqlQueryParser
             // Handle COUNT(*) and similar
             if (lexer.Current.Type == TokenType.Asterisk)
             {
-                args.Add(new SqlStarExpression(Location.Create(1, 1, lexer.Current.Position, lexer.Current.Position + 1)));
-                Advance(ref lexer);
+                args.Add(ParseStarArgument(ref lexer));
             }
             else
             {
-                args.Add(ParseExpression(ref lexer));
+                args.Add(ParseOperand(ref lexer, OperandRule.Expression));
                 while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
                 {
                     Advance(ref lexer);
-                    args.Add(ParseExpression(ref lexer));
+                    args.Add(ParseOperand(ref lexer, OperandRule.Expression));
                 }
             }
         }
 
-        if (IsAggregateFunction(name) && IsKeyword(ref lexer, "ORDER"))
+        if (IsKeyword(ref lexer, "ORDER"))
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
-                "ORDER BY inside SQL aggregate functions is not supported.");
+                "ORDER BY inside SQL function calls is not supported.");
         }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
-        }
+        Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");
+        SkipCallExtensions(ref lexer);
 
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, pos));
+    }
+
+    /// <summary>
+    /// Parses the <c>*</c> of <c>COUNT(*)</c>. It is the call's operand, a level below the call
+    /// like any other argument, so it enters that level the same way: a call at the deepest level
+    /// the limit allows has no room for it (#1151). The star used to be added without the check,
+    /// so <c>COUNT(*)</c> at that level built a tree one level deeper than the limit.
+    /// </summary>
+    private SqlExpression ParseStarArgument(ref TokenLexer lexer)
+    {
+        int position = lexer.Current.Position;
+        if (!TryEnterOperand(ref lexer))
+        {
+            return NestingPlaceholder(position);
+        }
+
+        EnterLeaf();
+        var star = new SqlStarExpression(Location.Create(1, 1, position, position + 1));
+        Advance(ref lexer);
+        _expressionDepth--;
+        return star;
+    }
+
+    /// <summary>
+    /// Skips <c>WITHIN GROUP (...)</c> and <c>FILTER (...)</c> after a call, reporting each once.
+    /// <c>WITHIN</c> used to become the column alias and <c>GROUP (ORDER BY ...)</c> a malformed
+    /// GROUP BY, so the construct also reported two SQL0003 diagnostics (#1101).
+    /// </summary>
+    private void SkipCallExtensions(ref TokenLexer lexer)
+    {
+        while (true)
+        {
+            int start = lexer.Current.Position;
+            if (IsWord(ref lexer, "WITHIN") && TryPeekToken(lexer, out string group, out int groupEnd) &&
+                group.Equals("GROUP", StringComparison.OrdinalIgnoreCase))
+            {
+                RequireSkippedConstruct(start, groupEnd, "WITHIN GROUP");
+                Advance(ref lexer);
+                Advance(ref lexer);
+            }
+            else if (IsWord(ref lexer, "FILTER") && TryPeekToken(lexer, out string next, out _) && next == "(")
+            {
+                RequireSkippedConstruct(start, start + lexer.Current.Value.Length, "FILTER");
+                Advance(ref lexer);
+            }
+            else
+            {
+                return;
+            }
+
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                SkipParenthesized(ref lexer);
+            }
+        }
     }
 
     private SqlExpression ParseCase(ref TokenLexer lexer)
@@ -612,20 +919,22 @@ public sealed partial class SqlQueryParser
         SqlExpression? input = null;
         if (!IsAtEnd(ref lexer) && !IsKeyword(ref lexer, "WHEN"))
         {
-            input = ParseExpression(ref lexer);
+            input = ParseOperand(ref lexer, OperandRule.Expression);
         }
 
         var whenClauses = new List<SqlWhenClause>();
+        if (!IsKeyword(ref lexer, "WHEN"))
+        {
+            AddExpectedDiagnostic(ref lexer, "WHEN in the CASE expression");
+        }
+
         while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "WHEN"))
         {
             Advance(ref lexer); // consume WHEN
-            var condition = ParseExpression(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "THEN"))
-            {
-                Advance(ref lexer);
-            }
+            var condition = ParseOperand(ref lexer, OperandRule.Expression);
+            ExpectKeyword(ref lexer, "THEN", "THEN after the WHEN condition");
 
-            var result = ParseExpression(ref lexer);
+            var result = ParseOperand(ref lexer, OperandRule.Expression);
             whenClauses.Add(new SqlWhenClause(condition, result));
         }
 
@@ -633,13 +942,10 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ELSE"))
         {
             Advance(ref lexer);
-            elseResult = ParseExpression(ref lexer);
+            elseResult = ParseOperand(ref lexer, OperandRule.Expression);
         }
 
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "END"))
-        {
-            Advance(ref lexer);
-        }
+        ExpectKeyword(ref lexer, "END", "END to close the CASE expression");
 
         return new SqlCaseExpression(input, whenClauses, elseResult,
             Location.Create(1, 1, pos, pos));
@@ -649,20 +955,19 @@ public sealed partial class SqlQueryParser
     {
         Advance(ref lexer); // consume EXISTS
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-        {
-            Advance(ref lexer);
-        }
-
         SqlSelectExpression? subquery = null;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
+        if (Expect(ref lexer, TokenType.LeftParen, "'(' after EXISTS"))
         {
-            subquery = ParseSubquery(ref lexer);
-        }
+            if (IsKeyword(ref lexer, "SELECT"))
+            {
+                subquery = ParseSubquery(ref lexer);
+            }
+            else
+            {
+                AddExpectedDiagnostic(ref lexer, "a SELECT subquery after EXISTS (");
+            }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
+            Expect(ref lexer, TokenType.RightParen, "')' after the EXISTS subquery");
         }
 
         subquery ??= new SqlSelectExpression(

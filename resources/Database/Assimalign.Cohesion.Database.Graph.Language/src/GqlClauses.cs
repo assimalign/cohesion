@@ -47,6 +47,13 @@ public static class GqlClauses
     /// <summary>Restricts graph results by a predicate.</summary>
     public const string Where = "WHERE";
 
+    /// <summary>
+    /// ISO/IEC 39075 label expressions (<c>|</c>, <c>&amp;</c>, <c>!</c>, <c>%</c>, parentheses and
+    /// <c>IS</c>) in node and edge patterns, and the labeled predicate
+    /// (<c>n IS [NOT] LABELED A</c>, <c>n:A</c>) in <c>WHERE</c>.
+    /// </summary>
+    public const string LabelExpression = "LABEL EXPRESSION";
+
     /// <summary>Orders graph results by one or more expressions.</summary>
     public const string OrderBy = "ORDER BY";
 

@@ -1,8 +1,6 @@
 using System;
 using System.Linq.Expressions;
 
-using Assimalign.Cohesion.Database.Sql.Internal;
-
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
@@ -20,7 +18,7 @@ public static class Sql
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="selector"/> or <paramref name="predicate"/> is null.
     /// </exception>
-    public static ISqlAggregateExpression Sum<TSource>(
+    public static SqlAggregateExpression Sum<TSource>(
         Expression<Func<TSource, object?>> selector,
         Expression<Func<TSource, bool>> predicate)
     {

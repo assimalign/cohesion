@@ -22,7 +22,7 @@
 
         <!-- The kernel: the contract root plus the child roots it rolls up
              (storage/durability, the ACID substrate, types, execution, the shared
-             language infra, wire protocol, security, governance - the root
+             language infra, wire protocol, security - the root
              REFERENCES all of them, so every child root in the root's closure
              must ship), and indexing (a kernel consumer of the root). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
@@ -32,10 +32,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Transactions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Indexing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Execution" />
-        <!-- Governance is a near-empty contracts shell (#167 fills it), but the
-             child-root inversion (2026-07-13) put it in the root's reference
-             closure, so the framework must deliver it. -->
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
 
         <!-- Service surface: wire protocol, client core, security, the embedded
              facade, and the composition-only hosting module. Servers are per-model
@@ -94,24 +90,22 @@
               executable under the repository-root samples/ tree; never shipped.
             - The Cache model family - engine scaffolds
               without shipping surface yet. (KeyValuePair graduated into the
-              shipping set 2026-07-14; its still-source-less satellites -
-              KeyValuePair.Replication and KeyValuePair.Security - stay excluded
-              until they ship.)
-            - Blob.Client, Blob.Replication, and Blob.Security - deferred model
+              shipping set 2026-07-14; its still-source-less satellite -
+              KeyValuePair.Security - stays excluded until it ships.)
+            - Blob.Client and Blob.Security - deferred model
               satellites; the Blob engine, catalog, and storage ship above.
-            - Documents.Client, Documents.Replication, and Documents.Security -
+            - Documents.Client and Documents.Security -
               deferred satellites; the Documents query and storage engine ships above.
             - Graph.Client - shipped as a NuGet-only client package, never a member
               of the App.Database shared framework (resource-areas.md).
-            - Graph.Replication and Graph.Security - deferred satellites; the Graph
+            - Graph.Security - a deferred satellite; the Graph
               engine, GQL subset, catalog, and adjacency storage ship above.
             - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
               package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
-            - Database.Replication, Database.Sql.Replication, Database.Sql.Security
-              - post-MVP contracts-only/empty shells (replication / #177). Add each
-              when its feature ships. (Database.Governance graduated into the
-              shipping set with the child-root inversion - see the kernel group.)
+            - Database.Sql.Security - a post-MVP empty shell. Add it when its
+              feature ships. (The Governance and Replication placeholders were
+              deleted on 2026-10-05, #1257.)
 
             Private implementation dependencies. Shipped in App.Database's Runtime
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never

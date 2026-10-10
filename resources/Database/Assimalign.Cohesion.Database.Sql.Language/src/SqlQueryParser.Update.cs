@@ -12,19 +12,12 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume UPDATE
 
-        // Table reference
-        SqlTableReference? table = null;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            table = ParseTableReference(ref lexer);
-        }
-        table ??= new SqlTableReference("?", null, null);
+        var table = ParseRequiredTableReference(ref lexer);
 
-        // SET
+        // SET is required: UPDATE t; used to execute with no assignments.
         var assignments = new List<SqlAssignment>();
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SET"))
+        if (ExpectKeyword(ref lexer, "SET", "SET after the UPDATE table"))
         {
-            Advance(ref lexer);
             assignments.Add(ParseAssignment(ref lexer));
 
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
@@ -46,19 +39,44 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
+    /// <summary>
+    /// Parses <c>column = value</c>. The column and the <c>=</c> are required. A clause
+    /// keyword in the column position means the column is missing, so
+    /// <c>SET a = 1, WHERE id = 1</c> reports the trailing comma instead of assigning
+    /// <c>(id = 1)</c> to a column named WHERE on every row (#1068).
+    /// </summary>
     private SqlAssignment ParseAssignment(ref TokenLexer lexer)
     {
+        int position = lexer.Current.Position;
         string columnName = string.Empty;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        if (IsNameToken(ref lexer))
         {
             columnName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, "a column name after SET or ','");
+            if (lexer.Current.Type != TokenType.Equals)
+            {
+                // Leave the clause keyword or terminator to the UPDATE parser.
+                return new SqlAssignment(columnName, new SqlLiteralExpression("NULL", SqlLiteralType.Null,
+                    Location.Create(1, 1, position, position)));
+            }
+        }
 
-        // =
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Equals)
+        if (lexer.Current.Type == TokenType.Equals)
         {
             Advance(ref lexer);
+        }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, "'=' after the SET column");
+            if (!CanStartOperand(ref lexer))
+            {
+                return new SqlAssignment(columnName, new SqlLiteralExpression("NULL", SqlLiteralType.Null,
+                    Location.Create(1, 1, position, position)));
+            }
         }
 
         var value = ParseExpression(ref lexer);

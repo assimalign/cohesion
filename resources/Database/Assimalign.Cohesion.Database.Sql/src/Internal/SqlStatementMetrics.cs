@@ -7,6 +7,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// records where the equivalent scan examines O(table) — consumed by tests
 /// through the session's last-statement view.
 /// </summary>
+/// <remarks>
+/// It also records the catalog changes a self-committing statement (DDL) committed by itself,
+/// which decide how the session reports the statement's failure on an offline storage (#1272).
+/// </remarks>
 internal sealed class SqlStatementMetrics
 {
     /// <summary>
@@ -21,4 +25,20 @@ internal sealed class SqlStatementMetrics
     /// statements with no table access.
     /// </summary>
     internal string AccessPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets the number of catalog changes the statement committed by itself that a reopened
+    /// database shows: a DDL statement's catalog self-commits that publish, alter or remove a
+    /// definition, each counted once its commit returned. A durable step nothing reaches before
+    /// such a commit (a table's identity reservation, index trees not yet described) is not
+    /// counted. Zero for every other statement, and for a DDL statement that met an offline storage
+    /// before it committed such a change, which is then reported as refused rather than unconfirmed
+    /// (#1272).
+    /// </summary>
+    internal int SelfCommits { get; private set; }
+
+    /// <summary>
+    /// Records one catalog change the statement committed by itself (<see cref="SelfCommits"/>).
+    /// </summary>
+    internal void RecordSelfCommit() => SelfCommits++;
 }

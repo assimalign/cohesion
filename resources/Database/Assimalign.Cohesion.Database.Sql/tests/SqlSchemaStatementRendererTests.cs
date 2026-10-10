@@ -224,14 +224,10 @@ public class SqlSchemaStatementRendererTests
         var current = new SqlCompiledSchema(
             SqlCompiledSchema.CurrentFormat,
             "orders",
-            EngineModel.Sql,
             allowsDestructiveChanges: false,
             Array.Empty<CompiledSchemaType>(),
             Array.Empty<CompiledSchemaTable>(),
-            Array.Empty<CompiledSchemaFunction>(),
-            Array.Empty<CompiledSchemaTrigger>(),
-            Array.Empty<CompiledSchemaPrincipal>(),
-            Array.Empty<CompiledSchemaExtension>());
+            Array.Empty<CompiledSchemaPrincipal>());
         var plan = new SqlSchemaMigrationPlan("not-the-current-hash", "target-hash", []);
 
         // Act / Assert

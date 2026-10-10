@@ -24,13 +24,13 @@ by — `Assimalign.Cohesion.Database.Storage`.
   overloads write the shared (owner-zero) space — the catalog file set's layout,
   where kind-discriminated metadata records are few and scanned as a whole.
 - **The journal is a public composition seam.** `WriteAheadJournal` returns the
-  existing `IStorageJournal` contract, matching Documents, Graph, and Blob storage.
+  storage's `StorageJournal`, matching Documents, Graph, and Blob storage.
   It replaces the shipped-to-shipped friend grant and hands the
   engine's transaction coordinator the same journal the storage brackets write page
   images to, for the manager's journal-bound transaction log and open-time recovery
   analysis. `Open(..., checkpointOnOpen: false)` exists for the same reason — the
   engine analyzes the recovered journal before the truncating checkpoint destroys
-  the records classification reads (see `ISqlStorageStrategy`). Storage retains
+  the records classification reads (see the Sql model's internal `SqlStorageStrategy`). Storage retains
   ownership of the journal; composers coordinate journal writes and checkpoints
   through their transaction coordinator and must not dispose it independently.
 

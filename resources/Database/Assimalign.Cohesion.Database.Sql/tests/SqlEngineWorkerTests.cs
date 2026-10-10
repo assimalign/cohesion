@@ -55,7 +55,7 @@ public sealed class SqlEngineWorkerTests : IDisposable
         return stream.Length;
     }
 
-    private static async Task<int> CountRowsAsync(IDatabaseSession session)
+    private static async Task<int> CountRowsAsync(SqlDatabaseSession session)
     {
         var result = await session.ExecuteAsync("SELECT id FROM t");
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -93,7 +93,7 @@ public sealed class SqlEngineWorkerTests : IDisposable
     public async Task Workers_OnCreation_ShouldExposeTheFullInventory()
     {
         // Arrange / Act
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "inventory" });
+        await using var engine = SqlDatabaseEngine.Create("inventory", new SqlDatabaseEngineOptions());
 
         // Assert: one worker per kind, observable (name/kind/cadence) from creation.
         engine.Workers.Count.ShouldBe(5);
@@ -111,9 +111,8 @@ public sealed class SqlEngineWorkerTests : IDisposable
     {
         // Arrange: a fast checkpoint cadence so the engine's own checkpoint loop —
         // spawned at creation, no host anywhere — lands passes during the test.
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        var engine = SqlDatabaseEngine.Create("ckpt", new SqlDatabaseEngineOptions
         {
-            EngineName = "ckpt",
             RootPath = _rootPath,
             CheckpointInterval = TimeSpan.FromMilliseconds(100),
         });
@@ -136,7 +135,7 @@ public sealed class SqlEngineWorkerTests : IDisposable
         // And the data survives disposal + a fresh engine over the same files.
         await engine.DisposeAsync();
 
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ckpt", RootPath = _rootPath });
+        await using var reopened = SqlDatabaseEngine.Create("ckpt", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var reopenedDatabase = await reopened.OpenDatabaseAsync("wal");
         await using var verify = await reopenedDatabase.CreateSessionAsync();
 
@@ -147,9 +146,8 @@ public sealed class SqlEngineWorkerTests : IDisposable
     public async Task CheckpointWorker_WithActiveTransaction_ShouldSkipBusyStorageAndRetry()
     {
         // Arrange: fast cadence, so passes land while the transaction is open.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("busy", new SqlDatabaseEngineOptions
         {
-            EngineName = "busy",
             RootPath = _rootPath,
             CheckpointInterval = TimeSpan.FromMilliseconds(50),
         });
@@ -184,9 +182,8 @@ public sealed class SqlEngineWorkerTests : IDisposable
     {
         // Pre-#1018 this test asserted prompt grouped commits on memory because
         // durability silently degraded; explicit Grouped must now fail at open.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("grouped", new SqlDatabaseEngineOptions
         {
-            EngineName = "grouped",
             Durability = StorageCommitDurability.Grouped,
             GroupCommitWindow = TimeSpan.FromSeconds(10),
         });
@@ -202,9 +199,8 @@ public sealed class SqlEngineWorkerTests : IDisposable
         // Arrange: no host, no application, no server — the engine's own loops are
         // the only scheduler that exists. Grouped durability + a fast checkpoint
         // cadence make their effects observable from the outside.
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        var engine = SqlDatabaseEngine.Create("embedded", new SqlDatabaseEngineOptions
         {
-            EngineName = "embedded",
             RootPath = _rootPath,
             Durability = StorageCommitDurability.Grouped,
             GroupCommitWindow = TimeSpan.FromMilliseconds(5),
@@ -231,7 +227,7 @@ public sealed class SqlEngineWorkerTests : IDisposable
         // engine.
         await engine.DisposeAsync();
 
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "embedded", RootPath = _rootPath });
+        await using var reopened = SqlDatabaseEngine.Create("embedded", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var reopenedDatabase = await reopened.OpenDatabaseAsync("embedded-db");
         await using var verify = await reopenedDatabase.CreateSessionAsync();
 

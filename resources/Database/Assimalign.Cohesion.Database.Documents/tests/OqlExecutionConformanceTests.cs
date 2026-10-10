@@ -91,10 +91,10 @@ public sealed class OqlExecutionConformanceTests
                 parsed.Diagnostics.ShouldBeEmpty(context);
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
-                await using var engine = DocumentDatabaseEngine.Create(new());
-                var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("conformance", cancellationToken);
-                var collection = await database.CreateCollectionAsync("items", cancellationToken);
+                await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+                var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
+                var collection = await session.CreateCollectionAsync("items", cancellationToken);
                 await SeedAsync(collection, session, cancellationToken);
                 foreach (string setup in execution.Setup ?? [])
                 {
@@ -141,10 +141,10 @@ public sealed class OqlExecutionConformanceTests
     public async Task Execute_InvalidAggregateContext_ReturnsIntendedErrorAsync(string statement, string message)
     {
         new OqlQueryParser().Parse(statement).Diagnostics.ShouldBeEmpty();
-        await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
-        await database.CreateCollectionAsync("items", CancellationToken.None);
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+        var database = await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
 
         var exception = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
@@ -176,7 +176,7 @@ public sealed class OqlExecutionConformanceTests
         _ => false,
     };
 
-    private static async Task SeedAsync(IDocumentCollection collection, IDatabaseSession session, CancellationToken cancellationToken)
+    private static async Task SeedAsync(DocumentCollection collection, DocumentDatabaseSession session, CancellationToken cancellationToken)
     {
         (string Id, string Json)[] documents =
         [

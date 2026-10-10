@@ -4,39 +4,69 @@ using System.Runtime.InteropServices;
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// Defines the binary layout of the file metadata stored in the body of page 0.
-/// The file header contains metadata that identifies the storage resource and
-/// describes its configuration.
+/// Defines the binary layout of the identity block stored in the body of page 0: the
+/// fields that identify a storage file and never change after it is created.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Every storage file, regardless of database model, begins with a file header page
-/// (<see cref="PageType.FileHeader"/>). Page 0 carries a normal page header (identifier,
-/// LSN, checksum) in its first <see cref="Units.Page.HeaderSize"/> bytes, so it is
-/// integrity-checked like every other page; this struct lives in the page body
-/// immediately after it.
+/// (<see cref="PageType.FileHeader"/>). Storage formats 2 and 3 lay page 0 out as follows:
+/// </para>
 /// <code>
-/// File Layout:
-/// ┌─────────────────────────────────┐  Page 0
-/// │ Page header │ StorageFileHeader │
-/// ├─────────────────────────────────┤  Page 1..N
-/// │ Data / Index / Catalog pages    │
-/// └─────────────────────────────────┘
+/// Page 0 (8 KiB)
+/// ┌──────────────┬──────────────────────┬──────────┬────────────┬──────────┬────────────┐
+/// │ page header  │ StorageFileHeader    │ reserved │ header     │ reserved │ header     │
+/// │ 0..96        │ 96..352 (identity)   │ ..512    │ slot 0     │ ..4608   │ slot 1     │
+/// │              │                      │          │ 512..4096  │          │ 4608..8192 │
+/// └──────────────┴──────────────────────┴──────────┴────────────┴──────────┴────────────┘
 /// </code>
-/// Free pages are stamped <see cref="PageType.Free"/> in their page headers; the
-/// free-space map is reconstructed by scanning page headers when the file is opened.
+/// <para>
+/// The identity block is written when the file is created. Everything that changes —
+/// page counts, the LSN and transaction-sequence floors, the checkpoint anchor — lives in two
+/// alternating header slots, each with its own generation counter and CRC-32C. A header
+/// write goes to the slot that does not hold the newest generation and is made durable
+/// before the next one starts, so a write torn by a crash leaves the other slot intact, and
+/// open picks the newest slot whose checksum verifies. RavenDB's Voron alternates its
+/// <c>headers.one</c> and <c>headers.two</c> the same way
+/// (<c>src/Voron/Impl/FileHeaders/HeaderAccessor.cs</c>, <c>Initialize</c> and
+/// <c>Modify</c>); PostgreSQL instead keeps <c>pg_control</c> within one 512-byte sector so
+/// that its single copy is written atomically (<c>PG_CONTROL_MAX_SAFE_SIZE</c>,
+/// <c>src/include/catalog/pg_control.h</c>).
+/// </para>
+/// <para>
+/// <b>The sector assumption.</b> A torn write is old-or-new per 512-byte sector: the slots
+/// share no 512-byte sector with each other or with the identity block. The identity block
+/// does share slot 0's 4 KiB block, and a drive with 4 KiB physical sectors that emulates
+/// 512-byte ones rewrites a slot-0 write as a read-modify-write of that whole physical sector,
+/// which power loss can leave unreadable. So each slot also carries a copy of the identity
+/// block: when the block on page 0 fails its magic or its checksum, open takes the identity
+/// from the newest valid slot, and the next write to slot 0 rewrites the whole leading block.
+/// </para>
+/// <para>
+/// Page 0 is never loaded through the buffer pool and its page-level checksum is zero
+/// ("never stamped"): a slot write rewrites only the slot's own bytes, so the identity block
+/// and each slot carry their own checksums instead.
+/// </para>
+/// <para>
+/// <see cref="Magic"/> and <see cref="FormatVersion"/> sit at the same offsets in every
+/// storage format, so an engine reads them from the raw page before it verifies any checksum
+/// and refuses a file of another format with <see cref="StorageFormatException"/>
+/// rather than reporting it as corrupt.
+/// </para>
 /// </remarks>
-[StructLayout(LayoutKind.Explicit, Size = 256, Pack = 1)]
+[StructLayout(LayoutKind.Explicit, Size = ByteSize, Pack = 1)]
 public unsafe struct StorageFileHeader
 {
     /// <summary>
     /// A magic number identifying this as a Cohesion database storage file.
-    /// Value: <c>0x434F4845</c> (ASCII "COHE").
+    /// Value: <c>0x434F4845</c> (ASCII "COHE"). At the same offset in every storage format.
     /// </summary>
     [FieldOffset(0)]
     public int Magic;
 
     /// <summary>
-    /// The storage format version, allowing forward/backward compatibility detection.
+    /// The storage format version. At the same offset in every storage format, and read
+    /// before any checksum: an engine opens only <see cref="CurrentFormatVersion"/>.
     /// </summary>
     [FieldOffset(4)]
     public int FormatVersion;
@@ -62,77 +92,36 @@ public unsafe struct StorageFileHeader
     public fixed byte StorageId[16];
 
     /// <summary>
-    /// The total number of pages currently in the storage file (including free pages).
-    /// </summary>
-    [FieldOffset(32)]
-    public long TotalPageCount;
-
-    /// <summary>
-    /// The number of pages currently marked as free.
-    /// </summary>
-    [FieldOffset(40)]
-    public long FreePageCount;
-
-    /// <summary>
-    /// The page identifier of the first free space map page.
-    /// </summary>
-    [FieldOffset(48)]
-    public long FreeSpaceMapPageId;
-
-    /// <summary>
-    /// The page identifier of the root segment page for this storage file.
-    /// </summary>
-    [FieldOffset(56)]
-    public long RootSegmentPageId;
-
-    /// <summary>
     /// A timestamp representing when the storage file was created, stored as UTC ticks.
     /// </summary>
-    [FieldOffset(64)]
+    [FieldOffset(32)]
     public long CreatedAtUtcTicks;
-
-    /// <summary>
-    /// A timestamp representing the last modification of the storage file, stored as UTC ticks.
-    /// </summary>
-    [FieldOffset(72)]
-    public long ModifiedAtUtcTicks;
 
     /// <summary>
     /// The name of the storage resource, stored as a fixed-length UTF-8 encoded string.
     /// Maximum 128 bytes (padded with null bytes).
     /// </summary>
-    [FieldOffset(80)]
+    [FieldOffset(40)]
     public fixed byte Name[128];
 
     /// <summary>
-    /// The log sequence number of the most recent completed checkpoint, or zero when
-    /// no checkpoint has been taken. Recovery replays the journal from this point.
+    /// The CRC-32C of the <see cref="ByteSize"/> bytes of this block, computed with this
+    /// field treated as zero.
     /// </summary>
-    [FieldOffset(208)]
-    public long LastCheckpointLsn;
+    [FieldOffset(168)]
+    public uint Checksum;
 
     /// <summary>
-    /// The highest transaction sequence assigned by this storage as of the last
-    /// header update, or zero for files written before the field existed. On open
-    /// this is the floor for new sequence assignment alongside the journal's
-    /// highest observed sequence: a checkpoint truncates the journal, and MVCC
-    /// row stamps persist in data pages, so sequences must never restart across
-    /// reopen once row versions carry them (a recycled sequence would corrupt
-    /// snapshot visibility).
+    /// Reserved bytes for future use; zero.
     /// </summary>
-    /// <remarks>
-    /// Carved from the front of the former reserved block; files written before
-    /// the field read zero here, which is a safe floor — they predate row
-    /// version stamps.
-    /// </remarks>
-    [FieldOffset(216)]
-    public long LastTransactionSequence;
+    [FieldOffset(172)]
+    public fixed byte Reserved[84];
 
     /// <summary>
-    /// Reserved bytes for future use.
+    /// The size of the identity block in bytes: it occupies the first
+    /// <see cref="ByteSize"/> bytes of page 0's body.
     /// </summary>
-    [FieldOffset(224)]
-    public fixed byte Reserved[32];
+    public const int ByteSize = 256;
 
     /// <summary>
     /// The expected magic number value for valid Cohesion storage files.
@@ -141,17 +130,23 @@ public unsafe struct StorageFileHeader
     public const int ExpectedMagic = 0x434F4845;
 
     /// <summary>
-    /// The current format version.
+    /// The current storage format version, the only one this engine opens. Version 3
+    /// (#1253) replaced the journal's full before- and after-images with a full page image
+    /// once per checkpoint interval and byte-range deltas at commit (journal frame version 4),
+    /// and its recovery with ordered redo. Version 2 (#1251) brought CRC-32C page and journal
+    /// checksums, journal frame version 3, the alternating header slots, the persisted LSN
+    /// floor and the chained checkpoint anchor. There is no upgrade path between versions (#1152).
     /// </summary>
-    public const int CurrentFormatVersion = 1;
+    public const int CurrentFormatVersion = 3;
 
     /// <summary>
-    /// Validates that the header contains a valid magic number and format version.
+    /// Validates that the header names this engine's file format: the expected magic number
+    /// and exactly <see cref="CurrentFormatVersion"/>.
     /// </summary>
     /// <returns><c>true</c> if the header is valid; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly bool IsValid()
     {
-        return Magic == ExpectedMagic && FormatVersion > 0;
+        return Magic == ExpectedMagic && FormatVersion == CurrentFormatVersion;
     }
 }

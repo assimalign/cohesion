@@ -10,7 +10,7 @@ internal sealed class DocumentWriteStream : Stream
 {
     private readonly DocumentStorage _storage;
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly Func<DocumentContentReference, ValueTask> _complete;
     private readonly Func<ValueTask> _abort;
     private readonly CancellationToken _lifetimeCancellation;
@@ -35,7 +35,7 @@ internal sealed class DocumentWriteStream : Stream
     public DocumentWriteStream(
         DocumentStorage storage,
         TransactionCoordinator coordinator,
-        ITransactionContext context,
+        TransactionContext context,
         Func<DocumentContentReference, ValueTask> complete,
         Func<ValueTask> abort,
         CancellationToken lifetimeCancellation)
@@ -149,7 +149,7 @@ internal sealed class DocumentWriteStream : Stream
         var record = DocumentChunkCodec.Encode(_buffer.AsSpan(0, _buffered), _context.Sequence);
         ulong next = await _coordinator.ApplyStatementAsync(_context, bracket =>
         {
-            var (page, slot) = _storage.InsertChunk(bracket, _context.Sequence, record);
+            var (page, slot) = _storage.InsertChunk(bracket, record);
             ulong location = DocumentStorage.PackLocation(page, slot);
             if (_tail != 0)
             {

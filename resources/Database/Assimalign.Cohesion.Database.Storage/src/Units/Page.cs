@@ -41,6 +41,16 @@ public readonly unsafe struct Page
     public const int ChecksumFieldOffset = 16;
 
     /// <summary>
+    /// The byte offset of the page LSN within the header.
+    /// </summary>
+    internal const int LsnFieldOffset = 8;
+
+    /// <summary>
+    /// The byte offset of the page type within the header.
+    /// </summary>
+    internal const int TypeFieldOffset = 21;
+
+    /// <summary>
     /// A pointer to the start of the page buffer.
     /// </summary>
     public readonly byte* Pointer;
@@ -64,9 +74,11 @@ public readonly unsafe struct Page
     /// </summary>
     /// <remarks>
     /// The LSN enforces the write-ahead rule: a page may only be written to the data
-    /// stream once every journal record up to and including this LSN is durable. During
-    /// recovery, a journal record is applied to the page only when the record's LSN is
-    /// newer than the LSN persisted here, making replay idempotent.
+    /// stream once every journal record up to and including this LSN is durable. It also
+    /// chains the page's journal records (storage format 3): a page delta names the LSN it
+    /// applies on top of, recovery applies it only to a page rebuilt at exactly that LSN, and
+    /// a page at or below the last checkpoint's LSN journals its full image before its next
+    /// change. Allocation zeroes it, so a reallocated page is always imaged again.
     /// </remarks>
     public long Lsn
     {

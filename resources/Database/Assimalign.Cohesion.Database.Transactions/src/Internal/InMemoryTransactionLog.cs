@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// In-memory transaction log for embedded working state and tests: appends are
 /// trivially "durable" because the log shares the process lifetime.
 /// </summary>
-internal sealed class InMemoryTransactionLog : ITransactionLog
+internal sealed class InMemoryTransactionLog : TransactionLog
 {
     private readonly List<(ulong Sequence, byte Kind)> _records = new();
     private readonly object _sync = new();
@@ -18,7 +18,7 @@ internal sealed class InMemoryTransactionLog : ITransactionLog
     private const byte abort = 3;
 
     /// <inheritdoc />
-    public ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+    public override ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Append(sequence.Value, begin);
@@ -26,7 +26,7 @@ internal sealed class InMemoryTransactionLog : ITransactionLog
     }
 
     /// <inheritdoc />
-    public ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+    public override ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Append(sequence.Value, commit);
@@ -34,7 +34,7 @@ internal sealed class InMemoryTransactionLog : ITransactionLog
     }
 
     /// <inheritdoc />
-    public ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+    public override ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Append(sequence.Value, abort);

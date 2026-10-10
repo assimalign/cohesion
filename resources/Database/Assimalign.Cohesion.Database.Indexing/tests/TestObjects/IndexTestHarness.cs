@@ -15,20 +15,20 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 /// manager, and the pairing between logical transaction contexts and their storage
 /// transactions (the engine's job in production).
 /// </summary>
-public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposable
+public sealed class IndexTestHarness : IAsyncDisposable
 {
-    private readonly Dictionary<ITransactionContext, IStorageTransaction> _pairs = new();
+    private readonly Dictionary<TransactionContext, StorageTransaction> _pairs = new();
     private readonly object _sync = new();
 
-    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null)
+    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null, string? name = null)
     {
-        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle());
+        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle(), name);
         LockManager = Transactions.LockManager.Create();
-        Manager = TransactionManager.Create(TransactionLog.CreateInMemory(), LockManager, VersionStore.CreateInMemory());
+        Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = Storage,
-            TransactionSource = this,
+            TransactionSource = GetStorageTransaction,
             LockManager = LockManager,
         });
     }
@@ -37,11 +37,11 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     {
         Storage = storage;
         LockManager = Transactions.LockManager.Create();
-        Manager = TransactionManager.Create(TransactionLog.CreateInMemory(), LockManager, VersionStore.CreateInMemory());
+        Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = Storage,
-            TransactionSource = this,
+            TransactionSource = GetStorageTransaction,
             LockManager = LockManager,
             ExistingIndexes = registrations,
         });
@@ -49,11 +49,11 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
 
     public HarnessStorage Storage { get; }
 
-    public ITransactionManager Manager { get; }
+    public TransactionManager Manager { get; }
 
-    public ILockManager LockManager { get; }
+    public LockManager LockManager { get; }
 
-    public IIndexManager IndexManager { get; }
+    public BTreeIndexManager IndexManager { get; }
 
     /// <summary>
     /// Reopens crashed (or cleanly closed) storage bytes and re-attaches indexes
@@ -71,7 +71,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         return new IndexTestHarness(HarnessStorage.Open(new SimulatedDurableFileHandle(dataStream), new SimulatedDurableFileHandle(journalStream)), registrations);
     }
 
-    public async Task<ITransactionContext> BeginAsync()
+    public async Task<TransactionContext> BeginAsync()
     {
         var context = await Manager.BeginAsync();
         var storageTransaction = Storage.BeginTransaction();
@@ -84,9 +84,9 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         return context;
     }
 
-    public async Task CommitAsync(ITransactionContext context)
+    public async Task CommitAsync(TransactionContext context)
     {
-        IStorageTransaction storageTransaction;
+        StorageTransaction storageTransaction;
         lock (_sync)
         {
             storageTransaction = _pairs[context];
@@ -97,9 +97,9 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         await Manager.CommitAsync(context);       // visibility (leaves the active table)
     }
 
-    public async Task RollbackAsync(ITransactionContext context)
+    public async Task RollbackAsync(TransactionContext context)
     {
-        IStorageTransaction storageTransaction;
+        StorageTransaction storageTransaction;
         lock (_sync)
         {
             storageTransaction = _pairs[context];
@@ -110,8 +110,40 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         await Manager.RollbackAsync(context);      // releases locks, purges versions
     }
 
-    /// <inheritdoc />
-    public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+    /// <summary>
+    /// Rolls a transaction back the way a model engine does after its statement
+    /// brackets already committed (a multi-statement ROLLBACK): the transaction's
+    /// physical writes stay durable, the caller's logical undo runs in a fresh
+    /// bracket while the transaction still holds its locks, and only then does the
+    /// transaction leave the active table as aborted.
+    /// </summary>
+    public async Task LogicalRollbackAsync(TransactionContext context, Func<StorageTransaction, Task> undo)
+    {
+        StorageTransaction storageTransaction;
+        lock (_sync)
+        {
+            storageTransaction = _pairs[context];
+            _pairs.Remove(context);
+        }
+
+        storageTransaction.Commit();
+
+        using (var bracket = Storage.BeginTransaction())
+        {
+            await undo(bracket);
+            bracket.Commit();
+        }
+
+        await Manager.RollbackAsync(context);
+    }
+
+    /// <summary>
+    /// Resolves the storage transaction paired with a context: the harness's
+    /// <see cref="BTreeIndexManagerOptions.TransactionSource"/>, the engine's job in production.
+    /// </summary>
+    /// <param name="context">The logical transaction context.</param>
+    /// <returns>The paired storage transaction.</returns>
+    public StorageTransaction GetStorageTransaction(TransactionContext context)
     {
         lock (_sync)
         {
@@ -132,16 +164,18 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     public sealed class HarnessStorage : Database.Storage.Storage
     {
         private HarnessStorage(StorageStream data, StorageStream journal)
-            : base(data, journal, new StorageStream(new MemoryStream()), bufferPoolCapacity: 64)
+            : base(StorageModel.Custom, data, journal, new StorageStream(new MemoryStream()), bufferPoolCapacity: 64)
         {
         }
 
-        public override StorageModel Model => StorageModel.Custom;
-
-        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal)
+        /// <summary>
+        /// Creates and initializes a storage, named <paramref name="name"/> (the event source tests
+        /// tell their database's events apart by it) or <c>index-harness</c>.
+        /// </summary>
+        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal, string? name = null)
         {
             var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal));
-            storage.InitializeNew((Name)"index-harness");
+            storage.InitializeNew((Name)(name ?? "index-harness"));
             return storage;
         }
 

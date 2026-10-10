@@ -18,6 +18,15 @@ using Assimalign.Cohesion.Database.Storage;
 /// group-commit window. The signal is reset <em>before</em> the flush pass, so a
 /// commit arriving mid-pass re-sets it and is served by the next pass. In the
 /// synchronous durability mode there is never anything pending and the worker idles.
+/// <para>
+/// A drain of the journal's append buffer (#1252) or a durable flush (#1243) that fails takes
+/// its database offline: the storage releases the committers waiting on it, each gets the
+/// refusal from its own flush, and the worker keeps
+/// flushing the engine's other databases. Any other failure of one file set is reported for its
+/// database and the pass goes on to the next (#1268); the database is flushed again after
+/// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their
+/// window meanwhile, as they do whenever the worker is late.
+/// </para>
 /// </remarks>
 internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
 {
@@ -25,22 +34,14 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
     private readonly ManualResetEventSlim _commitPending;
 
     internal SqlWriteAheadFlushWorker(SqlDatabaseEngine engine, ManualResetEventSlim commitPending)
+        : base(engine.Name + "/wal-flush", DatabaseEngineWorkerKind.WriteAheadFlush,
+            engine.EngineOptions.Durability == StorageCommitDurability.Grouped
+                ? engine.EngineOptions.GroupCommitWindow
+                : TimeSpan.FromSeconds(1))
     {
         _engine = engine;
         _commitPending = commitPending;
     }
-
-    /// <inheritdoc />
-    public override string Name => _engine.Name + "/wal-flush";
-
-    /// <inheritdoc />
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.WriteAheadFlush;
-
-    /// <inheritdoc />
-    public override TimeSpan Interval
-        => _engine.EngineOptions.Durability == StorageCommitDurability.Grouped
-            ? _engine.EngineOptions.GroupCommitWindow
-            : TimeSpan.FromSeconds(1);
 
     /// <inheritdoc />
     protected override void WaitForTrigger(CancellationToken cancellationToken)
@@ -56,27 +57,51 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before flushing: a commit that registers mid-pass sets the signal
         // again and is picked up by the next pass instead of being lost.
         _commitPending.Reset();
 
-        foreach (SqlStorage storage in _engine.GetStorageSnapshot())
+        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
-            try
+            // An offline database flushes nothing (#1243): its waiting committers were released
+            // when it went offline, and each gets the refusal from its own flush. Nor does a
+            // database its holder closed: the engine keeps it registered until its close ends, then forgets it,
+            // and its disposed storages have no committers left to serve.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
-                storage.FlushPendingCommits();
+                continue;
             }
-            catch (ObjectDisposedException)
+
+            FlushPending(database, database.DataStorage);
+            FlushPending(database, database.CatalogStorage);
+        }
+    }
+
+    private void FlushPending(SqlDatabase database, SqlStorage storage)
+    {
+        try
+        {
+            storage.FlushPendingCommits();
+        }
+        catch (ObjectDisposedException) when (!_engine.IsOpen(database))
+        {
+            // The snapshot can race a database drop; a disposed storage has no
+            // committers left to serve.
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The committers waiting on this file set self-help within their window; the next
+            // pass flushes it again. An offline database's refusal is not the worker's failure.
+            if (!database.IsOffline)
             {
-                // The snapshot can race a database drop; a disposed storage has no
-                // committers left to serve.
+                ReportFailure(database.Name, exception);
             }
         }
     }

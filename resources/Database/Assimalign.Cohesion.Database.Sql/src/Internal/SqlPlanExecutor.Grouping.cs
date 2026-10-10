@@ -1,12 +1,13 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -21,11 +22,24 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
-        var sourceEvaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings,
-            defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
-        var groups = new Dictionary<object?[], AggregateState[]>(new GroupKeyComparer(
-            plan.Keys.Select(expression => sourceEvaluator.ResolveCollation(expression)).ToArray()));
-        if (plan.Keys.Count == 0)
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        var keys = plan.Keys;
+        var aggregates = plan.Aggregates;
+        var keyCollations = new Collation[keys.Count];
+        for (int i = 0; i < keyCollations.Length; i++)
+        {
+            keyCollations[i] = keys[i].Collation.Resolve(_subqueryValues);
+        }
+
+        // Each aggregate call's input collation, resolved once for the statement: its functions'
+        // contexts carry it (MIN and MAX compare text with it).
+        var aggregateCollations = new Collation[aggregates.Count];
+        for (int i = 0; i < aggregateCollations.Length; i++)
+        {
+            aggregateCollations[i] = aggregates[i].Collation.Resolve(_subqueryValues);
+        }
+        var groups = new Dictionary<object?[], SqlAggregateAccumulator[]>(new GroupKeyComparer(keyCollations));
+        if (keys.Count == 0)
         {
             // The implicit global group exists even on empty input.
             groups.Add([], CreateStates());
@@ -38,7 +52,11 @@ internal sealed partial class SqlPlanExecutor
             {
                 row[i] = source.GetValue(i);
             }
-            var key = plan.Keys.Select(expression => sourceEvaluator.Evaluate(expression, row)).ToArray();
+            var key = keys.Count == 0 ? [] : new object?[keys.Count];
+            for (int i = 0; i < key.Length; i++)
+            {
+                key[i] = evaluator.Evaluate(keys[i].Value, row);
+            }
             if (!groups.TryGetValue(key, out var states))
             {
                 states = CreateStates();
@@ -46,14 +64,11 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < states.Length; i++)
             {
-                var argument = plan.Aggregates[i].Arguments[0];
-                states[i].Add(argument is SqlStarExpression ? 1L : sourceEvaluator.Evaluate(argument, row));
+                AddRow(states[i], aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken);
             }
         }
 
-        int projectionStart = plan.Keys.Count + plan.Aggregates.Count;
-        var evaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings, plan.ValueOrdinals,
-            _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        int projectionStart = keys.Count + aggregates.Count;
         var matches = new List<object?[]>();
         foreach (var (key, states) in groups)
         {
@@ -62,7 +77,8 @@ internal sealed partial class SqlPlanExecutor
             key.CopyTo(row, 0);
             for (int i = 0; i < states.Length; i++)
             {
-                row[key.Length + i] = states[i].Finish();
+                // Once per group, the implicit empty group included.
+                row[key.Length + i] = states[i].Finish().ToObject();
             }
             if (!evaluator.Matches(plan.Having, row))
             {
@@ -71,14 +87,14 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 row[projectionStart + i] = NormalizeGroupValue(
-                    evaluator.Evaluate(plan.Projections[i].Expression!, row), plan.Projections[i].Type);
+                    evaluator.Evaluate(plan.Projections[i].Value!, row), plan.Projections[i].Type);
             }
             matches.Add(row);
         }
         if (plan.OrderBy.Count > 0)
         {
-            matches = SortRows(matches, plan.OrderBy,
-                evaluator.ForOrdering(plan.Projections, plan.OrderByProjections, projectionStart));
+            // The ordering keys were bound over the grouped row, outputs included.
+            matches = SortRows(matches, plan.OrderBy, evaluator);
         }
         var projected = matches.Select(row => row[projectionStart..]).ToList();
         if (plan.IsDistinct)
@@ -99,84 +115,123 @@ internal sealed partial class SqlPlanExecutor
             Name = projection.Name,
             Ordinal = ordinal,
             Type = projection.Type,
-            IsNullable = projection.Expression is not SqlFunctionCallExpression call
-                || !call.FunctionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase),
+            IsNullable = projection.IsNullable,
         }).ToArray();
         return new SqlMaterializedResultSet(columns, window.ToList());
 
-        AggregateState[] CreateStates() => plan.Aggregates.Select(call => new AggregateState(call.FunctionName,
-            sourceEvaluator.ResolveCollation(call.Arguments[0]))).ToArray();
+        // One accumulator per group, per aggregate call, per statement, owned here and never shared.
+        SqlAggregateAccumulator[] CreateStates()
+        {
+            var states = new SqlAggregateAccumulator[aggregates.Count];
+            for (int i = 0; i < states.Length; i++)
+            {
+                var aggregate = aggregates[i];
+                states[i] = aggregate.Function.CreateAccumulator(
+                    new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken));
+            }
+
+            return states;
+        }
     }
 
     /// <summary>
-    /// All five aggregates skip NULL operands. COUNT(*) supplies a non-null
-    /// sentinel for each row. SUM/AVG accumulate decimal; MIN/MAX retain values.
+    /// Adds one input row to one group's accumulator of one aggregate call, the same way for every
+    /// aggregate, a built-in's or an application's: its arguments evaluated over the row, once,
+    /// converted to the value ABI on the stack and to their parameters' types. A strict aggregate's
+    /// accumulator skips the row when an argument is NULL; <c>COUNT(*)</c> has no argument, so it
+    /// counts every row.
     /// </summary>
-    private sealed class AggregateState
+    /// <remarks>
+    /// The frame holds no value of the ABI: each shape adds through a frame of its own (one
+    /// argument, the shape of every standard-library aggregate but <c>COUNT(*)</c>, through the
+    /// accumulator's internal <c>AddResolved</c>, which converts it and makes the coded call; none;
+    /// more), so the prologue of the call every row makes per aggregate clears no buffer of four
+    /// values, and it is inlined into the row loop, which then holds only references for it.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AddRow(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
     {
-        private readonly string _function;
-        private readonly Collation _collation;
-        private long _count;
-        private decimal _sum;
-        private object? _extreme;
-
-        /// <summary>Initializes a new instance of the <see cref="AggregateState"/> class.</summary>
-        /// <param name="function">The aggregate function name, matched case-insensitively.</param>
-        /// <param name="collation">The collation MIN and MAX use to compare values.</param>
-        public AggregateState(string function, Collation collation)
+        var arguments = aggregate.Arguments;
+        switch (arguments.Length)
         {
-            _function = function.ToUpperInvariant();
-            _collation = collation;
-        }
-
-        internal void Add(object? value)
-        {
-            if (value is null)
-            {
-                return;
-            }
-            try
-            {
-                _count = checked(_count + 1);
-                switch (_function)
+            case 1:
+                // A strict aggregate's NULL row is skipped before anything is converted.
+                object? argument = evaluator.Evaluate(arguments[0], row);
+                if (argument is not null || aggregate.Function.NullBehavior != SqlNullBehavior.ReturnsNullOnNullInput)
                 {
-                    case "SUM":
-                    case "AVG":
-                        if (value is not (sbyte or short or int or long or float or double or decimal))
-                        {
-                            throw new DatabaseException($"{_function} requires a numeric argument.");
-                        }
-                        _sum = checked(_sum + Convert.ToDecimal(value, CultureInfo.InvariantCulture));
-                        break;
-                    case "MIN":
-                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) < 0)
-                        {
-                            _extreme = value;
-                        }
-                        break;
-                    case "MAX":
-                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) > 0)
-                        {
-                            _extreme = value;
-                        }
-                        break;
+                    // Converted, added and coded in one frame of the accumulator's; not evaluated again.
+                    state.AddResolved(argument, aggregate.FirstTarget, aggregate.Database, collation, cancellationToken);
                 }
-            }
-            catch (OverflowException exception)
+
+                return;
+            case 0:
+                // COUNT(*): no argument, so no NULL for the strict rule to skip.
+                state.AddResolved(aggregate.Database, collation, cancellationToken);
+                return;
+            case <= SqlValueBuffer.Length:
+                AddRowBuffered(state, aggregate, collation, evaluator, row, cancellationToken);
+                return;
+            default:
+                AddRowPooled(state, aggregate, collation, evaluator, row, cancellationToken);
+                return;
+        }
+    }
+
+    /// <summary>Adds a row of a call of two to four arguments, converted into an inline buffer.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddRowBuffered(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+    {
+        SqlValueBuffer buffer = default;
+        Span<SqlValue> values = buffer[..aggregate.Arguments.Length];
+        EvaluateArguments(aggregate, evaluator, row, values);
+        state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+    }
+
+    private static void AddRowPooled(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+    {
+        SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(aggregate.Arguments.Length);
+        try
+        {
+            Span<SqlValue> values = rented.AsSpan(0, aggregate.Arguments.Length);
+            EvaluateArguments(aggregate, evaluator, row, values);
+            state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+        }
+        finally
+        {
+            ArrayPool<SqlValue>.Shared.Return(rented, clearArray: true);
+        }
+    }
+
+    private static void EvaluateArguments(SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator, object?[] row, Span<SqlValue> values)
+    {
+        var arguments = aggregate.Arguments;
+        var targets = aggregate.Targets;
+        for (int i = 0; i < values.Length; i++)
+        {
+            ref var value = ref values[i];
+            value = SqlValue.FromObject(evaluator.Evaluate(arguments[i], row));
+            if (targets is not null && targets[i] != DatabaseType.Null && targets[i] != value.Type)
             {
-                throw new DatabaseException($"{_function} overflow: the aggregate cannot be represented as a decimal or count.", exception);
+                value = Coerce(aggregate, i, value, targets[i]);
             }
         }
+    }
 
-        /// <summary>Decimal division preserves fractional averages, rounding to even when necessary.</summary>
-        internal object? Finish() => _function switch
+    /// <summary>Converts one argument to its parameter's type, coding an integer that does not fit as the evaluator codes one.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static SqlValue Coerce(SqlGroupAggregate aggregate, int index, in SqlValue value, DatabaseType target)
+    {
+        try
         {
-            "COUNT" => _count,
-            _ when _count == 0 => null,
-            "SUM" => _sum,
-            "AVG" => _sum / _count,
-            _ => _extreme,
-        };
+            return SqlFunctionResolver.Coerce(value, target, aggregate.Function, index);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception);
+        }
     }
 
     /// <summary>Uses SQL comparison equality, with NULL keys in one group and binary values by content.</summary>
@@ -219,17 +274,53 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    /// <summary>Alternative numeric CASE/COALESCE branches share the declared output type.</summary>
+    /// <summary>
+    /// Alternative numeric CASE/COALESCE branches share the declared output type. A
+    /// value that does not fit that type (an approximate branch beyond Decimal's range,
+    /// for example) fails the statement as out of range rather than escaping raw.
+    /// </summary>
     private static object? NormalizeGroupValue(object? value, DatabaseType type)
-        => value is not (sbyte or short or int or long or float or double or decimal) ? value : type switch
+    {
+        if (value is not (sbyte or short or int or long or float or double or decimal))
         {
-            DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
-            DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
-            DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
-            DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
-            _ => value,
-        };
+            return value;
+        }
+
+        // A value already of the output type is returned as it is: converting it to its own type
+        // yields the same value and would only box it again.
+        if (type switch
+        {
+            DatabaseType.Int8 => value is sbyte,
+            DatabaseType.Int16 => value is short,
+            DatabaseType.Int32 => value is int,
+            DatabaseType.Int64 => value is long,
+            DatabaseType.Float32 => value is float,
+            DatabaseType.Float64 => value is double,
+            DatabaseType.Decimal => value is decimal,
+            _ => true,
+        })
+        {
+            return value;
+        }
+
+        try
+        {
+            return type switch
+            {
+                DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
+                DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
+                _ => value,
+            };
+        }
+        catch (OverflowException exception)
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"{Convert.ToString(value, CultureInfo.InvariantCulture)} does not fit the {type} result type.", exception);
+        }
+    }
 }

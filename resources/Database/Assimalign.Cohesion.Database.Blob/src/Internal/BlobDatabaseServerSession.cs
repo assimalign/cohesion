@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics.Tracing;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,27 +17,36 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// (connected → startup → authenticating → ready ⇄ executing → terminated)
 /// over a single connection and routes all requests through the bound Blob session.
 /// </summary>
-internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
+/// <remarks>
+/// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
+/// row 11): the base owns the identity, and the negotiated version and authenticated principal,
+/// which the handshake records once each; the engine session is re-exposed typed by a covariant
+/// override. Option B (concrete-types plan, section 6.6): the exchanges run the container
+/// operations of the bound session itself, so they join a transaction the session holds.
+/// </remarks>
+internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 {
     private readonly BlobDatabaseServer _server;
     private readonly IConnection _connection;
     private readonly BlobDatabaseServerOptions _options;
-    private readonly IDatabaseEngine _engine;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly BlobDatabaseEngine _engine;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
+    private readonly long _acceptedTimestamp;
 
     private ProtocolChannel? _channel;
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
-    private IDatabaseSession? _databaseSession;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
+    private BlobDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
+    private string _closeReason = BlobDatabaseEventSource.CloseReason.Unknown;
 
     internal BlobDatabaseServerSession(
         BlobDatabaseServer server,
         IConnection connection,
         BlobDatabaseServerOptions options,
-        IDatabaseEngine engine,
-        IDatabaseAuthenticator authenticator)
+        BlobDatabaseEngine engine,
+        DatabaseAuthenticator authenticator)
     {
         _server = server;
         _connection = connection;
@@ -43,25 +54,29 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         _engine = engine;
         _authenticator = authenticator;
         _lifetimeSource = CancellationTokenSource.CreateLinkedTokenSource(connection.ConnectionClosed);
+        _acceptedTimestamp = BlobDatabaseEventSource.Log.SessionTimestamp();
     }
 
     /// <inheritdoc />
-    public Guid Id { get; } = Guid.NewGuid();
-
-    /// <inheritdoc />
-    public ProtocolVersion ProtocolVersion { get; private set; }
-
-    /// <inheritdoc />
-    public string? Principal { get; private set; }
-
-    /// <inheritdoc />
-    public IDatabaseSession? DatabaseSession => _databaseSession;
+    public override BlobDatabaseSession? DatabaseSession => _databaseSession;
 
     /// <summary>
     /// Gets the task that completes when the session pump has fully wound down.
     /// Never faults — the pump owns its errors.
     /// </summary>
     internal Task Completion => _completion;
+
+    /// <summary>
+    /// Gets why the session ended, for its <c>SessionClosed</c> event; the pump sets it on the
+    /// path that ends it.
+    /// </summary>
+    internal string CloseReason => _closeReason;
+
+    /// <summary>
+    /// Gets the timestamp the session's <c>SessionClosed</c> duration starts from; zero when the
+    /// event was disabled at accept.
+    /// </summary>
+    internal long AcceptedTimestamp => _acceptedTimestamp;
 
     internal void Start(CancellationToken softStop, CancellationToken hardAbort)
     {
@@ -86,7 +101,8 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <remarks>Idempotent: aborting a session that already wound down is a no-op.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
     {
         Abort();
         await _completion.ConfigureAwait(false);
@@ -114,21 +130,27 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         catch (ProtocolException exception)
         {
             // Framing or message-order violation: report and terminate.
+            _closeReason = BlobDatabaseEventSource.CloseReason.ProtocolViolation;
+            BlobDatabaseEventSource.Log.SessionProtocolViolation(this, exception.Message);
             await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, exception.Message).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             // Aborted, connection closed, or stop signaled mid-frame.
+            _closeReason = BlobDatabaseEventSource.CloseReason.Cancelled;
         }
-        catch (ConnectionAbortedException)
+        catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
-        }
-        catch (IOException)
-        {
-            // The transport failed under the pump; nothing to report to the peer.
+            // The transport failed under the pump: a peer that hung up or reset the connection, or
+            // the shutdown's abort. An expected outcome (plan D9), which SessionClosed's reason
+            // carries; nothing is reported to the peer.
+            _closeReason = reason;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
+            // The peer gets an internal error frame only; the event carries the failure.
+            _closeReason = BlobDatabaseEventSource.CloseReason.Faulted;
+            BlobDatabaseEventSource.Log.SessionFaulted(this, exception);
             await TryWriteErrorAsync(ProtocolErrorCode.Internal, "An unexpected server error terminated the session.").ConfigureAwait(false);
         }
         finally
@@ -150,91 +172,132 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         using var handshakeSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token, softStop);
         handshakeSource.CancelAfter(_options.AuthenticationTimeout);
 
-        ProtocolFrame? frame;
-
         try
         {
-            frame = await _reader!.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+            ProtocolFrame? frame;
+
+            try
+            {
+                frame = await _reader!.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
+            {
+                // Authentication timeout: drop the unauthenticated connection.
+                ReportHandshakeTimeout();
+                return false;
+            }
+
+            if (frame is null)
+            {
+                _closeReason = BlobDatabaseEventSource.CloseReason.PeerClosed;
+                return false; // The peer closed before starting up.
+            }
+
+            if (frame.Value.Type != ProtocolMessageType.Startup)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                return false;
+            }
+
+            ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
+
+            if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            SetNegotiatedVersion(negotiated);
+
+            // Only a disposed engine, or one failed as a whole, refuses every database here; a worker's
+            // failure of one database refuses that database after authentication (owner decision 42).
+            if (_engine.RefusesEveryDatabase(out var state))
+            {
+                BlobDatabaseEventSource.Log.EngineRefused(_engine, BlobDatabaseEventSource.RefusalPhase.Handshake, state);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {state}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            BlobDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+
+            if (database is null)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            // Authenticate exchange. The MVP challenge carries no payload (trust
+            // method); the client's response bytes are handed to the authenticator
+            // as opaque evidence.
+            await WriteFrameAsync(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+
+            try
+            {
+                frame = await _reader.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
+            {
+                ReportHandshakeTimeout();
+                return false;
+            }
+
+            if (frame is null)
+            {
+                _closeReason = BlobDatabaseEventSource.CloseReason.PeerClosed;
+                return false;
+            }
+
+            if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            bool authenticated = await _authenticator.AuthenticateAsync(startup.Database, startup.Principal, frame.Value.Payload, handshakeSource.Token).ConfigureAwait(false);
+
+            if (!authenticated)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            // A database a worker of the engine is failing on is refused, with its code, until the
+            // failure ends or the engine gives up on it; the engine's other databases are served
+            // (owner decision 42). Checked after authentication, as the offline refusal is, so an
+            // unauthenticated peer learns nothing of a database's health.
+            if (database.GetWorkerFailureRefusal() is { } failing)
+            {
+                BlobDatabaseEventSource.Log.DatabaseRefused(this, database.Name, BlobDatabaseEventSource.RefusalPhase.Handshake, failing);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, failing, startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            try
+            {
+                _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (DatabaseOfflineException exception)
+            {
+                // The database went offline after a failed durable flush (#1243): every session is
+                // refused, with the coded reason, until it is reopened.
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            SetAuthenticatedPrincipal(startup.Principal);
+
+            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            return true;
         }
-        catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
+        catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
         {
-            // Authentication timeout: drop the unauthenticated connection.
+            // The authentication timeout lapsed outside the two reads: while the database was
+            // resolved or opened, a handshake frame was written, the authenticator ran, or the
+            // session was created. The connection is dropped without an error frame, as at a
+            // read, and the pump ends the session as it did when the cancellation reached it.
+            ReportHandshakeTimeout();
             return false;
         }
-
-        if (frame is null)
-        {
-            return false; // The peer closed before starting up.
-        }
-
-        if (frame.Value.Type != ProtocolMessageType.Startup)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.").ConfigureAwait(false);
-            return false;
-        }
-
-        ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
-
-        if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.").ConfigureAwait(false);
-            return false;
-        }
-
-        ProtocolVersion = negotiated;
-
-        if (_engine.State != EngineState.Running)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {_engine.State}.").ConfigureAwait(false);
-            return false;
-        }
-
-        IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
-
-        if (database is null)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.").ConfigureAwait(false);
-            return false;
-        }
-
-        // Authenticate exchange. The MVP challenge carries no payload (trust
-        // method); the client's response bytes are handed to the authenticator
-        // as opaque evidence.
-        await WriteFrameAsync(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
-
-        try
-        {
-            frame = await _reader.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
-        {
-            return false;
-        }
-
-        if (frame is null)
-        {
-            return false;
-        }
-
-        if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.").ConfigureAwait(false);
-            return false;
-        }
-
-        bool authenticated = await _authenticator.AuthenticateAsync(startup.Database, startup.Principal, frame.Value.Payload, handshakeSource.Token).ConfigureAwait(false);
-
-        if (!authenticated)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.").ConfigureAwait(false);
-            return false;
-        }
-
-        _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
-        Principal = startup.Principal;
-
-        await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
-        return true;
     }
 
     private async Task ReadyLoopAsync(CancellationToken softStop)
@@ -255,12 +318,14 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                 catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested)
                 {
                     // Graceful drain: the session was idle at the frame boundary.
+                    _closeReason = BlobDatabaseEventSource.CloseReason.Shutdown;
                     await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
                     return;
                 }
                 catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested)
                 {
                     // Idle timeout eviction.
+                    _closeReason = BlobDatabaseEventSource.CloseReason.IdleTimeout;
                     await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The session was closed after exceeding the idle timeout.").ConfigureAwait(false);
                     return;
                 }
@@ -268,6 +333,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
 
             if (frame is null)
             {
+                _closeReason = BlobDatabaseEventSource.CloseReason.PeerClosed;
                 return; // The peer closed cleanly between frames.
             }
 
@@ -290,10 +356,11 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                     break;
 
                 case ProtocolMessageType.Terminate:
+                    _closeReason = BlobDatabaseEventSource.CloseReason.Terminated;
                     return;
 
                 default:
-                    await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Value.Type} frame in the ready state.").ConfigureAwait(false);
+                    await RejectUnexpectedFrameAsync(frame.Value.Type).ConfigureAwait(false);
                     return;
             }
         }
@@ -301,26 +368,39 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
 
     private async Task<bool> ExecuteAsync(ProtocolFrame frame, CancellationToken cancellationToken)
     {
-        if (_engine.State != EngineState.Running)
+        if (_engine.RefusesEveryDatabase(out var state))
         {
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {_engine.State}.", cancellationToken).ConfigureAwait(false);
+            _closeReason = BlobDatabaseEventSource.CloseReason.ExchangeRefused;
+            BlobDatabaseEventSource.Log.EngineRefused(_engine, BlobDatabaseEventSource.RefusalPhase.Exchange, state);
+            await RefuseExchangeAsync($"The Blob engine is {state}.", cancellationToken).ConfigureAwait(false);
             return false;
         }
+
+        // The session's database is refused while a worker of the engine is failing on it; an
+        // exchange for another database's session is served meanwhile (owner decision 42).
+        if (_databaseSession!.Database.GetWorkerFailureRefusal() is { } failing)
+        {
+            _closeReason = BlobDatabaseEventSource.CloseReason.ExchangeRefused;
+            BlobDatabaseEventSource.Log.DatabaseRefused(this, _databaseSession.Database.Name, BlobDatabaseEventSource.RefusalPhase.Exchange, failing);
+            await RefuseExchangeAsync(failing, cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
         try
         {
-            var database = (IBlobDatabase)_databaseSession!.Database;
+            var session = _databaseSession!;
             switch ((BlobProtocolMessageType)frame.Type)
             {
                 case BlobProtocolMessageType.Write:
-                    await UploadAsync(database, BlobWriteMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
+                    await UploadAsync(session, BlobWriteMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
                     break;
                 case BlobProtocolMessageType.Read:
-                    await DownloadAsync(database, BlobReadMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
+                    await DownloadAsync(session, BlobReadMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
                     break;
                 case BlobProtocolMessageType.Delete:
                 {
                     BlobDeleteMessage request = BlobDeleteMessage.Decode(frame.Payload.Span);
-                    IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+                    BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
                     bool deleted = await container.DeleteAsync(request.Name, cancellationToken).ConfigureAwait(false);
                     await CompleteAsync(deleted ? 1 : 0, cancellationToken).ConfigureAwait(false);
                     break;
@@ -328,7 +408,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                 case BlobProtocolMessageType.GetProperties:
                 {
                     BlobGetPropertiesMessage request = BlobGetPropertiesMessage.Decode(frame.Payload.Span);
-                    IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+                    BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
                     BlobProperties? properties = await container.GetPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false);
                     if (properties is { } found)
                     {
@@ -340,7 +420,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                 case BlobProtocolMessageType.List:
                 {
                     BlobListMessage request = BlobListMessage.Decode(frame.Payload.Span);
-                    IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+                    BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
                     long count = 0;
                     await foreach (BlobProperties properties in container.GetBlobsAsync(request.Prefix, cancellationToken).ConfigureAwait(false))
                     {
@@ -356,13 +436,67 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         catch (Exception exception) when (exception is not (ProtocolException or OperationCanceledException or OutOfMemoryException))
         {
             // A transfer may already be in progress. An error is terminal: no uncertain frame
-            // boundary or partially consumed content is returned to the connection pool.
-            await TryWriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message).ConfigureAwait(false);
+            // boundary or partially consumed content is returned to the connection pool. The
+            // teardown ends the session's transaction; a host-opened one is aborted first, so the
+            // host's commit names this failure whenever it runs (#1225).
+            // An offline database (#1243) refuses every exchange with its coded reason.
+            var code = exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
+            if (TransportCloseReason(exception) is { } transportReason)
+            {
+                // The transport failed under the exchange: a peer that hung up or reset the
+                // connection, or the shutdown's abort, which SessionsAborted reports. An expected
+                // outcome, which SessionClosed's reason carries as the pump's own catches do (plan
+                // D9), classified by the pump's own rule. A bare IOException is still reported: it
+                // can be the storage device's, not the peer's.
+                _closeReason = transportReason;
+            }
+            else
+            {
+                _closeReason = BlobDatabaseEventSource.CloseReason.ExchangeFailed;
+                if (BlobDatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
+                {
+                    // The request is read back from its frame only while the event is on, and in a
+                    // synchronous helper, so the exchange's state machine gains no field.
+                    ReportTransferFailed(frame, code, exception);
+                }
+            }
+
+            await AbortHostTransactionAsync(exception).ConfigureAwait(false);
+            await TryWriteErrorAsync(code, exception.Message).ConfigureAwait(false);
             return false;
         }
     }
 
-    private async Task UploadAsync(IBlobDatabase database, BlobWriteMessage request, CancellationToken cancellationToken)
+    // An exchange refused before it starts (an engine that refuses every database, a database a
+    // worker is failing on) is terminal like every wire failure, so it ends a host-opened
+    // transaction too: aborted with the refusal before the error is written, so the host's commit
+    // names the refusal whichever of the commit and the teardown runs first (#1225; owner decision
+    // 42 review).
+    private async Task RefuseExchangeAsync(string message, CancellationToken cancellationToken)
+    {
+        await AbortHostTransactionAsync(new DatabaseException(message)).ConfigureAwait(false);
+        await WriteErrorAsync(ProtocolErrorCode.Unavailable, message, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Aborts the session's still-usable host transaction with the failure the client is told about.
+    private async Task AbortHostTransactionAsync(Exception cause)
+    {
+        if (_databaseSession is { } session)
+        {
+            try
+            {
+                await session.AbortTransactionAsync(cause).ConfigureAwait(false);
+            }
+            catch (Exception abortError) when (abortError is not OutOfMemoryException)
+            {
+                // The transaction stays Faulted with the rollback failure recorded, and the
+                // teardown retries the rollback; the client still gets the original failure.
+                BlobDatabaseEventSource.Log.HostTransactionAbortFailed(this, abortError);
+            }
+        }
+    }
+
+    private async Task UploadAsync(BlobDatabaseSession session, BlobWriteMessage request, CancellationToken cancellationToken)
     {
         ProtocolFrame? start = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
         if (start is null || start.Value.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferStart)
@@ -370,11 +504,11 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             throw new ProtocolException("A Blob upload must begin with TransferStart.");
         }
         BlobTransferStartMessage metadata = BlobTransferStartMessage.Decode(start.Value.Payload.Span);
-        await using IDatabaseTransaction transaction = await _databaseSession!.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         Stream? destination = null;
         try
         {
-            IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+            BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
             destination = await container.OpenWriteAsync(request.Name, new BlobWriteOptions
             {
                 ContentType = metadata.ContentType.Length == 0 ? null : metadata.ContentType,
@@ -392,7 +526,9 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         {
             // Roll back BEFORE successful disposal can finalize the storage stream. Explicit
             // transactions keep even successfully disposed destinations invisible until commit.
-            if (transaction.State == TransactionState.Active)
+            // A failed operation leaves the transaction Faulted until it is rolled back (#1225);
+            // only a committed transaction refuses the rollback.
+            if (transaction.State is TransactionState.Active or TransactionState.Faulted)
             {
                 await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
@@ -408,12 +544,12 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         }
     }
 
-    private async Task DownloadAsync(IBlobDatabase database, BlobReadMessage request, CancellationToken cancellationToken)
+    private async Task DownloadAsync(BlobDatabaseSession session, BlobReadMessage request, CancellationToken cancellationToken)
     {
         // Metadata and content must refer to the same immutable version even when replaced
         // concurrently. The read-only transaction keeps its snapshot until stream disposal.
-        await using IDatabaseTransaction transaction = await _databaseSession!.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+        await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
         BlobProperties properties = await container.GetPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false)
             ?? throw new DatabaseException($"Blob '{request.Name}' does not exist.");
         await using Stream source = await container.OpenReadAsync(request.Name, cancellationToken).ConfigureAwait(false);
@@ -433,16 +569,16 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
     /// Resolves the startup-requested database on the server's one engine:
     /// already-open databases first, then an open attempt.
     /// </summary>
-    private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
+    private async ValueTask<BlobDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        if (_engine.TryGetDatabase(name, out IDatabase database))
+        if (_engine.TryGetDatabase(name, out var open))
         {
-            return database;
+            return open;
         }
 
         try
@@ -481,6 +617,90 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         }
     }
 
+    /// <summary>
+    /// Refuses the handshake: records why the session ends, writes the <c>HandshakeRefused</c>
+    /// event, and sends the coded error frame (best effort).
+    /// </summary>
+    private ValueTask RefuseHandshakeAsync(ProtocolErrorCode code, string detail, string database, string principal)
+    {
+        _closeReason = BlobDatabaseEventSource.CloseReason.HandshakeRefused;
+        BlobDatabaseEventSource.Log.HandshakeRefused(this, database, principal, code, detail);
+        return TryWriteErrorAsync(code, detail);
+    }
+
+    /// <summary>
+    /// Records that the handshake outlived the authentication timeout, which drops the connection
+    /// without an error frame.
+    /// </summary>
+    private void ReportHandshakeTimeout()
+    {
+        _closeReason = BlobDatabaseEventSource.CloseReason.HandshakeTimedOut;
+        BlobDatabaseEventSource.Log.HandshakeTimedOut(this, _options.AuthenticationTimeout);
+    }
+
+    /// <summary>
+    /// Terminates the session on a frame the ready state does not accept: records the violation
+    /// and sends the error frame (best effort).
+    /// </summary>
+    private ValueTask RejectUnexpectedFrameAsync(ProtocolMessageType type)
+    {
+        string violation = $"Unexpected {type} frame in the ready state.";
+        _closeReason = BlobDatabaseEventSource.CloseReason.ProtocolViolation;
+        BlobDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
+        return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
+    }
+
+    /// <summary>
+    /// Writes a failed exchange's <c>TransferFailed</c> event with the container its request named
+    /// and the code of the error frame the session sends; the blob's name is never read.
+    /// </summary>
+    private void ReportTransferFailed(ProtocolFrame frame, ProtocolErrorCode code, Exception exception)
+        => BlobDatabaseEventSource.Log.TransferFailed(this, DescribeContainer(frame), code, exception);
+
+    /// <summary>
+    /// Reads the container a failed exchange named from the request frame the exchange decoded:
+    /// the exchange keeps no copy of its own. A frame that no longer decodes gives an empty name
+    /// rather than a second failure.
+    /// </summary>
+    private static string DescribeContainer(ProtocolFrame frame)
+    {
+        try
+        {
+            return (BlobProtocolMessageType)frame.Type switch
+            {
+                BlobProtocolMessageType.Write => BlobWriteMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.Read => BlobReadMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.Delete => BlobDeleteMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.GetProperties => BlobGetPropertiesMessage.Decode(frame.Payload.Span).Container,
+                BlobProtocolMessageType.List => BlobListMessage.Decode(frame.Payload.Span).Container,
+                _ => string.Empty,
+            };
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Classifies a failure that reached the pump as the transport's, and names the close reason it
+    /// gives the session; null for anything else, which stays a fault. The four model servers carry
+    /// identical copies (plan D2). A reset reaches the pump as the TCP driver's raw
+    /// <see cref="SocketException"/> or a <see cref="ConnectionException"/>, neither of which is an
+    /// <see cref="IOException"/>; a stream that wraps one in an <see cref="IOException"/> is still
+    /// the transport's. A bare <see cref="IOException"/> is not: it can be the storage device's.
+    /// </summary>
+    /// <param name="exception">What reached the pump.</param>
+    /// <returns><c>ConnectionAborted</c>, <c>TransportFailed</c>, or null.</returns>
+    private static string? TransportCloseReason(Exception exception) => exception switch
+    {
+        ConnectionAbortedException => BlobDatabaseEventSource.CloseReason.ConnectionAborted,
+        ConnectionException => BlobDatabaseEventSource.CloseReason.TransportFailed,
+        SocketException => BlobDatabaseEventSource.CloseReason.TransportFailed,
+        IOException { InnerException: SocketException or ConnectionException } => BlobDatabaseEventSource.CloseReason.TransportFailed,
+        _ => null,
+    };
+
     private async ValueTask CleanupAsync()
     {
         try
@@ -498,6 +718,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {
                     // This session is terminal; remaining resources still need cleanup.
+                    BlobDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
                 }
             }
         }

@@ -52,4 +52,7 @@ dotnet pack tooling/templates/Assimalign.Cohesion.Templates/src/Assimalign.Cohes
 Feed-free tests always install and instantiate the full roster. Set `COHESION_TEMPLATES_TEST_FEED`
 and `COHESION_TEMPLATES_TEST_PACKAGE_VERSION` to exercise builds against a prepared package feed.
 Defaults are `_out/packages` and the canonical version with `.local` appended. Test discovery
-reports exact missing packages or an SDK pack without executable defaults as skips.
+reports exact missing packages or an SDK pack without executable defaults as skips. With the feed
+present, one test also starts the generated `cohesion-database`: it builds it self-contained for
+the host RID, so that run restores the matching `Microsoft.NETCore.App` runtime pack from nuget.org,
+then writes and reads one full customer row over the wire.

@@ -15,12 +15,16 @@ internal static class GraphPlanExecutor
 {
     // Finite syntax guarantees termination; this cap also bounds materialization.
     private const int MaximumMatches = 100_000;
-    internal static async ValueTask<QueryResult> ExecuteAsync(GraphDatabaseInstance database, GraphOperation operation,
+    internal static async ValueTask<QueryResult> ExecuteAsync(GraphDatabase database, GraphOperation operation,
         GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false)
     {
         operation.EnsureActive();
         var error = statement.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
-        if (error is not null) { throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}"); }
+        if (error is not null)
+        {
+            if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
+            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}");
+        }
         if (paths)
         {
             var query = statement.GqlExpression;
@@ -35,7 +39,12 @@ internal static class GraphPlanExecutor
         var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression);
         if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
         { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
-        var bindings = new List<Dictionary<string, object>> { new(StringComparer.Ordinal) };
+        // A pattern that requires a label or relationship type the database does not have matches
+        // no element, so the statement starts with no binding and reads nothing (#1228); a MATCH
+        // that matches nothing leaves its INSERT or DELETE nothing to act on.
+        var bindings = plan.MatchesNothing
+            ? new List<Dictionary<string, object>>()
+            : new List<Dictionary<string, object>> { new(StringComparer.Ordinal) };
         var budget = new ExpansionBudget();
         foreach (var path in plan.Matches)
         {
@@ -60,7 +69,7 @@ internal static class GraphPlanExecutor
                     _ => throw new DatabaseException("COHDBG001: Path execution requires a path or bound entity projection."),
                 });
             }
-            return new GraphPathsQueryResult(results.AsReadOnly());
+            return new GraphPathsQueryResult(results.AsReadOnly(), plan.Warnings);
         }
         long affected = 0;
         foreach (var binding in bindings)
@@ -89,15 +98,15 @@ internal static class GraphPlanExecutor
             if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
             await database.Store.DeleteNodeAsync(id.Value, plan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
         }
-        if (plan.Query.Projections.Count == 0) { return new GraphMutationResult(affected); }
+        if (plan.Query.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
         var columns = plan.Query.Projections.Select((projection, i) => new QueryColumn
         { Name = projection.Alias ?? projection.Variable + (projection.Property is null ? "" : "." + projection.Property), Ordinal = i, Type = DatabaseType.Null }).ToArray();
         var rows = bindings.Select(binding => plan.Query.Projections.Select(projection => projection.Property is { } property
             ? GraphExpressionEvaluator.Property(binding[projection.Variable], property) : binding[projection.Variable]).ToArray()).ToArray();
-        return new GraphQueryResult(columns, rows);
+        return new GraphQueryResult(columns, rows, plan.Warnings);
     }
 
-    private static async ValueTask MatchAsync(GraphDatabaseInstance database, GraphOperation operation, GraphPathPlan plan,
+    private static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
         Dictionary<string, object> input, List<Dictionary<string, object>> output, ExpansionBudget budget, CancellationToken token)
     {
         var path = plan.Pattern;
@@ -119,7 +128,7 @@ internal static class GraphPlanExecutor
             token.ThrowIfCancellationRequested();
             budget.Consume();
             var bindings = new Dictionary<string, object>(input, StringComparer.Ordinal);
-            var node = GraphDatabaseInstance.Materialize(candidate);
+            var node = GraphDatabase.Materialize(candidate);
             if (!AcceptNode(path.Nodes[anchor.NodeIndex], node, bindings)) { continue; }
             var positions = new GraphNode[path.Nodes.Count];
             positions[anchor.NodeIndex] = node;
@@ -144,8 +153,10 @@ internal static class GraphPlanExecutor
             foreach (var edge in await database.Store.GetIncidentAsync(from, operation.Context.Snapshot, token).ConfigureAwait(false))
             {
                 budget.Consume();
-                if (used.Contains(edge.Id) || pattern.Type is { } type && edge.Type != type) { continue; }
+                if (used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(pattern, edge.Type)) { continue; }
                 // A leftward expansion reverses the pattern direction, not the stored edge.
+                // Undirected and LeftOrRight constrain neither end: storage holds only directed
+                // relationships, so -[]- and <-[]-> both match an edge in either orientation.
                 bool forward = current.To > current.From;
                 bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing && forward || pattern.Direction == GqlPatternDirection.Incoming && !forward;
                 bool incoming = pattern.Direction == GqlPatternDirection.Incoming && forward || pattern.Direction == GqlPatternDirection.Outgoing && !forward;
@@ -153,9 +164,9 @@ internal static class GraphPlanExecutor
                 ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
                 if (database.Store.FindNode(next, operation.Context.Snapshot) is not { } target) { continue; }
                 var copy = new Dictionary<string, object>(bindings, StringComparer.Ordinal);
-                var relationship = GraphDatabaseInstance.Materialize(edge);
+                var relationship = GraphDatabase.Materialize(edge);
                 if (!Accept(pattern.Variable, relationship, copy) || !PropertiesMatch(pattern.Properties, relationship.Properties)) { continue; }
-                var node = GraphDatabaseInstance.Materialize(target);
+                var node = GraphDatabase.Materialize(target);
                 if (!AcceptNode(path.Nodes[current.To], node, copy)) { continue; }
                 var nextPositions = (GraphNode[])positions.Clone();
                 nextPositions[current.To] = node;
@@ -167,7 +178,7 @@ internal static class GraphPlanExecutor
         }
     }
 
-    private static GraphPath ProjectRelationship(GraphDatabaseInstance database, GraphOperation operation, GraphRelationship relationship)
+    private static GraphPath ProjectRelationship(GraphDatabase database, GraphOperation operation, GraphRelationship relationship)
     {
         // Resolve the bound relationship's endpoints in the same statement snapshot, including anonymous nodes.
         // This projects an engine entity binding directly; scalar projection rows are never involved.
@@ -175,11 +186,11 @@ internal static class GraphPlanExecutor
         if (database.Store.FindNode(relationship.From.Value, snapshot) is not { } from ||
             database.Store.FindNode(relationship.To.Value, snapshot) is not { } to)
         { throw new DatabaseException("COHDBG003: A matched relationship has a missing endpoint."); }
-        return new GraphPath([GraphDatabaseInstance.Materialize(from), GraphDatabaseInstance.Materialize(to)], [relationship]);
+        return new GraphPath([GraphDatabase.Materialize(from), GraphDatabase.Materialize(to)], [relationship]);
     }
 
     private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object> bindings)
-        => pattern.Labels.All(node.Labels.Contains) && PropertiesMatch(pattern.Properties, node.Properties) && Accept(pattern.Variable, node, bindings);
+        => GraphLabelEvaluator.Accepts(pattern, node.Labels) && PropertiesMatch(pattern.Properties, node.Properties) && Accept(pattern.Variable, node, bindings);
     private static bool Accept(string? variable, object entity, Dictionary<string, object> bindings)
     {
         if (variable is null) { return true; }
@@ -194,7 +205,7 @@ internal static class GraphPlanExecutor
     private static bool PropertiesMatch(IReadOnlyDictionary<string, object?> expected, IReadOnlyDictionary<string, object?> actual)
         => expected.All(item => actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(item.Value, value));
 
-    private static async ValueTask<long> CreateAsync(GraphDatabaseInstance database, GraphOperation operation, GqlPathPattern path,
+    private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,
         Dictionary<string, object> bindings, CancellationToken token)
     {
         long affected = 0;
@@ -209,7 +220,7 @@ internal static class GraphPlanExecutor
             }
             else
             {
-                nodes[i] = await database.CreateNodeCoreAsync(operation, pattern.Labels, pattern.Properties, token).ConfigureAwait(false);
+                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), pattern.Properties, token).ConfigureAwait(false);
                 Accept(pattern.Variable, nodes[i], bindings);
                 affected++;
             }
@@ -219,9 +230,10 @@ internal static class GraphPlanExecutor
             var pattern = path.Relationships[i];
             if (pattern.Variable is { } variable && bindings.ContainsKey(variable))
             { throw new DatabaseException("COHDBG001: An inserted relationship variable must be new."); }
+            // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
             var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
-                nodes[outgoing ? i + 1 : i].Id, pattern.Type!, pattern.Properties, token).ConfigureAwait(false);
+                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), pattern.Properties, token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
             affected++;
         }
@@ -241,15 +253,18 @@ internal static class GraphPlanExecutor
 internal sealed class GraphMutationResult : QueryResult
 {
     private readonly long _count;
+    private readonly IReadOnlyList<Diagnostic> _warnings;
 
     /// <summary>Initializes a new instance of the <see cref="GraphMutationResult"/> class.</summary>
     /// <param name="count">The number of graph entities the mutation affected.</param>
-    public GraphMutationResult(long count)
+    /// <param name="warnings">The statement's warnings; a statement without a projection reports them here.</param>
+    public GraphMutationResult(long count, IReadOnlyList<Diagnostic> warnings)
     {
         _count = count;
+        _warnings = warnings;
     }
 
     public override QueryResultStatus Status => QueryResultStatus.Success;
     public override long AffectedCount => _count;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
 }

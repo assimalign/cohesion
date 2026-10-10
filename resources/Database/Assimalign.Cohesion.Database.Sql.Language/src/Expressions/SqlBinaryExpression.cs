@@ -3,8 +3,13 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Language;
 
 /// <summary>
-/// Represents a binary expression such as <c>a + b</c>, <c>x = 1</c>, or <c>a AND b</c>.
+/// Represents a binary expression such as <c>a + b</c>, <c>x = 1</c>, or <c>a || b</c>.
 /// </summary>
+/// <remarks>
+/// <c>AND</c> and <c>OR</c> chains are <see cref="SqlLogicalExpression"/> nodes, one per chain.
+/// Every other operator builds one binary node per link, so <c>1 + 1 + 1</c> is two nodes, each
+/// a level of the expression tree.
+/// </remarks>
 public sealed class SqlBinaryExpression : SqlExpression
 {
     /// <summary>
@@ -20,6 +25,7 @@ public sealed class SqlBinaryExpression : SqlExpression
         Left = left;
         Operator = op;
         Right = right;
+        Depth = 1 + System.Math.Max(left.Depth, right.Depth);
     }
 
     /// <summary>

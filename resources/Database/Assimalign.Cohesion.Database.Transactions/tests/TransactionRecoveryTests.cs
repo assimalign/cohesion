@@ -7,6 +7,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
@@ -24,7 +25,7 @@ public class TransactionRecoveryTests
     {
         // Arrange
         using var stream = new SimulatedDurableFileHandle();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
             TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
         await using var _ = manager;
@@ -40,6 +41,29 @@ public class TransactionRecoveryTests
         plan.Committed.ShouldContain(transaction.Sequence);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Recovery: analysis reads the records still in the journal's append buffer (#1252)")]
+    public void Analyze_WithBufferedRecords_ShouldDrainAndClassifyThem()
+    {
+        // Arrange: lifecycle records the journal has not written yet.
+        using var stream = new SimulatedDurableFileHandle();
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
+        journal.AppendBegin(1);
+        journal.AppendCommit(1);
+        journal.AppendBegin(2);
+        long bufferedThrough = journal.LastLsn;
+        long writtenBefore = journal.WrittenLsn;
+
+        // Act
+        var plan = TransactionRecovery.Analyze(journal);
+
+        // Assert: the analysis drained the buffer, then read every record.
+        writtenBefore.ShouldBe(0);
+        journal.WrittenLsn.ShouldBe(bufferedThrough);
+        plan.Committed.ShouldContain(new TransactionSequence(1));
+        plan.Aborted.ShouldContain(new TransactionSequence(2));
+        stream.Length.ShouldBeGreaterThan(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Recovery: crash mid-commit leaves no partial effects")]
     public async Task Recovery_CrashBeforeCommitRecord_ShouldPurgeUncommittedVersions()
     {
@@ -50,7 +74,7 @@ public class TransactionRecoveryTests
         TransactionSequence crashedSequence;
 
         {
-            using var journal = new StreamJournal(stream, leaveOpen: true);
+            using var journal = StorageJournal.Create(stream, leaveOpen: true);
             var versions = VersionStore.CreateInMemory();
             var manager = TransactionManager.Create(
                 TransactionLog.CreateJournalBound(journal), LockManager.Create(), versions);
@@ -70,7 +94,7 @@ public class TransactionRecoveryTests
         // Act: restart — analyze the journal and rebuild the version store the way
         // an engine would (re-appending committed work from its own storage replay,
         // purging anything the journal does not prove committed).
-        using var reopenedJournal = new StreamJournal(stream, leaveOpen: true);
+        using var reopenedJournal = StorageJournal.Create(stream, leaveOpen: true);
         var plan = TransactionRecovery.Analyze(reopenedJournal);
 
         // Assert
@@ -104,7 +128,7 @@ public class TransactionRecoveryTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
             TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
         await using var _ = manager;
@@ -127,7 +151,7 @@ public class TransactionRecoveryTests
         // away but carries it as active; transaction 8 begins after and commits.
         // A crash follows.
         using var stream = new SimulatedDurableFileHandle();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
 
         journal.AppendBegin(7);
         journal.Checkpoint([7L]);

@@ -19,8 +19,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(true)]
     public async Task UnsignedValues_ShouldRespectPromotedSchemaTypesAndRetainTheirStoredValue(bool relationship)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var properties = new Dictionary<string, object?>
         {
@@ -64,8 +64,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(DatabaseType.JsonBinary)]
     public async Task UnsupportedSchemaScalar_ShouldBeRejectedWithoutPublishingMetadata(DatabaseType unsupported)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person");
@@ -81,8 +81,8 @@ public sealed class GraphConcurrencyTests
     [Fact]
     public async Task ClosingSessionWhileWaitingForWriter_ShouldAbortAndReleaseALaterGrant()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
         await using var observer = await database.CreateSessionAsync();
@@ -105,8 +105,8 @@ public sealed class GraphConcurrencyTests
     [Fact]
     public async Task CancellingWriterWait_ShouldReleaseSessionAndLeaveOtherTransactionsUsable()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
         await database.CreateNodeAsync(blocker, ["Person"]);
@@ -125,8 +125,8 @@ public sealed class GraphConcurrencyTests
     [Fact]
     public async Task StaleSnapshot_ShouldRejectNodeWriteAfterPropertyConstraintChanged()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var stale = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person");
@@ -134,7 +134,12 @@ public sealed class GraphConcurrencyTests
         await schema.SaveLabelAsync(label);
         await using var transaction = await stale.BeginTransactionAsync();
         await schema.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(label.Id, "age", DatabaseType.Int64, true));
-        await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await database.CreateNodeAsync(stale, ["Person"]));
+        var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await database.CreateNodeAsync(stale, ["Person"]));
+        // The engine aborted the explicit transaction: it stays Faulted and refuses work until the caller rolls back (#1188).
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        (await Should.ThrowAsync<DatabaseException>(async () => await database.CreateNodeAsync(stale, ["Person"])))
+            .InnerException.ShouldBeSameAs(conflict);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await database.CreateNodeAsync(writer, ["Person"], new Dictionary<string, object?> { ["age"] = 42L })).Properties["age"].ShouldBe(42L);
     }
@@ -144,8 +149,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(true)]
     public async Task StaleDrop_ShouldRefuseNewlyCommittedGraphData(bool relationship)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var stale = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
         var writerSchema = GraphSchema.Open(database, writer);
@@ -165,6 +170,8 @@ public sealed class GraphConcurrencyTests
             else { await schema.DropLabelAsync("Person"); }
         });
         error.Message.ShouldContain("in use");
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await writerSchema.GetLabelsAsync()).ShouldHaveSingleItem().Name.ShouldBe("Person");
         (await writerSchema.GetRelationshipTypesAsync()).ShouldHaveSingleItem().Name.ShouldBe("FRIEND");
@@ -175,8 +182,8 @@ public sealed class GraphConcurrencyTests
     [InlineData(true)]
     public async Task PropertyConstraintChange_ShouldValidateExistingNodesAndRelationships(bool relationship)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var first = await database.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = "unknown" });
         var second = await database.CreateNodeAsync(session, ["Person"]);

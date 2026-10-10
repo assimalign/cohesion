@@ -7,8 +7,10 @@ kernel, and deliberately the kernel-generality proof (area DESIGN §3.10).
 
 ## Purpose
 
-Implements the area root's `IDatabaseEngine`/`IDatabase`/`IDatabaseSession`
-contracts for the key-value model by composing the shared kernel — storage
+Derives sealed leaves from the area root's `DatabaseEngine`/`DatabaseInstance`/
+`DatabaseSession`/`DatabaseTransaction`/`DatabaseServer` bases for the key-value
+model (the concrete-first rule, `.claude/rules/database-area.md`) by composing the
+shared kernel — storage
 (pages/WAL/recovery), transactions (MVCC snapshots, lock manager), indexing
 (B+Tree) — never re-implementing it. Keys and values are opaque byte sequences;
 keys order by unsigned lexicographic byte comparison.
@@ -17,9 +19,25 @@ keys order by unsigned lexicographic byte comparison.
 
 - `KeyValueDatabaseEngine` + `KeyValueDatabaseEngineOptions` — the data machine:
   create → use → dispose, engine-owned background workers, two file sets per
-  database (`<name>` + `<name>.catalog`).
-- `IKeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
-  etag-conditional writes).
+  database (`<name>` + `<name>.catalog`). `KeyValueDatabaseEngineBuilder` (from
+  `CreateBuilder(name)` or the `AddKeyValue(name, ...)` verb) carries the engine's `Options`
+  (copied at build), the databases it declares (`AddDatabase(name)`: opened or created by the
+  build, never dropped while declared), and its servers (`AddServer(options => ...)` or a
+  factory) and workers. `KeyValueDatabaseEngine.Create(name, options)` creates a standalone
+  engine; no options type carries the engine name.
+- `KeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
+  etag-conditional writes); `KeyValueDatabaseSession` and
+  `KeyValueDatabaseTransaction` are its typed session and explicit transaction.
+- Explicit transactions: a failed command writes nothing and leaves the transaction
+  active, so later commands stay inside it until the caller commits or rolls back. A
+  rollback can be repeated, and a started rollback always ends the transaction, even when
+  its abort record or its undo fails (an undo that fails keeps the written keys locked until
+  a retry completes it: about 100 ms later, then at doubling delays up to the maintenance
+  interval, #1226; a failed journal write takes the database offline instead, #1252). A
+  transaction the kernel ended under its
+  caller refuses commands and COMMIT with `COHDBK001`. A rollback or a closed session ends
+  the transaction even under a running command, which then fails and writes nothing; a
+  commit while a command runs is refused.
 - Sessions address exactly one database (A5). All five typed operations reject
   sessions from another database; text and typed requests execute only against
   the receiving session's database. Database/server administration stays on the
@@ -34,6 +52,14 @@ keys order by unsigned lexicographic byte comparison.
   wire-protocol server, carrying its own full copy of the server machinery
   (servers are per-model and each model package owns its copy — owner decision
   2026-07-14; see DESIGN.md for the placement history).
+- Storage operations: a failed journal or data fsync takes the database offline, both file
+  sets at once, and every later operation, in process and over the server, is refused with
+  `DatabaseOfflineException` (`COHDBK002`) until `OpenDatabaseAsync` reopens it and recovery
+  decides the unconfirmed commit (#1243); `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
+  `CheckpointInterval` (5 minutes) size the pool and trigger checkpoints (#1254). See
+  DESIGN.md, "Storage operations".
+- Closing: a database its holder disposed is forgotten once the close ends, and
+  `OpenDatabaseAsync` opens it again with its entries, in memory as on disk (owner decision 33).
 
 ## Dependencies
 
@@ -52,12 +78,12 @@ keys order by unsigned lexicographic byte comparison.
 ## Usage
 
 ```csharp
-await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
-{
-    RootPath = "/var/lib/app/data", // omit for in-memory
-});
+var builder = KeyValueDatabaseEngine.CreateBuilder("app-kv"); // the engine name, written once
+builder.Options.RootPath = "/var/lib/app/data";               // omit for in-memory
+builder.AddDatabase("app");                                     // opened, or created, by the build
 
-var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("app");
+await using var engine = await builder.BuildAsync();
+var database = await engine.OpenDatabaseAsync("app"); // a KeyValueDatabase, no cast
 await using var session = await database.CreateSessionAsync();
 
 var put = await database.PutAsync(session, key, value);

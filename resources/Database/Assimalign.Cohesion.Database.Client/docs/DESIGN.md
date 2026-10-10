@@ -34,10 +34,11 @@ flowchart LR
 
 `DatabaseClientOptions.Family` is mandatory. The pool captures the exact immutable
 `ProtocolMessageFamily` instance before dialing. Every connection uses a
-`ProtocolChannel` bound to that family throughout its lifetime. An
-`IDatabaseProtocolExchange<TResult>` supplies its required family and consumes one
-exchange through the channel reader and writer. A different family instance is
-rejected before execution, including a family that reuses the same identifier bytes.
+`ProtocolChannel` bound to that family throughout its lifetime. A
+`DatabaseProtocolExchange<TResult>` takes its required family in its protected
+constructor and consumes one exchange through the channel reader and writer. A
+different family instance is rejected before execution, including a family that
+reuses the same identifier bytes.
 
 The materialized operation returns only after consuming the complete response and
 must not retain or dispose the borrowed reader/writer. SQL and Key-Value materialize;
@@ -52,16 +53,18 @@ Disposing a healthy rental returns it to an idle stack; `MaxPoolSize` bounds
 rentals and exhausted rents wait. Disposing the client closes idle connections;
 outstanding rentals close when returned. Closure sends best-effort `Terminate`.
 
-The pool does not infer connection health from an error code. On failure,
-`IDatabaseProtocolExchange<TResult>.IsResponseComplete` certifies that the exchange
-consumed the entire response and left the server session ready for another request.
-Its default is false, so an exchange that supplies no evidence is discarded after
-failure. Successful return already guarantees a complete response; existing
-successful exchanges do not need to implement this property. Framing violations,
+The pool does not infer connection health from an error code. On failure, the
+exchange's completion evidence certifies that it consumed the entire response and
+left the server session ready for another request. The base owns that evidence: its
+internal run entry clears it before every run, and a leaf records it with the
+protected `MarkResponseComplete` before it throws. An exchange that supplies no
+evidence is discarded after failure. Successful return already guarantees a complete
+response, so a successful exchange never marks anything. Framing violations,
 transport failure, and an unfinished response invalidate the connection.
 
-SQL and Key-Value reset the signal before each request and set it only after decoding
-a terminal response. Their server implementations send `ParseFailure` and
+SQL, Key-Value and Graph mark the evidence only after decoding a terminal response.
+Before the base owned the reset, each of the three cleared it by hand at the start of
+its exchange. Their server implementations send `ParseFailure` and
 `ExecutionFailure` as complete statement responses before any result frames and
 return to their ready loop; the model exchanges certify that initial response phase
 before throwing the unchanged
@@ -75,12 +78,78 @@ Handshake rejections preserve their wire code in `DatabaseClientException`.
 Idle server-side evictions remain discoverable at next use; rent-time pings are
 future work.
 
+A failed dial is a `DatabaseClientException` too (owner decision 39 of 2026-10-07).
+The internal `DatabaseConnection.OpenAsync` dials through the connection factory and
+catches its failure: a refused or unreachable endpoint (`SocketException`), an
+`IOException`, a TLS handshake failure (`AuthenticationException` from the TLS layer),
+a connect timeout. It throws `DatabaseClientException` with
+`ProtocolErrorCode.ConnectionFailure`, a message that names the endpoint
+(`Failed to connect to 127.0.0.1:5740: …`; a connection-string or resource-URI endpoint,
+a `DnsEndPoint`, reads `host:port`, with an IPv6 literal in brackets, not the
+`Unspecified/host:port` of its own text) and the factory's exception as
+`InnerException`. `ConnectionFailure` is the taxonomy's one client-local code; no
+server sends it (Protocol `DESIGN.md`), and the client holds peers to that: an error
+frame that carries it, in the handshake or in an exchange, is a `ProtocolViolation`
+that breaks the connection, so the code means a failed dial and nothing else (a
+malformed handshake error frame is a `ProtocolViolation` too). The catch is broad on
+purpose: `IConnectionFactory` is an open seam, and each transport throws its own types.
+Three exceptions pass through unchanged: `OperationCanceledException` when the caller's
+token is canceled, `ObjectDisposedException`, and `OutOfMemoryException`. Any other
+failure the transport reports once the caller's token is canceled (a socket the
+cancellation aborted, say) is the caller's cancellation as well: an
+`OperationCanceledException` for the caller's token with the failure inside. A
+cancellation the caller did not request is the transport's own timeout (the TLS layer
+cancels a handshake that outlives `TlsClientOptions.HandshakeTimeout`), so it is wrapped
+like any other dial failure, with a message that says the attempt timed out.
+`RentAsync` then releases the pool slot, so an unreachable endpoint never exhausts the
+pool. (A failed TLS upgrade still leaves its dialed TCP connection open inside the
+Connections layering, which never reaches this client; plan §12.) The model clients
+translate this exception as they translate a handshake rejection: SQL and Key-Value map
+the code to their `ConnectionFailure` kind, and Graph and Blob keep the code.
+
+A transport that breaks after the dial, during the handshake, reports `Internal`, with
+the transport's exception inside when there is one: a peer that closes the connection
+gives "The server closed the connection mid-exchange.", and one that resets it gives the
+transport's error. The TCP transport completes the connection's input with the raw
+`SocketException` of a reset, and a `SocketException` is not an `IOException`, so the
+handshake and the exchanges translate `IOException`, `SocketException`,
+`ConnectionAbortedException` and `ConnectionResetException` alike; no transport
+exception leaves `RentAsync` or `ExecuteAsync` raw. Whether a handshake-phase break
+should report `ConnectionFailure` instead is an owner question (plan §12).
+
+```mermaid
+flowchart TD
+    Rent["RentAsync"] --> Dial["IConnectionFactory.ConnectAsync"]
+    Dial -->|connected| Handshake["startup, authenticate, ready"]
+    Dial -->|"caller's token canceled"| Canceled["OperationCanceledException for the caller's token, any transport failure inside"]
+    Dial -->|ObjectDisposedException| Disposed["ObjectDisposedException, unchanged"]
+    Dial -->|"any other failure, a transport timeout included"| Wrapped["DatabaseClientException: ConnectionFailure, endpoint, inner exception"]
+    Handshake -->|"transport closed or reset"| Broken["DatabaseClientException: Internal, transport exception inside"]
+    Handshake -->|"error frame with ConnectionFailure, or malformed"| Violation["DatabaseClientException: ProtocolViolation"]
+    Handshake -->|error frame| Rejected["DatabaseClientException: the server's code"]
+    Handshake -->|ready| Rented["DatabaseConnection"]
+```
+
+The shape is Npgsql's connector open path (`npgsql/npgsql` at `9c472445`).
+`NpgsqlConnector.ConnectAsync` catches every failure of a connect attempt
+(`src/Npgsql/Internal/NpgsqlConnector.cs:1362`), rethrows the caller's cancellation
+first (`:1373`), turns any other cancellation into a `TimeoutException` (`:1375-1376`)
+and throws `new NpgsqlException($"Failed to connect to {endpoint}", e)` (`:1383`). Its
+TLS negotiation wraps every failure but a cancellation in
+`NpgsqlException("Exception while performing SSL handshake", e)` (`:1194-1196`), and
+`NpgsqlException.IsTransient` reads the inner `IOException`, `SocketException` or
+`TimeoutException` (`src/Npgsql/NpgsqlException.cs:45-46`). Two differences, both
+keeping the original exception: Npgsql replaces a transport's cancellation with a new
+`TimeoutException`, and its `ThrowIfCancellationRequested` drops the transport failure
+it found after the caller canceled, while this client keeps each as the inner
+exception.
+
 Only one exchange may use a connection at a time. An overlapping exchange is rejected
 before it writes any frames. Disposing a connection cancels and joins its current
 operation before returning the rental, so an active exchange cannot enter the idle
 pool. Disposal and failure release each rental exactly once.
 
-`IDatabaseConnection.AbortAsync` explicitly discards a rental when a model cannot
+`DatabaseConnection.AbortAsync` explicitly discards a rental when a model cannot
 reset its application-level session state. It marks the connection unusable before
 cancelling/joining any active exchange and disposing the rental, so the pool closes
 its transport instead of reusing the session. This is non-cancellable and idempotent
@@ -89,9 +158,11 @@ unacknowledged command; transaction outcome and reconciliation remain model conc
 
 ## Streaming exchange and ownership
 
-`IDatabaseStreamingExchange` supplies the exact `Family`, an `OpenAsync` phase that
-writes the request and validates startup metadata, and a `CopyToAsync` phase that
-copies content into a borrowed destination and verifies the terminal response.
+`DatabaseStreamingExchange` takes the exact `Family` in its protected constructor
+and implements two protected cores: an `OpenCoreAsync` phase that writes the request
+and validates startup metadata, and a `CopyToCoreAsync` phase that copies content
+into a borrowed destination and verifies the terminal response. Their entry points
+are internal, so only the shared client runs the phases, in that order.
 The shared client owns the asynchronous producer, bounded handoff, cancellation,
 read stream, and connection lifetime. The model owns framing semantics, metadata,
 counts, and acknowledgements; it never owns the handoff queue or producer task.
@@ -101,14 +172,15 @@ Streaming frame adapters normalize completed transport pipes that report
 to streaming frame I/O; materialized SQL and Key-Value exchanges retain their
 existing transport exception behavior, and caller stream exceptions are unchanged.
 
-There are two deliberate ownership forms. `IDatabaseConnection.ExecuteStreamingAsync`
+There are two deliberate ownership forms. `DatabaseConnection.ExecuteStreamingAsync`
 uses a caller-owned rental and preserves that rental after verified completion and
 stream disposal, allowing another operation on the same typed connection. A failed
-or abandoned transfer invalidates and returns that rental immediately. The
-`IDatabaseClient.ExecuteStreamingAsync` extension rents on the caller's behalf; its
-returned stream owns that rental until disposal or failure. Verified EOF alone does
+or abandoned transfer invalidates and returns that rental immediately.
+`DatabaseClient.ExecuteStreamingAsync` rents on the caller's behalf; its returned
+stream owns that rental until disposal or failure. It rejects an exchange of another
+family before it rents, so a wrong exchange dials nothing. Verified EOF alone does
 not return a client-owned stream's healthy rental: the caller must dispose the stream.
-These forms serve Blob's existing connection API and model clients that expose a
+These forms serve the Blob and Graph connection APIs and model clients that expose a
 download directly from their pooled client.
 
 The destination copies content into chunks no larger than 65,536 bytes and writes
@@ -146,11 +218,60 @@ stateDiagram-v2
     Closed --> [*]
 ```
 
-The completion signal serves SQL, Key-Value, Blob, and future exchanges with their
-own terminal semantics. The streaming contract and its two ownership forms serve
-Blob and test-level model consumers; future Documents and Graph clients implement
-only their startup and content protocol. No Blob-specific type enters the shared
-contract, and those clients need not copy Blob's former lifetime machinery.
+The completion signal serves SQL, Key-Value, Graph, Blob, and future exchanges with
+their own terminal semantics. The streaming contract and its two ownership forms serve
+Blob's downloads, Graph's path streams and test-level model consumers; a future
+Documents client implements only its startup and content protocol. No Blob-specific
+type enters the shared contract, and those clients need not copy Blob's former
+lifetime machinery.
+
+## Diagnostics
+
+The client core reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Client` (`src/Internal/EventSource/DatabaseClientEventSource.cs`).
+Every model client runs on `DatabaseClient`, so one source covers the connections of all of them;
+each model client's own source reports its commands. The pool's per-rental events carry the `Pool`
+keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload | Written by |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `ConnectionOpened` | Informational | — | `database`, `endPoint` (as the dial failure names it), `serverVersion`, `durationMilliseconds` (dial and handshake) | `OpenAsync`, once the ready frame arrives |
+| 2 | `ConnectionOpenFailed` | Error | — | `database`, `endPoint`, `code`, `exceptionMessage`, `durationMilliseconds` | `OpenAsync`: a failed dial (`ConnectionFailure`), a handshake rejection (the server's code), a protocol violation, a transport break (`Internal`) |
+| 3 | `ConnectionClosed` | Informational | — | `database`, `endPoint` | the first `CloseAsync` of a connection that opened |
+| 4 | `ConnectionBroken` | Warning | — | `database`, `code`, `exceptionMessage` | `MarkBroken` on an open connection: a protocol or transport failure during an exchange |
+| 5 | `ConnectionRented` | Verbose | `Pool` | `database`, `reused`, `waitedMilliseconds` (the wait for a pool slot; a new connection's dial is event 1's duration) | `RentAsync` |
+| 6 | `ConnectionReturned` | Verbose | `Pool` | `database`, `pooled` (false when the connection closes instead) | `ReturnAsync` |
+| 7 | `ExchangeFailed` | Verbose | — | `database`, `code`, `exceptionType` (never the message, see below) | `ExecuteAsync`, for every coded failure of an exchange: a server error, or a client-detected one, including one that leaves the response incomplete. When the response was incomplete the connection does not survive, and this Verbose event is the only record of the loss; it is not reported as `ConnectionBroken`. The model client's own failure event is the operator-facing record |
+| 8 | `DownloadReleaseFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the download stream, when returning a failed download's rental fails (swallowed: the download's own failure stays the caller's) |
+
+A failure during the open is `ConnectionOpenFailed` only: a connection that never opened is not
+broken. It is captured by an exception filter that declines it, so it reaches the caller unchanged,
+and written from the open's `finally` once the throwing call unwound. Endpoints and database names
+are written; connection strings, credentials and statement text never are.
+
+**The failure rule** (the area's, `docs/resources/Database/DESIGN.md`, "Diagnostics"). A
+statement-level server error can quote user data the core cannot recognize: the key-value server
+names a conflicting key in hexadecimal, the Blob server names a missing or existing blob, and a
+parse error can quote a fragment of the statement. `ExchangeFailed` therefore writes the failure's
+code and exception type only, as every model client's failure event does. The lifecycle failures
+keep their message: a failed open's (the dial's names the endpoint, a handshake rejection is the
+server's refusal of the startup), a broken connection's (a transport or protocol fault's text) and
+a failed release's.
+
+Counters, created on the first enable command: `current-connections` (a connection that opened, +1
+in `OpenAsync`, −1 in its first `CloseAsync` behind an `Interlocked.Exchange` flag, because
+`_isClosed` is checked and set without synchronization), `current-rented-connections` (+1 when
+`MarkRented` turns a connection rented, −1 when `DisposeAsync` returns it), `connections-opened-per-second`
+and `total-connection-failures` (failed opens). The backing fields are updated whether or not anyone
+listens, so a tool that attaches late reads exact values. Timestamps are taken only while a listener
+takes the source (the pool wait only under `Pool`).
+
+`DatabaseClientEventSourceTests` checks the name, the strict manifest, a loopback client against a
+real SQL server (open, rent, return, re-rent, a failing statement, close: each event once, in order,
+and both gauges back where they started), a dial to a dead endpoint, a refused authentication, a
+protocol violation mid-exchange, a refused download over a transport whose disposal throws (event 8
+once, from the stream's swallowing catch, and event 7 with its code and type and no server message), and the four
+counters.
 
 ## Settings and compatibility
 
@@ -163,7 +284,7 @@ SQL and Key-Value wire bytes stay at version 1.0. Moving APIs is a managed API
 migration: direct SQL callers import `Database.Sql.Client` and bind
 `SqlProtocol.Family`, or use the existing typed client. `DatabaseClientResult`
 and `DatabaseClientColumn` now live in the SQL client's namespace. New model
-clients implement the generic exchange interface using their model's exact family.
+clients derive from the exchange bases using their model's exact family.
 
 No reflection, code generation, driver discovery, model parser, or model result
 policy is required. The streaming path adds no dependencies or shipped-library
@@ -180,7 +301,7 @@ afterward. The two-argument factory still creates a transport owned and disposed
 Both overloads perform the same endpoint and credential validation; a null supplied transport
 throws `ArgumentNullException`. The client does not discover application trust.
 
-IDatabaseCommandClient is the separate HTTP admin command contract. DatabaseCommandClient.Create
+The sealed `DatabaseCommandClient` is the separate HTTP admin command client. `DatabaseCommandClient.Create`
 accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
 SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
 base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local
@@ -188,3 +309,74 @@ ResourceCommandObservation with Status and Detail, retaining actionable provider
 Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
 Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
 are disabled. No runtime Hosting or ApplicationModel dependency was added.
+
+## Concrete types (concrete-types plan, phase 5, #1261)
+
+The client core has no public interface left and no `Abstractions/` folder
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+
+| Type | Shape | Was |
+|---|---|---|
+| `DatabaseClient` | sealed; `Create(DatabaseClientOptions)` over a private constructor | the static `DatabaseClient` factory, `IDatabaseClient` and the internal `DefaultDatabaseClient` |
+| `DatabaseCommandClient` | sealed; the two `Create` overloads over a private constructor | the static factory, `IDatabaseCommandClient` and the internal `HttpDatabaseCommandClient` |
+| `DatabaseConnection` | sealed; internal constructor | `IDatabaseConnection` and the internal `PooledDatabaseConnection` |
+| `DatabaseProtocolExchange<TResult>` | abstract; protected constructor | `IDatabaseProtocolExchange<TResult>` |
+| `DatabaseStreamingExchange` | abstract; protected constructor | `IDatabaseStreamingExchange` |
+
+- **Why the two exchange bases are abstract.** They are inverted seams (`database-area.md`, rule
+  2): Database.Client runs them, and the model clients, their tests and applications implement
+  them. The protocol exchange is a variant set as well (the Sql, Key-Value, Graph and Blob
+  exchanges and the download stream's carrier), and so is the streaming exchange (Blob's download
+  and Graph's path stream). Their leaves live in other shipped assemblies, so the constructors
+  are protected (rule 3), and both carry the deviation marker.
+- **What the bases own.** The family is a constructor argument behind a non-virtual getter (rule
+  6). The protocol exchange owns the completion evidence: an internal getter the connection reads,
+  cleared by the internal run entry before every run, and set by the leaf through the protected
+  `MarkResponseComplete`. That replaces the interface's default member and the hand-written resets
+  of the Sql, Key-Value and Graph exchanges (and Graph's test exchange).
+  `DatabaseExchangeHealthTests.ExecuteAsync_ReusedExchangeWithoutNewEvidence_ShouldDiscardSession`
+  pins the reset: it fails when the entry stops clearing the evidence.
+- **Internal entry points.** The run entries (`ExecuteAsync`, `OpenAsync`, `CopyToAsync`) are
+  internal over protected abstract cores. Only a connection runs an exchange, so no public entry
+  exists that runs one over another reader and writer, for the same reason the engine worker has
+  no public release.
+- **No generic virtual method.** `DatabaseConnection.ExecuteAsync<TResult>` was a generic
+  interface call, which NativeAOT never devirtualizes; it is a non-virtual generic method on the
+  sealed connection (rule 5).
+- **`DatabaseConnection.OpenAsync` is internal.** The client opens every connection before its
+  first rental, and nothing else called it. Public, it reopened a broken connection by dialing a
+  second transport over the first without releasing it.
+- **The streaming extension is folded in** (plan §5.2). `DatabaseClient.ExecuteStreamingAsync` is
+  an instance member, and it rejects an exchange of another family before it rents
+  (`DatabaseStreamingExchangeTests.ExecuteStreamingAsync_DifferentFamily_ShouldRejectBeforeRenting`);
+  the extension rented first (dialing when no connection was idle) and then returned the rental.
+- **What changed for a caller.** The interface names become the sealed types, so a caller that
+  mocked a client through its interface uses an in-process engine behind a loopback server
+  instead, as these tests do. An exchange passes its family to the base constructor, overrides
+  `ExecuteCoreAsync` (or `OpenCoreAsync` and `CopyToCoreAsync`), and calls
+  `MarkResponseComplete()` where it used to set `IsResponseComplete`.
+- **A returned `DatabaseConnection` is not a lease (known limit).** The pool hands out the same
+  instance on every rental of its session, and its rented flag is per instance, so a reference
+  kept after `DisposeAsync` reaches the next caller's rental once the pool rents it again: its
+  calls run on that rental and a second dispose returns it. `ObjectDisposedException` fires only
+  between the return and the next rent. The four model connections wrap the rental with their
+  own disposed flag (the Sql and Key-Value ones since the P5 review), so their callers are safe;
+  a direct caller of `RentAsync` drops the reference when it disposes. A per-rental lease or
+  generation token is a design change left to P8 (plan §12).
+- **Dial failures are wrapped (resolved).** The P5 review found that `RentAsync` wrapped
+  handshake failures in `DatabaseClientException` while a transport dial failure (a
+  `SocketException` from `TcpConnectionFactory`) reached the caller unchanged, through each
+  model's `ConnectAsync` as well (plan §7, "P5, as landed", owner review 39). Owner decision 39
+  of 2026-10-07 wraps it with `ProtocolErrorCode.ConnectionFailure` ("Lifecycle and errors",
+  above); the XML documentation of `RentAsync` and the four `ConnectAsync` members says so.
+  `DatabaseClientDialFailureTests` pins the refused TCP dial (and that the slot is released),
+  five transport exception types, the TLS layer's handshake timeout and alert, the
+  unwrapped caller cancellation and `ObjectDisposedException`, a transport failure after the
+  caller canceled, and the `host:port` naming of a connection-string endpoint; each model
+  client's `…ClientDialFailureTests` pins the refused dial and the canceled dial. The
+  decision's review closed the neighboring gap a peer reset left open, a raw
+  `SocketException` from the handshake: `DatabaseClientHandshakeFailureTests` pins the reset
+  (`Internal` with the socket error inside, the slot released), a handshake or exchange error
+  frame that carries the client-local code, and a malformed handshake error frame (each a
+  `ProtocolViolation`), and `SqlClientDialFailureTests` pins the reset's chain through
+  `SqlClient.ConnectAsync`.

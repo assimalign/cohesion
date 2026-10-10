@@ -26,8 +26,9 @@ flowchart LR
 ## Wire ownership
 
 `KeyValueClient.Create` binds its pool to `KeyValueProtocol.Family`.
-`KeyValueExecuteExchange` encodes parameters, writes the command, and materializes
-the complete response before returning its private result to the typed connection.
+`KeyValueExecuteExchange`, a `DatabaseProtocolExchange<KeyValueProtocolResult>`,
+encodes parameters, writes the command, and materializes the complete response
+before returning its private result to the typed connection.
 The model's [command specification](../../Assimalign.Cohesion.Database.KeyValuePair/docs/COMMANDS.md)
 defines command grammar and operation result shapes. Protocol 1.0 bytes are unchanged.
 
@@ -56,8 +57,56 @@ Framing/decoder failure or cancellation during an exchange invalidates the share
 connection. Disposing a healthy typed connection returns its session to the pool;
 disposing the client disposes that pool.
 
+A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
+`ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
+"Lifecycle and errors"). It maps to `KeyValueClientErrorKind.ConnectionFailure`, like a
+handshake rejection, and the core exception, which keeps the transport's exception, is
+the inner exception. A canceled dial throws `OperationCanceledException` unchanged
+(`KeyValueClientDialFailureTests`).
+
 Observers report grammar text, counts, and elapsed time. Key/value bytes are never
-included. Observer exceptions cannot fault an operation or mask its exception.
+included. Observer exceptions cannot fault an operation or mask its exception. An
+observer derives from the abstract `KeyValueClientObserver`, whose three hooks are
+`protected internal virtual` with empty bodies: it overrides only what it records, and
+only the owning `KeyValueConnection` fires them.
+
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.KeyValuePair.Client`
+(`src/Internal/EventSource/KeyValueClientEventSource.cs`), written by `KeyValueConnection`'s one
+command path. Its ids, names and payloads are the SQL client's, so one query reads both. Start and
+stop carry the `Commands` keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `status` (`Success`, `Error` or `Cancelled`), `rowCount`, `affectedCount` (both -1 unless `Success`), `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`KeyValueClientErrorKind`; empty for an uncoded failure), `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
+| 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
+
+Keys, values and the command text are never written, as the observers never receive key or value
+bytes. Nor is the server's message: it names a conflicting key in hexadecimal (`Write-write
+conflict on key '…'`), so event 3 writes the error kind, the wire code and the exception's type
+only (the area's failure rule, `docs/resources/Database/DESIGN.md`, "Diagnostics"); no redaction
+is needed, and none is done. **Every start has a stop**: the command writes its end from a
+`finally`, before its observer hears of it: event 3 and then `CommandStop` with `Error` for a coded
+or an uncoded failure (an overlapping exchange, a disposed connection), `CommandStop` with
+`Cancelled` and no failure for a cancellation, which is how a timeout surfaces. A command fails
+with an Error whatever its cause; a `MalformedResult` the typed operation raises after a completed
+response is not a command failure. As `System.Net.Http`'s `RequestStop`, `CommandStop` is written
+only for a command whose `CommandStart` was written; event 3 is written either way. Event 4 makes
+visible an observer failure the client swallows.
+No counters. The command path already takes the timestamp its observer receives, so the events add
+only `IsEnabled` checks while nobody listens.
+
+`KeyValueClientEventSourceTests` checks the name, the strict manifest, a put and a refused scan
+under an observer whose every hook throws (each event once, in order, with its payload, the
+failure's stop after it, and no key, value or command text), a cancelled command (a `Cancelled`
+stop), a write-write conflict whose server message names the key, which neither event 3 nor
+the core's events write, and, by direct writes, an uncoded failure (empty kind and code) and a stop
+written only after a written start. The test assembly's observers override the hooks as
+`protected internal`, which the project's test-only `InternalsVisibleTo` requires (CS0507).
 
 ## Materialized scans, AOT, and non-goals
 
@@ -77,3 +126,36 @@ fixture retrieves the engine from the built context for provisioning. The
 application owns the engine and the engine owns its server/listener; disposing
 the application closes this whole graph before the restart-recovery composition.
 Wire/client behavior and protocol remain unchanged.
+
+## Concrete types (concrete-types plan, phase 5, #1261)
+
+The package has no public interface left and no `Abstractions/` folder
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+
+| Type | Shape | Was |
+|---|---|---|
+| `KeyValueClient` | sealed; `Create(KeyValueClientOptions)` over a private constructor | the static `KeyValueClient` factory, `IKeyValueClient` and the internal `DefaultKeyValueClient` |
+| `KeyValueConnection` | sealed; internal constructor; moved out of `Internal/` | `IKeyValueConnection` and the internal `KeyValueConnection` |
+| `KeyValueClientObserver` | abstract; protected constructor; `protected internal virtual` hooks with empty bodies | `IKeyValueClientObserver` |
+
+- **Why the observer is abstract.** It is an inverted seam (`database-area.md`, rule 2): the
+  application supplies it through `KeyValueClientOptions.Observer` and the connection fires it; no
+  observer ships. Its constructor is protected (rule 3), and it carries the deviation marker.
+  `KeyValueClientTests.PutAsync_WithPartialThrowingObserver_ShouldNotFaultCommands` covers a
+  one-hook observer that throws.
+- **Result collections.** `ScanAsync` returns an array, empty when nothing matches, never null
+  (rule 9). `GetAsync` returns null for a key with no visible entry: null means absent there, which
+  the rule leaves alone.
+- **What changed for a caller.** `IKeyValueClient` and `IKeyValueConnection` become
+  `KeyValueClient` and `KeyValueConnection` (Studio's key-value workspace was retyped), and an
+  observer overrides `protected` hooks instead of implementing public ones. An observer cannot
+  forward to another observer instance: outside this assembly the hooks are protected (CS1540),
+  so an application that needs several sinks fans out inside one subclass (plan §7, "P5, as
+  landed", owner review 38).
+- **Disposal is final for the instance.** The pool rents the same core `DatabaseConnection` to
+  the next caller, so `KeyValueConnection` keeps its own disposed flag, as `GraphConnection` and
+  `BlobConnection` do: after `DisposeAsync` every command throws `ObjectDisposedException` before
+  the observer runs, and a second dispose does nothing. Before the P5 review a stale
+  `KeyValueConnection` ran its commands on whichever caller had rented the session next, and a
+  second dispose returned that caller's rental
+  (`KeyValueClientTests.GetAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).

@@ -1,9 +1,10 @@
 using System;
 using System.Linq;
-using System.Linq.Expressions;
 
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
@@ -12,7 +13,7 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation matches the explicit compiler")]
     public void Compile_WithValidDeclaration_ShouldMatchTwoStepCompilation()
     {
-        static void Configure(ISqlSchemaBuilder database)
+        static void Configure(SqlSchemaBuilder database)
         {
             database.Type<Money>(type => type.Decimal(18, 2));
             database.Table<Order>("orders", table =>
@@ -24,9 +25,7 @@ public class SqlSchemaTests
         }
 
         SqlCompiledSchema schema = SqlSchema.Compile("orders", Configure);
-        SqlCompiledSchema twoStep = SqlSchemaCompiler.Compile(
-            SqlSchema.Create("orders", Configure),
-            EngineModel.Sql);
+        SqlCompiledSchema twoStep = SqlSchemaCompiler.Compile(SqlSchema.Create("orders", Configure));
 
         schema.Hash.ShouldBe(twoStep.Hash);
         schema.CanonicalDocument.ShouldBe(twoStep.CanonicalDocument);
@@ -35,7 +34,7 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation preserves compiler validation errors")]
     public void Compile_WithInvalidDeclaration_ShouldMatchTwoStepValidationErrors()
     {
-        static void Configure(ISqlSchemaBuilder database)
+        static void Configure(SqlSchemaBuilder database)
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<Order>("orders", table => table.Key(order => order.Id));
@@ -45,7 +44,7 @@ public class SqlSchemaTests
         SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
             () => SqlSchema.Compile("invalid", Configure));
         SqlSchemaValidationException twoStep = Should.Throw<SqlSchemaValidationException>(
-            () => SqlSchemaCompiler.Compile(SqlSchema.Create("invalid", Configure), EngineModel.Sql));
+            () => SqlSchemaCompiler.Compile(SqlSchema.Create("invalid", Configure)));
 
         exception.Message.ShouldBe(twoStep.Message);
         exception.Errors
@@ -69,7 +68,7 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: declarations retain the complete compile-time model")]
     public void Create_WithSchemaDeclarations_ShouldRetainCompileTimeModel()
     {
-        ISqlSchema schema = SqlSchema.Create("orders", database =>
+        SqlSchema schema = SqlSchema.Create("orders", database =>
         {
             database.Type<Money>(type => type.Decimal(18, 2));
             database.Table<Order>(table =>
@@ -82,10 +81,6 @@ public class SqlSchemaTests
                 table.Key(line => line.Id);
                 table.References<Order>(line => line.OrderId);
             });
-            database.Function("order_identity", (long orderId) => orderId);
-            database.Trigger<Order>(
-                SqlTriggerEvent.AfterInsert,
-                (transaction, row) => transaction.Audit("order.placed", row.Id));
             database.Principal(
                 "appa-api",
                 principal => principal.Grant(SqlPermission.ReadWrite, "Orders", "OrderLines"));
@@ -93,40 +88,28 @@ public class SqlSchemaTests
 
         schema.Name.ShouldBe("orders");
 
-        ISqlSchemaType type = schema.Types.ShouldHaveSingleItem();
+        SqlSchemaType type = schema.Declaration.Types.ShouldHaveSingleItem();
         type.ClrType.ShouldBe(typeof(Money));
         type.Precision.ShouldBe(18);
         type.Scale.ShouldBe(2);
 
-        schema.Tables.Count.ShouldBe(2);
-        ISqlSchemaTable order = schema.Tables[0];
+        schema.Declaration.Tables.Count.ShouldBe(2);
+        SqlSchemaTable order = schema.Declaration.Tables[0];
         order.RowType.ShouldBe(typeof(Order));
         order.PrimaryKey.ShouldBe(nameof(Order.Id));
         order.Indexes.ShouldBe([nameof(Order.CustomerId)]);
         order.Columns.ShouldBe([nameof(Order.Id), nameof(Order.CustomerId)]);
 
-        ISqlSchemaTable line = schema.Tables[1];
+        SqlSchemaTable line = schema.Declaration.Tables[1];
         line.RowType.ShouldBe(typeof(OrderLine));
         line.PrimaryKey.ShouldBe(nameof(OrderLine.Id));
-        ISqlSchemaReference reference = line.References.ShouldHaveSingleItem();
+        SqlSchemaReference reference = line.References.ShouldHaveSingleItem();
         reference.Member.ShouldBe(nameof(OrderLine.OrderId));
         reference.TargetType.ShouldBe(typeof(Order));
 
-        ISqlSchemaFunction function = schema.Functions.ShouldHaveSingleItem();
-        function.Name.ShouldBe("order_identity");
-        function.Body.ShouldBeAssignableTo<Expression<Func<long, long>>>();
-        function.Body.Parameters.ShouldHaveSingleItem().Type.ShouldBe(typeof(long));
-
-        ISqlSchemaTrigger trigger = schema.Triggers.ShouldHaveSingleItem();
-        trigger.RowType.ShouldBe(typeof(Order));
-        trigger.Event.ShouldBe(SqlTriggerEvent.AfterInsert);
-        trigger.Body.Parameters.Count.ShouldBe(2);
-        trigger.Body.Parameters[0].Type.ShouldBe(typeof(ISqlTriggerContext));
-        trigger.Body.Parameters[1].Type.ShouldBe(typeof(Order));
-
-        ISqlSchemaPrincipal principal = schema.Principals.ShouldHaveSingleItem();
+        SqlSchemaPrincipal principal = schema.Declaration.Principals.ShouldHaveSingleItem();
         principal.Name.ShouldBe("appa-api");
-        ISqlSchemaGrant grant = principal.Grants.ShouldHaveSingleItem();
+        SqlSchemaGrant grant = principal.Grants.ShouldHaveSingleItem();
         grant.Permission.ShouldBe(SqlPermission.ReadWrite);
         grant.Objects.ShouldBe(["Orders", "OrderLines"]);
     }
@@ -134,9 +117,9 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: completed declarations are immutable snapshots")]
     public void Create_WhenRetainedBuildersChange_ShouldKeepCompletedSnapshot()
     {
-        ISqlTableBuilder<Order>? retainedTable = null;
-        ISqlPrincipalBuilder? retainedPrincipal = null;
-        ISqlSchema schema = SqlSchema.Create("orders", database =>
+        SqlTableBuilder<Order>? retainedTable = null;
+        SqlPrincipalBuilder? retainedPrincipal = null;
+        SqlSchema schema = SqlSchema.Create("orders", database =>
         {
             database.Table<Order>(table =>
             {
@@ -153,8 +136,8 @@ public class SqlSchemaTests
         retainedTable!.Index(order => order.CustomerId);
         retainedPrincipal!.Grant(SqlPermission.Write, "Orders");
 
-        schema.Tables.ShouldHaveSingleItem().Indexes.ShouldBeEmpty();
-        schema.Principals.ShouldHaveSingleItem().Grants.ShouldHaveSingleItem();
+        schema.Declaration.Tables.ShouldHaveSingleItem().Indexes.ShouldBeEmpty();
+        schema.Declaration.Principals.ShouldHaveSingleItem().Grants.ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: table selectors require a direct row member")]
@@ -181,6 +164,103 @@ public class SqlSchemaTests
         Should.Throw<ArgumentException>(() => SqlSchema.Create(
             "orders",
             database => database.Principal("reader", principal => principal.Grant(SqlPermission.Read))));
+
+        // The sealed builder's parameters carry the names its documentation gives; the former
+        // implementation behind the interface reported "tableName".
+        Should.Throw<ArgumentException>(() => SqlSchema.Create(
+            "orders",
+            database => database.Table<Order>(" ", _ => { }))).ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declaration compiles itself as the one-step form does")]
+    public void Compile_FromDeclaration_ShouldMatchOneStepCompilation()
+    {
+        static void Configure(SqlSchemaBuilder database)
+        {
+            database.Table<Order>("orders", table =>
+            {
+                table.PrimaryKey(order => order.Id);
+                table.Index(order => order.CustomerId);
+            });
+        }
+
+        SqlSchema declaration = SqlSchema.Create("orders", Configure);
+        SqlCompiledSchema compiled = declaration.Compile();
+
+        declaration.Name.ShouldBe("orders");
+        compiled.Name.ShouldBe("orders");
+        compiled.Format.ShouldBe(SqlCompiledSchema.CurrentFormat);
+        compiled.Hash.ShouldBe(SqlSchema.Compile("orders", Configure).Hash);
+    }
+
+    /// <summary>
+    /// <c>table.Check(name, sql)</c> compiles to a CHECK constraint whose text is the author's, in the
+    /// v2 document and its hash, with no advisory columns; the package never parses the SQL.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declared CHECK compiles its SQL text as written into the v2 document")]
+    public void Compile_WithTableCheck_ShouldRecordTheSqlTextAsAConstraint()
+    {
+        // Arrange
+        static void Configure(SqlSchemaBuilder database)
+            => database.Table<OrderLine>("lines", table =>
+            {
+                table.Key(line => line.Id);
+                table.Column(line => line.Quantity);
+                table.Check("ck_quantity", "Quantity > 0 AND slugify('x') <> ''");
+                table.Check("ck_id", "Id >= 0");
+            });
+
+        // Act
+        SqlCompiledSchema schema = SqlSchema.Compile("orders", Configure);
+        SqlCompiledSchema reread = SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument);
+
+        // Assert
+        schema.Format.ShouldBe("cohesion/database-schema/v2");
+        CompiledSchemaTable lines = schema.Tables.ShouldHaveSingleItem();
+        lines.Constraints.Select(constraint => (constraint.Name, constraint.Kind, constraint.Expression?.CanonicalText, constraint.Columns.Count))
+            .ShouldBe([
+                ("ck_id", CompiledSchemaConstraintKind.Check, "Id >= 0", 0),
+                ("ck_quantity", CompiledSchemaConstraintKind.Check, "Quantity > 0 AND slugify('x') <> ''", 0),
+            ]);
+        schema.CanonicalDocument.ShouldContain("\"kind\":1");
+        reread.Hash.ShouldBe(schema.Hash);
+        reread.Tables[0].Constraints[1].Expression!.CanonicalText.ShouldBe("Quantity > 0 AND slugify('x') <> ''");
+        SqlSchema.Compile("orders", database => database.Table<OrderLine>("lines", table =>
+        {
+            table.Key(line => line.Id);
+            table.Column(line => line.Quantity);
+            table.Check("ck_quantity", "quantity > 0 AND slugify('x') <> ''");
+            table.Check("ck_id", "Id >= 0");
+        })).Hash.ShouldNotBe(schema.Hash, "the text is the author's spelling, not a canonical SQL rendering");
+    }
+
+    /// <summary>A CHECK name shares the table's constraint and index namespace, and blank arguments fail at the call.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a CHECK needs a name of its own and non-blank text")]
+    public void Check_WithDuplicateNameOrBlankArguments_ShouldBeRefused()
+    {
+        // Act
+        SqlSchemaValidationException duplicate = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("orders", database =>
+            database.Table<OrderLine>("lines", table =>
+            {
+                table.Key(line => line.Id);
+                table.Index(line => line.OrderId);
+                table.Check("ck", "Id > 0");
+                table.Check("CK", "Id < 10");
+                table.Check("IX_lines_OrderId", "Id <> 5");
+            })));
+
+        // Assert
+        duplicate.Errors.Select(error => (error.Code, error.Declaration)).ShouldBe([
+            (SqlSchemaValidationErrorCode.DuplicateDeclaration, "lines.CK"),
+            (SqlSchemaValidationErrorCode.DuplicateDeclaration, "lines.IX_lines_OrderId"),
+        ]);
+        SqlSchema.Create("orders", database => database.Table<OrderLine>("lines", table =>
+        {
+            Should.Throw<ArgumentException>(() => table.Check(" ", "Id > 0")).ParamName.ShouldBe("name");
+            Should.Throw<ArgumentNullException>(() => table.Check("ck", null!)).ParamName.ShouldBe("sql");
+            Should.Throw<ArgumentException>(() => table.Check("ck", "")).ParamName.ShouldBe("sql");
+            table.Key(line => line.Id);
+        }));
     }
 
     private static long StaticId => 42;

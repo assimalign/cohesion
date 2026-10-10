@@ -21,10 +21,10 @@ public sealed class DocumentProtocolTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("documents", token);
-        var collection = await database.CreateCollectionAsync("items", cancellationToken: token);
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+        var database = await engine.CreateDatabaseAsync("documents", token);
         await using var session = await database.CreateSessionAsync(token);
+        var collection = await session.CreateCollectionAsync("items", cancellationToken: token);
         byte[] content = "{\"profile\":{\"city\":\"東京\"},\"items\":[1,null,{\"flags\":[true,false]}]}"u8.ToArray();
         await collection.PutAsync(session, "one", content, cancellationToken: token);
         var pair = InMemoryConnectionPair.Create();

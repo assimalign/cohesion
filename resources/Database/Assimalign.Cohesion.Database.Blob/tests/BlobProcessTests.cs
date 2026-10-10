@@ -88,9 +88,9 @@ public sealed class BlobProcessTests
             var fields = ready.Split('|');
             fields.Length.ShouldBe(3);
             long committedLength = long.Parse(fields[1], CultureInfo.InvariantCulture);
-            await using var reopened = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { RootPath = root });
-            var database = (IBlobDatabase)await reopened.OpenDatabaseAsync("existing", timeout.Token);
-            var container = await database.GetContainerAsync("objects", timeout.Token);
+            await using var reopened = BlobDatabaseEngine.Create("blob-engine", new BlobDatabaseEngineOptions { RootPath = root });
+            var database = await reopened.OpenDatabaseAsync("existing", timeout.Token);
+            var container = await AutocommitContainer.GetAsync(database, "objects", timeout.Token);
             (await container.GetPropertiesAsync("committed", timeout.Token))!.Value.Length.ShouldBe(committedLength);
             var (length, digest) = await ReadDigestAsync(container, "committed", timeout.Token);
             length.ShouldBe(committedLength);
@@ -102,8 +102,8 @@ public sealed class BlobProcessTests
             }
             names.ShouldBe(new[] { "committed" });
 
-            var otherDatabase = (IBlobDatabase)await reopened.OpenDatabaseAsync("new-object", timeout.Token);
-            var otherContainer = await otherDatabase.GetContainerAsync("objects", timeout.Token);
+            var otherDatabase = await reopened.OpenDatabaseAsync("new-object", timeout.Token);
+            var otherContainer = await AutocommitContainer.GetAsync(otherDatabase, "objects", timeout.Token);
             (await otherContainer.GetPropertiesAsync("incomplete", timeout.Token)).ShouldBeNull();
             await Should.ThrowAsync<DatabaseException>(async () =>
                 await otherContainer.OpenReadAsync("incomplete", timeout.Token));
@@ -112,6 +112,10 @@ public sealed class BlobProcessTests
                 throw new InvalidDataException($"Uncommitted blob survived: {unexpected.Name}.");
             }
             reopened.State.ShouldBe(EngineState.Running);
+
+            // Closed here, not at the end of the scope, so a failed close fails the test itself
+            // rather than hiding behind the cleanup's IOException.
+            await reopened.DisposeAsync();
         }
         finally { DeleteRoot(root); }
     }
@@ -149,7 +153,22 @@ public sealed class BlobProcessTests
         await process.WaitForExitAsync(timeout.Token);
     }
 
-    private static async Task<(long Length, string Digest)> ReadDigestAsync(IBlobContainer container, string name, CancellationToken token)
+    private static async Task<(long Length, string Digest)> ReadDigestAsync(BlobContainer container, string name, CancellationToken token)
+    {
+        await using var input = await container.OpenReadAsync(name, token);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[64 * 1024];
+        long length = 0;
+        int count;
+        while ((count = await input.ReadAsync(buffer, token)) != 0)
+        {
+            length += count;
+            hash.AppendData(buffer.AsSpan(0, count));
+        }
+        return (length, Convert.ToHexString(hash.GetHashAndReset()));
+    }
+
+    private static async Task<(long Length, string Digest)> ReadDigestAsync(AutocommitContainer container, string name, CancellationToken token)
     {
         await using var input = await container.OpenReadAsync(name, token);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -167,11 +186,25 @@ public sealed class BlobProcessTests
     private static string NewRoot()
         => Path.Combine(Path.GetTempPath(), "cohesion-blob-process", Guid.NewGuid().ToString("N"));
 
+    // Retries a delete another process's brief hold on a file refuses (an antivirus scan of the
+    // files the fixture and the engine just closed), for about two seconds before it gives up.
     private static void DeleteRoot(string root)
     {
-        if (Directory.Exists(root))
+        for (int attempt = 1; ; attempt++)
         {
-            Directory.Delete(root, recursive: true);
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < 20)
+            {
+                Thread.Sleep(100);
+            }
         }
     }
 }

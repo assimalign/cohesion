@@ -16,52 +16,58 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// The SQL model's wire-protocol server: fronts one <see cref="SqlDatabaseEngine"/>
 /// on the network — accept loop over the composed listener, the session state
 /// machine and frame pump, the authentication/idle/session-limit guardrails, and
-/// the two-phase graceful drain — implementing the area root's
-/// <see cref="IDatabaseServer"/> contract directly.
+/// the two-phase graceful drain — as a sealed leaf of the area root's
+/// <see cref="DatabaseServer"/> base.
 /// </summary>
 /// <remarks>
-/// Servers are per-model, and the root contract is the only area-wide requirement:
-/// every model ships its own <see cref="IDatabaseServer"/> implementation against
+/// <para>
+/// Servers are per-model, and the root base is the only area-wide requirement:
+/// every model ships its own <see cref="DatabaseServer"/> leaf against
 /// <c>Connections</c> and the protocol child root, carrying its <b>own copy</b> of
 /// the server machinery (owner decision 2026-07-14, made with the second model's
 /// extraction evidence in hand: model independence outweighs the duplication
 /// cost — wire parity is held by the protocol contract and per-model E2Es, not
 /// by shared code; see docs/DESIGN.md for the full placement history). This type
-/// is where SQL-specific wire behavior grows
-/// (typed relational payloads, SQL transaction frames) as the protocol's
-/// model-specific surface lands; today execution rides the model-agnostic
-/// text-execute seam on the root's <see cref="IDatabaseSession"/>. The server is
-/// created inert; <see cref="StartAsync"/> binds the configured listener before
-/// it begins accepting,
-/// <see cref="StopAsync"/> drains within
-/// <see cref="SqlDatabaseServerOptions.ShutdownDrainTimeout"/> then aborts, and
-/// releases the listener. Stop is terminal: restarting means composing a fresh
-/// server and listener. The composition root retains ownership of the engine;
-/// the server owns the listener lifecycle once startup is attempted.
-/// Compose one with <see cref="Create"/>, or through the <c>engineBuilder.AddServer(factory)</c>
-/// builder verb.
+/// is where SQL-specific wire behavior grows (typed relational payloads, SQL
+/// transaction frames) as the protocol's model-specific surface lands; today
+/// execution rides the model-agnostic text-execute seam of the root's
+/// <see cref="DatabaseSession"/>.
+/// </para>
+/// <para>
+/// <b>The lifecycle is the base's</b> (concrete-types plan, phase 4, #1260): the server is
+/// created inert; <see cref="DatabaseServer.StartAsync"/> binds the configured listener before
+/// it begins accepting, and a bind that fails disposes the listener and leaves the server stopped
+/// for good; <see cref="DatabaseServer.StopAsync"/> drains within
+/// <see cref="SqlDatabaseServerOptions.ShutdownDrainTimeout"/>, then aborts and releases the
+/// listener, and releases it as well for a server that never started. Stop is terminal:
+/// restarting means composing a fresh server and listener. The composition root retains
+/// ownership of the engine; the server owns the listener lifecycle once startup is attempted.
+/// Compose one with <see cref="Create"/>, or through the
+/// <c>engineBuilder.AddServer(factory)</c> builder verb.
+/// </para>
 /// </remarks>
-public sealed class SqlDatabaseServer : IDatabaseServer
+public sealed class SqlDatabaseServer : DatabaseServer
 {
+    private readonly SqlDatabaseEngine _engine;
     private readonly SqlDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
-    private readonly IDatabaseAuthenticator _authenticator;
-    private readonly SqlDatabaseServerContext _context;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly ConcurrentDictionary<Guid, SqlDatabaseServerSession> _sessions = new();
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
     // close at the next frame boundary; hard abort cancels in-flight executions
-    // and tears connections down. StopAsync escalates from the first to the
+    // and tears connections down. StopCoreAsync escalates from the first to the
     // second when the drain budget lapses.
     private CancellationTokenSource? _softStopSource;
     private CancellationTokenSource? _hardAbortSource;
     private Task? _acceptTask;
-    private bool _isRunning;
-    private bool _isDisposed;
-    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
 
     private SqlDatabaseServer(SqlDatabaseEngine engine, SqlDatabaseServerOptions options)
+        : base(engine)
     {
+        // The server keeps a copy, checked here, as the engine keeps a copy of its options (B1 of
+        // the engine extensibility design): the sessions read the limits live.
+        options = options.Snapshot();
         if (options.Listener is null)
         {
             throw new ArgumentException("A connection listener is required.", nameof(options));
@@ -71,28 +77,35 @@ public sealed class SqlDatabaseServer : IDatabaseServer
             throw new ArgumentException("The session limit must be positive.", nameof(options));
         }
 
-        Engine = engine;
+        _engine = engine;
         _options = options;
         _listener = options.Listener;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
-        _context = new SqlDatabaseServerContext(this, engine);
     }
 
     /// <summary>
-    /// Gets the SQL engine this server fronts (the typed counterpart of
-    /// <see cref="IDatabaseServerContext.Engine"/>).
+    /// Gets the SQL engine this server fronts.
     /// </summary>
-    public SqlDatabaseEngine Engine { get; }
+    public new SqlDatabaseEngine Engine => _engine;
+
+    /// <summary>
+    /// Gets the server's own copy of the options it was created with, as
+    /// <see cref="SqlDatabaseEngine.EngineOptions"/> exposes the engine's.
+    /// </summary>
+    internal SqlDatabaseServerOptions ServerOptions => _options;
 
     /// <inheritdoc />
-    public IDatabaseServerContext Context => _context;
+    public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
 
     /// <summary>
     /// Creates a SQL database server over the given engine and options. The server
-    /// is inert until <see cref="StartAsync"/> is called.
+    /// is inert until <see cref="DatabaseServer.StartAsync"/> is called.
     /// </summary>
     /// <param name="engine">The SQL engine the server fronts. The composition root owns and disposes the engine.</param>
-    /// <param name="options">The composition options. Requires a configured <see cref="SqlDatabaseServerOptions.Listener"/>.</param>
+    /// <param name="options">
+    /// The composition options. Requires a configured <see cref="SqlDatabaseServerOptions.Listener"/>.
+    /// The server keeps a copy, so a later change to this object does not reach it.
+    /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>
@@ -105,141 +118,99 @@ public sealed class SqlDatabaseServer : IDatabaseServer
     }
 
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    protected override async Task StartCoreAsync(CancellationToken cancellationToken)
     {
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var softStopSource = new CancellationTokenSource();
+        var hardAbortSource = new CancellationTokenSource();
 
         try
         {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-
-            if (_isRunning)
-            {
-                return;
-            }
-
-            var softStopSource = new CancellationTokenSource();
-            var hardAbortSource = new CancellationTokenSource();
-
+            await _listener.BindAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // This is an ownership boundary: every bind failure, including a
+            // catastrophic one after endpoint acquisition, must attempt the
+            // server's terminal listener cleanup before propagating. The base
+            // leaves the server stopped, so a later stop has nothing to release.
+            softStopSource.Dispose();
+            hardAbortSource.Dispose();
             try
             {
-                await _listener.BindAsync(cancellationToken).ConfigureAwait(false);
+                await _listener.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception)
+            catch
             {
-                // This is an ownership boundary: every bind failure, including a
-                // catastrophic one after endpoint acquisition, must attempt the
-                // server's terminal listener cleanup before propagating.
-                _isDisposed = true;
-                softStopSource.Dispose();
-                hardAbortSource.Dispose();
-                try
-                {
-                    await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Preserve the bind failure that made startup fail. Listener cleanup is still
-                    // attempted here and StopAsync remains idempotent after this terminal state.
-                }
-
-                throw;
+                // Preserve the bind failure that made startup fail. Listener cleanup is still
+                // attempted here and StopAsync remains idempotent after this terminal state.
             }
 
-            _softStopSource = softStopSource;
-            _hardAbortSource = hardAbortSource;
-            _isRunning = true;
-            _acceptTask = AcceptLoopAsync(_softStopSource.Token, _hardAbortSource.Token);
+            throw;
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
+
+        _softStopSource = softStopSource;
+        _hardAbortSource = hardAbortSource;
+        _acceptTask = AcceptLoopAsync(_softStopSource.Token, _hardAbortSource.Token);
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    protected override async Task StopCoreAsync(CancellationToken cancellationToken)
     {
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
         try
         {
-            if (_isDisposed)
+            if (_acceptTask is not null)
             {
-                return;
-            }
+                _softStopSource!.Cancel();
 
-            _isDisposed = true;
-            _isRunning = false;
+                try
+                {
+                    await _acceptTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The accept loop observed the stop signal mid-accept.
+                }
+
+                // Graceful drain: session pumps never fault (they own their
+                // errors), so awaiting their completions cannot throw.
+                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
+                Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
+
+                if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
+                {
+                    _hardAbortSource!.Cancel();
+
+                    int aborted = 0;
+                    foreach (SqlDatabaseServerSession session in _sessions.Values)
+                    {
+                        session.Abort();
+                        aborted++;
+                    }
+
+                    SqlDatabaseEventSource.Log.SessionsAborted(_engine, aborted, _options.ShutdownDrainTimeout);
+                }
+
+                await drain.ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // Listener release follows accept-loop and session drain so no
+            // live server work can race the terminal transport disposal.
             try
             {
-                if (_acceptTask is not null)
-                {
-                    _softStopSource!.Cancel();
-
-                    try
-                    {
-                        await _acceptTask.ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // The accept loop observed the stop signal mid-accept.
-                    }
-
-                    // Graceful drain: session pumps never fault (they own their
-                    // errors), so awaiting their completions cannot throw.
-                    Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
-                    Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
-
-                    if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
-                    {
-                        _hardAbortSource!.Cancel();
-
-                        foreach (SqlDatabaseServerSession session in _sessions.Values)
-                        {
-                            session.Abort();
-                        }
-                    }
-
-                    await drain.ConfigureAwait(false);
-                }
+                await _listener.DisposeAsync().ConfigureAwait(false);
             }
             finally
             {
-                // Listener release follows accept-loop and session drain so no
-                // live server work can race the terminal transport disposal.
-                try
-                {
-                    await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                finally
-                {
-                    _softStopSource?.Dispose();
-                    _hardAbortSource?.Dispose();
-                    _softStopSource = null;
-                    _hardAbortSource = null;
-                    _acceptTask = null;
-                }
+                _softStopSource?.Dispose();
+                _hardAbortSource?.Dispose();
+                _softStopSource = null;
+                _hardAbortSource = null;
+                _acceptTask = null;
             }
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
     }
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        await StopAsync().ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// A point-in-time snapshot of the sessions currently active on the server,
-    /// for the server context.
-    /// </summary>
-    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
-        => _sessions.Values.ToArray();
 
     private async Task AcceptLoopAsync(CancellationToken softStop, CancellationToken hardAbort)
     {
@@ -261,15 +232,23 @@ public sealed class SqlDatabaseServer : IDatabaseServer
                 break;
             }
 
-            if (_sessions.Count >= _options.MaxSessions)
+            int activeSessions = _sessions.Count;
+            if (activeSessions >= _options.MaxSessions)
             {
+                SqlDatabaseEventSource.Log.SessionRejected(_engine, SqlDatabaseEventSource.RejectReason.SessionLimit, activeSessions, _options.MaxSessions);
                 _ = RejectAsync(connection, hardAbort);
                 continue;
             }
 
-            var session = new SqlDatabaseServerSession(this, connection, _options, Engine, _authenticator);
+            var session = new SqlDatabaseServerSession(this, connection, _options, _engine, _authenticator);
 
-            _sessions.TryAdd(session.Id, session);
+            // The server-session gauge follows the registry exactly: up once here, down once when
+            // OnSessionCompleted removes the session.
+            if (_sessions.TryAdd(session.Id, session))
+            {
+                SqlDatabaseEventSource.Log.SessionAccepted(_engine, session, activeSessions + 1);
+            }
+
             session.Start(softStop, hardAbort);
         }
     }
@@ -283,7 +262,7 @@ public sealed class SqlDatabaseServer : IDatabaseServer
         try
         {
             var stream = connection.AsStream();
-            await using var writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+            await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is at its session limit.");
 
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), hardAbort).ConfigureAwait(false);
@@ -302,6 +281,9 @@ public sealed class SqlDatabaseServer : IDatabaseServer
 
     internal void OnSessionCompleted(SqlDatabaseServerSession session)
     {
-        _sessions.TryRemove(session.Id, out _);
+        if (_sessions.TryRemove(session.Id, out _))
+        {
+            SqlDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
+        }
     }
 }

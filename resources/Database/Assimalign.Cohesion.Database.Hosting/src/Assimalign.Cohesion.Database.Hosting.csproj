@@ -7,7 +7,7 @@
 		area root inside the area, plus non-area hosting infrastructure. The private
 		Web.Hosting/Web.Health references implement the Database admin control plane
 		without exposing Web APIs. Database server runtimes remain per-model; this
-		module composes IDatabaseServer instances through the root seam and has no
+		module composes DatabaseServer instances through the root base and has no
 		model-specific wire knowledge.
 	-->
 	<ItemGroup>
@@ -22,6 +22,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting.Health" />

@@ -19,7 +19,7 @@ public class ProtocolFramingTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        await using (var writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true))
+        await using (var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true))
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Startup, new byte[] { 1, 2, 3 }));
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty));
@@ -30,7 +30,7 @@ public class ProtocolFramingTests
         stream.Position = 0;
 
         // Act / Assert
-        await using var reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
+        await using var reader = ProtocolFrameReader.Create(stream, leaveOpen: true);
 
         var first = await reader.ReadFrameAsync();
         first!.Value.Type.ShouldBe(ProtocolMessageType.Startup);
@@ -52,7 +52,7 @@ public class ProtocolFramingTests
         truncated.Write(new byte[] { 1, 2 });
         truncated.Position = 0;
 
-        await using (var reader = ProtocolFraming.CreateReader(truncated, leaveOpen: true))
+        await using (var reader = ProtocolFrameReader.Create(truncated, leaveOpen: true))
         {
             await Should.ThrowAsync<ProtocolException>(async () => await reader.ReadFrameAsync());
         }
@@ -66,10 +66,85 @@ public class ProtocolFramingTests
         oversized.Write(bad);
         oversized.Position = 0;
 
-        await using (var reader = ProtocolFraming.CreateReader(oversized, leaveOpen: true))
+        await using (var reader = ProtocolFrameReader.Create(oversized, leaveOpen: true))
         {
             await Should.ThrowAsync<ProtocolException>(async () => await reader.ReadFrameAsync());
         }
+    }
+
+    /// <summary>
+    /// The payload bound lives in the base's public <c>WriteFrameAsync</c> (owner decision 29 of
+    /// 2026-10-06): the stream writer, the channel's family writer and a leaf of another assembly
+    /// (this test's) all refuse an oversized payload with the same synchronous error before their
+    /// core runs, and a payload of exactly the bound reaches the core.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Framing: every writer refuses an oversized payload the same way before its core runs")]
+    public async Task WriteFrame_OversizedPayload_EveryWriterShouldRefuseBeforeItsCore()
+    {
+        // Arrange
+        var payload = new byte[ProtocolFrameHeader.MaxPayloadLength + 1];
+        var oversized = new ProtocolFrame((ProtocolMessageType)64, payload);
+        using var stream = new MemoryStream();
+        await using var raw = ProtocolFrameWriter.Create(stream, leaveOpen: true);
+        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("model", 64), leaveOpen: true);
+        var recording = new RecordingFrameWriter();
+        var writers = new[] { raw, channel.Writer, recording };
+
+        // Act: each refusal is thrown by the call itself, not through the returned task.
+        var messages = new List<string>();
+        foreach (var writer in writers)
+        {
+            messages.Add(Should.Throw<ProtocolException>(() => { _ = writer.WriteFrameAsync(oversized); }).Message);
+        }
+
+        await recording.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)64, payload.AsMemory(0, (int)ProtocolFrameHeader.MaxPayloadLength)));
+
+        // Assert
+        messages.ShouldAllBe(message => message == messages[0]);
+        messages[0].ShouldContain($"exceeds the {ProtocolFrameHeader.MaxPayloadLength}-byte maximum");
+        stream.Length.ShouldBe(0);
+        recording.WrittenLengths.ShouldBe(new[] { (int)ProtocolFrameHeader.MaxPayloadLength });
+    }
+
+    /// <summary>
+    /// The bound runs before any core, so a frame that fails both it and the channel's family
+    /// check reports the bound; a frame failing only the family check still reports the family.
+    /// Before decision 29 the bound sat in the stream writer's core, behind the family check, and
+    /// the same frame reported the family.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Channel: a frame failing both the payload bound and the family check reports the bound")]
+    public async Task Channel_OversizedPayloadOutsideTheFamily_ShouldReportTheBoundFirst()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("model", 64), leaveOpen: true);
+        var payload = new byte[ProtocolFrameHeader.MaxPayloadLength + 1];
+
+        // Act
+        var both = Should.Throw<ProtocolException>(
+            () => { _ = channel.Writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)65, payload)); });
+        var familyOnly = Should.Throw<ProtocolException>(
+            () => { _ = channel.Writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)65, payload.AsMemory(0, 1))); });
+
+        // Assert
+        both.Message.ShouldContain("exceeds the");
+        both.Message.ShouldNotContain("endpoint family");
+        familyOnly.Message.ShouldContain("endpoint family 'model'");
+        stream.Length.ShouldBe(0);
+    }
+
+    /// <summary>A leaf outside Database.Protocol: it records what reaches its core.</summary>
+    private sealed class RecordingFrameWriter : ProtocolFrameWriter
+    {
+        public List<int> WrittenLengths { get; } = new();
+
+        protected override ValueTask WriteFrameCoreAsync(ProtocolFrame frame, System.Threading.CancellationToken cancellationToken)
+        {
+            WrittenLengths.Add(frame.Payload.Length);
+            return default;
+        }
+
+        protected override ValueTask FlushCoreAsync(System.Threading.CancellationToken cancellationToken) => default;
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Messages: startup and error payloads round-trip")]

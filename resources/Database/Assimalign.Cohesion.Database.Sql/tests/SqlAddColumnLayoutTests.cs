@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-/// <summary>Proves read-time defaults remain correct across positional row rewrites and retained MVCC versions.</summary>
+/// <summary>Proves read-time defaults remain correct across dropped columns and retained MVCC versions.</summary>
 public sealed class SqlAddColumnLayoutTests
 {
     /// <summary>Dropping an earlier column preserves an added default and a stored explicit null.</summary>
@@ -18,7 +18,7 @@ public sealed class SqlAddColumnLayoutTests
     public async Task AddColumn_DefaultThenDropOtherColumn_ShouldPreserveValues()
     {
         // Arrange: the old rows have no stored component for extra.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-layout" });
+        await using var engine = SqlDatabaseEngine.Create("add-layout", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("layout");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT, obsolete TEXT, payload TEXT);");
@@ -30,11 +30,13 @@ public sealed class SqlAddColumnLayoutTests
         before[1].ShouldBe(new object?[] { 2, "remove-two", "two", 7 });
         await ExecuteAsync(session, "INSERT INTO t VALUES (3, 'remove-three', 'three', NULL);");
 
-        // Act: DROP rewrites positional records, including the formerly missing tail.
+        // Act: DROP marks obsolete's physical ordinal dropped and rewrites no record; the old
+        // rows keep extra in their missing tail (#1241), and the UPDATE writes a version that
+        // stores NULL at the dropped ordinal and stores extra.
         await ExecuteAsync(session, "ALTER TABLE t DROP COLUMN obsolete;");
         await ExecuteAsync(session, "UPDATE t SET payload = 'one-updated' WHERE id = 1;");
 
-        // Assert: materializing the rewrite preserves defaults and explicit nulls separately.
+        // Assert: the layout with a dropped ordinal still resolves the default and keeps the explicit null.
         var rows = await RowsAsync(session, "SELECT id, payload, extra FROM t ORDER BY id;");
         rows.Count.ShouldBe(3);
         rows[0].ShouldBe(new object?[] { 1, "one-updated", 7 });
@@ -47,7 +49,7 @@ public sealed class SqlAddColumnLayoutTests
     public async Task AddColumn_AfterDropSameName_ShouldUseNewDefault()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-readd" });
+        await using var engine = SqlDatabaseEngine.Create("add-readd", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("readd");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT, extra INT);");
@@ -73,7 +75,7 @@ public sealed class SqlAddColumnLayoutTests
     public async Task AddColumn_NotNullAfterDelete_ShouldKeepOlderSnapshotReadable()
     {
         // Arrange: the snapshot pins a version which DELETE removes from the current table.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-deleted-version" });
+        await using var engine = SqlDatabaseEngine.Create("add-deleted-version", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("deleted-version");
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await using var reader = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
@@ -98,13 +100,13 @@ public sealed class SqlAddColumnLayoutTests
             .ShouldBe(new object?[] { 2, "new", 8 });
     }
 
-    private static async Task ExecuteAsync(IDatabaseSession session, string sql)
+    private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         result.Status.ShouldBe(QueryResultStatus.Success);
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None))
             .ShouldBeAssignableTo<QueryResultSet>();

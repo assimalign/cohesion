@@ -28,10 +28,8 @@ jobs:
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
         # transitively. The as-yet source-less model scaffolds (Cache, plus
-        # Documents.Client/.Replication/.Security, Graph.Replication/.Security,
-        # Blob.Replication/.Security and
-        # KeyValuePair.Replication/.Security) and the post-MVP contract
-        # shells (Replication, Sql.Replication, Sql.Security, Memory) are
+        # Documents.Client/.Security, Graph.Security, Blob.Security and
+        # KeyValuePair.Security) and the post-MVP shells (Sql.Security, Memory) are
         # excluded until they ship.
         projects: [
             'Assimalign.Cohesion.Database',
@@ -47,7 +45,6 @@ jobs:
             'Assimalign.Cohesion.Database.Documents.Storage',
             'Assimalign.Cohesion.Database.Embedded',
             'Assimalign.Cohesion.Database.Execution',
-            'Assimalign.Cohesion.Database.Governance',
             'Assimalign.Cohesion.Database.Graph',
             'Assimalign.Cohesion.Database.Graph.Catalog',
             'Assimalign.Cohesion.Database.Graph.Client',
@@ -94,6 +91,80 @@ jobs:
           area: 'resources'
           category: 'Database'
           project: ${{ matrix.projects }}
+
+  # The SQL engine's two NativeAOT harnesses, published for linux-x64 and run (this machine leg
+  # does not exist locally; win-arm64 is published by hand, see each csproj):
+  # - the statement benchmark (DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md section 10), the instrument
+  #   each engine phase's performance gate is measured with, so it must keep compiling and running
+  #   as the public API it drives changes; CI runs every case on a small table as a smoke, and the
+  #   timings it prints are not a gate;
+  # - the function-ABI guard (phase E2), which registers typed and hand-written functions, runs
+  #   them in process and over the wire, and exits 1 when a check fails, so a trimmed or
+  #   AOT-compiled build that loses a code path fails the job.
+  # Both projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
+  # output, whatever the project promotes to an error (the guard also makes ILC's warnings errors).
+  sql-benchmarks:
+    name: "Database.Sql NativeAOT harnesses (linux-x64)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      - name: Restore build tasks
+        shell: pwsh
+        run: dotnet restore "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj"
+
+      - name: Build build tasks
+        shell: pwsh
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --no-restore
+
+      - name: Publish and run the function-ABI NativeAOT guard
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "sql-aot-sample"
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.AotSample/Assimalign.Cohesion.Database.Sql.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Sql.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Sql.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+
+          & (Join-Path $output "Assimalign.Cohesion.Database.Sql.AotSample")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database.Sql.AotSample reported a failed check (exit code $LASTEXITCODE)."
+          }
+
+      - name: Publish and smoke-run the NativeAOT statement benchmark
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "sql-benchmarks"
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/Assimalign.Cohesion.Database.Sql.Benchmarks.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Sql.Benchmarks failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Sql.Benchmarks reported IL2xxx/IL3xxx warnings."
+          }
+
+          & (Join-Path $output "Assimalign.Cohesion.Database.Sql.Benchmarks") --rows 2000 --iterations 1 --label ci-smoke
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database.Sql.Benchmarks failed with exit code $LASTEXITCODE."
+          }
 
   database-testing-pack:
     name: "Prepare Database SDK E2E packages"

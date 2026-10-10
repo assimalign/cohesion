@@ -27,7 +27,7 @@ public class DatabaseApplicationTests
             StartServicesConcurrently = true,
         };
 
-        Should.Throw<InvalidOperationException>(() => new DatabaseApplication(options))
+        Should.Throw<InvalidOperationException>(() => new DatabaseApplicationBuilder(options).Build())
             .Message.ShouldContain("sequential service start and stop");
     }
 
@@ -39,7 +39,7 @@ public class DatabaseApplicationTests
             StopServicesConcurrently = true,
         };
 
-        Should.Throw<InvalidOperationException>(() => new DatabaseApplication(options))
+        Should.Throw<InvalidOperationException>(() => new DatabaseApplicationBuilder(options).Build())
             .Message.ShouldContain("sequential service start and stop");
     }
 
@@ -49,13 +49,16 @@ public class DatabaseApplicationTests
         var serviceStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseService = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var serverStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var options = new DatabaseApplicationOptions();
-        options.Services.Add(new ControlledStartService(serviceStarted, releaseService));
-        options.Servers.Add(new ControlledStartServer(
+        var engine = new RecordingEngine();
+        engine.AddServer(owner => new ControlledStartServer(
+            owner,
             serverStarted,
             new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)));
-        var application = new DatabaseApplication(options);
-        options.StartServicesConcurrently = true;
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        builder.AddService(new ControlledStartService(serviceStarted, releaseService));
+        builder.AddEngine(engine);
+        var application = builder.Build();
+        builder.Options.StartServicesConcurrently = true;
 
         Task start = ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await serviceStarted.Task.WaitAsync(DatabaseHostTestHarness.Timeout());
@@ -69,24 +72,22 @@ public class DatabaseApplicationTests
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context: post-build option mutation cannot change hosted registries")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context: a server attached after build cannot change hosted registries")]
     public async Task Application_WhenRegistriesAreMutatedAfterBuild_ShouldRetainBuiltSnapshot()
     {
         var log = new List<string>();
         var registeredEngine = new RecordingEngine();
-        var registeredServer = new RecordingServer(log, "registered", registeredEngine);
-        var lateEngine = new RecordingEngine();
-        var lateServer = new RecordingServer(log, "late", lateEngine);
-        var options = new DatabaseApplicationOptions();
-        options.Engines.Add(registeredEngine);
-        options.Servers.Add(registeredServer);
-        var application = new DatabaseApplication(options);
+        RecordingServer? registeredServer = null;
+        registeredEngine.AddServer(owner => registeredServer = new RecordingServer(log, "registered", owner));
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        builder.AddEngine(registeredEngine);
+        var application = builder.Build();
 
-        options.Engines.Add(lateEngine);
-        options.Servers.Add(lateServer);
+        registeredEngine.AddServer(owner => new RecordingServer(log, "late", owner));
+        Should.Throw<InvalidOperationException>(() => builder.AddEngine(new RecordingEngine("late")));
 
         application.Context.Engines.ShouldBe([registeredEngine]);
-        application.Context.Servers.ShouldBe([registeredServer]);
+        application.Context.Servers.ShouldBe([registeredServer.ShouldNotBeNull()]);
 
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
@@ -111,24 +112,22 @@ public class DatabaseApplicationTests
         result.Rows[0].ShouldBe([1, "ada"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: the application is composition-only — one endpoint service per server, nothing else")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: the application is composition-only — its reopen service, then one endpoint service per server, nothing else")]
     public async Task Application_Defaults_ShouldComposeOneEndpointServicePerServer()
     {
         // Arrange: the harness composes one SQL server; the engine takes no part in
         // the host lifecycle (it is a data machine, operational from creation).
         await using var harness = await DatabaseHostTestHarness.CreateAsync();
 
-        // Assert: exactly one hosted service — the endpoint wrapper for the server.
-        int count = 0;
-        foreach (IHostService _ in harness.Application.Context.HostedServices)
-        {
-            count++;
-        }
+        // Assert: exactly two hosted services — the module's own reopen service (owner decision
+        // 22), started before the servers, and the endpoint wrapper for the server.
+        var services = new List<IHostService>(harness.Application.Context.HostedServices);
 
-        count.ShouldBe(1);
+        services.Count.ShouldBe(2);
+        services[0].ShouldBeSameAs(harness.Application.Context.ReopenService);
         harness.Application.Context.Servers.ShouldHaveSingleItem().ShouldBeSameAs(harness.Server);
         harness.Application.Context.Engines.ShouldHaveSingleItem().ShouldBeSameAs(harness.Engine);
-        harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);
+        harness.Server.Engine.ShouldBeSameAs(harness.Engine);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: services start before the servers and stop after they drain")]
@@ -138,13 +137,16 @@ public class DatabaseApplicationTests
         // order of lifecycle calls made by the host (servers are per-model, so an
         // application may run several).
         var log = new List<string>();
-        var options = new DatabaseApplicationOptions();
+        var sql = new RecordingEngine("sql");
+        var documents = new RecordingEngine("documents");
+        sql.AddServer(owner => new RecordingServer(log, "sql-server", owner));
+        documents.AddServer(owner => new RecordingServer(log, "docs-server", owner));
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        builder.AddService(new RecordingService(log, "provisioner"));
+        builder.AddEngine(sql);
+        builder.AddEngine(documents);
 
-        options.Services.Add(new RecordingService(log, "provisioner"));
-        options.Servers.Add(new RecordingServer(log, "sql-server", new RecordingEngine("sql")));
-        options.Servers.Add(new RecordingServer(log, "docs-server", new RecordingEngine("documents")));
-
-        var application = new DatabaseApplication(options);
+        var application = builder.Build();
 
         // Act
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
@@ -184,9 +186,11 @@ public class DatabaseApplicationTests
     {
         var bindStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var options = new DatabaseApplicationOptions();
-        options.Servers.Add(new ControlledStartServer(bindStarted, accepting));
-        var application = new DatabaseApplication(options);
+        var engine = new RecordingEngine();
+        engine.AddServer(owner => new ControlledStartServer(owner, bindStarted, accepting));
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        builder.AddEngine(engine);
+        var application = builder.Build();
 
         Task start = ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await bindStarted.Task.WaitAsync(DatabaseHostTestHarness.Timeout());
@@ -201,37 +205,36 @@ public class DatabaseApplicationTests
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
     }
 
-    private sealed class ControlledStartServer : IDatabaseServer
+    private sealed class ControlledStartServer : DatabaseServer
     {
-        private readonly RecordingServer _inner = new([], "controlled");
         private readonly TaskCompletionSource<bool> _bindStarted;
         private readonly TaskCompletionSource<bool> _accepting;
 
         /// <summary>Initializes a new instance of the <see cref="ControlledStartServer"/> class.</summary>
+        /// <param name="engine">The engine the server fronts, which attaches it.</param>
         /// <param name="bindStarted">Completed when the host begins starting the server.</param>
         /// <param name="accepting">Completes the server start once it is set, signalling the server is accepting.</param>
         public ControlledStartServer(
+            DatabaseEngine engine,
             TaskCompletionSource<bool> bindStarted,
             TaskCompletionSource<bool> accepting)
+            : base(engine)
         {
             _bindStarted = bindStarted;
             _accepting = accepting;
         }
 
-        public IDatabaseServerContext Context => _inner.Context;
+        public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
 
-        public Task StartAsync(CancellationToken cancellationToken = default)
+        internal void Accept() => _accepting.TrySetResult(true);
+
+        protected override Task StartCoreAsync(CancellationToken cancellationToken)
         {
             _bindStarted.TrySetResult(true);
             return _accepting.Task.WaitAsync(cancellationToken);
         }
 
-        public Task StopAsync(CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-        internal void Accept() => _accepting.TrySetResult(true);
+        protected override Task StopCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class ControlledStartService : IHostService

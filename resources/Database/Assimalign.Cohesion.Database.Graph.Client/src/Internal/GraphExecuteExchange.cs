@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
 internal sealed class GraphExecuteExchange
-    : IDatabaseProtocolExchange<GraphResultSet>
+    : DatabaseProtocolExchange<GraphResultSet>
 {
     private readonly GraphProtocolExecuteMessage _request;
 
@@ -20,17 +20,14 @@ internal sealed class GraphExecuteExchange
     /// <param name="statement">The graph statement to execute.</param>
     /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
     public GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+        : base(GraphProtocol.Family)
     {
         _request = GraphRequest.Create(statement, parameters);
     }
 
-    public ProtocolMessageFamily Family => GraphProtocol.Family;
-    public bool IsResponseComplete { get; private set; }
-
-    public async ValueTask<GraphResultSet> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
-        CancellationToken cancellationToken = default)
+    protected override async ValueTask<GraphResultSet> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
+        CancellationToken cancellationToken)
     {
-        IsResponseComplete = false;
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)GraphProtocolMessageType.Execute, _request.Encode()),
             cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -62,13 +59,15 @@ internal sealed class GraphExecuteExchange
                 case (byte)GraphProtocolMessageType.ResultComplete:
                     if (frame.Payload.Length != sizeof(long)) { throw new ProtocolException("Malformed graph result completion."); }
                     var complete = GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    IsResponseComplete = true;
                     return new GraphResultSet(columns, rows, complete.AffectedCount);
                 case (byte)ProtocolMessageType.Error:
                     var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
                     // The ready-loop statement rejection is terminal only before result output.
-                    IsResponseComplete = !hasHeader &&
-                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure;
+                    if (!hasHeader &&
+                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+                    {
+                        MarkResponseComplete();
+                    }
                     throw new DatabaseClientException(error.Code, error.Message);
                 default:
                     throw new ProtocolException($"Unexpected {frame.Type} frame in a graph execute exchange.");

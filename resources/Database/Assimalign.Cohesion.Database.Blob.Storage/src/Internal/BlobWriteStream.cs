@@ -10,9 +10,9 @@ internal sealed class BlobWriteStream : Stream
 {
     private readonly BlobStorage _storage;
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly Func<BlobContentReference, ValueTask> _complete;
-    private readonly Func<ValueTask> _abort;
+    private readonly Func<Exception, ValueTask> _abort;
     private readonly CancellationToken _lifetimeCancellation;
     private readonly byte[] _buffer = new byte[BlobChunkCodec.PayloadSize];
     private int _buffered;
@@ -28,14 +28,14 @@ internal sealed class BlobWriteStream : Stream
     /// <param name="coordinator">The transaction coordinator that applies each chunk write as a statement.</param>
     /// <param name="context">The transaction the upload writes under.</param>
     /// <param name="complete">The callback invoked with the content reference once the upload is published.</param>
-    /// <param name="abort">The callback invoked when the upload fails.</param>
+    /// <param name="abort">The callback invoked with the failure when the upload fails.</param>
     /// <param name="lifetimeCancellation">The token that cancels the upload for the lifetime of its owner.</param>
     public BlobWriteStream(
         BlobStorage storage,
         TransactionCoordinator coordinator,
-        ITransactionContext context,
+        TransactionContext context,
         Func<BlobContentReference, ValueTask> complete,
-        Func<ValueTask> abort,
+        Func<Exception, ValueTask> abort,
         CancellationToken lifetimeCancellation)
     {
         _storage = storage;
@@ -76,9 +76,9 @@ internal sealed class BlobWriteStream : Stream
                 }
             }
         }
-        catch
+        catch (Exception error)
         {
-            FailAsync().AsTask().GetAwaiter().GetResult();
+            FailAsync(error).AsTask().GetAwaiter().GetResult();
             throw;
         }
     }
@@ -108,9 +108,9 @@ internal sealed class BlobWriteStream : Stream
                 }
             }
         }
-        catch
+        catch (Exception error)
         {
-            await FailAsync().ConfigureAwait(false);
+            await FailAsync(error).ConfigureAwait(false);
             throw;
         }
     }
@@ -127,9 +127,9 @@ internal sealed class BlobWriteStream : Stream
         {
             await PersistBufferAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception error)
         {
-            await FailAsync().ConfigureAwait(false);
+            await FailAsync(error).ConfigureAwait(false);
             throw;
         }
     }
@@ -147,7 +147,7 @@ internal sealed class BlobWriteStream : Stream
         var record = BlobChunkCodec.Encode(_buffer.AsSpan(0, _buffered), _context.Sequence);
         ulong next = await _coordinator.ApplyStatementAsync(_context, bracket =>
         {
-            var (page, slot) = _storage.InsertChunk(bracket, _context.Sequence, record);
+            var (page, slot) = _storage.InsertChunk(bracket, record);
             ulong location = BlobStorage.PackLocation(page, slot);
             if (_tail != 0)
             {
@@ -185,7 +185,7 @@ internal sealed class BlobWriteStream : Stream
         }
     }
 
-    private async ValueTask FailAsync()
+    private async ValueTask FailAsync(Exception error)
     {
         if (_failed)
         {
@@ -193,7 +193,7 @@ internal sealed class BlobWriteStream : Stream
         }
 
         _failed = true;
-        await _abort().ConfigureAwait(false);
+        await _abort(error).ConfigureAwait(false);
     }
 
     private async ValueTask CompleteAsync()
@@ -215,9 +215,9 @@ internal sealed class BlobWriteStream : Stream
             _lifetimeCancellation.ThrowIfCancellationRequested();
             await _complete(new BlobContentReference(_head, _length, ~_checksum)).ConfigureAwait(false);
         }
-        catch
+        catch (Exception error)
         {
-            await FailAsync().ConfigureAwait(false);
+            await FailAsync(error).ConfigureAwait(false);
             throw;
         }
     }

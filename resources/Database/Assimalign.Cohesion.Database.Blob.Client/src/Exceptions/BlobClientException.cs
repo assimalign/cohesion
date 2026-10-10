@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Blob.Client;
 public sealed class BlobClientException : DatabaseException
 {
     /// <summary>Creates an exception preserving a server or client-local wire error code.</summary>
-    /// <param name="code">The server code, or ProtocolViolation/Internal for a local failure.</param>
+    /// <param name="code">The server code; ConnectionFailure for a failed dial; ProtocolViolation or Internal for another local failure.</param>
     /// <param name="message">The failure description.</param>
     /// <param name="innerException">The underlying failure, when available.</param>
     public BlobClientException(ProtocolErrorCode code, string message, Exception? innerException = null)

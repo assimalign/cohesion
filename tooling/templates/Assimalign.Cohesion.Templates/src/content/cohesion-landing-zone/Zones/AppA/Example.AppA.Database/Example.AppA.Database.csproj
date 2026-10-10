@@ -1,7 +1,8 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Database">
   <!--
-    The appa-database resource: an ordinary executable whose Program.cs defines the schema, triggers, functions and
-    custom types in C# through the Database builder and serves the wire protocol on endpoint `db`. Only orchestration-facing
+    The appa-database resource: an ordinary executable whose Program.cs declares its SQL engine, the database it owns
+    and that database's schema in C#, provisions it while the application is built, and serves the wire protocol on
+    endpoint `db`. Only orchestration-facing
     facts live here. Sdk.Database defaults: endpoint `db` (cohesion-db 5740), endpoint `admin` (http 8081, private —
     the Database default control plane: readiness http:/readyz, liveness http:/livez, commands), mount `data` (Volume,
     /data, 10Gi), workload StatefulSet, replicas 1.
@@ -13,6 +14,10 @@
          Database default control plane — readiness, health, observed endpoints, stop, Database commands — owned by
          Database.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <!-- Keeps the Database engine's EventSource tracing in a NativeAOT or trimmed publish, so dotnet-trace,
+         dotnet-counters and the log forwarder still receive its events. The .NET SDK default removes EventSource
+         support from such builds; delete this line to accept that default. -->
+    <EventSourceSupport>true</EventSourceSupport>
   </PropertyGroup>
   <ItemGroup>
     <CohesionSetting Include="Database:Durability" Type="Assimalign.Cohesion.Database.Storage.StorageCommitDurability" Default="synchronous" />

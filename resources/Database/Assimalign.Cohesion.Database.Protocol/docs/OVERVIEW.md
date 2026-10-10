@@ -7,7 +7,8 @@ Model packages own their message identifiers and payload codecs.
 - ProtocolFrameHeader / ProtocolFrame: five-byte envelope and payload.
 - ProtocolMessageType: core handshake, error, liveness, and termination identifiers.
 - ProtocolMessageFamily / ProtocolChannel: immutable endpoint family and validated I/O.
-- ProtocolFraming: raw stream reader/writer factories for mechanism and diagnostics.
+- ProtocolFrameReader / ProtocolFrameWriter: the abstract frame reader and writer; their
+  `Create` factories return the raw stream reader and writer for mechanism and diagnostics.
 - ProtocolPayload: big-endian integers and length-prefixed UTF-8 string primitives.
 - ProtocolVersion: deployed-compatible version 1.0 negotiation.
 - ProtocolErrorCode / ProtocolException: shared error taxonomy and framing failures.

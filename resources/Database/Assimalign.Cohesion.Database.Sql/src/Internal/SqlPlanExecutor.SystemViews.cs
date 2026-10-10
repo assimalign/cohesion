@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -15,11 +16,15 @@ internal sealed partial class SqlPlanExecutor
 {
     private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.View.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
-        foreach (var values in EnumerateSystemViewRows(plan.View, statement, cancellationToken))
+        // The function catalog is the engine's, frozen at its build: no catalog snapshot describes it.
+        var rows = plan.View.Name == SqlSystemViews.FunctionsView
+            ? EnumerateFunctionRows(_definitions.Functions.Catalog)
+            : EnumerateSystemViewRows(plan.View, statement, cancellationToken);
+        foreach (var values in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
             statement.Metrics.RecordsExamined++;
@@ -193,8 +198,59 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    /// <summary>
+    /// The rows of <c>COHESION_SCHEMA.FUNCTIONS</c>: every function of the engine's catalog, one row
+    /// per overload in registration order (the standard library first), then the special forms,
+    /// which are grammar and have no signature (owner decision 66 of 2026-10-09). An aggregate's
+    /// VOLATILITY is NULL: it is never folded or admitted in a CHECK.
+    /// </summary>
+    private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog)
+    {
+        foreach (var function in catalog)
+        {
+            var types = new StringBuilder();
+            var parameters = function.Parameters;
+            for (int index = 0; index < parameters.Count; index++)
+            {
+                types.Append(index == 0 ? string.Empty : ", ").Append(parameters[index].Name);
+            }
+            if (function.VariadicParameter is { } variadic)
+            {
+                types.Append(parameters.Count == 0 ? string.Empty : ", ").Append(variadic.Name).Append(" ...");
+            }
+            else if (parameters.Count == 0 && function.Kind == SqlFunctionKind.Aggregate)
+            {
+                types.Append('*'); // a parameterless aggregate is called as name(*), as COUNT(*) is
+            }
+
+            yield return
+            [
+                function.Name,
+                function.Kind == SqlFunctionKind.Scalar ? "SCALAR" : "AGGREGATE",
+                types.ToString(),
+                (long)parameters.Count,
+                function.ReturnType.Name,
+                // An aggregate is never folded and never admitted in a CHECK, so volatility does not
+                // apply to it: NULL, rather than a VOLATILE that would call SUM non-deterministic.
+                function.Kind == SqlFunctionKind.Aggregate ? null : function.Volatility switch
+                {
+                    SqlFunctionVolatility.Immutable => "IMMUTABLE",
+                    SqlFunctionVolatility.Stable => "STABLE",
+                    _ => "VOLATILE",
+                },
+                function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput ? "RETURNS NULL ON NULL INPUT" : "CALLED ON NULL INPUT",
+                SqlStandardLibrary.Contains(function) ? "YES" : "NO",
+            ];
+        }
+
+        foreach (string form in SqlStandardLibrary.SpecialForms)
+        {
+            yield return [form, "SPECIAL FORM", null, null, null, null, null, "YES"];
+        }
+    }
+
     private static IEnumerable<(string Name, IReadOnlyList<string> Columns, bool IsPrimaryKey)> SystemKeyConstraints(
-        ISqlCatalogSnapshot catalog, SqlCatalogTable table)
+        SqlCatalogSnapshot catalog, SqlCatalogTable table)
     {
         var indexes = catalog.GetIndexes(table.ObjectId);
         // Catalogs created before primary indexes existed still retain the
@@ -221,21 +277,9 @@ internal sealed partial class SqlPlanExecutor
     private static string SystemOwner(DatabaseObjectOwner owner)
         => owner == DatabaseObjectOwner.Schema ? "Schema" : "Adhoc";
 
-    private static string? SystemColumnDefault(SqlCatalogColumn column)
-    {
-        if (column.DefaultLiteral is not string literal)
-        {
-            return null;
-        }
-        return column.Type.Type switch
-        {
-            DatabaseType.String or DatabaseType.Json or DatabaseType.Date or DatabaseType.Time or
-                DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Guid
-                => "'" + literal.Replace("'", "''", StringComparison.Ordinal) + "'",
-            DatabaseType.Boolean when bool.TryParse(literal, out bool value) => value ? "TRUE" : "FALSE",
-            _ => literal,
-        };
-    }
+    // The catalog stores a DEFAULT as the canonical SQL text of its literal, which is the
+    // default clause ISO's COLUMN_DEFAULT reports.
+    private static string? SystemColumnDefault(SqlCatalogColumn column) => column.DefaultLiteral;
 
     // The catalog retains shared type identities rather than lexical SQL
     // aliases. Report a canonical SQL name; size and precision have ISO columns.

@@ -9,6 +9,7 @@ using Xunit;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
@@ -68,6 +69,28 @@ public sealed class GraphServerProtocolTests
         });
     }
 
+    /// <summary>
+    /// A Cypher arrow is a parse failure that names GQL0008 on either exchange (#1139), and the
+    /// session stays ready: the next Ping gets Pong.
+    /// </summary>
+    /// <param name="paths">Whether the statement goes through ExecutePaths rather than Execute.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: a Cypher arrow is a GQL0008 parse failure and keeps the session ready")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_CypherArrow_ShouldReturnGql0008AndKeepSessionReady(bool paths)
+    {
+        await WithServerAsync(async (channel, token) =>
+        {
+            await WriteAsync(channel, (ProtocolMessageType)(paths ? GraphProtocolMessageType.ExecutePaths : GraphProtocolMessageType.Execute),
+                GraphProtocolExecuteMessage.Create("MATCH (a)-->(b) RETURN a").Encode(), token);
+            var error = await ReadErrorAsync(channel, token);
+            error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            error.Message.ShouldContain("GQL0008", Case.Sensitive);
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+        });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: malformed parameter components terminate either exchange")]
     [InlineData(false)]
     [InlineData(true)]
@@ -84,11 +107,109 @@ public sealed class GraphServerProtocolTests
         });
     }
 
-    private static async Task WithServerAsync(Func<ProtocolChannel, CancellationToken, Task> action)
+    /// <summary>
+    /// After a failed statement aborts the explicit transaction, both exchanges are refused with a
+    /// COHDBG007 ExecutionFailure and the session stays ready (#1188). An empty statement is no
+    /// statement, so it is a ParseFailure that leaves an active transaction untouched. The wire has
+    /// no transaction control, so the test opens the transaction on the server's engine session.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Server: an aborted transaction refuses both exchanges and keeps the session ready")]
+    public async Task Execute_AbortedTransaction_ShouldRefuseBothExchangesAndKeepSessionReady()
+    {
+        await WithServerAsync(async (server, channel, token) =>
+        {
+            var transaction = await server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull()
+                .BeginTransactionAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("INSERT (:Pending)").Encode(), token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create(" ").Encode(), token);
+            (await ReadErrorAsync(channel, token)).Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            transaction.State.ShouldBe(TransactionState.Active);
+
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("MATCH (n) RETURN m.name").Encode(), token);
+            (await ReadErrorAsync(channel, token)).Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+            foreach (var type in new[] { GraphProtocolMessageType.Execute, GraphProtocolMessageType.ExecutePaths })
+            {
+                await WriteAsync(channel, (ProtocolMessageType)type, GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
+                var refused = await ReadErrorAsync(channel, token);
+                refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+                refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+                refused.Message.ShouldContain("COHDBG001", Case.Sensitive);
+            }
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+
+            transaction.State.ShouldBe(TransactionState.Faulted);
+            await transaction.RollbackAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
+                GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
+            var complete = await ReadAsync(channel, token);
+            complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
+            GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(0);
+        });
+    }
+
+    /// <summary>
+    /// A read of an unknown label or relationship type succeeds on the wire (#1228). Protocol 1.0
+    /// has no frame for a successful statement's warning, so the exchange is byte-for-byte an empty
+    /// result: Execute answers ResultHeader then ResultComplete, ExecutePaths answers PathsComplete
+    /// with a zero count, and the next Ping gets Pong, so no other frame was sent. The explicit
+    /// transaction stays active and commits the earlier write.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Server: a read of an unknown label is an empty result and keeps the transaction")]
+    public async Task Execute_UnknownTokenRead_ShouldReturnEmptyResultAndKeepTransaction()
+    {
+        await WithServerAsync(async (server, channel, token) =>
+        {
+            var databaseSession = server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
+            var transaction = await databaseSession.BeginTransactionAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("INSERT (:Pending {name: 'p'})").Encode(), token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+
+            foreach (string statement in new[] { "MATCH (n:Missing) RETURN n.name", "MATCH (a)-[r:Missing]->(b) RETURN r.name" })
+            {
+                await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                    GraphProtocolExecuteMessage.Create(statement).Encode(), token);
+                var header = await ReadAsync(channel, token);
+                header.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
+                GraphProtocolResultHeaderMessage.Decode(header.Payload.Span).Columns.ShouldHaveSingleItem();
+                var complete = await ReadAsync(channel, token);
+                complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+                GraphProtocolResultCompleteMessage.Decode(complete.Payload.Span).AffectedCount.ShouldBe(-1);
+            }
+            foreach (string statement in new[] { "MATCH (n:Missing) RETURN n", "MATCH p = (a)-[r:Missing]->(b) RETURN p" })
+            {
+                await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
+                    GraphProtocolExecuteMessage.Create(statement).Encode(), token);
+                var complete = await ReadAsync(channel, token);
+                complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
+                GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(0);
+            }
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+
+            transaction.State.ShouldBe(TransactionState.Active);
+            await transaction.CommitAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("MATCH (n:Pending) RETURN n.name").Encode(), token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultRow);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+        });
+    }
+
+    private static Task WithServerAsync(Func<ProtocolChannel, CancellationToken, Task> action)
+        => WithServerAsync((_, channel, token) => action(channel, token));
+
+    private static async Task WithServerAsync(Func<GraphDatabaseServer, ProtocolChannel, CancellationToken, Task> action)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await engine.CreateDatabaseAsync("graph", token);
         var listener = new InMemoryConnectionListener();
         await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });
@@ -100,7 +221,7 @@ public sealed class GraphServerProtocolTests
         (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
         await WriteAsync(channel, ProtocolMessageType.AuthenticateResponse, [], token);
         (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Ready);
-        await action(channel, token);
+        await action(server, channel, token);
     }
 
     private static async Task WriteAsync(ProtocolChannel channel, ProtocolMessageType type, byte[] payload, CancellationToken token)

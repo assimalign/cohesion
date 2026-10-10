@@ -1,13 +1,10 @@
 using System;
 using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
-using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
@@ -18,35 +15,6 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class StorageWorkerSupportTests
 {
-    /// <summary>
-    /// Minimal concrete storage exposing the journal for durability assertions.
-    /// </summary>
-    private sealed class WorkerStorage : Storage
-    {
-        private WorkerStorage(StorageStream data, StorageStream journal)
-            : base(data, journal, new StorageStream(new MemoryStream())) { }
-
-        public override StorageModel Model => StorageModel.Sql;
-
-        public IStorageJournal Wal => WriteAheadLog;
-
-        public static WorkerStorage Create(Stream data, Stream journal)
-            => Create(data, new SimulatedDurableFileHandle(journal));
-
-        public static WorkerStorage Create(Stream data, IFileSystemFileHandle journal)
-        {
-            var storage = new WorkerStorage(new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(journal));
-            storage.InitializeNew((Name)"worker-support");
-            return storage;
-        }
-
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ReadOnlySpan<byte> data)
-            => InsertRecord(transaction, data);
-
-        public (PageId PageId, int SlotIndex) Insert(ReadOnlySpan<byte> data)
-            => InsertRecord(data);
-    }
-
     [Fact(DisplayName = "Cohesion Test [Storage] - GroupCommit: A grouped commit without a worker self-helps to durability")]
     public void Commit_GroupedWithoutWorker_ShouldSelfHelpToDurability()
     {
@@ -71,39 +39,8 @@ public sealed class StorageWorkerSupportTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - GroupCommit: A grouped commit waits for the worker's flush and completes when it lands")]
-    public async Task Commit_GroupedWithWorker_ShouldCompleteWhenWorkerFlushes()
-    {
-        // Arrange: a window long enough that self-help cannot kick in during the
-        // test, so completion is attributable to the worker's flush alone.
-        using var storage = WorkerStorage.Create(new MemoryStream(), new MemoryStream());
-        storage.CommitDurability = StorageCommitDurability.Grouped;
-        storage.GroupCommitWindow = TimeSpan.FromSeconds(20);
-
-        using var pending = new ManualResetEventSlim();
-        storage.OnCommitPending = pending.Set;
-
-        // Act: commit on a background thread; it registers on the gate and waits.
-        Task commit = Task.Run(() =>
-        {
-            using var transaction = storage.BeginTransaction();
-            storage.Insert(transaction, new byte[] { 4, 5, 6 });
-            transaction.Commit();
-        });
-
-        pending.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
-
-        // The commit is registered but not acknowledged: nothing has flushed yet.
-        await Task.Delay(200);
-        commit.IsCompleted.ShouldBeFalse();
-
-        // The "flush worker" performs one group flush pass.
-        storage.FlushPendingCommits().ShouldBeTrue();
-
-        // Assert: the flush released the committer, and its records are durable.
-        (await Task.WhenAny(commit, Task.Delay(TimeSpan.FromSeconds(10)))).ShouldBe(commit);
-        await commit;
-        storage.Wal.DurableLsn.ShouldBe(storage.Wal.LastLsn);
-    }
+    public void Commit_GroupedWithWorker_ShouldCompleteWhenWorkerFlushes()
+        => GroupedCommitScenario.AssertCompletesOnWorkerFlush();
 
     [Fact(DisplayName = "Cohesion Test [Storage] - GroupCommit: FlushPendingCommits is a no-op when nothing is pending")]
     public void FlushPendingCommits_WithNothingPending_ShouldReturnFalse()

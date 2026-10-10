@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -13,7 +14,7 @@ internal sealed partial class SqlPlanner
     /// slots. Shared by stored, joined, virtual and grouped relations. Compound
     /// numeric expressions remain expressions: ORDER BY 1 + 1 is not ordinal 2.
     /// </summary>
-    private static Dictionary<SqlExpression, int> BindOrderByProjections(
+    private Dictionary<SqlExpression, int> BindOrderByProjections(
         SqlSelectExpression select, IReadOnlyList<SqlProjection> projections, int sourceColumnCount)
     {
         var aliases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -70,6 +71,7 @@ internal sealed partial class SqlPlanner
 
         void BindAliases(SqlExpression expression)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             if (expression is SqlColumnReferenceExpression { TableAlias: null, SchemaName: null } reference
                 && aliases.TryGetValue(reference.ColumnName, out int index))
             {

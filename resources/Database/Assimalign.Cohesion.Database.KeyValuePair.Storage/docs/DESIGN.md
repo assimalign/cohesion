@@ -34,7 +34,7 @@ contract: the engine runs `TransactionRecovery.Analyze` over the recovered journ
 before any truncation (classification reads lifecycle records a checkpoint would
 destroy) and checkpoints through its coordinator once analysis completes.
 
-`WriteAheadJournal` publicly returns the existing `IStorageJournal` contract so a
+`WriteAheadJournal` publicly returns the storage's `StorageJournal` so a
 transaction coordinator can share the storage's actual WAL. This is the same
 composition seam exposed by Documents, Graph, and Blob storage and replaces the
 shipped-to-shipped friend grant. Storage retains ownership of the journal; callers

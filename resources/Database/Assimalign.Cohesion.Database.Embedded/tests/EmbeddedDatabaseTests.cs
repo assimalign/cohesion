@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Embedded.Tests;
 
@@ -71,53 +74,50 @@ public class EmbeddedDatabaseTests
         disposalOrder.ShouldBe(new[] { "second", "first" });
     }
 
-    private sealed class TestDatabaseEngine : IDatabaseEngine
+    // An engine of the root base that implements only the protected cores (database-area.md,
+    // "Test doubles"): it has no databases, and its disposal core records the disposal order.
+    private sealed class TestDatabaseEngine : DatabaseEngine
     {
         private readonly List<string>? _disposalOrder;
 
         public TestDatabaseEngine(string name, EngineModel model, List<string>? disposalOrder = null)
+            : base(name, model)
         {
-            Name = name;
-            Model = model;
             _disposalOrder = disposalOrder;
         }
 
-        public string Name { get; }
+        public override IReadOnlyList<DatabaseName> OfflineDatabases => [];
 
-        public EngineState State => EngineState.Running;
-
-        public EngineModel Model { get; }
-
-        public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
-
-        public IReadOnlyList<IDatabaseServer> Servers => [];
-
-        public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
-        public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
-        public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
-        public IAsyncEnumerable<IDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
+        protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
-        public bool TryGetDatabase(DatabaseName name, out IDatabase database)
+        protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
         {
-            database = null!;
+            database = null;
             return false;
         }
 
-        public void Dispose()
+        protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
         {
-            _disposalOrder?.Add(Name);
         }
 
-        public ValueTask DisposeAsync()
+        protected override StorageOfflineException? GetOfflineErrorCore(DatabaseName name) => null;
+
+        protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
+            => false;
+
+        protected override ValueTask DisposeAsyncCore()
         {
-            Dispose();
+            _disposalOrder?.Add(Name);
             return ValueTask.CompletedTask;
         }
     }

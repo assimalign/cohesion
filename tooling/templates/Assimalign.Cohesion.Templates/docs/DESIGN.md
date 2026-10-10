@@ -181,14 +181,32 @@ and retain the concrete application with await using before calling RunAsync. Th
 execution and disposal available while the root interfaces carry only area contracts.
 
 
-## Phase 29 Database composition migration
+## Database composition
 
-Database programs now capture `AddSql((context, engine) => ...)` intent, register
-the server through that engine builder's deferred `AddServer` factory, and
-identify deferred provisioning with the engine name. One application Build
-constructs and owns the engine and nested server; the program disposes the
-application. The standalone template still uses its ordinary local data path.
-This migration changes composition only; it adds no ApplicationModel declarations,
-manifests or resource control planes. Template acceptance explicitly builds all
-five emitted Database programs because resources-only changes do not trigger the
-Templates workflow.
+The five Database programs (the standalone `cohesion-database`, the app's `Acme.Database` and the
+landing zone's three) use the three composition levels of the engine extensibility design (B1,
+owner decisions 49 to 59 and 72 of 2026-10-09). `builder.AddSql("<engine>", sql => ...)` names the
+engine once; inside it, `sql.Options` holds the engine's values, `sql.AddServer(server =>
+server.Listen(...))` lets the model create the server (no cast to `SqlDatabaseEngine`), and
+`sql.AddDatabase("<database>", database => database.Schema(...))` declares the one database the
+engine owns and its schema. The engine's build, inside application `Build()`, creates the
+database on first start and applies the schema before any server accepts, so the program has no
+separate provisioning call. The programs declare no principals: the SQL engine refuses schema
+principals at build (`COHSQLP001`) until principal and grant DDL exists (decision 58), which is why
+the earlier templates failed on their first start. Every record member a table stores is
+declared: `Key`, `Column`, `Index` and `References` each add the member they select as a column and
+nothing else does, so a member left out of the declaration is no column, and the first write that
+names it fails. The standalone template reads
+`Database:DataPath` and `Database:Endpoint` from configuration, with its local data directory and
+`cohesion-db://localhost:5740` as defaults; the enabled programs read the mount and endpoint from
+their generated `Resource` accessors.
+
+This changes composition only; it adds no ApplicationModel declarations, manifests or resource
+control planes. Template acceptance explicitly builds all five emitted Database programs because
+resources-only changes do not trigger the Templates workflow, and it starts the generated
+`cohesion-database` once: a self-contained build for the host RID runs with a free loopback
+endpoint, and the test waits for the server to accept a connection, which happens only after the
+engine's build has provisioned `customers`. It then writes a full `Customer` row and reads it back
+over the wire with the SQL client, and checks the database's files exist. The test project
+references the SQL client from source for that; the generated programs stay package-only
+consumers.

@@ -76,8 +76,24 @@ Kind 3 contains this complete header followed by raw JSON bytes:
 
 Payload capacity is `SlottedPage.MaxRecordSize - 28` (8,064 bytes with the current kernel page
 layout). A packed location stores the page in its high 48 bits and slot in its low 16 bits:
-`(pageId << 16) | slotIndex`. Zero cannot identify a content record. Chunk pages use owner
-`writerSequence | (1UL << 63)`, isolating streaming content from owner-zero metadata scans.
+`(pageId << 16) | slotIndex`. Zero cannot identify a content record.
+
+Every chunk page carries one content owner, `1UL << 63` (`DocumentStorage.ContentOwner`), which
+keeps streaming content out of the owner-zero catalog and owner-one tree-registration scans. All
+transactions share it. The kernel fills only an owner's current write page, so the former owner
+per writer, `writerSequence | (1UL << 63)`, gave every transaction a fresh page: a 180-byte
+document took a whole 8 KiB page, 1.009 pages per auto-commit put, and one six-second pace test on
+a fast CI runner grew an in-memory data file past 2 GiB. With the shared owner, about 38 such
+documents fill a page. PostgreSQL keeps its insert target per relation for the same reason: it
+tries the cached target block, then the free-space map, then the last page "to avoid
+one-tuple-per-page syndrome" (`src/backend/access/heap/hio.c:571-596`,
+`RelationGetBufferForTuple`). Visibility needs no page of its own: it is per record, through the
+writer and deleter stamps, and every chunk bracket runs under the coordinator's apply gate. A page
+holds chunks of many transactions, so it returns to the free-space map only when the last of them
+is undone or purged. A full 8,064-byte chunk still takes a page alone, and the partly filled page it
+passes over is not revisited until the kernel tracks partial free space (Database.Storage
+DESIGN.md, "Per-owner record chains"). A file written with per-writer owners needs no migration:
+owner tags only group pages, so its chunks stay readable and its pages simply take no new chunks.
 
 The catalog stores the first location, total byte length, and IEEE CRC-32 over all content bytes.
 CRC-32 uses polynomial `0xedb88320`, initial state `0xffffffff`, and final bitwise complement.
@@ -90,7 +106,7 @@ empty byte chain, but catalog publication rejects it as a document.
 A write buffers one chunk, inserts it in a shared physical statement bracket, and links the
 previous tail in that same bracket. All chunks and the later metadata version carry the same
 logical writer. They remain invisible until the transaction commits. Replacing/deleting content
-tombstones every old chunk through `ITransactionContext`; snapshot readers retain the old chain
+tombstones every old chunk through `TransactionContext`; snapshot readers retain the old chain
 until the shared purge bound allows reclamation. The shared version ledger removes all created
 chunks and clears old tombstones on rollback. A crash uses the shared recovery scrub instead of
 an in-memory undo ledger. Tests flush the journal ordinarily and clone serialized memory-stream

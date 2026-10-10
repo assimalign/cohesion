@@ -14,11 +14,15 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql.Client;
+using Assimalign.Cohesion.Database.Sql.Schema;
 
 using Shouldly;
+
+using SqlDatabase = Assimalign.Cohesion.Database.Sql.SqlDatabase;
+using SqlDatabaseEngine = Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine;
+using SqlDatabaseEngineOptions = Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineOptions;
 
 using Xunit;
 
@@ -63,8 +67,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     {
         // Arrange
         string manifestPath = GetSampleGeneratedPath("resource.json");
-        string schemaPath = GetSampleGeneratedPath("database.schema.json");
-        string schemaHashPath = GetSampleGeneratedPath("database.schema.sha256");
+        string schemaPath = GetSampleGeneratedPath(Path.Combine("database", "sample.schema.json"));
+        string schemaHashPath = GetSampleGeneratedPath(Path.Combine("database", "sample.schema.sha256"));
 
         // Act
         ResourceManifest manifest = ResourceManifest.Load(manifestPath);
@@ -180,6 +184,11 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         {
             await ((IApplicationGateway)secondGateway).StopAsync(cancellation.Token);
         }
+
+        // Assert: the schema the SDK compiled at build time is the one the host's engine build
+        // provisioned and recorded (§5.7 of the engine extensibility design). With the host
+        // stopped, an embedded engine over the same files finds it already applied.
+        await AssertRecordedSchemaMatchesSdkAsync(cancellation.Token);
     }
 
     private LocalGateway CreateGateway()
@@ -375,8 +384,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         Uri endpoint,
         CancellationToken cancellationToken)
     {
-        await using ISqlClient client = CreateSqlClient(endpoint);
-        await using ISqlConnection connection = await client.ConnectAsync(cancellationToken);
+        await using SqlClient client = CreateSqlClient(endpoint);
+        await using SqlConnection connection = await client.ConnectAsync(cancellationToken);
 
         await connection.ExecuteAsync(
             "INSERT INTO orders (Id, Item) VALUES (1, 'widget'), (2, 'gadget')",
@@ -393,8 +402,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         Uri endpoint,
         CancellationToken cancellationToken)
     {
-        await using ISqlClient client = CreateSqlClient(endpoint);
-        await using ISqlConnection connection = await client.ConnectAsync(cancellationToken);
+        await using SqlClient client = CreateSqlClient(endpoint);
+        await using SqlConnection connection = await client.ConnectAsync(cancellationToken);
 
         SqlResultSet rows = await connection.QueryAsync(
             "SELECT Id, Item FROM orders ORDER BY Id",
@@ -403,7 +412,34 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         rows[1].GetString("Item").ShouldBe("gadget");
     }
 
-    private static ISqlClient CreateSqlClient(Uri endpoint)
+    private async Task AssertRecordedSchemaMatchesSdkAsync(CancellationToken cancellationToken)
+    {
+        SqlCompiledSchema compiled = SqlCompiledSchemaSerializer.Read(
+            GetSampleGeneratedPath(Path.Combine("database", "sample.schema.json")));
+        File.ReadAllText(GetSampleGeneratedPath(Path.Combine("database", "sample.schema.sha256")))
+            .Trim()
+            .ShouldBe(compiled.Hash);
+
+        // The SQL engine keeps a database as <root>/<database>/<database>.dat; the gateway
+        // materialized the data mount somewhere under its state directory.
+        string dataFile = Directory
+            .EnumerateFiles(_statePath, "sample.dat", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem();
+        string rootPath = Path.GetDirectoryName(Path.GetDirectoryName(dataFile)!)!;
+
+        await using SqlDatabaseEngine engine = SqlDatabaseEngine.Create("sample-sql", new SqlDatabaseEngineOptions
+        {
+            RootPath = rootPath,
+        });
+        SqlDatabase sample = await engine.OpenDatabaseAsync("sample", cancellationToken);
+        SqlSchemaMigrationResult result = await sample.ApplySchemaAsync(compiled, cancellationToken);
+
+        result.WasAlreadyApplied.ShouldBeTrue("the host recorded a schema other than the one the SDK compiled");
+        result.FromHash.ShouldBe(compiled.Hash);
+        result.OperationCount.ShouldBe(0);
+    }
+
+    private static SqlClient CreateSqlClient(Uri endpoint)
     {
         return SqlClient.Create(new SqlClientOptions
         {
@@ -465,8 +501,10 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
         while (directory is not null)
         {
+            // In a linked worktree '.git' is a file, not a directory; either marks the checkout's
+            // root, and stopping at the first keeps a worktree from reading its parent's fixture.
             if (File.Exists(Path.Combine(directory.FullName, "global.json")) &&
-                Directory.Exists(Path.Combine(directory.FullName, ".git")))
+                Path.Exists(Path.Combine(directory.FullName, ".git")))
             {
                 return directory.FullName;
             }

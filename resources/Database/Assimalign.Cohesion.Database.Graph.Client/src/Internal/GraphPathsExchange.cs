@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
 internal sealed class GraphPathsExchange
-    : IDatabaseStreamingExchange
+    : DatabaseStreamingExchange
 {
     private readonly GraphProtocolExecuteMessage _request;
     private ProtocolFrame _initial;
@@ -22,14 +22,13 @@ internal sealed class GraphPathsExchange
     /// <param name="statement">The graph statement whose matched paths are streamed.</param>
     /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
     public GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+        : base(GraphProtocol.Family)
     {
         _request = GraphRequest.Create(statement, parameters);
     }
 
-    public ProtocolMessageFamily Family => GraphProtocol.Family;
-
-    public async ValueTask OpenAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
-        CancellationToken cancellationToken = default)
+    protected override async ValueTask OpenCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
+        CancellationToken cancellationToken)
     {
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths, _request.Encode()),
             cancellationToken).ConfigureAwait(false);
@@ -38,8 +37,8 @@ internal sealed class GraphPathsExchange
         ValidateFrame(_initial);
     }
 
-    public async ValueTask CopyToAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
-        Stream destination, CancellationToken cancellationToken = default)
+    protected override async ValueTask CopyToCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
+        Stream destination, CancellationToken cancellationToken)
     {
         ProtocolFrame frame = _initial;
         _initial = default;
@@ -81,7 +80,7 @@ internal sealed class GraphPathsExchange
         }
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(IProtocolFrameReader reader, CancellationToken cancellationToken)
+    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
     {
         ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("The server closed the connection before completing the graph path exchange.");

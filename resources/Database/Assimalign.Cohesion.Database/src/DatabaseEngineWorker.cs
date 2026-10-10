@@ -1,71 +1,592 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Internal;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The guided base class for engine-owned background workers: implements the
-/// blocking pump loop so an implementer only supplies the trigger wait and the
-/// per-pass work.
+/// The base of every engine-owned background worker: implements the blocking pump loop,
+/// the loop's failure handling, and the per-database failure record, so an implementer only
+/// supplies the trigger wait and the per-pass work.
 /// </summary>
 /// <remarks>
-/// The public contract (<see cref="IDatabaseEngineWorker"/>) includes the engine's
-/// pump seam. Members on this base — <see cref="Run"/>, <see cref="RunIteration"/>,
-/// <see cref="WaitForTrigger"/> — exist for the <em>owning engine</em>, which spawns
-/// one dedicated thread (or timer loop) per worker at engine creation and cancels it
-/// on dispose. Nothing outside the engine may pump a worker; a worker never runs
-/// twice concurrently because exactly one engine-internal scheduler drives it.
-/// The default <see cref="Run"/> loop alternates <see cref="WaitForTrigger"/> and
-/// <see cref="RunIteration"/> until cancellation. Timer-paced workers inherit the
-/// default trigger (wait out <see cref="Interval"/>); signal-driven workers (a
-/// group-commit flusher woken by pending commits) override
+/// <para>
+/// The public surface includes the engine's pump seam.
+/// Members on this base — <see cref="Run"/>, <see cref="RunIteration"/>,
+/// <see cref="WaitForTrigger"/> — exist for the <em>owning engine</em>, which spawns one dedicated
+/// thread per worker at engine creation and cancels it on dispose. The <see cref="Run"/> loop
+/// alternates <see cref="WaitForTrigger"/> and <see cref="RunIteration"/> until cancellation; passes
+/// never overlap, even when a test calls <see cref="RunIteration"/> beside the engine's thread.
+/// Timer-paced workers inherit the default trigger (wait out <see cref="Interval"/>);
+/// signal-driven workers (a group-commit flusher woken by pending commits) override
 /// <see cref="WaitForTrigger"/> with their own wake condition.
+/// </para>
+/// <para>
+/// <b>One database's failure holds back that database only (#1268).</b> A pass visits the engine's
+/// databases one by one. A failure that concerns one database is caught by the pass and reported
+/// (<see cref="ReportFailure(string, Exception)"/>): the database gets a failure record, and the
+/// passes that follow skip it (<see cref="BeginDatabase"/> returns false) until
+/// <see cref="FailureBackoff"/> has passed, while every other database keeps the worker's full
+/// pace. A repeated page write failure is therefore retried about once a second, and the
+/// checkpoints of the engine's healthy databases never wait for it. The backoff bounds how often a
+/// database is tried, not how long one try blocks: a pass may hand a database's work to a thread of
+/// its own and leave it running, as the engines' checkpointers do with a checkpoint that hangs in
+/// its device, reporting it unfinished until a later pass settles it. The record ends with the first
+/// pass that finishes that database's work, and is forgotten when a pass no longer visits the
+/// database (it was dropped or closed, or went offline), or at once when the owning engine takes the
+/// database offline or the database closes. PostgreSQL's background writer,
+/// checkpointer and WAL writer recover the same way: each catches an error per cycle, reports it,
+/// releases what the cycle held and sleeps a second before its loop continues ("A write error is
+/// likely to be repeated", <c>src/backend/postmaster/bgwriter.c:154-205</c>,
+/// <c>checkpointer.c:286-346</c>, <c>walwriter.c:147-193</c>). Neo4j's checkpoint scheduler
+/// counts consecutive failures and clears them on the next success
+/// (<c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84</c>).
+/// </para>
+/// <para>
+/// A failure that ends a whole pass — its work threw, or its trigger wait did — is the worker's
+/// own: it is recorded, and <see cref="Run"/> sleeps <see cref="FailureBackoff"/> before the next
+/// trigger wait, so a pass that fails at once cannot spin. The next pass that runs to its end
+/// clears it.
+/// </para>
+/// <para>
+/// <b>A streak's clock runs while its database is busy</b> (owner decision 42 review). A pass that
+/// skips a database still backing off, or reports its work unfinished
+/// (<see cref="ReportUnfinished"/>: a storage busy with a transaction, a checkpoint deferred or
+/// still running on its lane), neither ends the database's streak nor stops its clock: the window is
+/// measured from the streak's first failed pass to the pass that reports the latest failure, so
+/// three failures with a long busy stretch between them reach the window as surely as three in a
+/// row would. Only a pass that finishes the database's work ends the streak.
+/// </para>
+/// <para>
+/// <see cref="Fault"/> is set while the worker holds any failure, so the owning engine reports
+/// <see cref="EngineState.Faulted"/> exactly while one of its workers has a database, or a pass,
+/// whose failure it has not yet worked off. Every failure and every recovery is also written to
+/// the <c>Assimalign.Cohesion.Database</c> event source (<c>docs/EVENT_SOURCES.md</c>).
+/// </para>
+/// <para>
+/// A failure the worker cannot recover from is not the worker's to report: a storage that went
+/// offline (a failed durable flush, #1243, a failed drain of its journal's append buffer, #1252, or
+/// a failed file header write, #1268) takes its database offline, the
+/// workers skip that database from then on, and the engine lists it in
+/// <see cref="DatabaseEngine.OfflineDatabases"/>. Only an <see cref="OutOfMemoryException"/>
+/// leaves the loop, and the thread with it, which ends the process: nothing ends the loop silently.
+/// </para>
+/// <para>
+/// <b>A failure that persists takes its database offline</b> (owner decisions 25 of 2026-10-06 and
+/// 42 of 2026-10-07). A database's failures are a streak, from the first pass that reported one to
+/// the pass that finishes the database's work again, counted per pass and timed from its first
+/// failed pass on the owning engine's clock. When a checkpoint, page write-back, write-ahead flush
+/// or version-purge worker's streak on one database has lasted the owning engine's
+/// <see cref="DatabaseEngine.WorkerFailureWindow"/> and spans at least its
+/// <see cref="DatabaseEngine.WorkerFailureMinimumPasses"/> failed passes, the engine takes that
+/// database offline with the <see cref="StorageOfflineCause"/> that names the worker
+/// (<see cref="StorageOfflineCause.CheckpointFailures"/> and its siblings), so every later
+/// operation on it is refused with the model's offline code until it is reopened, and the
+/// workers skip it from then on. A worker can also give up on a database for a reason of its own
+/// (<see cref="TakeDatabaseOffline"/>): the engines' checkpointer does when a database's journal
+/// passes the engine's cap while its checkpoints keep failing. Neo4j panics a database after ten
+/// consecutive checkpoint failures the same way
+/// (<c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75</c>).
+/// The window is time, not a count, so a worker that visits a failing database seldom (a deferred
+/// undo on its doubling backoff) gives up about as soon as one that visits it every second; the
+/// minimum of passes makes even the slowest retry before it gives up. The model engines' version
+/// purge retries a failed full pass a <see cref="FailureBackoff"/> after it failed, not at its next
+/// maintenance interval (owner decision 46).
+/// The engine takes the database offline on a thread-pool thread, never the worker's, so a pass
+/// that gives up on a database whose journal is held by a hung fsync goes on to the others at once
+/// (<see cref="DatabaseEngine"/>, "The give-up never runs on a worker's thread"). Once the database
+/// is offline the engine ends the worker's record of it, so the worker's <see cref="Fault"/> no
+/// longer holds it. Index-maintenance workers never take a database offline: their work costs
+/// space, not durability. A worker no engine owns (a test calling <see cref="RunIteration"/> on a
+/// free worker) counts its failures and gives up on nothing.
+/// </para>
+/// <para>
+/// <b>The engine reads which databases are failing</b> (owner decision 42). A failure the worker
+/// holds is a database's (its record, until a pass finishes that database's work, and a give-up of
+/// it the engine's leaf could not complete) or the worker's own (a pass or trigger wait that failed
+/// as a whole); the owning engine reports the first per database
+/// (<see cref="DatabaseEngine.HasFailingWorker"/>, for the kinds whose failures can take a database
+/// offline) and the second as the engine's (<see cref="DatabaseEngine.HasEngineWideFailure"/>), so
+/// a server refuses only the database whose work fails.
+/// </para>
+/// <para>
+/// <b>Release belongs to the engine that owns the worker.</b> A worker belongs to one engine: the
+/// engine claims it when it attaches it, before the worker's pump starts, and refuses a worker
+/// another engine owns or one already released. It releases the worker once it stopped the
+/// worker's pump: it runs the worker's <see cref="DisposeAsyncCore"/> (a checkpointer ends the
+/// checkpoints it left running on their lanes before the storages close). The worker has no
+/// public disposal: a worker no engine owns, a product a builder refused, is released through
+/// the engine base's protected <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, which
+/// does nothing on a worker an engine owns, so code holding <see cref="DatabaseEngine.Workers"/>
+/// cannot release a worker whose pump still runs. Either path reaches
+/// <see cref="DisposeAsyncCore"/> once.
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual.
+/// <see cref="Name"/>, <see cref="Kind"/> and <see cref="Interval"/> are fixed by the protected
+/// constructor, so reading them makes no virtual call; a leaf supplies only the per-pass work
+/// (<see cref="RunIterationCore"/>) and, when it is signal-driven, its trigger wait
+/// (<see cref="WaitForTrigger"/>), and, when it holds work of its own, its release
+/// (<see cref="DisposeAsyncCore"/>): the two lifecycle hooks. The leaves live in the model
+/// assemblies, so the constructor is <c>protected</c>. The release hook landed with the last
+/// model's phase-4 PR (#1260, row 7), in place of the engines' <see cref="IDisposable"/> and
+/// <see cref="IAsyncDisposable"/> type tests; it is internal to the root, reached by the owning
+/// engine's disposal and, for a worker no engine owns, by the engine base's protected release.
+/// </para>
 /// </remarks>
-public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+public abstract class DatabaseEngineWorker
 {
+    // The worker's lifetime: free until an engine claims it at attach, then owned by that engine,
+    // and released once, by the owning engine (ReleaseAsync) or, for a worker no engine owns, by
+    // the engine base's protected release (ReleaseUnownedAsync).
+    private const int free = 0;
+    private const int owned = 1;
+    private const int released = 2;
+
+    private readonly string _name;
+    private readonly DatabaseEngineWorkerKind _kind;
+    private readonly TimeSpan _interval;
+    private int _lifetime = free;
+
+    // The engine that claimed the worker: the one that gives up on a database whose failures
+    // persist (owner decision 25). Null while the worker is free.
+    private DatabaseEngine? _owner;
+
+    // Held for the whole of a pass: passes never overlap.
+    private readonly object _passGate = new();
+
+    // Guards everything below; never held across the pass's own work or an event write, so a
+    // pass may report from any thread it starts.
+    private readonly object _sync = new();
+    private readonly Dictionary<string, DatabaseFailure> _databases = new(StringComparer.OrdinalIgnoreCase);
+
+    // How many database failure records the worker holds, published on every change so the engine's
+    // per-database read skips the lock while the worker holds none.
+    private int _failingDatabases;
+    private long _pass;
+    private bool _passRunning;
+    private bool _passReported;
+    private long _order;
+
+    // The failure of a whole pass (its work threw) or of a trigger wait, and how many in a row;
+    // cleared by the next pass that runs to its end.
+    private Exception? _passFault;
+    private int _passFailures;
+
+    // The failure of the owning engine's give-up on a database for this worker, which the leaf
+    // could not complete, and how many in a row: held in Fault, but one database's, not the
+    // worker's as a whole (owner decision 42 review); cleared by the next pass that runs to its end.
+    private Exception? _giveUpFault;
+    private int _giveUpFailures;
+
+    private Exception? _fault;
+    private int _consecutiveFailures;
+    private long _failureCount;
+
     /// <summary>
-    /// Initializes a new worker.
+    /// Initializes a new worker with its diagnostic name, its role and its cadence.
     /// </summary>
-    protected DatabaseEngineWorker() { }
-
-    /// <inheritdoc />
-    public abstract string Name { get; }
-
-    /// <inheritdoc />
-    public abstract DatabaseEngineWorkerKind Kind { get; }
-
-    /// <inheritdoc />
-    public abstract TimeSpan Interval { get; }
+    /// <param name="name">
+    /// The diagnostic name, unique within the owning engine (for example <c>sql-engine/checkpoint</c>).
+    /// </param>
+    /// <param name="kind">The worker's role.</param>
+    /// <param name="interval">
+    /// The cadence of the pump: the bound on how long the default trigger waits between passes. The
+    /// owning engine validates the option it comes from; the value is fixed for the worker's life.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+    protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _name = name;
+        _kind = kind;
+        _interval = interval;
+    }
 
     /// <summary>
-    /// Runs the worker's pump until <paramref name="cancellationToken"/> is signaled:
-    /// waits for the worker's trigger (its <see cref="Interval"/> or an internal work
-    /// signal), performs one pass, and repeats. Blocking — the owning engine calls
-    /// this on the dedicated thread it spawns for the worker.
+    /// Gets how long a database whose failure was reported is skipped before the worker tries it
+    /// again, and how long <see cref="Run"/> sleeps after a pass that failed as a whole: one second,
+    /// PostgreSQL's sleep after a background worker error
+    /// (<c>src/backend/postmaster/checkpointer.c:340-345</c>), so a failure that repeats is retried
+    /// at most about once a second instead of as fast as the trigger fires.
+    /// </summary>
+    public static TimeSpan FailureBackoff { get; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Gets the diagnostic name of this worker, unique within its engine
+    /// (for example <c>sql-engine/checkpoint</c>), as the constructor set it.
+    /// </summary>
+    public string Name => _name;
+
+    /// <summary>
+    /// Gets the role of this worker, as the constructor set it.
+    /// </summary>
+    public DatabaseEngineWorkerKind Kind => _kind;
+
+    /// <summary>
+    /// Gets the cadence of the worker's pump: the bound on how long the default trigger waits
+    /// between passes, as the constructor set it from the owning engine's options.
+    /// </summary>
+    public TimeSpan Interval => _interval;
+
+    /// <summary>
+    /// Gets the newest failure the worker still holds, or null while it is healthy: the failure of
+    /// a pass that failed as a whole, or else the newest failure of a database the worker has not
+    /// yet completed its work for.
+    /// </summary>
+    /// <remarks>
+    /// One exception, never a list: a worker that fails on several databases holds the newest
+    /// failure only. A database's failure stops being reported once a pass completes that
+    /// database's work, whatever the worker's other databases do.
+    /// </remarks>
+    public Exception? Fault => Volatile.Read(ref _fault);
+
+    /// <summary>
+    /// Gets the number of failed passes — passes that reported a failure, or failed as a whole —
+    /// since the worker last held no failure; zero while it is healthy.
+    /// </summary>
+    public int ConsecutiveFailures => Volatile.Read(ref _consecutiveFailures);
+
+    /// <summary>
+    /// Gets the number of passes that failed over the worker's life (diagnostics).
+    /// </summary>
+    public long FailureCount => Interlocked.Read(ref _failureCount);
+
+    /// <summary>
+    /// Runs the worker's pump until <paramref name="cancellationToken"/> is signaled: waits for the
+    /// worker's trigger (its <see cref="Interval"/> or an internal work signal), performs one pass,
+    /// and repeats; after a pass that failed as a whole, or a trigger wait that failed, it sleeps
+    /// <see cref="FailureBackoff"/> first. Blocking — the owning engine calls this on the dedicated
+    /// thread it spawns for the worker.
     /// </summary>
     /// <param name="cancellationToken">Signaled to stop the pump.</param>
-    public virtual void Run(CancellationToken cancellationToken)
+    /// <remarks>
+    /// Returns only when <paramref name="cancellationToken"/> is signaled. A failure never ends the
+    /// loop; only an <see cref="OutOfMemoryException"/> escapes it. A failure one database's work
+    /// reported does not slow the loop: that database alone is skipped until its backoff passed.
+    /// </remarks>
+    public void Run(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            WaitForTrigger(cancellationToken);
+            try
+            {
+                WaitForTrigger(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A trigger that cannot be waited for fails the worker as a whole: recorded, then
+                // the backoff paces the next attempt so a wait that fails at once cannot spin.
+                RecordWholeFailure(exception);
+                BackOff(cancellationToken);
+                continue;
+            }
 
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
-            RunIteration(cancellationToken);
+            bool threw;
+            try
+            {
+                RunPass(cancellationToken, out threw);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            // Only a pass that failed as a whole backs the loop off: a failure one database's
+            // work reported holds back that database alone (BeginDatabase).
+            if (threw)
+            {
+                BackOff(cancellationToken);
+            }
         }
     }
 
     /// <summary>
-    /// Performs one bounded pump pass without waiting. Called by <see cref="Run"/>;
-    /// the owning engine may also tick it directly from its own timer loop.
+    /// Performs one bounded pump pass without waiting, and records its outcome: a pass that threw
+    /// sets <see cref="Fault"/> until a later pass runs to its end; a database whose failure the
+    /// pass reported keeps it until a later pass completes that database's work. Called by
+    /// <see cref="Run"/>; the owning engine, or a test, may also call it directly, and a call made
+    /// while another pass runs waits for that pass to end.
     /// </summary>
     /// <param name="cancellationToken">Cancels the pass.</param>
+    /// <returns>True when the pass neither threw nor reported a failure; false when it did.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is signaled mid-pass.</exception>
-    public abstract void RunIteration(CancellationToken cancellationToken);
+    /// <remarks>
+    /// The pass's own failures never propagate: they are recorded, and the caller reads the
+    /// outcome from the return value and <see cref="Fault"/>. Only cancellation and an
+    /// <see cref="OutOfMemoryException"/> are thrown. A pass that only skipped a database still
+    /// backing off reported nothing new, so it returns true while <see cref="Fault"/> stays set.
+    /// </remarks>
+    public bool RunIteration(CancellationToken cancellationToken) => RunPass(cancellationToken, out _);
+
+    /// <summary>
+    /// Performs the worker's per-pass work: one bounded pass over the engine's open databases.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the pass.</param>
+    /// <remarks>
+    /// <para>
+    /// For each database it visits, the pass first asks <see cref="BeginDatabase"/>, and skips the
+    /// database when that returns false. A failure that concerns one database is caught and
+    /// reported (<see cref="ReportFailure(string, Exception)"/>), and the pass goes on to the next
+    /// database, so one database's failure never stops another's work. Work left for later without
+    /// a failure (a storage busy with a transaction, a checkpoint deferred to a running statement)
+    /// is reported with <see cref="ReportUnfinished"/>, which keeps an earlier failure of that
+    /// database recorded until the work is done. Anything the pass lets escape fails the pass as a
+    /// whole.
+    /// </para>
+    /// <para>
+    /// A database the pass does not begin is forgotten: its failure record ends with the pass. A
+    /// pass therefore begins every open, online database, and skips an offline one without
+    /// beginning it: the engine reports an offline database, not the worker.
+    /// </para>
+    /// </remarks>
+    protected abstract void RunIterationCore(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Begins the current pass's work on <paramref name="database"/>, and reports whether the pass
+    /// should do it: false while a failure reported for the database is still backing off
+    /// (<see cref="FailureBackoff"/>, or the delay its report named). The pass then skips the
+    /// database, whose failure stays recorded.
+    /// </summary>
+    /// <param name="database">The database's name, unique among the engine's open databases.</param>
+    /// <returns>True when the pass should do the database's work; false to skip it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="database"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">No pass is running.</exception>
+    protected bool BeginDatabase(string database)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+
+        lock (_sync)
+        {
+            ThrowIfNoPassLocked();
+            if (!_databases.TryGetValue(database, out var record))
+            {
+                return true;
+            }
+
+            record.VisitedPass = _pass;
+            if (Stopwatch.GetTimestamp() < record.RetryAt)
+            {
+                record.UnfinishedPass = _pass;
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Records a failure of <paramref name="database"/> the current pass caught and moved past:
+    /// the pass counts as failed, the worker's <see cref="Fault"/> is set at once, and later passes
+    /// skip the database for <see cref="FailureBackoff"/>. Once the database's failures have lasted
+    /// the owning engine's <see cref="DatabaseEngine.WorkerFailureWindow"/> across at least its
+    /// <see cref="DatabaseEngine.WorkerFailureMinimumPasses"/> failed passes in a row, the engine
+    /// takes it offline (owner decisions 25 and 42).
+    /// </summary>
+    /// <param name="database">The database's name.</param>
+    /// <param name="exception">The failure.</param>
+    /// <returns>
+    /// How many passes in a row have failed on the database, this one included: what the engine's
+    /// minimum of passes is compared with.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="database"/> or <paramref name="exception"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">No pass is running.</exception>
+    protected int ReportFailure(string database, Exception exception)
+        => ReportFailure(database, exception, FailureBackoff);
+
+    /// <summary>
+    /// Records a failure of <paramref name="database"/> the current pass caught and moved past, and
+    /// skips the database for <paramref name="retryAfter"/>: zero for work that paces its own
+    /// retries (deferred undo, whose coordinator schedules each retry, #1226). Once the database's
+    /// failures have lasted the owning engine's <see cref="DatabaseEngine.WorkerFailureWindow"/>
+    /// across at least its <see cref="DatabaseEngine.WorkerFailureMinimumPasses"/> failed passes in
+    /// a row, the engine takes it offline (owner decisions 25 and 42).
+    /// </summary>
+    /// <param name="database">The database's name.</param>
+    /// <param name="exception">The failure.</param>
+    /// <param name="retryAfter">How long later passes skip the database.</param>
+    /// <returns>
+    /// How many passes in a row have failed on the database, this one included: what the engine's
+    /// minimum of passes is compared with.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="database"/> or <paramref name="exception"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="retryAfter"/> is negative.</exception>
+    /// <exception cref="InvalidOperationException">No pass is running.</exception>
+    /// <remarks>
+    /// <para>
+    /// A pass that reports several failures of one database (one per file set of the database)
+    /// counts once: the minimum is on failed passes, as Neo4j's count is on failed checkpoint runs.
+    /// </para>
+    /// <para>
+    /// The window is measured on the owning engine's clock from the streak's first failed pass,
+    /// the report that started the database's record, so the engine gives up on the first failed
+    /// pass at least the window after it that also reaches the minimum of passes: about the window
+    /// at every worker's pace. A pass that finishes the database's work ends the streak, and the
+    /// next failure starts a new one.
+    /// </para>
+    /// <para>
+    /// The give-up is queued to the thread pool (<see cref="DatabaseEngine"/>, "The give-up never
+    /// runs on a worker's thread"), so this returns at once; the database goes offline a moment
+    /// later, and its failure record backs it off until then.
+    /// </para>
+    /// </remarks>
+    protected int ReportFailure(string database, Exception exception, TimeSpan retryAfter)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(exception);
+        ArgumentOutOfRangeException.ThrowIfLessThan(retryAfter, TimeSpan.Zero);
+
+        // The owner's clock times the streak; a worker no engine owns times it on the system clock
+        // and gives up on nothing.
+        var engine = Volatile.Read(ref _owner);
+        int failures;
+        TimeSpan persisted;
+        DatabaseFailure? record;
+        lock (_sync)
+        {
+            ThrowIfNoPassLocked();
+            if (!_databases.TryGetValue(database, out record))
+            {
+                record = new DatabaseFailure(engine?.TimeProvider ?? TimeProvider.System);
+                _databases.Add(database, record);
+                Volatile.Write(ref _failingDatabases, _databases.Count);
+            }
+
+            record.Fault = exception;
+            if (record.FailedPass != _pass)
+            {
+                record.Failures++;
+            }
+
+            record.Order = ++_order;
+            record.VisitedPass = _pass;
+            record.FailedPass = _pass;
+            long now = Stopwatch.GetTimestamp();
+            double delay = retryAfter.TotalSeconds * Stopwatch.Frequency;
+            record.RetryAt = delay >= long.MaxValue - now ? long.MaxValue : now + (long)delay;
+            failures = record.Failures;
+            persisted = record.Persisted;
+            _passReported = true;
+            Volatile.Write(ref _fault, exception);
+        }
+
+        DatabaseEventSource.Log.WorkerFailed(this, database, exception, failures);
+
+        if (engine is not null
+            && failures >= engine.WorkerFailureMinimumPasses
+            && persisted >= engine.WorkerFailureWindow
+            && GetFailureCause(_kind) is { } cause)
+        {
+            string reason = string.Create(
+                CultureInfo.InvariantCulture,
+                $"the engine's {Describe(_kind)} worker '{_name}' failed on database '{database}' on {failures} passes in a row over {persisted.TotalSeconds:0.###} s, at least the engine's window of {engine.WorkerFailureWindow.TotalSeconds:0.###} s");
+
+            // Only while the streak that reached the window is still recorded. A give-up an earlier
+            // report of this streak queued may have run since the lock above was released, taken
+            // the database offline and ended the record; a request built from the ended streak
+            // would ask again, for a database already offline or, once reopened, a new instance
+            // (owner decision 42 review). The engine only queues the give-up and returns at once
+            // (it takes the storages offline on a thread-pool thread, whose end of the record
+            // waits for this lock), so holding the lock here holds no pass.
+            lock (_sync)
+            {
+                if (_databases.TryGetValue(database, out var current) && ReferenceEquals(current, record))
+                {
+                    engine.GiveUpOnDatabase(this, database, cause, reason, exception);
+                }
+            }
+        }
+
+        return failures;
+    }
+
+    /// <summary>
+    /// Takes <paramref name="database"/> offline through the owning engine because this worker's
+    /// work on it cannot go on (owner decision 25 of 2026-10-06), with a cause that names why: the
+    /// engines' checkpointer gives up on a database whose journal passed the engine's cap while its
+    /// checkpoints kept failing (<see cref="StorageOfflineCause.JournalSizeLimit"/>). The database
+    /// goes offline exactly as after a failed durable flush (#1243): every later operation on it is
+    /// refused with the model's offline code until it is reopened. The engine does it on a
+    /// thread-pool thread, never this worker's, so the call returns at once.
+    /// </summary>
+    /// <param name="database">The database's name.</param>
+    /// <param name="cause">
+    /// The cause, one an engine gives up with: <see cref="StorageOfflineCause.CheckpointFailures"/>,
+    /// <see cref="StorageOfflineCause.PageWriteBackFailures"/>,
+    /// <see cref="StorageOfflineCause.WriteAheadFlushFailures"/>,
+    /// <see cref="StorageOfflineCause.VersionPurgeFailures"/> or
+    /// <see cref="StorageOfflineCause.JournalSizeLimit"/>.
+    /// </param>
+    /// <param name="reason">What the engine gives up on, naming this worker, for the storage's message.</param>
+    /// <param name="failure">The worker's last failure on the database.</param>
+    /// <returns>
+    /// True when the engine queued the give-up; false when no engine owns the worker, the engine
+    /// is being disposed, or a give-up of the database is queued or running already. A queued
+    /// give-up takes nothing offline when the database is not open in the engine, is closing or is
+    /// offline already by the time it runs.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="database"/> or <paramref name="failure"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="reason"/> is null, empty or white space.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="cause"/> is a failure of a storage's own device operations, which only the
+    /// storage reports.
+    /// </exception>
+    protected bool TakeDatabaseOffline(string database, StorageOfflineCause cause, string reason, Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        ArgumentNullException.ThrowIfNull(failure);
+        if (cause is < StorageOfflineCause.CheckpointFailures or > StorageOfflineCause.JournalSizeLimit)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cause), cause,
+                "A worker gives up on a database only with a cause an engine owns: a worker whose work kept failing, or the journal size limit.");
+        }
+
+        return Volatile.Read(ref _owner) is { } engine && engine.GiveUpOnDatabase(this, database, cause, reason, failure);
+    }
+
+    /// <summary>
+    /// Reports that the current pass left work of <paramref name="database"/> for a later pass
+    /// without a failure: a storage busy with a transaction, a checkpoint a running statement took
+    /// over. A failure reported for the database earlier stays recorded until a pass finishes its
+    /// work; a database with no failure record is unaffected.
+    /// </summary>
+    /// <param name="database">The database's name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="database"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">No pass is running.</exception>
+    protected void ReportUnfinished(string database)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+
+        lock (_sync)
+        {
+            ThrowIfNoPassLocked();
+            if (_databases.TryGetValue(database, out var record))
+            {
+                record.VisitedPass = _pass;
+                record.UnfinishedPass = _pass;
+            }
+        }
+
+        DatabaseEventSource.Log.WorkerDatabaseUnfinished(this, database);
+    }
 
     /// <summary>
     /// Blocks until the worker's next pump pass should run. The default waits out
@@ -75,4 +596,430 @@ public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
     /// <param name="cancellationToken">Signaled to stop the pump; the wait must return promptly.</param>
     protected virtual void WaitForTrigger(CancellationToken cancellationToken)
         => cancellationToken.WaitHandle.WaitOne(Interval);
+
+    /// <summary>
+    /// Releases what the worker holds once its pump has stopped: work it left running on threads of
+    /// its own (a checkpoint on its lane), which must end before the engine closes its storages.
+    /// Called once: by the owning engine's disposal, or, for a worker no engine owns (a product a
+    /// builder refused), by <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>. The default
+    /// releases nothing.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Claims the worker for the engine attaching it, before the engine starts its pump: from now on
+    /// only that engine releases it, and it is the engine that gives up on a database whose failures
+    /// persist. Called by <see cref="DatabaseEngine"/> under its attach lock.
+    /// </summary>
+    /// <param name="owner">The engine attaching the worker.</param>
+    /// <returns>
+    /// <see langword="true"/> when the worker was free; <see langword="false"/> when another engine
+    /// owns it or it was released.
+    /// </returns>
+    internal bool TryClaim(DatabaseEngine owner)
+    {
+        if (Interlocked.CompareExchange(ref _lifetime, owned, free) != free)
+        {
+            return false;
+        }
+
+        Volatile.Write(ref _owner, owner);
+        return true;
+    }
+
+    /// <summary>
+    /// Returns a claimed worker to free when its engine's attach failed after the claim (its pump
+    /// thread did not start), so the builder that refused it can still release it.
+    /// </summary>
+    internal void Unclaim()
+    {
+        Volatile.Write(ref _owner, null);
+        Interlocked.CompareExchange(ref _lifetime, free, owned);
+    }
+
+    /// <summary>
+    /// Releases the worker for the engine that owns it, once the engine stopped the worker's pump:
+    /// the worker's <see cref="DisposeAsyncCore"/>, unless it already ran.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal ValueTask ReleaseAsync()
+        => Interlocked.Exchange(ref _lifetime, released) == released ? ValueTask.CompletedTask : DisposeAsyncCore();
+
+    /// <summary>
+    /// Releases a worker no engine owns: the worker's <see cref="DisposeAsyncCore"/>, once. Does
+    /// nothing on a worker an engine owns, whose engine releases it after it stopped the worker's
+    /// pump, and nothing after the first release.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal ValueTask ReleaseUnownedAsync()
+        => Interlocked.CompareExchange(ref _lifetime, released, free) == free ? DisposeAsyncCore() : ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Ends the failure record of <paramref name="database"/>, if the worker holds one, and
+    /// publishes the worker's state: the owning engine calls it once it took the database offline,
+    /// and whenever a database of the engine closes (owner decision 25). The engine reports an
+    /// offline database itself, and a database opened again counts its failures from one.
+    /// </summary>
+    /// <param name="database">The database's name.</param>
+    /// <remarks>
+    /// Safe beside a running pass: a failure the pass reports for the database afterwards starts a
+    /// new record, which the next pass that does not visit the database ends.
+    /// </remarks>
+    internal void ForgetDatabase(string database)
+    {
+        lock (_sync)
+        {
+            if (_databases.Remove(database))
+            {
+                Volatile.Write(ref _failingDatabases, _databases.Count);
+                PublishFaultLocked();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the worker's failures can take a database offline: true for a checkpoint, page
+    /// write-back, write-ahead flush or version-purge worker; false for an index-maintenance worker,
+    /// whose failures cost space, not durability (owner decision 25). Read by
+    /// <see cref="DatabaseEngine.HasFailingWorker"/> (owner decision 42 review).
+    /// </summary>
+    internal bool TakesDatabasesOffline => GetFailureCause(_kind) is not null;
+
+    /// <summary>
+    /// Gets whether the worker holds a failure of <paramref name="database"/>: its record, from the
+    /// failure to the pass that finishes the database's work, or until the engine ends it (owner
+    /// decision 42). Read by <see cref="DatabaseEngine.HasFailingWorker"/>.
+    /// </summary>
+    /// <param name="database">The database's name.</param>
+    /// <returns>True while the worker holds a failure of the database.</returns>
+    internal bool HoldsFailure(string database)
+    {
+        // A worker holding no database failure, the usual case, answers without its lock.
+        if (Volatile.Read(ref _failingDatabases) == 0)
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            return _databases.ContainsKey(database);
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the worker holds a failure of its own, no database's: a pass that failed as a
+    /// whole or a trigger wait that failed, until its next pass runs to its end (owner decision 42).
+    /// Read by <see cref="DatabaseEngine.HasEngineWideFailure"/>. A give-up of one database that the
+    /// engine's leaf could not complete is that database's, not the worker's as a whole: the
+    /// database's record still names it.
+    /// </summary>
+    internal bool HoldsOwnFailure => Volatile.Read(ref _passFault) is not null;
+
+    /// <summary>
+    /// Records that the owning engine's give-up on <paramref name="database"/> failed in the leaf
+    /// (owner decision 25): held in <see cref="Fault"/>, so the engine stays
+    /// <see cref="EngineState.Faulted"/>, until the worker's next pass runs to its end. It concerns
+    /// that database alone (owner decision 42 review): the database's failure record stays, so
+    /// <see cref="DatabaseEngine.HasFailingWorker"/> keeps naming it and its next failure asks the
+    /// engine again, while <see cref="DatabaseEngine.HasEngineWideFailure"/> does not read it.
+    /// </summary>
+    /// <param name="database">The database the engine could not take offline.</param>
+    /// <param name="exception">The leaf's failure.</param>
+    internal void RecordGiveUpFailure(string database, Exception exception)
+    {
+        int giveUpFailures;
+        lock (_sync)
+        {
+            _giveUpFault = exception;
+            giveUpFailures = ++_giveUpFailures;
+            PublishFaultLocked();
+        }
+
+        DatabaseEventSource.Log.WorkerFailed(this, database, exception, giveUpFailures);
+        DatabaseEventSource.Log.WorkerGiveUpFailed(this, database, exception);
+    }
+
+    private bool RunPass(CancellationToken cancellationToken, out bool threw)
+    {
+        lock (_passGate)
+        {
+            long pass;
+            lock (_sync)
+            {
+                pass = ++_pass;
+                _passRunning = true;
+                _passReported = false;
+            }
+
+            long started = DatabaseEventSource.Log.WorkerPassStart(this, pass);
+
+            // Error until the pass settles, so a pass that escapes still closes its activity.
+            var status = QueryResultStatus.Error;
+            try
+            {
+                Exception? thrown = null;
+                try
+                {
+                    RunIterationCore(cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    AbandonPass();
+
+                    // A pass cancelled at shutdown is not a failure (event-sources plan, D9).
+                    status = QueryResultStatus.Cancelled;
+                    throw;
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    thrown = exception;
+                }
+                catch
+                {
+                    AbandonPass();
+                    throw;
+                }
+
+                threw = thrown is not null;
+                bool cancelled = cancellationToken.IsCancellationRequested;
+                bool succeeded = SettlePass(thrown, cancelled);
+
+                // A pass that saw the engine's stop and returned stopped early, as SettlePass reads
+                // it: what it did not visit is not done, so it ends Cancelled, not Success.
+                status = !succeeded ? QueryResultStatus.Error
+                    : cancelled ? QueryResultStatus.Cancelled
+                    : QueryResultStatus.Success;
+                return succeeded;
+            }
+            finally
+            {
+                // Every exit writes the stop that closes the activity the start opened.
+                DatabaseEventSource.Log.WorkerPassStop(this, pass, status, started);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends a pass that was cancelled, or escaped: nothing it did is settled.
+    /// </summary>
+    private void AbandonPass()
+    {
+        lock (_sync)
+        {
+            _passRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// Settles a pass that ended: records a whole-pass failure, or ends the whole-pass failure and
+    /// every database failure whose work the pass finished, then publishes the worker's state.
+    /// </summary>
+    /// <returns>True when the pass neither threw nor reported a failure.</returns>
+    private bool SettlePass(Exception? thrown, bool cancelled)
+    {
+        bool failed;
+        int passFailures = 0;
+        int recoveredPassFailures = 0;
+        List<(string Database, int Failures)>? recovered = null;
+
+        lock (_sync)
+        {
+            _passRunning = false;
+            failed = _passReported || thrown is not null;
+
+            if (thrown is not null)
+            {
+                // The pass did not reach every database, so their records stay as they are.
+                _passFault = thrown;
+                passFailures = ++_passFailures;
+            }
+            else
+            {
+                if (_passFault is not null)
+                {
+                    recoveredPassFailures = _passFailures;
+                    _passFault = null;
+                    _passFailures = 0;
+                }
+
+                // A give-up the leaf failed ends here too; the database's record, which asks again
+                // at its next failure, is settled below with the others.
+                _giveUpFault = null;
+                _giveUpFailures = 0;
+
+                // A cancelled pass stopped early: what it did not visit is not done.
+                if (!cancelled && _databases.Count > 0)
+                {
+                    List<string>? ended = null;
+                    foreach (var (database, record) in _databases)
+                    {
+                        if (record.VisitedPass != _pass)
+                        {
+                            // Not visited: dropped, closed or offline. Nothing is left to recover.
+                            (ended ??= []).Add(database);
+                        }
+                        else if (record.FailedPass != _pass && record.UnfinishedPass != _pass)
+                        {
+                            // The pass finished the work the failure had left: recovered.
+                            (ended ??= []).Add(database);
+                            (recovered ??= []).Add((database, record.Failures));
+                        }
+                    }
+
+                    if (ended is not null)
+                    {
+                        foreach (string database in ended)
+                        {
+                            _databases.Remove(database);
+                        }
+
+                        Volatile.Write(ref _failingDatabases, _databases.Count);
+                    }
+                }
+            }
+
+            if (failed)
+            {
+                _failureCount++;
+                _consecutiveFailures++;
+            }
+
+            PublishFaultLocked();
+        }
+
+        if (thrown is not null)
+        {
+            DatabaseEventSource.Log.WorkerFailed(this, string.Empty, thrown, passFailures);
+        }
+
+        if (recoveredPassFailures > 0)
+        {
+            DatabaseEventSource.Log.WorkerRecovered(this, string.Empty, recoveredPassFailures);
+        }
+
+        if (recovered is not null)
+        {
+            foreach (var (database, failures) in recovered)
+            {
+                DatabaseEventSource.Log.WorkerRecovered(this, database, failures);
+            }
+        }
+
+        return !failed;
+    }
+
+    /// <summary>
+    /// Records a trigger wait that failed: a failure of the worker as a whole, which the next pass
+    /// that runs to its end clears.
+    /// </summary>
+    private void RecordWholeFailure(Exception exception)
+    {
+        int passFailures;
+        lock (_sync)
+        {
+            _passFault = exception;
+            passFailures = ++_passFailures;
+            _failureCount++;
+            _consecutiveFailures++;
+            PublishFaultLocked();
+        }
+
+        DatabaseEventSource.Log.WorkerFailed(this, string.Empty, exception, passFailures);
+    }
+
+    /// <summary>
+    /// Publishes <see cref="Fault"/> from the failures the worker holds, and resets
+    /// <see cref="ConsecutiveFailures"/> once it holds none.
+    /// </summary>
+    private void PublishFaultLocked()
+    {
+        Exception? fault = _passFault ?? _giveUpFault;
+        if (fault is null)
+        {
+            long newest = 0;
+            foreach (var record in _databases.Values)
+            {
+                if (record.Order > newest)
+                {
+                    newest = record.Order;
+                    fault = record.Fault;
+                }
+            }
+        }
+
+        if (fault is null)
+        {
+            _consecutiveFailures = 0;
+        }
+
+        Volatile.Write(ref _fault, fault);
+    }
+
+    private void ThrowIfNoPassLocked()
+    {
+        if (!_passRunning)
+        {
+            throw new InvalidOperationException(
+                "A worker reports on a database only from within a pass (RunIterationCore).");
+        }
+    }
+
+    private static void BackOff(CancellationToken cancellationToken)
+        => cancellationToken.WaitHandle.WaitOne(FailureBackoff);
+
+    /// <summary>
+    /// Gets the cause a database goes offline with when a worker of <paramref name="kind"/> keeps
+    /// failing on it, or null for a kind whose failures never take a database offline.
+    /// </summary>
+    private static StorageOfflineCause? GetFailureCause(DatabaseEngineWorkerKind kind) => kind switch
+    {
+        DatabaseEngineWorkerKind.Checkpoint => StorageOfflineCause.CheckpointFailures,
+        DatabaseEngineWorkerKind.PageWriteBack => StorageOfflineCause.PageWriteBackFailures,
+        DatabaseEngineWorkerKind.WriteAheadFlush => StorageOfflineCause.WriteAheadFlushFailures,
+        DatabaseEngineWorkerKind.VersionPurge => StorageOfflineCause.VersionPurgeFailures,
+        _ => null,
+    };
+
+    // The worker's role as it reads in a message.
+    private static string Describe(DatabaseEngineWorkerKind kind) => kind switch
+    {
+        DatabaseEngineWorkerKind.Checkpoint => "checkpoint",
+        DatabaseEngineWorkerKind.PageWriteBack => "page write-back",
+        DatabaseEngineWorkerKind.WriteAheadFlush => "write-ahead flush",
+        DatabaseEngineWorkerKind.VersionPurge => "version-purge",
+        _ => kind.ToString(),
+    };
+
+    /// <summary>
+    /// The failure record of one database: the failure, how often it repeated, when its streak
+    /// started, when the database may be tried again, and what the passes since did with it.
+    /// </summary>
+    private sealed class DatabaseFailure
+    {
+        // The clock the streak is timed on, and its reading at the streak's first failed pass
+        // (owner decision 42): the owning engine's, kept with the record so a record a free worker
+        // started is timed on the clock it started on.
+        private readonly TimeProvider _clock;
+        private readonly long _firstFailedAt;
+
+        public Exception Fault = null!;
+        public int Failures;
+        public long Order;
+        public long RetryAt;
+        public long VisitedPass;
+        public long FailedPass;
+        public long UnfinishedPass;
+
+        public DatabaseFailure(TimeProvider clock)
+        {
+            _clock = clock;
+            _firstFailedAt = clock.GetTimestamp();
+        }
+
+        /// <summary>
+        /// Gets how long the streak has lasted: the time since its first failed pass.
+        /// </summary>
+        public TimeSpan Persisted => _clock.GetElapsedTime(_firstFailedAt);
+    }
 }

@@ -9,11 +9,12 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
-internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseClientResult>
+internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClientResult>
 {
     private readonly ProtocolExecuteMessage _request;
 
     internal SqlExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+        : base(SqlProtocol.Family)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         var encoded = new Dictionary<string, byte[]>(parameters?.Count ?? 0);
@@ -30,13 +31,8 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
         _request = new ProtocolExecuteMessage(statement, encoded);
     }
 
-    public ProtocolMessageFamily Family => SqlProtocol.Family;
-
-    public bool IsResponseComplete { get; private set; }
-
-    public async ValueTask<DatabaseClientResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+    protected override async ValueTask<DatabaseClientResult> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken)
     {
-        IsResponseComplete = false;
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)SqlProtocolMessageType.Execute, _request.Encode()), cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
 
@@ -68,7 +64,6 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
                 case (byte)SqlProtocolMessageType.ResultComplete:
                 {
                     ProtocolResultCompleteMessage complete = ProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    IsResponseComplete = true;
                     return new DatabaseClientResult(columns, rows, complete.AffectedCount);
                 }
                 case (byte)ProtocolMessageType.Error:
@@ -77,8 +72,11 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
                     // The SQL server sends these as the entire failed statement
                     // response before any results, then returns to its ready loop.
                     // An Error after result frames cannot certify that boundary.
-                    IsResponseComplete = !hasResultFrames &&
-                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure;
+                    if (!hasResultFrames &&
+                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+                    {
+                        MarkResponseComplete();
+                    }
                     throw new DatabaseClientException(error.Code, error.Message);
                 }
                 default:

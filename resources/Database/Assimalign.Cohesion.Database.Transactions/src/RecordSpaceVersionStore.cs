@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,20 +14,20 @@ using Assimalign.Cohesion.Database.Storage;
 /// carry the shared 16-byte writer/deleter stamp prefix. Payloads remain in the
 /// record space; the ledger supplies logical undo and safe space reclamation.
 /// </summary>
-public sealed class RecordSpaceVersionStore : IVersionStore
+public sealed class RecordSpaceVersionStore : VersionStore
 {
     // A logical transaction can span a streamed object larger than RAM. Physical
-    // undo/reclamation must bound retained page before-images independently of it.
+    // undo/reclamation must bound the page pre-images a storage bracket retains independently of it.
     private const int MutationBatchSize = 64;
-    private readonly IStorage _storage;
-    private readonly ITransactionRecordSpace _records;
+    private readonly Storage _storage;
+    private readonly TransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
     private readonly Dictionary<ulong, List<LedgerEntry>> _ledger = new();
     private readonly List<PrunableVersion> _prunable = new();
     private readonly HashSet<ulong> _pendingAbortedPurges = new();
     private readonly object _sync = new();
 
-    internal RecordSpaceVersionStore(IStorage storage, ITransactionRecordSpace records, SemaphoreSlim applyGate)
+    internal RecordSpaceVersionStore(Storage storage, TransactionRecordSpace records, SemaphoreSlim applyGate)
     {
         _storage = storage;
         _records = records;
@@ -99,7 +101,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// <param name="index">The index's stamp-verified undo adapter.</param>
     /// <param name="key">The encoded key; a private copy is retained for undo.</param>
     /// <param name="entryReference">The index entry's record reference.</param>
-    public void RecordIndexEntryCreated(TransactionSequence writer, IRecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
+    public void RecordIndexEntryCreated(TransactionSequence writer, RecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
         => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryCreated, entryReference, index, key.ToArray()));
 
     /// <summary>
@@ -111,7 +113,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// <param name="index">The index's stamp-verified undo adapter.</param>
     /// <param name="key">The encoded key; a private copy is retained for undo.</param>
     /// <param name="entryReference">The index entry's record reference.</param>
-    public void RecordIndexEntryTombstoned(TransactionSequence writer, IRecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
+    public void RecordIndexEntryTombstoned(TransactionSequence writer, RecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
         => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryTombstoned, entryReference, index, key.ToArray()));
 
     /// <summary>
@@ -139,10 +141,8 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask AppendVersionAsync(ulong objectId, ulong entryId, ReadOnlyMemory<byte> payload, TransactionSequence writer, CancellationToken cancellationToken = default)
+    protected override ValueTask AppendVersionCoreAsync(ulong objectId, ulong entryId, ReadOnlyMemory<byte> payload, TransactionSequence writer, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
         // The record space holds the payload; the contract member records the
         // creation in the ledger (entryId is the packed location).
         Record(writer, new LedgerEntry(LedgerEntryKind.Created, entryId));
@@ -150,25 +150,14 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionAsync(ulong objectId, ulong entryId, TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
+    protected override ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionCoreAsync(ulong objectId, ulong entryId, TransactionSnapshot snapshot, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        cancellationToken.ThrowIfCancellationRequested();
-
         var (pageId, slotIndex) = _records.UnpackLocation(entryId);
 
-        ReadOnlyMemory<byte> record;
-        try
+        // A reclaimed location (a deleted or reverted slot, a freed or reallocated page) has
+        // no visible version; a page that fails its checksum or cannot be read throws (#1342).
+        if (!_storage.TryReadRecord(pageId, slotIndex, out var record))
         {
-            record = _records.Read(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // The slot was reverted out of existence by a bracket rollback.
             return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
         }
 
@@ -182,17 +171,29 @@ public sealed class RecordSpaceVersionStore : IVersionStore
         bool visible = snapshot.IsVisible(writer)
             && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter));
 
-        return new ValueTask<ReadOnlyMemory<byte>?>(visible ? record : null);
+        // Typed null: a bare null here converts through ReadOnlyMemory's implicit
+        // operator from a null array, which reads as an empty visible version.
+        return new ValueTask<ReadOnlyMemory<byte>?>(visible ? record : (ReadOnlyMemory<byte>?)null);
     }
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// Physically reclaims committed-tombstoned versions whose deleter is below
     /// <paramref name="oldestActive"/>: every live and future snapshot admits
     /// the deleter, so no one can see the version again. Each candidate is
     /// verified against its current stamps before removal.
+    /// </para>
+    /// <para>
+    /// A candidate whose page cannot be read (a failed checksum, a malformed page, an I/O error)
+    /// stays tracked and the pass goes on: the other candidates are reclaimed and their batches
+    /// commit, and the first such failure is rethrown once the pass is done, so the purge worker
+    /// reports the page and retries it. Without that, one unreadable page would stop
+    /// reclamation for the whole record space: the pass would throw at it every time, roll back
+    /// the candidates batched with it and never reach the ones after it (#1342).
+    /// </para>
     /// </remarks>
-    public async ValueTask<long> PruneAsync(TransactionSequence oldestActive, CancellationToken cancellationToken = default)
+    protected override async ValueTask<long> PruneCoreAsync(TransactionSequence oldestActive, CancellationToken cancellationToken)
     {
         List<PrunableVersion> candidates;
 
@@ -208,6 +209,12 @@ public sealed class RecordSpaceVersionStore : IVersionStore
 
         long pruned = 0;
 
+        // The candidates a committed batch reclaimed or found stale. A batch that does not commit
+        // rolls back, so its candidates stay tracked, as the unreadable ones do.
+        var settled = new HashSet<PrunableVersion>(candidates.Count);
+        var batchSettled = new List<PrunableVersion>(Math.Min(MutationBatchSize, candidates.Count));
+        ExceptionDispatchInfo? unreadable = null;
+
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -216,30 +223,50 @@ public sealed class RecordSpaceVersionStore : IVersionStore
                 cancellationToken.ThrowIfCancellationRequested();
                 using var bracket = _storage.BeginTransaction();
                 int end = Math.Min(offset + MutationBatchSize, candidates.Count);
+                long batchPruned = 0;
+                batchSettled.Clear();
                 for (int index = offset; index < end; index++)
                 {
                     var candidate = candidates[index];
                     var (pageId, slotIndex) = _records.UnpackLocation(candidate.Location);
-                    if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter.Value == candidate.Deleter)
+                    TransactionSequence deleter;
+                    bool held;
+
+                    try
+                    {
+                        held = TryReadStamps(pageId, slotIndex, out _, out deleter);
+                    }
+                    catch (Exception exception) when (exception is StorageCorruptionException or StorageIOException or IOException)
+                    {
+                        // Only the read failed, so the bracket holds no change for this candidate.
+                        unreadable ??= ExceptionDispatchInfo.Capture(exception);
+                        continue;
+                    }
+
+                    if (held && deleter.Value == candidate.Deleter)
                     {
                         _records.Delete(bracket, pageId, slotIndex);
-                        pruned++;
+                        batchPruned++;
                     }
+
+                    batchSettled.Add(candidate);
                 }
                 bracket.Commit();
+                pruned += batchPruned;
+                settled.UnionWith(batchSettled);
             }
         }
         finally
         {
             _applyGate.Release();
+
+            lock (_sync)
+            {
+                _prunable.RemoveAll(settled.Contains);
+            }
         }
 
-        lock (_sync)
-        {
-            var removed = new HashSet<PrunableVersion>(candidates);
-            _prunable.RemoveAll(removed.Contains);
-        }
-
+        unreadable?.Throw();
         return pruned;
     }
 
@@ -250,14 +277,21 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// A failure leaves the writer queued for the version-purge worker to retry
     /// (an aborted writer's stamps must not serve snapshots, so retry is mandatory).
     /// </remarks>
-    public async ValueTask<long> PurgeWriterAsync(TransactionSequence writer, CancellationToken cancellationToken = default)
+    protected override async ValueTask<long> PurgeWriterCoreAsync(TransactionSequence writer, CancellationToken cancellationToken)
     {
         List<LedgerEntry>? entries;
 
         lock (_sync)
         {
-            _ledger.Remove(writer.Value, out entries);
-            _prunable.RemoveAll(version => version.Deleter == writer.Value);
+            // Only a writer with a ledger can have tombstones to forget, and a transaction that wrote
+            // nothing (a read-committed statement's snapshot pin, #1363) must not pay a scan of every
+            // committed tombstone the purge has not reclaimed yet. Committed writers alone enter the
+            // prunable set (OnCommitted, ScrubRecovered), and a deferred undo's retry re-adds its
+            // ledger before it runs again.
+            if (_ledger.Remove(writer.Value, out entries))
+            {
+                _prunable.RemoveAll(version => version.Deleter == writer.Value);
+            }
         }
 
         if (entries is null || entries.Count == 0)
@@ -478,25 +512,28 @@ public sealed class RecordSpaceVersionStore : IVersionStore
         }
     }
 
+    /// <summary>
+    /// Reads the stamps of the version a ledger or prunable entry names, when the location still
+    /// holds a record. A reclaimed location reads as nothing to do: a failed statement's bracket
+    /// rollback restored a pre-image without the slot (reverting the very insert the entry
+    /// recorded), an earlier pass deleted the slot, or the emptied page was freed and perhaps
+    /// reallocated, which the stamp rechecks of the callers then reject.
+    /// </summary>
+    /// <exception cref="StorageCorruptionException">
+    /// The version's page failed its checksum or is malformed. The undo or prune fails instead of
+    /// treating the version as gone (#1342): an undo that skipped it would release an aborted writer
+    /// whose stamps are still on the page, and once the page read again every snapshot would admit
+    /// them as committed. The failure requeues the writer for the purge worker's retry; a prune
+    /// keeps that candidate, reclaims the others and then fails the pass.
+    /// </exception>
+    /// <exception cref="StorageIOException">The version's page could not be read; handled as a failed checksum is.</exception>
     private bool TryReadStamps(PageId pageId, int slotIndex, out TransactionSequence writer, out TransactionSequence deleter)
     {
         writer = default;
         deleter = default;
 
-        ReadOnlyMemory<byte> record;
-        try
+        if (!_storage.TryReadRecord(pageId, slotIndex, out var record))
         {
-            record = _records.Read(pageId, slotIndex);
-        }
-        catch (StorageException)
-        {
-            return false;
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // The slot no longer exists: a failed statement's bracket rollback
-            // restored the page's before-image, reverting the very insert this
-            // ledger entry recorded. Nothing to undo.
             return false;
         }
 
@@ -520,7 +557,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     private readonly record struct LedgerEntry(
         LedgerEntryKind Kind,
         ulong Location,
-        IRecordVersionIndex? Index = null,
+        RecordVersionIndex? Index = null,
         byte[]? Key = null);
 
     private readonly record struct PrunableVersion(ulong Deleter, ulong Location);

@@ -15,15 +15,9 @@ public static class SqlSchemaMigrationPlanner
     public static SqlSchemaMigrationPlan Plan(SqlCompiledSchema? current, SqlCompiledSchema desired)
     {
         ArgumentNullException.ThrowIfNull(desired);
-        StringComparer identifiers = desired.Model == EngineModel.Sql
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-        if (current is not null && current.Model != desired.Model)
-        {
-            throw new SqlSchemaMigrationException(
-                $"Schema '{desired.Name}' targets {desired.Model}, but the catalog schema targets {current.Model}.");
-        }
 
+        // SQL identifiers compare without case, as the engine's catalog does.
+        StringComparer identifiers = StringComparer.OrdinalIgnoreCase;
         if (current is not null && !identifiers.Equals(current.Name, desired.Name))
         {
             throw new SqlSchemaMigrationException(
@@ -267,8 +261,7 @@ public static class SqlSchemaMigrationPlanner
     {
         if (current is null)
         {
-            if (desired.Types.Count > 0 || desired.Functions.Count > 0 || desired.Triggers.Count > 0 ||
-                desired.Principals.Count > 0 || desired.Extensions.Count > 0)
+            if (desired.Types.Count > 0 || desired.Principals.Count > 0)
             {
                 throw UnsupportedMetadata(desired.Name);
             }
@@ -277,39 +270,10 @@ public static class SqlSchemaMigrationPlanner
         }
 
         if (!current.Types.SequenceEqual(desired.Types) ||
-            !FunctionsEqual(current.Functions, desired.Functions) ||
-            !current.Triggers.SequenceEqual(desired.Triggers) ||
-            !PrincipalsEqual(current.Principals, desired.Principals) ||
-            !current.Extensions.SequenceEqual(desired.Extensions))
+            !PrincipalsEqual(current.Principals, desired.Principals))
         {
             throw UnsupportedMetadata(desired.Name);
         }
-    }
-
-    private static bool FunctionsEqual(
-        IReadOnlyList<CompiledSchemaFunction> left,
-        IReadOnlyList<CompiledSchemaFunction> right)
-    {
-        if (left.Count != right.Count)
-        {
-            return false;
-        }
-
-        for (int index = 0; index < left.Count; index++)
-        {
-            CompiledSchemaFunction first = left[index];
-            CompiledSchemaFunction second = right[index];
-            if (!string.Equals(first.Name, second.Name, StringComparison.Ordinal) ||
-                first.ResultType != second.ResultType ||
-                !string.Equals(first.CustomResultType, second.CustomResultType, StringComparison.Ordinal) ||
-                first.Body != second.Body ||
-                !first.Parameters.SequenceEqual(second.Parameters))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static bool PrincipalsEqual(
@@ -348,6 +312,6 @@ public static class SqlSchemaMigrationPlanner
 
     private static SqlSchemaMigrationException UnsupportedMetadata(string schemaName)
         => new(
-            $"Schema '{schemaName}' changes custom types, functions, triggers, principals, or model extensions, " +
+            $"Schema '{schemaName}' changes custom types or principals, " +
             "but the shipped migration statement models cannot apply those metadata dimensions yet.");
 }

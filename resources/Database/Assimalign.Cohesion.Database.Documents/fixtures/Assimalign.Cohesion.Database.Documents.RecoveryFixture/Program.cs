@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Execution;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: seed|verify directory"); }
-await using var engine = DocumentDatabaseEngine.Create(new()
+await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
 {
     RootPath = args[1],
     CheckpointInterval = TimeSpan.FromHours(1),
@@ -19,9 +20,9 @@ await using var engine = DocumentDatabaseEngine.Create(new()
 string original = "{\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string('x', 40000) + "\"]}}";
 if (args[0] == "seed")
 {
-    var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("crash");
-    var collection = await database.CreateCollectionAsync("items");
+    var database = await engine.CreateDatabaseAsync("crash");
     await using var session = await database.CreateSessionAsync();
+    var collection = await session.CreateCollectionAsync("items");
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
     await session.BeginTransactionAsync();
@@ -29,9 +30,11 @@ if (args[0] == "seed")
     await collection.PutAsync(session, "partial", Encoding.UTF8.GetBytes(original));
     foreach (var worker in engine.Workers)
     {
-        if (worker.Kind == DatabaseEngineWorkerKind.PageWriteBack)
+        // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
+        if (worker.Kind == DatabaseEngineWorkerKind.PageWriteBack
+            && worker is DatabaseEngineWorker guided && !guided.RunIteration(CancellationToken.None))
         {
-            ((DatabaseEngineWorker)worker).RunIteration(CancellationToken.None);
+            throw new InvalidOperationException("The page write-back pass failed.", guided.Fault);
         }
     }
     // Process termination skips disposal and rollback after physical write brackets.
@@ -40,9 +43,9 @@ if (args[0] == "seed")
 }
 else if (args[0] == "verify")
 {
-    var database = (IDocumentDatabase)await engine.OpenDatabaseAsync("crash");
-    var collection = await database.GetCollectionAsync("items");
+    var database = await engine.OpenDatabaseAsync("crash");
     await using var session = await database.CreateSessionAsync();
+    var collection = await session.GetCollectionAsync("items");
     var document = await collection.GetAsync(session, "committed");
     if (document is null || Encoding.UTF8.GetString(document.Value.Content.Span) != original)
     {

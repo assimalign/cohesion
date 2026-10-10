@@ -13,40 +13,50 @@ using Assimalign.Cohesion.Database.Graph.Internal;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>
-/// Serves database-scoped graph statements and matched paths over the shared database protocol.
+/// Serves database-scoped graph statements and matched paths over the shared database protocol,
+/// as a sealed leaf of the area root's <see cref="DatabaseServer"/> base.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Execute serves scalar MATCH projections, graph mutations, and the existing catalog SHOW
 /// surface. ExecutePaths serves read-only MATCH projections of nodes, relationships, and paths.
 /// Explicit wire transaction control remains unsupported; each statement uses the engine's
 /// automatic transaction. The reserved Transaction frame is rejected as a protocol violation.
 /// This model owns its server machinery, following the SQL and Key-Value server design.
-/// <see cref="StartAsync"/> binds the configured listener; <see cref="StopAsync"/> drains
-/// sessions within <see cref="GraphDatabaseServerOptions.ShutdownDrainTimeout"/> before
-/// aborting remaining work and releasing the listener. Stop is terminal. The composition
-/// root retains ownership of the engine; the server owns the listener after startup is attempted.
+/// </para>
+/// <para>
+/// <b>The lifecycle is the base's</b> (concrete-types plan, phase 4, #1260), the one this server
+/// carried before: the server is created inert; <see cref="DatabaseServer.StartAsync"/> binds the
+/// configured listener before it begins accepting, and a bind that fails disposes the listener and
+/// leaves the server stopped for good; <see cref="DatabaseServer.StopAsync"/> drains sessions
+/// within <see cref="GraphDatabaseServerOptions.ShutdownDrainTimeout"/> before aborting remaining
+/// work and releasing the listener, and releases it as well for a server that never started. Stop
+/// is terminal. The composition root retains ownership of the engine; the server owns the listener
+/// after startup is attempted.
+/// </para>
 /// </remarks>
-public sealed class GraphDatabaseServer : IDatabaseServer
+public sealed class GraphDatabaseServer : DatabaseServer
 {
+    private readonly GraphDatabaseEngine _engine;
     private readonly GraphDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
-    private readonly IDatabaseAuthenticator _authenticator;
-    private readonly GraphDatabaseServerContext _context;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly ConcurrentDictionary<Guid, GraphDatabaseServerSession> _sessions = new();
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
     // close at the next frame boundary; hard abort cancels in-flight executions
-    // and tears connections down. StopAsync escalates from the first to the
+    // and tears connections down. StopCoreAsync escalates from the first to the
     // second when the drain budget lapses.
     private CancellationTokenSource? _softStopSource;
     private CancellationTokenSource? _hardAbortSource;
     private Task? _acceptTask;
-    private bool _isRunning;
-    private bool _isDisposed;
-    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
 
     private GraphDatabaseServer(GraphDatabaseEngine engine, GraphDatabaseServerOptions options)
+        : base(engine)
     {
+        // The server keeps a copy, checked here, as the engine keeps a copy of its options (B3 of
+        // the engine extensibility design): the sessions read the limits and timeouts live.
+        options = options.Snapshot();
         if (options.Listener is null)
         {
             throw new ArgumentException("A connection listener is required.", nameof(options));
@@ -56,28 +66,35 @@ public sealed class GraphDatabaseServer : IDatabaseServer
             throw new ArgumentException("The session limit must be positive.", nameof(options));
         }
 
-        Engine = engine;
+        _engine = engine;
         _options = options;
         _listener = options.Listener;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
-        _context = new GraphDatabaseServerContext(this, engine);
     }
 
     /// <summary>
-    /// Gets the Graph engine this server fronts (the typed counterpart of
-    /// <see cref="IDatabaseServerContext.Engine"/>).
+    /// Gets the Graph engine this server fronts.
     /// </summary>
-    public GraphDatabaseEngine Engine { get; }
+    public new GraphDatabaseEngine Engine => _engine;
+
+    /// <summary>
+    /// Gets the server's own copy of the options it was created with, as
+    /// <see cref="GraphDatabaseEngine.EngineOptions"/> exposes the engine's.
+    /// </summary>
+    internal GraphDatabaseServerOptions ServerOptions => _options;
 
     /// <inheritdoc />
-    public IDatabaseServerContext Context => _context;
+    public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
 
     /// <summary>
     /// Creates a Graph database server over the given engine and options. The server
-    /// is inert until <see cref="StartAsync"/> is called.
+    /// is inert until <see cref="DatabaseServer.StartAsync"/> is called.
     /// </summary>
     /// <param name="engine">The Graph engine the server fronts. The composition root owns and disposes the engine.</param>
-    /// <param name="options">The composition options. Requires a configured <see cref="GraphDatabaseServerOptions.Listener"/>.</param>
+    /// <param name="options">
+    /// The composition options. Requires a configured <see cref="GraphDatabaseServerOptions.Listener"/>.
+    /// The server keeps a copy, so a later change to this object does not reach it.
+    /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>
@@ -90,141 +107,99 @@ public sealed class GraphDatabaseServer : IDatabaseServer
     }
 
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    protected override async Task StartCoreAsync(CancellationToken cancellationToken)
     {
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var softStopSource = new CancellationTokenSource();
+        var hardAbortSource = new CancellationTokenSource();
 
         try
         {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-
-            if (_isRunning)
-            {
-                return;
-            }
-
-            var softStopSource = new CancellationTokenSource();
-            var hardAbortSource = new CancellationTokenSource();
-
+            await _listener.BindAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // This is an ownership boundary: every bind failure, including a
+            // catastrophic one after endpoint acquisition, must attempt the
+            // server's terminal listener cleanup before propagating. The base
+            // leaves the server stopped, so a later stop has nothing to release.
+            softStopSource.Dispose();
+            hardAbortSource.Dispose();
             try
             {
-                await _listener.BindAsync(cancellationToken).ConfigureAwait(false);
+                await _listener.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception)
+            catch
             {
-                // This is an ownership boundary: every bind failure, including a
-                // catastrophic one after endpoint acquisition, must attempt the
-                // server's terminal listener cleanup before propagating.
-                _isDisposed = true;
-                softStopSource.Dispose();
-                hardAbortSource.Dispose();
-                try
-                {
-                    await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Preserve the bind failure that made startup fail. Listener cleanup is still
-                    // attempted here and StopAsync remains idempotent after this terminal state.
-                }
-
-                throw;
+                // Preserve the bind failure that made startup fail. Listener cleanup is still
+                // attempted here and StopAsync remains idempotent after this terminal state.
             }
 
-            _softStopSource = softStopSource;
-            _hardAbortSource = hardAbortSource;
-            _isRunning = true;
-            _acceptTask = AcceptLoopAsync(_softStopSource.Token, _hardAbortSource.Token);
+            throw;
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
+
+        _softStopSource = softStopSource;
+        _hardAbortSource = hardAbortSource;
+        _acceptTask = AcceptLoopAsync(_softStopSource.Token, _hardAbortSource.Token);
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    protected override async Task StopCoreAsync(CancellationToken cancellationToken)
     {
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
         try
         {
-            if (_isDisposed)
+            if (_acceptTask is not null)
             {
-                return;
-            }
+                _softStopSource!.Cancel();
 
-            _isDisposed = true;
-            _isRunning = false;
+                try
+                {
+                    await _acceptTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The accept loop observed the stop signal mid-accept.
+                }
+
+                // Graceful drain: session pumps never fault (they own their
+                // errors), so awaiting their completions cannot throw.
+                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
+                Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
+
+                if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
+                {
+                    _hardAbortSource!.Cancel();
+
+                    int aborted = 0;
+                    foreach (GraphDatabaseServerSession session in _sessions.Values)
+                    {
+                        session.Abort();
+                        aborted++;
+                    }
+
+                    GraphDatabaseEventSource.Log.SessionsAborted(_engine, aborted, _options.ShutdownDrainTimeout);
+                }
+
+                await drain.ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // Listener release follows accept-loop and session drain so no
+            // live server work can race the terminal transport disposal.
             try
             {
-                if (_acceptTask is not null)
-                {
-                    _softStopSource!.Cancel();
-
-                    try
-                    {
-                        await _acceptTask.ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // The accept loop observed the stop signal mid-accept.
-                    }
-
-                    // Graceful drain: session pumps never fault (they own their
-                    // errors), so awaiting their completions cannot throw.
-                    Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
-                    Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
-
-                    if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
-                    {
-                        _hardAbortSource!.Cancel();
-
-                        foreach (GraphDatabaseServerSession session in _sessions.Values)
-                        {
-                            session.Abort();
-                        }
-                    }
-
-                    await drain.ConfigureAwait(false);
-                }
+                await _listener.DisposeAsync().ConfigureAwait(false);
             }
             finally
             {
-                // Listener release follows accept-loop and session drain so no
-                // live server work can race the terminal transport disposal.
-                try
-                {
-                    await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                finally
-                {
-                    _softStopSource?.Dispose();
-                    _hardAbortSource?.Dispose();
-                    _softStopSource = null;
-                    _hardAbortSource = null;
-                    _acceptTask = null;
-                }
+                _softStopSource?.Dispose();
+                _hardAbortSource?.Dispose();
+                _softStopSource = null;
+                _hardAbortSource = null;
+                _acceptTask = null;
             }
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
     }
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        await StopAsync().ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// A point-in-time snapshot of the sessions currently active on the server,
-    /// for the server context.
-    /// </summary>
-    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
-        => _sessions.Values.ToArray();
 
     private async Task AcceptLoopAsync(CancellationToken softStop, CancellationToken hardAbort)
     {
@@ -246,15 +221,23 @@ public sealed class GraphDatabaseServer : IDatabaseServer
                 break;
             }
 
-            if (_sessions.Count >= _options.MaxSessions)
+            int activeSessions = _sessions.Count;
+            if (activeSessions >= _options.MaxSessions)
             {
+                GraphDatabaseEventSource.Log.SessionRejected(_engine, GraphDatabaseEventSource.RejectReason.SessionLimit, activeSessions, _options.MaxSessions);
                 _ = RejectAsync(connection, hardAbort);
                 continue;
             }
 
-            var session = new GraphDatabaseServerSession(this, connection, _options, Engine, _authenticator);
+            var session = new GraphDatabaseServerSession(this, connection, _options, _engine, _authenticator);
 
-            _sessions.TryAdd(session.Id, session);
+            // The server-session gauge follows the registry exactly: up once here, down once when
+            // OnSessionCompleted removes the session.
+            if (_sessions.TryAdd(session.Id, session))
+            {
+                GraphDatabaseEventSource.Log.SessionAccepted(_engine, session, activeSessions + 1);
+            }
+
             session.Start(softStop, hardAbort);
         }
     }
@@ -268,7 +251,7 @@ public sealed class GraphDatabaseServer : IDatabaseServer
         try
         {
             var stream = connection.AsStream();
-            await using var writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+            await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is at its session limit.");
 
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), hardAbort).ConfigureAwait(false);
@@ -287,6 +270,9 @@ public sealed class GraphDatabaseServer : IDatabaseServer
 
     internal void OnSessionCompleted(GraphDatabaseServerSession session)
     {
-        _sessions.TryRemove(session.Id, out _);
+        if (_sessions.TryRemove(session.Id, out _))
+        {
+            GraphDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
+        }
     }
 }

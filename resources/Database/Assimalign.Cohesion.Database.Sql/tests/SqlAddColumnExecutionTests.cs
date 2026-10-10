@@ -23,7 +23,7 @@ public sealed class SqlAddColumnExecutionTests
     public async Task ExecuteAsync_OlderRowSnapshot_ShouldSeeOriginalRowsAndCompleteDefaults()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-column-mvcc" });
+        await using var engine = SqlDatabaseEngine.Create("add-column-mvcc", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("additions", cancellationToken: CancellationToken.None);
         await using var reader = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
@@ -64,9 +64,8 @@ public sealed class SqlAddColumnExecutionTests
     {
         // Arrange
         var storage = new CrashCaptureSqlStorageStrategy();
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using (var engine = SqlDatabaseEngine.Create("add-column-restart", new SqlDatabaseEngineOptions
         {
-            EngineName = "add-column-restart",
             StorageStrategy = storage,
         }))
         {
@@ -88,9 +87,8 @@ public sealed class SqlAddColumnExecutionTests
         }
 
         // Act
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var reopened = SqlDatabaseEngine.Create("add-column-reopened", new SqlDatabaseEngineOptions
         {
-            EngineName = "add-column-reopened",
             StorageStrategy = storage.CaptureDurableImages(),
         });
         var restored = await reopened.OpenDatabaseAsync("additions", cancellationToken: CancellationToken.None);
@@ -106,7 +104,7 @@ public sealed class SqlAddColumnExecutionTests
         rows[2].ShouldBe(new object?[] { 3, "omitted", 7, "CAFÉ" });
         rows[3].ShouldBe(new object?[] { 4, "explicit null", null, "CAFÉ" });
         rows[4].ShouldBe(new object?[] { 5, "after reopen", 7, "CAFÉ" });
-        var catalog = restored.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
+        var catalog = restored.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("dbo", "additions", out var table).ShouldBeTrue();
         table.FindColumn("extra").ShouldNotBeNull().DefaultLiteral.ShouldBe("7");
         table.FindColumn("category").ShouldNotBeNull().Collation.ShouldBe(Collation.CaseAccentInsensitive);
@@ -117,13 +115,13 @@ public sealed class SqlAddColumnExecutionTests
     public async Task ExecuteAsync_SchemaOwnedTable_ShouldRejectDefaultedAdditionAndPreserveRows()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "add-column-owner" });
+        await using var engine = SqlDatabaseEngine.Create("add-column-owner", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("additions", cancellationToken: CancellationToken.None);
-        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "additions", EngineModel.Sql, false, [],
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "additions", false, [],
             [new CompiledSchemaTable("additions", "Tests.Additions",
                 [new CompiledSchemaColumn("id", DatabaseType.Int32, IsNullable: false),
-                 new CompiledSchemaColumn("label", DatabaseType.String, IsNullable: true)], null, [], [])], [], [], [], []);
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema,
+                 new CompiledSchemaColumn("label", DatabaseType.String, IsNullable: true)], null, [], [])], []);
+        await database.ApplySchemaAsync(schema,
             cancellationToken: CancellationToken.None);
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "INSERT INTO additions VALUES (1, 'original'), (2, NULL)");
@@ -135,7 +133,7 @@ public sealed class SqlAddColumnExecutionTests
         // Assert
         error.Operation.ShouldBe("ALTER TABLE ADD COLUMN");
         error.OwningSchema.ShouldBe("additions");
-        var catalog = database.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
+        var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("dbo", "additions", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
         table.FindColumn("extra").ShouldBeNull();
@@ -145,10 +143,10 @@ public sealed class SqlAddColumnExecutionTests
         rows[1].ShouldBe(new object?[] { 2, null });
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

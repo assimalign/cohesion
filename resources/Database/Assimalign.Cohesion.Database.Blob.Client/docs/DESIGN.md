@@ -3,8 +3,8 @@
 ## Ownership and family
 
 The typed client binds `Database.Client` to the exact `BlobProtocol.Family` instance.
-`IBlobClient.ConnectAsync` rents an authenticated shared connection and wraps its lease in
-`IBlobConnection`. Database selection happens in the shared handshake and is immutable;
+`BlobClient.ConnectAsync` rents an authenticated shared connection and wraps its lease in
+the sealed `BlobConnection`. Database selection happens in the shared handshake and is immutable;
 Blob requests carry container and object names only. The client never chooses a concrete
 transport and owns no parallel handshake, frame parser, or connection pool.
 
@@ -28,7 +28,7 @@ flowchart LR
 | `Assimalign.Cohesion.Database.Protocol` | Family validation, frame envelope, startup and error vocabulary |
 | `Assimalign.Cohesion.Connections` | Transport-neutral connection factory |
 
-Public APIs are client interfaces, a static factory, options, and a typed exception.
+Public APIs are a sealed client with its `Create` factory, a sealed connection, options, and a typed exception.
 Blob consumes the shared streaming exchange contract without changing its own caller-facing
 connection contract or its model's wire protocol. Explicit codecs and ordinary generic
 delegates keep the implementation compatible with `net10.0` and NativeAOT without reflection.
@@ -56,9 +56,9 @@ return is stronger: it confirms receipt of the matching publication acknowledgem
 
 ## Streaming downloads and bounded memory
 
-Downloads implement `IDatabaseStreamingExchange`. Its `OpenAsync` phase sends the Blob read
+Downloads derive from `DatabaseStreamingExchange`. Its `OpenCoreAsync` phase sends the Blob read
 request and validates `TransferStart`; `DownloadAsync` returns only after that validation,
-so errors before startup fail the method itself. Its `CopyToAsync` phase passes the metadata,
+so errors before startup fail the method itself. Its `CopyToCoreAsync` phase passes the metadata,
 frame adapters, and borrowed destination stream to `BlobProtocolTransfer.ReceiveAsync`, which
 verifies chunks, counts, acknowledgements, and terminal completion. This is Blob-specific wire
 work. The shared client runs the producer and owns the content stream and its lifetime.
@@ -109,7 +109,7 @@ are unsupported even when the server declared a length.
 ## Cancellation, disposal, and pooled leases
 
 Each connection allows only one exchange. Starting another while one is active fails promptly
-with `InvalidOperationException`. Downloads call `IDatabaseConnection.ExecuteStreamingAsync`,
+with `InvalidOperationException`. Downloads call `DatabaseConnection.ExecuteStreamingAsync`,
 so a healthy typed connection retains its caller-owned shared pool lease until connection
 disposal; a background producer cannot accidentally return that lease while using frames.
 Normal verified completion releases the operation slot, even if some verified bytes remain
@@ -166,6 +166,62 @@ are normal null/false results; downloading a missing blob is an error. Local mal
 ordering mistakes, and truncation map to `ProtocolViolation`; transport failures map to `Internal`.
 Deadline behavior comes from supplied cancellation tokens and server lifecycle options.
 
+A failed dial is the one transport failure with its own code. It reaches `ConnectAsync` as the
+core's `DatabaseClientException` with `ProtocolErrorCode.ConnectionFailure` (owner decision 39;
+the core's `DESIGN.md`, "Lifecycle and errors"). `BlobClientException` keeps that code, and the
+core exception, which keeps the transport's exception, is its inner exception. A canceled dial
+throws `OperationCanceledException` unchanged (`BlobClientDialFailureTests`).
+
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Blob.Client` (`src/Internal/EventSource/BlobClientEventSource.cs`).
+Start and stop carry the `Transfers` keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `TransferStart` | Verbose | `Transfers` | `database`, `operation` (`Upload`, `Download`, `Delete`, `GetProperties` or `List`), `container` |
+| 2 | `TransferStop` | Verbose | `Transfers` | `database`, `operation`, `container`, `status` (`Success`, `Error` or `Cancelled`), `bytes` (the content an upload sent or a download received; zero otherwise and for a transfer that did not complete), `durationMilliseconds` |
+| 3 | `TransferFailed` | Error | — | `database`, `operation`, `container`, `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
+| 4 | `ListCleanupFailed` | Warning | — | `database`, `container`, `code`, `exceptionType` |
+
+**Every start has a stop** (the area's convention, `docs/resources/Database/DESIGN.md`,
+"Diagnostics"), as `System.Net.Http`'s `RequestStart`/`RequestStop` pair: a failure writes event 3
+and then `TransferStop` with `Error`; a cancellation (how a timeout surfaces, and how an abandoned
+listing or download ends) writes `TransferStop` with `Cancelled` and no failure. Upload, delete,
+properties and listing write their end from the `finally` of the private `ExecuteCoreAsync` every
+one of them runs through, after a broken lease was returned; a listing whose consumer stops early
+cancels its worker, whose transfer then stops `Cancelled`. A download starts in `DownloadAsync`:
+until its stream opens, `DownloadAsync` writes the end from its `finally`; once it opened, the
+download exchange's copy writes it from its own `finally`, which can be after `DownloadAsync`
+returned the stream: `Success` with the received bytes when the last chunk is verified, `Error`
+after event 3 when the copy fails (with the code the shared client gives it: its own for a coded
+failure, `ProtocolViolation` for malformed frames, `Internal` otherwise), `Cancelled` when the
+caller disposes the stream early or cancels it. Each failure is captured by an exception filter
+that declines it and written once the throwing call unwound, so it reaches the caller unchanged.
+As `RequestStop`, `TransferStop` is written only for a transfer whose `TransferStart` was written
+(the download exchange carries that flag to its copy); event 3 is written either way.
+
+Event 4 reports a failure the listing's cleanup swallows only when its consumer never saw it (it
+stopped reading early): the failure the enumeration already surfaced, and the cancellation the
+cleanup itself causes, are not written. It is a Warning, as the shared core's
+`DownloadReleaseFailed` is: both are a fault a client cleanup hides.
+
+Container names are identifiers and are written; blob names may be user data and are never
+written, nor is any content. The server names the blob in some of its failure messages
+(`Blob '…' does not exist.`, `Blob '…' already exists.`), so events 3 and 4 write the wire code and
+the exception's type only, never the message (the area's failure rule); no redaction is needed,
+and none is done. Timestamps are taken only while a listener takes the source, and the byte count
+is read without boxing the result. No counters.
+
+`BlobClientEventSourceTests` checks the name, the strict manifest, each member's transfer once (the
+download's stop with its received bytes, and a refused download's failure followed by its `Error`
+stop), an upload refused over an existing blob, a download abandoned before its first read and a
+cancelled metadata read (each a `Cancelled` stop and no failure), a metadata read refused by the
+client itself while a download holds the exchange (an empty code and `InvalidOperationException`,
+then an `Error` stop), a failure whose start was not written (no stop), no blob name in any event,
+and event 4 from a scripted listing whose worker fails after the consumer stopped taking items.
+
 ## Scope and verification
 
 This package does not provision databases or containers, expose SQL commands, multiplex
@@ -179,3 +235,20 @@ future Documents and Graph clients can supply their own startup and content prot
 copying Blob's former queue, producer, cancellation, or rental-release machinery. Listings
 remain a Blob-owned bounded typed enumeration: they produce metadata items rather than a
 content stream and validate Blob-specific prefix and item-count rules.
+
+## Concrete types (concrete-types plan, phase 5, #1261)
+
+The package has no public interface left and no `Abstractions/` folder
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+
+| Type | Shape | Was |
+|---|---|---|
+| `BlobClient` | sealed; `Create(BlobClientOptions)` over a private constructor | the static `BlobClient` factory, `IBlobClient` and the internal `DefaultBlobClient` |
+| `BlobConnection` | sealed; internal constructor; moved out of `Internal/` | `IBlobConnection` and the internal `BlobConnection` |
+
+The connection's private exchanges are leaves of the shared bases: the materialized operations'
+`BlobExchange<TResult>` of `DatabaseProtocolExchange<TResult>`, and the download's
+`BlobDownloadExchange` of `DatabaseStreamingExchange`. `BlobExchange` never calls
+`MarkResponseComplete`, so every failed Blob exchange still discards its connection: a transfer
+can leave unread frames even when its error code is `ExecutionFailure`. Studio's Blob workspace
+was retyped to the sealed types.

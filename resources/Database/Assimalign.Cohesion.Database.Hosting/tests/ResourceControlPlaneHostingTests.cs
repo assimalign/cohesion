@@ -11,9 +11,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Logging;
 
 using Shouldly;
 
@@ -23,15 +25,16 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public sealed class ResourceControlPlaneHostingTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Telemetry off creates no logger factory or extra host service")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Telemetry off adds no logger provider or extra host service")]
     public async Task TelemetryOff_ShouldPreserveComposition()
     {
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceControlPlaneHostingTests).Assembly);
-        typeof(DatabaseApplicationBuilder).GetField("_loggerFactory", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
+        typeof(DatabaseApplicationBuilder).GetField("_telemetry", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
         await using var application = builder.Build();
         await using var baseline = DatabaseApplication.CreateBuilder().Build();
         application.Context.HostedServices.Count().ShouldBe(baseline.Context.HostedServices.Count());
+        application.Context.Services.GetRequiredService<ILoggerFactory>().Providers.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - CreateBuilder(args): honors the registered control plane and ambient admin endpoint")]
@@ -53,7 +56,7 @@ public sealed class ResourceControlPlaneHostingTests
             new DatabaseApplicationOptions(),
             typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddHealthCheck("builder", _ => ValueTask.FromResult(HealthContribution.Healthy()));
-        builder.Options.Services.Add(new HealthyHostService("services"));
+        builder.AddService(new HealthyHostService("services"));
 
         await using DatabaseApplication application = builder.Build();
         IResourceControlPlane controlPlane = builder.ControlPlane.ShouldNotBeNull();
@@ -146,7 +149,9 @@ public sealed class ResourceControlPlaneHostingTests
         DatabaseApplicationBuilder builder = new(
             new DatabaseApplicationOptions(),
             typeof(ResourceControlPlaneHostingTests).Assembly);
-        builder.Options.Servers.Add(new ControlledStartServer(bindStarted, accepting));
+        await using var engine = new RecordingEngine();
+        engine.AddServer(owner => new ControlledStartServer(owner, bindStarted, accepting));
+        builder.AddEngine(engine);
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
 
@@ -277,20 +282,21 @@ public sealed class ResourceControlPlaneHostingTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: aggregates distinct engine states and worker inventory")]
     public async Task CheckAsync_WithFaultedServerEngine_ShouldReportDegradedWithWorkerInventory()
     {
-        // Arrange: register the same engine directly and behind a server; the context health
-        // contribution must count the data machine once while still discovering server engines.
+        // Arrange: an engine fronted by a server; the context health contribution must count the
+        // data machine once while still discovering server engines. A pass of the engine's worker
+        // fails, so the engine base folds the engine as Faulted.
         var worker = new RecordingEngineWorker(
             "sql/wal-flush",
             DatabaseEngineWorkerKind.WriteAheadFlush,
             TimeSpan.FromMilliseconds(25));
-        var engine = new RecordingEngine(
-            "sql",
-            EngineState.Faulted,
-            [worker]);
-        var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        options.Servers.Add(new RecordingServer([], engine: engine));
-        await using var application = new DatabaseApplication(options);
+        await using var engine = new RecordingEngine("sql");
+        engine.AddWorker(worker);
+        engine.AddServer(owner => new RecordingServer([], engine: owner));
+        worker.Failure = new InvalidOperationException("Injected flush failure");
+        worker.RunIteration(CancellationToken.None).ShouldBeFalse();
+        var applicationBuilder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
 
         // Act
         HealthContribution contribution = await application.Context.CheckAsync(CancellationToken.None);
@@ -306,13 +312,57 @@ public sealed class ResourceControlPlaneHostingTests
         data["engine.0.worker.0.kind"].ShouldBe(nameof(DatabaseEngineWorkerKind.WriteAheadFlush));
     }
 
+    /// <summary>
+    /// A database goes offline (a commit's journal fsync failed): it refuses every request while
+    /// its engine keeps running. The application's health is unhealthy and names the database, so
+    /// an operator or an orchestrator acting on health learns of it; reopening the database brings
+    /// health back (#1243 review). Until phase 4 of the concrete-types plan the test failed a real
+    /// SQL engine's fsync through the model's fault-injecting storage strategy, internal since
+    /// (D9); the engine double reports the offline database the real engine lists, and the SQL
+    /// model's own suites prove the real engine lists it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a database offline after a failed fsync is unhealthy until reopened")]
+    public async Task CheckAsync_WithDatabaseOfflineAfterFailedFsync_ShouldReportUnhealthyUntilReopened()
+    {
+        // Arrange: a running engine whose database the test takes offline.
+        var engine = new RecordingEngine("sql");
+        var options = new DatabaseApplicationOptions();
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
+        HealthContribution before = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Act: the commit's journal fsync fails, and the engine lists the database offline until
+        // it is reopened.
+        engine.Offline = ["app"];
+        HealthContribution offline = await application.Context.CheckAsync(CancellationToken.None);
+        engine.Offline = [];
+        HealthContribution reopened = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Assert
+        before.Status.ShouldBe(HealthStatus.Healthy);
+        offline.Status.ShouldBe(HealthStatus.Unhealthy);
+        offline.Description.ShouldNotBeNull().ShouldContain("sql/app");
+        offline.Description.ShouldContain("A device operation of their storage failed");
+        IReadOnlyDictionary<string, object> data = offline.Data.ShouldNotBeNull();
+        data["engine.0.state"].ShouldBe(nameof(EngineState.Running));
+        data["engine.0.offlineDatabaseCount"].ShouldBe(1);
+        data["engine.0.offlineDatabases"].ShouldBe("app");
+        data["offlineDatabaseCount"].ShouldBe(1);
+        reopened.Status.ShouldBe(HealthStatus.Healthy);
+        reopened.Data.ShouldNotBeNull()["offlineDatabaseCount"].ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a disposed engine is unhealthy")]
     public async Task CheckAsync_WithDisposedEngine_ShouldReportUnhealthy()
     {
-        // Arrange
+        // Arrange: an engine disposed by its owner while the application still borrows it.
+        var engine = new RecordingEngine();
+        await engine.DisposeAsync();
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(new RecordingEngine(state: EngineState.Disposed));
-        await using var application = new DatabaseApplication(options);
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
 
         // Act
         HealthContribution contribution = await application.Context.CheckAsync(CancellationToken.None);
@@ -372,34 +422,34 @@ public sealed class ResourceControlPlaneHostingTests
         }
     }
 
-    private sealed class ControlledStartServer : IDatabaseServer
+    private sealed class ControlledStartServer : DatabaseServer
     {
-        private readonly RecordingServer _inner = new([], "controlled");
         private readonly TaskCompletionSource<bool> _bindStarted;
         private readonly TaskCompletionSource<bool> _accepting;
 
         /// <summary>Initializes a new instance of the <see cref="ControlledStartServer"/> class.</summary>
+        /// <param name="engine">The engine the server fronts, which attaches it.</param>
         /// <param name="bindStarted">Completed when the host begins starting the server.</param>
         /// <param name="accepting">Completes the server start once it is set, signalling the server is accepting.</param>
         public ControlledStartServer(
+            DatabaseEngine engine,
             TaskCompletionSource<bool> bindStarted,
             TaskCompletionSource<bool> accepting)
+            : base(engine)
         {
             _bindStarted = bindStarted;
             _accepting = accepting;
         }
 
-        public IDatabaseServerContext Context => _inner.Context;
+        public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
 
-        public Task StartAsync(CancellationToken cancellationToken = default)
+        protected override Task StartCoreAsync(CancellationToken cancellationToken)
         {
             _bindStarted.TrySetResult(true);
             return _accepting.Task.WaitAsync(cancellationToken);
         }
 
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        protected override Task StopCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private static int ReservePort()

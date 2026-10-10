@@ -18,7 +18,7 @@ public sealed class DatabaseApplicationLifetimeTests
     public async Task Run_WithoutServers_ShouldWaitForShutdownThroughRunner()
     {
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => new RecordingEngine());
+        builder.AddEngine("recording-engine", _ => new RecordingEngine());
         await using var application = builder.Build();
         var runner = new RecordingRunner();
         application.Context.Runner = runner;
@@ -45,7 +45,7 @@ public sealed class DatabaseApplicationLifetimeTests
         var engine = new RecordingEngine();
         engine.AddServer(owner => new RecordingServer(log, "nested", owner));
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => engine);
+        builder.AddEngine(engine.Name, _ => engine);
         await using var application = builder.Build();
 
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
@@ -68,14 +68,17 @@ public sealed class DatabaseApplicationLifetimeTests
         engine.AddServer(owner => new RecordingServer(log, "failing", owner) { StartException = failure });
         var builder = DatabaseApplication.CreateBuilder();
         builder.AddService(new RecordingService(log, "service"));
-        builder.AddEngine(_ => engine);
+        builder.AddEngine(engine.Name, _ => engine);
         await using var application = builder.Build();
 
         var actual = await Should.ThrowAsync<InvalidOperationException>(async () =>
             await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout()));
 
+        // The host rolls back every service it started, the failed server included, but a failed
+        // start is terminal on the server base: the failing server released what its start held,
+        // so its stop reaches no core (concrete-types plan, phase 6).
         actual.ShouldBeSameAs(failure);
-        log.ShouldBe(["service:start", "first:start", "failing:start", "failing:stop", "first:stop", "service:stop"]);
+        log.ShouldBe(["service:start", "first:start", "failing:start", "first:stop", "service:stop"]);
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout()));
     }
@@ -92,16 +95,18 @@ public sealed class DatabaseApplicationLifetimeTests
         };
         first.AddServer(_ => server);
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => first);
-        builder.AddEngine(_ => second);
+        builder.AddEngine(first.Name, _ => first);
+        builder.AddEngine(second.Name, _ => second);
         var application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
 
         await Should.ThrowAsync<AggregateException>(async () => await ((IAsyncDisposable)application).DisposeAsync());
 
+        // The host's stop ran the server's stop core, which failed; the engine's disposal of the
+        // stopped server then finds nothing left to stop.
         first.DisposeCount.ShouldBe(1);
         second.DisposeCount.ShouldBe(1);
-        server.DisposeCount.ShouldBe(1);
+        server.Stops.ShouldBe(1);
     }
 
     private sealed class RecordingRunner : IHostRunner, IHostRunObserver

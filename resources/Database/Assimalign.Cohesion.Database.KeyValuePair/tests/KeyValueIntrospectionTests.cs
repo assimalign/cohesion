@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
@@ -36,7 +35,7 @@ public sealed class KeyValueIntrospectionTests
         {
             DatabaseType.String, DatabaseType.Int64, DatabaseType.Int32, DatabaseType.String, DatabaseType.String, DatabaseType.Boolean,
         });
-        var expected = new object?[] { "kv", 1L, 1, "key", "BTree", true };
+        var expected = new object?[] { "kv", 1L, 2, "key", "BTree", true };
         (await MaterializeAsync(result)).ShouldHaveSingleItem().ShouldBe(expected);
         (await MaterializeAsync(await session.ExecuteAsync(new KeyValueKeySpacesRequest(), TestTimeout.Token())))
             .ShouldHaveSingleItem().ShouldBe(expected);
@@ -58,12 +57,12 @@ public sealed class KeyValueIntrospectionTests
         var previous = await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token());
 
         // A metadata publication after execution cannot alter its returned rows.
-        var catalog = database.ShouldBeOfType<KeyValueDatabaseInstance>().Catalog;
-        await catalog.SetEntrySpaceFormatVersionAsync(2, TestTimeout.Token());
-        (await MaterializeAsync(previous)).ShouldHaveSingleItem()[2].ShouldBe(1);
+        var catalog = database.Catalog;
+        await catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
+        (await MaterializeAsync(previous)).ShouldHaveSingleItem()[2].ShouldBe(2);
         (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
-            .ShouldHaveSingleItem()[2].ShouldBe(2);
-        await catalog.SetEntrySpaceFormatVersionAsync(1, TestTimeout.Token());
+            .ShouldHaveSingleItem()[2].ShouldBe(3);
+        await catalog.SetEntrySpaceFormatVersionAsync(2, TestTimeout.Token());
     }
 
     /// <summary>Both databases have the same implicit id, but their catalog values remain isolated.</summary>
@@ -71,17 +70,17 @@ public sealed class KeyValueIntrospectionTests
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Introspection scope: Discovery is bound to the session database")]
     public async Task KeySpaces_ShouldRemainDatabaseScoped()
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "scope" });
+        await using var engine = KeyValueDatabaseEngine.Create("scope", new KeyValueDatabaseEngineOptions());
         var first = await engine.CreateDatabaseAsync("first");
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();
         await using var other = await second.CreateSessionAsync();
-        await second.ShouldBeOfType<KeyValueDatabaseInstance>().Catalog.SetEntrySpaceFormatVersionAsync(2, TestTimeout.Token());
+        await second.Catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
 
         (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
-            .ShouldHaveSingleItem().ShouldBe(new object?[] { "first", 1L, 1, "key", "BTree", true });
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { "first", 1L, 2, "key", "BTree", true });
         (await MaterializeAsync(await other.ExecuteAsync(new KeyValueKeySpacesRequest(), TestTimeout.Token())))
-            .ShouldHaveSingleItem().ShouldBe(new object?[] { "second", 1L, 2, "key", "BTree", true });
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { "second", 1L, 3, "key", "BTree", true });
 
         await Should.ThrowAsync<DatabaseParseException>(async () =>
             await session.ExecuteAsync("KEYSPACES FROM second", cancellationToken: TestTimeout.Token()));
@@ -104,7 +103,7 @@ public sealed class KeyValueIntrospectionTests
             await session.ExecuteAsync(command, cancellationToken: TestTimeout.Token()));
         error.Message.ShouldBe("The KEYSPACES catalog surface is read-only.");
         (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
-            .ShouldHaveSingleItem().ShouldBe(new object?[] { "kv", 1L, 1, "key", "BTree", true });
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { "kv", 1L, 2, "key", "BTree", true });
 
         var key = KeyValueTestHarness.Bytes("KEYSPACES");
         await database.PutAsync(session, key, KeyValueTestHarness.Bytes("data"), cancellationToken: TestTimeout.Token());
@@ -145,7 +144,7 @@ public sealed class KeyValueIntrospectionTests
         header.Columns[0].ShouldBe(("database_name", (byte)DatabaseType.String));
         header.Columns[1].ShouldBe(("keyspace_id", (byte)DatabaseType.Int64));
         var row = DecodeRow((await client.ExpectAsync(ProtocolMessageType.ResultRow)).Payload.ToArray());
-        row.ShouldBe(new object?[] { "other", 1L, 1, "key", "BTree", true });
+        row.ShouldBe(new object?[] { "other", 1L, 2, "key", "BTree", true });
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
 
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("DELETE KEYSPACES").Encode());

@@ -191,12 +191,12 @@ public sealed class SqlCollationExecutionTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "collation-execution" });
+        => SqlDatabaseEngine.Create("collation-execution", new SqlDatabaseEngineOptions());
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
     {
         await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

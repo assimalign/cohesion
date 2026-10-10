@@ -14,11 +14,26 @@ public sealed class DatabaseObjectLockedException : DatabaseException
     /// <param name="owningSchema">The compiled schema that provisioned the object.</param>
     /// <param name="operation">The refused operation in the model's own vocabulary.</param>
     public DatabaseObjectLockedException(string objectName, string owningSchema, string operation)
-        : base($"Object '{objectName}' is owned by schema '{owningSchema}' and cannot be changed by {operation}. Alter the schema and redeploy it.")
+        : this(objectName, owningSchema, operation, $"Object '{objectName}' is owned by schema '{owningSchema}' and cannot be changed by {operation}. Alter the schema and redeploy it.")
+    {
+    }
+
+    /// <summary>
+    /// Initializes a refusal whose owner is not a schema object's compiled schema, with a message
+    /// naming that owner and its remedy: a SQL engine's declared database, which its declaration
+    /// owns at the database level (owner decision 56 of 2026-10-09).
+    /// </summary>
+    /// <param name="objectName">The object the operation targeted.</param>
+    /// <param name="owningSchema">The declaration that owns the object.</param>
+    /// <param name="operation">The refused operation in the model's own vocabulary.</param>
+    /// <param name="message">The message, which names the owner and the remedy.</param>
+    public DatabaseObjectLockedException(string objectName, string owningSchema, string operation, string message)
+        : base(message)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(objectName);
         ArgumentException.ThrowIfNullOrWhiteSpace(owningSchema);
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
         ObjectName = objectName;
         OwningSchema = owningSchema;
         Operation = operation;

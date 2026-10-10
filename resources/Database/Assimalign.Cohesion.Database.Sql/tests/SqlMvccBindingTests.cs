@@ -11,17 +11,17 @@ using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// Tests for the MVCC session binding (#907): explicit and auto-commit SQL
-/// statements run under an <c>ITransactionContext</c> from the database's
+/// statements run under a <c>TransactionContext</c> from the database's
 /// transaction manager, paired one-to-one with a storage bracket under a single
 /// shared sequence, and transaction-kernel aborts surface wrapped in the area
 /// root's <see cref="DatabaseTransactionAbortedException"/>.
 /// </summary>
 public sealed class SqlMvccBindingTests
 {
-    private static async Task<(SqlDatabaseInstance Database, IDatabaseSession Session)> CreateSessionAsync(
+    private static async Task<(SqlDatabase Database, SqlDatabaseSession Session)> CreateSessionAsync(
         SqlDatabaseEngine engine, string name)
     {
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         var session = await database.CreateSessionAsync();
         return (database, session);
     }
@@ -30,13 +30,13 @@ public sealed class SqlMvccBindingTests
     public async Task BeginTransactionAsync_Explicit_ShouldRunOnManagerContext()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-pairing" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-pairing", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "pairing-db");
         await using var _ = session;
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
 
         // Act
-        var transaction = (SqlDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
 
         // Assert: the transaction is a live manager context, and physical
         // brackets are per statement — none is held between statements (page
@@ -55,7 +55,7 @@ public sealed class SqlMvccBindingTests
     public async Task ExecuteAsync_AutoCommit_ShouldRideManagerTransaction()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-autocommit" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-autocommit", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "autocommit-db");
         await using var _ = session;
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -76,7 +76,7 @@ public sealed class SqlMvccBindingTests
     public async Task RollbackAsync_AfterWrites_ShouldUndoThroughManager()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-rollback" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-rollback", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "rollback-db");
         await using var _ = session;
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -105,14 +105,14 @@ public sealed class SqlMvccBindingTests
         // carrying a context begun on database B's manager — the manager rejects
         // the foreign context with the kernel's TransactionAbortedException, which
         // must cross the model boundary wrapped in the area root's typed abort.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-abort" });
+        await using var engine = SqlDatabaseEngine.Create("mvcc-abort", new SqlDatabaseEngineOptions());
         var (databaseA, sessionA) = await CreateSessionAsync(engine, "abort-a");
         var (databaseB, sessionB) = await CreateSessionAsync(engine, "abort-b");
         await using var _ = sessionA;
         await using var __ = sessionB;
 
         var foreignContext = await databaseB.Coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var crossBound = new SqlDatabaseTransaction(databaseA.Coordinator, foreignContext);
+        var crossBound = new SqlDatabaseTransaction(databaseA.Coordinator, foreignContext, databaseA, catalogSnapshot: null);
 
         // Act + Assert
         var exception = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
@@ -127,7 +127,7 @@ public sealed class SqlMvccBindingTests
     public async Task DisposeAsync_WithActiveTransaction_ShouldAbortCleanly()
     {
         // Arrange
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-dispose" });
+        var engine = SqlDatabaseEngine.Create("mvcc-dispose", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "dispose-db");
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
         await session.BeginTransactionAsync();

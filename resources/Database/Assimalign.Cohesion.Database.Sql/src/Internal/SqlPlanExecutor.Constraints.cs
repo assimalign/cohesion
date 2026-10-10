@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -18,6 +18,56 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+
+    /// <summary>
+    /// One row on the cascade walk's path (<see cref="CollectCascadeDeletesAsync"/>),
+    /// holding what a recursive call held in its frame: the row, the references into
+    /// its table, and how far the walk has got through them.
+    /// </summary>
+    private sealed class SqlCascadeFrame
+    {
+        public SqlCascadeFrame(SqlCatalogTable table, object?[] values, List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> incoming,
+            int lastCascade)
+        {
+            Table = table;
+            Values = values;
+            Incoming = incoming;
+            LastCascade = lastCascade;
+        }
+
+        /// <summary>The table the row belongs to.</summary>
+        public SqlCatalogTable Table { get; }
+
+        /// <summary>The row's values, which supply the keys its child rows are found by.</summary>
+        public object?[] Values { get; }
+
+        /// <summary>The references into <see cref="Table"/>, read once the row was locked.</summary>
+        public List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> Incoming { get; }
+
+        /// <summary>
+        /// The index in <see cref="Incoming"/> of the last reference this row's
+        /// deletion can cascade through (see <see cref="CascadeKeys"/>), or -1 when
+        /// there is none. The references after it are passed over without a lookup.
+        /// </summary>
+        public int LastCascade { get; }
+
+        /// <summary>The index in <see cref="Incoming"/> of the reference being walked; -1 before the first.</summary>
+        public int Reference { get; set; } = -1;
+
+        /// <summary>The current reference's child rows, or null between references.</summary>
+        public List<((PageId PageId, int SlotIndex) Location, object?[] Values)>? Matches { get; set; }
+
+        /// <summary>The index in <see cref="Matches"/> of the next child row to consider.</summary>
+        public int Match { get; set; }
+
+        /// <summary>
+        /// Whether the walk has handed out every row this frame can descend into:
+        /// it has reached its last cascading reference and that reference's matches
+        /// are exhausted. Any reference after it is a restricting one, or one whose
+        /// key is null in this row, which the walk would pass over without a lookup.
+        /// </summary>
+        public bool IsComplete => Matches is null && Reference >= LastCascade;
+    }
 
     /// <summary>
     /// One parent row version a statement's outgoing foreign keys depend on: the
@@ -53,6 +103,17 @@ internal sealed partial class SqlPlanExecutor
     //     Exclusive are incompatible, so every child writer that acquired or
     //     released a reference to that row has been decided by the time the read
     //     happens.
+    //
+    // The guarantee holds while the locked row is the parent's live version. A
+    // statement whose snapshot holds a version that a committed transaction has
+    // since replaced locks that stale version, while new child writers lock the
+    // replacement, so its read can return a child whose writer is still in flight.
+    // Such a statement writes nothing below the stale version: a cascade under a
+    // fixed snapshot fails on that child (`EnsureSnapshotSeesCascadeRow`), a
+    // RESTRICT or key-change check reports it as a violation, and otherwise the
+    // stale version fails its phase-two `EnsureLatestVersion`, which comes before
+    // every row found below it because the cascade builds its deletion set
+    // pre-order.
     //
     // Table-grain locks stay intent-only: `IntentShared` on the adjacent tables a
     // statement reads for constraint purposes, which is compatible with other
@@ -259,6 +320,9 @@ internal sealed partial class SqlPlanExecutor
     //     table, which is the same guarantee at table grain.
     //
     // Ordinary parent visibility still uses the original statement snapshot below.
+    // A latest-state read can return a version newer than a snapshot fixed at the
+    // transaction's begin; a cascade that would delete one fails first-updater-wins
+    // instead (EnsureSnapshotSeesCascadeRow, #1370).
     private static TransactionSnapshot ConstraintCurrentSnapshot(SqlStatementContext statement)
         => new(statement.Transaction.Sequence, new TransactionSequence(ulong.MaxValue), new TransactionSequence(ulong.MaxValue), Array.Empty<TransactionSequence>());
 
@@ -305,21 +369,6 @@ internal sealed partial class SqlPlanExecutor
     private static bool SameConstraintColumns(IReadOnlyList<string> left, IReadOnlyList<string> right)
         => left.Count == right.Count && left.All(column => right.Contains(column, StringComparer.OrdinalIgnoreCase));
 
-    private static IEnumerable<string> CheckColumns(SqlExpression expression)
-    {
-        if (expression is SqlColumnReferenceExpression column)
-        {
-            yield return column.ColumnName;
-        }
-        foreach (var child in SqlPlanner.Children(expression))
-        {
-            foreach (string name in CheckColumns(child))
-            {
-                yield return name;
-            }
-        }
-    }
-
     private static bool ValuesEqual(object? left, object? right, Collation? collation = null)
         => left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
 
@@ -348,24 +397,27 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateRows(SqlCatalogTable table, IReadOnlyList<object?[]> rows, SqlStatementContext statement,
         CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null)
     {
+        // The table version's CHECK predicates were parsed and bound once, when the catalog
+        // loaded or the DDL that produced this version ran; a write only evaluates the bound
+        // trees, which carry their column ordinals, functions and collations.
+        var bound = _definitions.Get(table);
+        var evaluator = ExecutionEvaluator(null, cancellationToken);
         foreach (var constraint in table.Constraints)
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
             {
-                var expression = ParseCheck(constraint.CheckExpression!);
-                var evaluator = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+                var check = bound.GetCheck(constraint);
                 foreach (var row in rows)
                 {
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
-                    object? result = evaluator.Evaluate(expression, row);
+                    object? result = evaluator.Evaluate(check.Bound, row);
                     if (result is not null and not bool)
                     {
                         throw new DatabaseException($"CHECK '{constraint.Name}' must evaluate to BOOLEAN.");
                     }
                     if (result is false)
                     {
-                        throw Violation(table, constraint, CheckColumns(expression).Distinct(StringComparer.OrdinalIgnoreCase)
-                            .Select(column => row[FindColumnOrdinal(table, column)]).ToArray());
+                        throw Violation(table, constraint, check.ColumnOrdinals.Select(ordinal => row[ordinal]).ToArray());
                     }
                 }
                 continue;
@@ -446,17 +498,94 @@ internal sealed partial class SqlPlanExecutor
     /// referential-locking note above). The traversal deduplicates by packed
     /// location, so a cyclic cascade graph deletes each row exactly once.
     /// </summary>
+    /// <remarks>
+    /// The walk is depth-first and pre-order: a row joins the deletion set, is
+    /// locked and releases its own references before any row below it is read.
+    /// It keeps its path in an explicit stack of <see cref="SqlCascadeFrame"/>s on
+    /// the heap rather than recursing once per level, because the depth of a
+    /// cascade is the data's, not the schema's: a self-referencing chain is as
+    /// deep as it is long, and recursing through it overflowed the stack of the
+    /// thread running the statement, which ends the process (#1164). Each frame
+    /// holds exactly what a recursive call held, so the order rows are visited,
+    /// locked and added to the deletion set is the recursion's.
+    /// <para>
+    /// A frame leaves the path as soon as it hands out the last matching row of
+    /// its last cascading reference, before that row's subtree is walked: the
+    /// recursive call had nothing left to do but pass over its restricting
+    /// references and return once the subtree did. A self-referencing chain
+    /// therefore walks with one frame on the path however long it is, whatever
+    /// restricting references into its table follow the self-reference; the path
+    /// grows only with the rows that still have matches, or cascading references,
+    /// left to visit.
+    /// </para>
+    /// </remarks>
     private async Task CollectCascadeDeletesAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions, HashSet<ulong> scannedTables,
-        List<SqlParentReference> released, SqlCatalogConstraint? arrivedBy,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var root = await EnterCascadeRowAsync(table, location, values, arrivedBy: null, deletions, scannedTables, released,
+            statement, cancellationToken).ConfigureAwait(false);
+        if (root is null)
+        {
+            return; // an earlier target's cascade already reached this row
+        }
+
+        var path = new Stack<SqlCascadeFrame>();
+        path.Push(root);
+        while (path.TryPeek(out var frame))
+        {
+            // Entering a row takes only its locks, which an uncontended grant does
+            // not check for cancellation, and one lookup can hand out any number of
+            // rows (a wide fan-out into a table with no cascading references does no
+            // further lookup). Checking each step makes every step cancellable.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match))
+            {
+                path.Pop(); // every row below this one is collected
+                continue;
+            }
+
+            if (frame.IsComplete)
+            {
+                path.Pop(); // that was its last child row
+            }
+
+            var next = await EnterCascadeRowAsync(edge.Child, match.Location, match.Values, edge.Constraint, deletions, scannedTables,
+                released, statement, cancellationToken).ConfigureAwait(false);
+            if (next is not null)
+            {
+                path.Push(next);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Visits one row of a cascade: adds it to the deletion set, takes its
+    /// exclusive lock, checks a child row against a snapshot fixed at the
+    /// transaction's begin (<see cref="EnsureSnapshotSeesCascadeRow"/>), takes
+    /// the intent locks on the tables around it the first time the walk reaches
+    /// its table, and collects the references deleting it releases. Returns the
+    /// frame that descends from it, or null when the row is already in the
+    /// deletion set.
+    /// </summary>
+    private async ValueTask<SqlCascadeFrame?> EnterCascadeRowAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location,
+        object?[] values, SqlCatalogConstraint? arrivedBy, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
+        HashSet<ulong> scannedTables, List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!deletions.TryAdd((table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex)), new(table, location, values)))
         {
-            return;
+            return null;
         }
 
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
+
+        // A child row was found in latest state, which can be newer than a snapshot fixed at the
+        // transaction's begin; a target of the statement itself was found through that snapshot.
+        if (arrivedBy is not null)
+        {
+            EnsureSnapshotSeesCascadeRow(table, location, statement);
+        }
+
         if (scannedTables.Add(table.ObjectId))
         {
             await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
@@ -468,25 +597,147 @@ internal sealed partial class SqlPlanExecutor
         // already exclusively locked by this statement.
         CollectReleasedReferences(table, [values], released, statement, cancellationToken, skip: arrivedBy);
 
-        foreach (var (child, constraint) in IncomingReferences(table).ToList())
+        // The incoming references are read after the row and its table are locked,
+        // exactly where the recursive walk read them.
+        var incoming = IncomingReferences(table).ToList();
+        int lastCascade = incoming.Count - 1;
+        while (lastCascade >= 0 && CascadeKeys(table, values, incoming[lastCascade].Constraint) is null)
         {
-            var keys = constraint.ReferencedColumns!.Select(column => values[FindColumnOrdinal(table, column)]).ToArray();
-            if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict || keys.Any(value => value is null))
+            lastCascade--;
+        }
+
+        return new SqlCascadeFrame(table, values, incoming, lastCascade);
+    }
+
+    /// <summary>
+    /// The transaction-snapshot crosscheck of a cascade (#1370). Under a snapshot fixed at the
+    /// transaction's begin (<see cref="IsolationLevel.Snapshot"/> and
+    /// <see cref="IsolationLevel.Serializable"/>), a child row the walk reached in latest state
+    /// must be a version that snapshot sees. A version it does not see is a write the
+    /// transaction never read. Usually its writer committed after the snapshot: the parent row's
+    /// exclusive lock waited for every writer of a row referencing it, and an aborted writer's
+    /// versions are undone before its locks release. The exception is a statement whose snapshot
+    /// holds a parent version that a committed transaction has since replaced: child writers
+    /// lock the replacement, not the version this statement locked, so the walk can reach a
+    /// child whose writer is still in flight (the referential-locking note above). Either way
+    /// deleting that version would overwrite a write the transaction never saw, so the statement
+    /// fails with the retryable write-write conflict, first-updater-wins, before it writes
+    /// anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// PostgreSQL makes the same decision. Its cascade runs with the latest snapshot and, in a
+    /// REPEATABLE READ or SERIALIZABLE transaction, the transaction snapshot as a crosscheck
+    /// (<c>src/backend/utils/adt/ri_triggers.c:1206-1211</c>, <c>:2810-2815</c>);
+    /// <c>heap_delete</c> reports a row the crosscheck does not see as updated
+    /// (<c>src/backend/access/heap/heapam.c:2970-2975</c>), and <c>ExecDelete</c> raises that as
+    /// a serialization failure, "could not serialize access due to concurrent update"
+    /// (<c>src/backend/executor/nodeModifyTable.c:1735-1738</c>). A child inserted after the
+    /// snapshot fails the same way. Under <see cref="IsolationLevel.ReadCommitted"/> the
+    /// statement reads through a snapshot of its own and the walk deletes the latest version, as
+    /// PostgreSQL's read-committed cascade does.
+    /// </para>
+    /// <para>
+    /// Until #1370 the walk deleted the newer version anyway and removed its index entries
+    /// through the transaction's snapshot, which does not see it: the index delete matched
+    /// nothing, and the deleted child's unique entry stayed live, so its key could never be
+    /// inserted again.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The child row's table.</param>
+    /// <param name="location">The child row's location, exclusively locked by the statement.</param>
+    /// <param name="statement">The executing statement.</param>
+    /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer.</exception>
+    private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement)
+    {
+        if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
+        {
+            return;
+        }
+
+        var (writer, _) = ReadVersionStamps(table, location.PageId, location.SlotIndex);
+        if (!statement.Snapshot.IsVisible(writer))
+        {
+            throw new TransactionAbortedException(
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version written by transaction {writer}, " +
+                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+        }
+    }
+
+    /// <summary>
+    /// Returns the key a row's children are found by through one incoming
+    /// reference, or null when deleting the row cascades nothing through it: the
+    /// reference is <c>ON DELETE RESTRICT</c> (checked against the whole deletion
+    /// set once the walk is done), or the row's key has a null component and so
+    /// matches no child (MATCH SIMPLE).
+    /// </summary>
+    private static object?[]? CascadeKeys(SqlCatalogTable table, object?[] values, SqlCatalogConstraint constraint)
+    {
+        if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict)
+        {
+            return null;
+        }
+
+        var keys = constraint.ReferencedColumns!.Select(column => values[FindColumnOrdinal(table, column)]).ToArray();
+        return keys.Any(value => value is null) ? null : keys;
+    }
+
+    /// <summary>
+    /// Advances a frame to the next child row its deletion cascades to: the next
+    /// match of the current incoming reference that is not already in the deletion
+    /// set, reading the next cascading reference's matches when the current one is
+    /// exhausted. Returns false when the frame has no more rows to descend into.
+    /// </summary>
+    /// <remarks>
+    /// A reference's matches are read when the walk reaches that reference, after
+    /// every row below the previous reference has been collected, and are
+    /// materialized: the walk awaits lock acquisitions between them, and the
+    /// storage iterator must not stay open across those awaits. The deletion-set
+    /// check is made per match, as late as possible, so a row an earlier sibling's
+    /// cascade already reached is skipped rather than visited twice.
+    /// </remarks>
+    private bool TryNextCascadeRow(SqlCascadeFrame frame, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
+        SqlStatementContext statement, CancellationToken cancellationToken,
+        out (SqlCatalogTable Child, SqlCatalogConstraint Constraint) edge,
+        out ((PageId PageId, int SlotIndex) Location, object?[] Values) match)
+    {
+        while (true)
+        {
+            if (frame.Matches is { } matches)
+            {
+                edge = frame.Incoming[frame.Reference];
+                while (frame.Match < matches.Count)
+                {
+                    match = matches[frame.Match++];
+                    if (!deletions.ContainsKey((edge.Child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))))
+                    {
+                        if (frame.Match == matches.Count)
+                        {
+                            frame.Matches = null; // the last match: let the list go before its subtree is walked
+                        }
+
+                        return true;
+                    }
+                }
+
+                frame.Matches = null;
+            }
+
+            if (++frame.Reference >= frame.Incoming.Count)
+            {
+                edge = default;
+                match = default;
+                return false;
+            }
+
+            var (child, constraint) = frame.Incoming[frame.Reference];
+            if (CascadeKeys(frame.Table, frame.Values, constraint) is not { } keys)
             {
                 continue;
             }
-            // Materialized before descending: the recursion awaits lock
-            // acquisitions, and the storage iterator must not stay open across them.
-            foreach (var match in FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList())
-            {
-                if (deletions.ContainsKey((child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))))
-                {
-                    continue;
-                }
 
-                await CollectCascadeDeletesAsync(child, match.Location, match.Values, deletions, scannedTables, released,
-                    constraint, statement, cancellationToken).ConfigureAwait(false);
-            }
+            frame.Matches = FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList();
+            frame.Match = 0;
         }
     }
 
@@ -542,16 +793,51 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static SqlExpression ParseCheck(string text)
+    /// <summary>
+    /// Accepts a CHECK predicate a DDL statement declares: every column and collation must
+    /// resolve, the predicate must be a deterministic Boolean row expression the evaluator can
+    /// run, and it must pass the declaration rules — no casts, no sign over an operand the plan
+    /// types as non-numeric, and no function that is not <see cref="SqlFunctionVolatility.Immutable"/>
+    /// (owner decision 64 of 2026-10-09: stricter than PostgreSQL and SQLite, so relaxing it later
+    /// breaks no stored definition).
+    /// </summary>
+    /// <param name="expression">The declared predicate.</param>
+    /// <param name="table">The table version the predicate constrains.</param>
+    /// <param name="defaultCollation">The database default collation.</param>
+    /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
+    internal static void ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
+        SqlFunctionEnvironment functions)
     {
-        var parsed = new SqlQueryParser().Parse($"SELECT * FROM __constraint WHERE {text}");
-        if (parsed.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
-            parsed is not SqlQueryStatement { SqlExpression: SqlSelectExpression { Where: { } expression } })
-        {
-            throw new DatabaseException("CHECK requires a valid scalar predicate.");
-        }
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
+        SqlPlanner.ValidateExpression(expression, scope);
+        new SqlCheckSyntax(table, scope, declaring: true).Validate(expression, requireBoolean: true);
+    }
 
-        return expression;
+    /// <summary>
+    /// Binds a CHECK predicate the catalog persisted to a table version: every column and
+    /// collation must resolve, and the predicate must be a Boolean row expression the evaluator
+    /// can run. The declaration rules <see cref="ValidateCheck"/> adds are not applied again: the
+    /// engine that stored the predicate accepted it, and a later engine tightening what DDL
+    /// accepts must not make an existing database refuse to open.
+    /// </summary>
+    /// <param name="expression">The persisted predicate, parsed.</param>
+    /// <param name="table">The table version the predicate constrains.</param>
+    /// <param name="defaultCollation">The database default collation.</param>
+    /// <param name="functions">The engine's function catalog and the database.</param>
+    /// <returns>
+    /// The predicate compiled to the bound tree every write to the table version evaluates: its
+    /// columns as ordinals of the version's rows, its calls bound to their functions and each
+    /// comparison's collation fixed, once per table version.
+    /// </returns>
+    /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
+    internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
+        SqlFunctionEnvironment functions)
+    {
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions);
+        SqlPersistedExpression.Bind(expression, scope);
+        new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
+        return scope.Bind(expression);
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
@@ -587,11 +873,17 @@ internal sealed partial class SqlPlanExecutor
 
             if (definition.Kind == SqlConstraintKind.Check)
             {
-                var expression = definition.CheckExpression ?? ParseCheck(definition.CheckExpressionText!);
-                SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues));
-                ValidateCheckSyntax(expression, table, requireBoolean: true);
+                var expression = definition.CheckExpression
+                    ?? throw new DatabaseException("CHECK requires a valid scalar predicate.");
+                ValidateCheck(expression, table, _catalog.DefaultCollation, _definitions.Functions);
+
+                // The catalog stores the canonical text of the parsed predicate, not the text as
+                // written: no spelling, and no leniency an older parser had for it, reaches
+                // storage, and the text is proven to reload to this tree before it is kept.
+                string canonical = SqlPersistedExpression.Canonicalize(expression,
+                    $"CHECK constraint '{name}' on table '{table.Schema}.{table.Name}'");
                 result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Check, definition.Columns,
-                    checkExpression: definition.CheckExpressionText));
+                    checkExpression: canonical));
                 continue;
             }
             var referenced = definition.ReferencedTable!;
@@ -640,71 +932,258 @@ internal sealed partial class SqlPlanExecutor
         }
         return result;
     }
-    private static void ValidateCheckSyntax(SqlExpression expression, SqlCatalogTable table, bool requireBoolean)
+
+    /// <summary>
+    /// Checks the shape of a CHECK predicate in one pass that visits every node exactly once, so
+    /// its cost is linear in the size of the predicate however deeply AND, OR, NOT, COALESCE and
+    /// CASE nest. (Walking a Boolean operand once as a plain child and again as a Boolean one
+    /// doubled the work at every AND/OR level: a 24-term AND took seconds, and binding at open
+    /// ran it for every such table.)
+    /// </summary>
+    /// <remarks>
+    /// A call must resolve to a scalar function of the engine's catalog, or be <c>COALESCE</c>; an
+    /// aggregate, or a name outside the catalog, cannot be evaluated against one row. When DDL
+    /// declares the predicate, the function must also be <see cref="SqlFunctionVolatility.Immutable"/>
+    /// (owner decision 64); a stored predicate is not held to it again, so a function whose
+    /// registration changed does not stop its database from opening.
+    /// </remarks>
+    private sealed class SqlCheckSyntax
     {
-        if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlCastExpression or SqlStarExpression
-            or SqlInExpression { Subquery: not null })
+        private readonly SqlCatalogTable _table;
+        private readonly SqlExpressionEvaluator _scope;
+        private readonly bool _declaring;
+
+        /// <summary>Initializes the check of one predicate.</summary>
+        /// <param name="table">The table version the predicate constrains.</param>
+        /// <param name="scope">The scope its calls resolve in.</param>
+        /// <param name="declaring">
+        /// <see langword="true"/> when DDL accepts the predicate, which also applies the declaration
+        /// rules against casts and functions that are not immutable; <see langword="false"/> when
+        /// the catalog's persisted predicate binds.
+        /// </param>
+        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring)
         {
-            throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
+            _table = table;
+            _scope = scope;
+            _declaring = declaring;
         }
-        if (expression is SqlFunctionCallExpression function && function.FunctionName.ToUpperInvariant() is not ("COALESCE" or "UPPER" or "LOWER" or "LENGTH" or "ABS"))
+
+        /// <summary>Checks one node.</summary>
+        /// <param name="expression">The node to check.</param>
+        /// <param name="requireBoolean">Whether the node's position requires a Boolean value.</param>
+        /// <exception cref="DatabaseException">The node breaks a CHECK rule.</exception>
+        internal void Validate(SqlExpression expression, bool requireBoolean)
         {
-            throw new DatabaseException($"Function '{function.FunctionName}' is not supported in CHECK.");
-        }
-        foreach (var child in SqlPlanner.Children(expression))
-        {
-            ValidateCheckSyntax(child, table, requireBoolean: false);
-        }
-        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical)
-        {
-            ValidateCheckSyntax(logical.Left, table, requireBoolean: true);
-            ValidateCheckSyntax(logical.Right, table, requireBoolean: true);
-        }
-        if (expression is SqlUnaryExpression { Operator: SqlUnaryOperator.Not } negation)
-        {
-            ValidateCheckSyntax(negation.Operand, table, requireBoolean: true);
-        }
-        if (!requireBoolean)
-        {
-            return;
-        }
-        bool boolean = expression switch
-        {
-            SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual or SqlBinaryOperator.And or SqlBinaryOperator.Or,
-            SqlUnaryExpression unary => unary.Operator == SqlUnaryOperator.Not,
-            SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
-            SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,
-            SqlColumnReferenceExpression column => table.Columns[FindColumnOrdinal(table, column.ColumnName)].Type.Type == DatabaseType.Boolean,
-            SqlFunctionCallExpression functionCall => string.Equals(functionCall.FunctionName, "COALESCE", StringComparison.OrdinalIgnoreCase),
-            SqlCaseExpression => true,
-            _ => false,
-        };
-        if (!boolean)
-        {
-            throw new DatabaseException("CHECK requires a BOOLEAN predicate.");
-        }
-        if (expression is SqlFunctionCallExpression coalesce)
-        {
-            foreach (var argument in coalesce.Arguments)
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression
+                or SqlInExpression { Subquery: not null } || (_declaring && expression is SqlCastExpression))
             {
-                ValidateCheckSyntax(argument, table, requireBoolean: true);
+                throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
             }
-        }
-        if (expression is SqlCaseExpression caseExpression)
-        {
-            foreach (var branch in caseExpression.WhenClauses)
+
+            // A call's arguments were matched against its overloads when the statement was planned
+            // (DDL) or the persisted predicate was bound (open); here only its function is checked.
+            var called = expression is SqlFunctionCallExpression function ? CheckFunction(function) : null;
+
+            // Each child is visited once, with the requirement its position puts on it: the operands
+            // of AND, OR and NOT are Boolean, and so are COALESCE's arguments and a CASE's results
+            // (and a searched CASE's conditions) when the call or CASE itself must be Boolean.
+            switch (expression)
             {
-                if (caseExpression.Input is null)
+                case SqlLogicalExpression logical:
+                    // Every term of an AND/OR chain at one level, however long the chain (#1151).
+                    foreach (var term in logical.Operands)
+                    {
+                        Validate(term, requireBoolean: true);
+                    }
+                    break;
+                case SqlUnaryExpression { Operator: SqlUnaryOperator.Not } negation:
+                    Validate(negation.Operand, requireBoolean: true);
+                    break;
+                case SqlFunctionCallExpression call:
+                    bool booleanArguments = requireBoolean && called is null;
+                    foreach (var argument in call.Arguments)
+                    {
+                        Validate(argument, booleanArguments);
+                    }
+                    break;
+                case SqlCaseExpression caseExpression:
+                    if (caseExpression.Input is not null)
+                    {
+                        Validate(caseExpression.Input, requireBoolean: false);
+                    }
+                    foreach (var branch in caseExpression.WhenClauses)
+                    {
+                        Validate(branch.Condition, requireBoolean && caseExpression.Input is null);
+                        Validate(branch.Result, requireBoolean);
+                    }
+                    if (caseExpression.ElseResult is not null)
+                    {
+                        Validate(caseExpression.ElseResult, requireBoolean);
+                    }
+                    break;
+                default:
+                    foreach (var child in SqlPlanner.Children(expression))
+                    {
+                        Validate(child, requireBoolean: false);
+                    }
+                    break;
+            }
+
+            CheckApplicationResults(expression);
+            if (!requireBoolean)
+            {
+                return;
+            }
+            bool boolean = expression switch
+            {
+                SqlLogicalExpression => true,
+                SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
+                SqlUnaryExpression unary => unary.Operator == SqlUnaryOperator.Not,
+                SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
+                SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,
+                SqlColumnReferenceExpression column => _table.Columns[FindColumnOrdinal(_table, column.ColumnName)].Type.Type == DatabaseType.Boolean,
+                // COALESCE over Boolean arguments, or a function declared to return BOOLEAN.
+                SqlFunctionCallExpression => called is null || ReferenceEquals(called.ReturnType, SqlType.Boolean),
+                SqlCaseExpression => true,
+                _ => false,
+            };
+            if (!boolean)
+            {
+                if (expression is SqlFunctionCallExpression call && called is not null && !SqlStandardLibrary.Contains(called))
                 {
-                    ValidateCheckSyntax(branch.Condition, table, requireBoolean: true);
+                    throw new SqlFunctionResultMismatchException(call, ResultName(call, called), "BOOLEAN");
                 }
-                ValidateCheckSyntax(branch.Result, table, requireBoolean: true);
+
+                throw new DatabaseException("CHECK requires a BOOLEAN predicate.");
             }
-            if (caseExpression.ElseResult is not null)
+        }
+
+        /// <summary>
+        /// Checks that an application function's result fits where the predicate uses it: an
+        /// operand of a comparison, <c>BETWEEN</c> or <c>IN</c> list of a type its other operand
+        /// compares with, and an arithmetic operand that is a number. The evaluator would refuse
+        /// either on every row the call returns a value for. Calls of the standard library, and
+        /// operands whose type the plan cannot tell, are not checked, so no predicate DDL accepted
+        /// before is refused.
+        /// </summary>
+        /// <exception cref="SqlFunctionResultMismatchException">An application function's result does not fit.</exception>
+        private void CheckApplicationResults(SqlExpression expression)
+        {
+            switch (expression)
             {
-                ValidateCheckSyntax(caseExpression.ElseResult, table, requireBoolean: true);
+                case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual
+                    or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual:
+                    CheckComparable(binary.Left, binary.Right);
+                    break;
+                case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
+                    or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo:
+                    CheckNumber(binary.Left);
+                    CheckNumber(binary.Right);
+                    break;
+                case SqlBetweenExpression between:
+                    CheckComparable(between.Operand, between.Low);
+                    CheckComparable(between.Operand, between.High);
+                    break;
+                case SqlInExpression { Values: { } values } list:
+                    foreach (var value in values)
+                    {
+                        CheckComparable(list.Operand, value);
+                    }
+                    break;
             }
+        }
+
+        private void CheckComparable(SqlExpression left, SqlExpression right)
+        {
+            var (leftCall, leftType) = Operand(left);
+            var (rightCall, rightType) = Operand(right);
+            if (leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
+                Comparable(leftType, rightType))
+            {
+                return;
+            }
+
+            var (call, type, other) = leftCall is not null ? (leftCall, leftType, rightType) : (rightCall!, rightType, leftType);
+            throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), $"a value that compares with {SqlType.NameOf(other)}");
+
+            // The value order's own rule (SqlValueComparer): the same type, or two numbers. JSON is read as text and JSONB as bytes.
+            static bool Comparable(DatabaseType first, DatabaseType second)
+            {
+                first = first switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
+                second = second switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
+                return first == second || IsNumber(first) && IsNumber(second);
+            }
+        }
+
+        private void CheckNumber(SqlExpression operand)
+        {
+            var (call, type) = Operand(operand);
+            if (call is not null && type != DatabaseType.Null && !IsNumber(type))
+            {
+                throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), "a number");
+            }
+        }
+
+        /// <summary>
+        /// An operand's static type, and the call when the operand is a call of an application
+        /// function. Only a call, a literal or a column is typed; anything else is not checked.
+        /// </summary>
+        private (SqlFunctionCallExpression? Call, DatabaseType Type) Operand(SqlExpression expression)
+        {
+            while (expression is SqlCollateExpression collate)
+            {
+                expression = collate.Operand;
+            }
+
+            switch (expression)
+            {
+                case SqlFunctionCallExpression call when !SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                    return _scope.ResolveFunction(call) is SqlScalarFunction function && !SqlStandardLibrary.Contains(function)
+                        ? (call, _scope.StaticCallType(call))
+                        : (null, DatabaseType.Null);
+                case SqlLiteralExpression or SqlColumnReferenceExpression:
+                    return (null, _scope.StaticTypeOf(expression));
+                default:
+                    return (null, DatabaseType.Null);
+            }
+        }
+
+        private static bool IsNumber(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+            or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal;
+
+        /// <summary>A call's result type as a message names it: its static type, else its declared type.</summary>
+        private string ResultName(SqlFunctionCallExpression call, SqlScalarFunction function)
+            => _scope.StaticCallType(call) is var type && type != DatabaseType.Null ? SqlType.NameOf(type) : function.ReturnType.Name;
+
+        /// <summary>
+        /// Checks that a call may appear in a CHECK, and returns the scalar function it resolves to;
+        /// null for <c>COALESCE</c>, the special form.
+        /// </summary>
+        /// <exception cref="DatabaseException">
+        /// The call is an aggregate's or names no function of the catalog, or DDL declares a call of a
+        /// function that is not immutable.
+        /// </exception>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private SqlScalarFunction? CheckFunction(SqlFunctionCallExpression call)
+        {
+            if (SqlStandardLibrary.IsCoalesce(call.FunctionName))
+            {
+                return null;
+            }
+
+            if (_scope.ResolveFunction(call) is not SqlScalarFunction function)
+            {
+                throw new DatabaseException($"Function '{call.FunctionName}' is not supported in CHECK.");
+            }
+            if (_declaring && function.Volatility != SqlFunctionVolatility.Immutable)
+            {
+                throw new DatabaseException(
+                    $"Function '{call.FunctionName}' is {(function.Volatility == SqlFunctionVolatility.Stable ? "STABLE" : "VOLATILE")}, and a CHECK admits only IMMUTABLE functions. " +
+                    "Register the function as SqlFunctionVolatility.Immutable if its result depends on nothing but its arguments.");
+            }
+
+            return function;
         }
     }
-
 }

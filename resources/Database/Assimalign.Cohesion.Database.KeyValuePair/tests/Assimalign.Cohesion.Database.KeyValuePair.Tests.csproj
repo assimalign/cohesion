@@ -13,6 +13,18 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+		<!-- Rewrites index pages into the layouts the old-format refusal tests need (#1194). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
+		<!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\StorageFormatFiles.cs" Link="TestObjects\StorageFormatFiles.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalFrames.cs" Link="TestObjects\JournalFrames.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\PageWriteLockHolder.cs" Link="TestObjects\PageWriteLockHolder.cs" />
+		<!-- Device faults that fire on the engine's worker threads, for the worker resilience tests (#1268). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DeviceFaults.cs" Link="TestObjects\DeviceFaults.cs" />
+		<!-- Samples the journal for the checkpoint size trigger's test (#1254). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalSamples.cs" Link="TestObjects\JournalSamples.cs" />
+		<!-- A clock the worker failure window tests move by hand (owner decision 42). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database\tests\TestObjects\ManualTimeProvider.cs" Link="TestObjects\ManualTimeProvider.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />

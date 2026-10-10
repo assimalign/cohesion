@@ -20,7 +20,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: folded seeks and ranges preserve original row text")]
     public async Task Seek_FoldedColumns_ShouldAgreeWithScanAndExpressionOverrides()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("collation-seeks", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (id INT, name TEXT COLLATE case_accent_insensitive)");
@@ -58,7 +58,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: UNIQUE index rejects folded duplicates on insert and update")]
     public async Task Unique_FoldedKeys_ShouldRejectInsertUpdateAndBackfillDuplicates()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("collation-unique", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (id INT, name TEXT COLLATE case_insensitive UNIQUE)");
@@ -83,7 +83,7 @@ public sealed class SqlCollationIndexTests
         string root = Path.Combine(Path.GetTempPath(), "cohesion-collation", Guid.NewGuid().ToString("N"));
         try
         {
-            await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = root }))
+            await using (var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("restart", Collation.CaseInsensitive, CancellationToken.None);
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -91,10 +91,10 @@ public sealed class SqlCollationIndexTests
                 await Execute(session, "INSERT INTO t VALUES ('Alice', 'Alice', 'Élodie')");
                 await Execute(session, "CREATE INDEX ix_accent ON t(accent)");
             }
-            await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = root }))
+            await using (var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions { RootPath = root }))
             {
                 var database = await engine.OpenDatabaseAsync("restart", CancellationToken.None);
-                var catalog = ((SqlDatabaseInstance)database).Catalog;
+                var catalog = database.Catalog;
                 catalog.DefaultCollation.ShouldBeSameAs(Collation.CaseInsensitive);
                 catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
                 table.Columns[0].Collation.ShouldBeNull();
@@ -124,7 +124,7 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: binary default stays isolated from a folded database")]
     public async Task Database_Defaults_ShouldRemainIsolatedAndBinaryWhenUnspecified()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         foreach (bool folded in new[] { true, false })
         {
             var database = folded
@@ -146,25 +146,25 @@ public sealed class SqlCollationIndexTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Collation: linguistic indexes and non-string column overrides reject clearly")]
     public async Task Index_NonByteCollation_ShouldRejectBeforePublishingEmptyIndex()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
+        await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("unsupported", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (name TEXT COLLATE invariant)");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE INDEX ix ON t(name)"))).Message.ShouldContain("not index-backed");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad (name TEXT COLLATE invariant UNIQUE)"))).Message.ShouldContain("not index-backed");
         await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad_number (id INT COLLATE binary)"));
-        ((SqlDatabaseInstance)database).Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();
         await Execute(session, "INSERT INTO t VALUES ('Alice')");
         (await Names(session, "SELECT name FROM t WHERE name = 'Alice'")).ShouldBe(new[] { "Alice" });
     }
 
-    private static async Task Execute(IDatabaseSession session, string sql)
+    private static async Task Execute(SqlDatabaseSession session, string sql)
         => await session.ExecuteAsync(SqlQueryRequest.FromSql(sql), CancellationToken.None);
 
-    private static SqlStatementMetrics Metrics(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics Metrics(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static async Task<string[]> Names(IDatabaseSession session, string sql)
+    private static async Task<string[]> Names(SqlDatabaseSession session, string sql)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(SqlQueryRequest.FromSql(sql), CancellationToken.None);
         var values = new List<string>();

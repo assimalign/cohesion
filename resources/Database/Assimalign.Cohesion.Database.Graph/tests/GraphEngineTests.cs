@@ -2,8 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 using Shouldly;
@@ -16,8 +21,8 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Cyclic_traversal_visits_each_node_once_excludes_start_and_honors_depth_and_direction()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var db = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var a = await db.CreateNodeAsync(session, ["Person"]);
         var b = await db.CreateNodeAsync(session, ["Person"]);
@@ -42,8 +47,8 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Typed_delete_cascades_and_rollback_restores_node_relationships_and_index()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var db = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var a = await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "a" });
         var b = await db.CreateNodeAsync(session, ["Person"]);
@@ -64,8 +69,8 @@ public sealed class GraphEngineTests
     [InlineData(IsolationLevel.ReadCommitted, true)]
     public async Task Transactions_enforce_the_requested_visibility(IsolationLevel isolation, bool seesNew)
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var db = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var db = await engine.CreateDatabaseAsync("graph");
         await using var reader = await db.CreateSessionAsync();
         await using var writer = await db.CreateSessionAsync();
         await using var tx = await reader.BeginTransactionAsync(isolation);
@@ -77,8 +82,8 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Definitions_are_discoverable_and_schema_owned_changes_name_object_schema_and_operation()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var db = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var schema = GraphSchema.Open(db, session);
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person", DatabaseObjectOwner.Schema, "PeopleSchema");
@@ -99,8 +104,8 @@ public sealed class GraphEngineTests
     [Fact]
     public async Task Required_property_and_type_mismatch_reject_the_complete_write()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
-        var db = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var db = await engine.CreateDatabaseAsync("graph");
         await using var session = await db.CreateSessionAsync();
         var schema = GraphSchema.Open(db, session);
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person");
@@ -119,21 +124,21 @@ public sealed class GraphEngineTests
         try
         {
             GraphNodeId id;
-            await using (var engine = GraphDatabaseEngine.Create(new() { RootPath = root }))
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
             {
                 engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(4);
                 engine.State.ShouldBe(EngineState.Running);
-                var db = (IGraphDatabase)await engine.CreateDatabaseAsync("persisted");
+                var db = await engine.CreateDatabaseAsync("persisted");
                 await using var session = await db.CreateSessionAsync();
                 id = (await db.CreateNodeAsync(session, ["Person"])).Id;
                 engine.TryGetDatabase("PERSISTED", out var found).ShouldBeTrue(); found.ShouldBeSameAs(db);
                 await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("persisted"));
             }
-            var reopened = GraphDatabaseEngine.Create(new() { RootPath = root });
+            var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
             var names = new List<string>();
             await foreach (var db in reopened.GetDatabasesAsync()) { names.Add(db.Name.ToString()); }
             names.ShouldBe(["persisted"]);
-            var restored = (IGraphDatabase)await reopened.OpenDatabaseAsync("persisted");
+            var restored = await reopened.OpenDatabaseAsync("persisted");
             await using (var session = await restored.CreateSessionAsync()) { (await restored.GetNodeAsync(session, id)).ShouldNotBeNull(); }
             await reopened.DropDatabaseAsync("persisted");
             reopened.TryGetDatabase("persisted", out _).ShouldBeFalse();
@@ -141,5 +146,201 @@ public sealed class GraphEngineTests
             await reopened.DisposeAsync(); reopened.Dispose(); reopened.State.ShouldBe(EngineState.Disposed);
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database whose indexes are in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    public async Task Open_IndexPagesInFormatOne_ShouldBeRefused()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-format-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Arrange: a closed database with a property index, its index pages rewritten
+            // into the layout engines before #1194 wrote (entries ordered by key alone).
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
+            {
+                var db = await engine.CreateDatabaseAsync("legacy");
+                await using var session = await db.CreateSessionAsync();
+                await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "a" });
+                await GraphSchema.Open(db, session).CreateIndexAsync("Person", "by_name", "name");
+            }
+
+            LegacyBTreePages.DowngradeDataFiles(root).ShouldBeGreaterThan(0);
+            var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+            // Act
+            await using var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
+
+            // Assert: the coded refusal, with the index manager's as its cause; the
+            // check ran before recovery, so the database is left as it was.
+            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
+            failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
+            reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            await reopened.DisposeAsync();
+
+            foreach (var (path, bytes) in before)
+            {
+                File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+            }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
+    public async Task Open_StorageFormatTwo_ShouldBeRefusedNamingTheDatabase()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-storage-format-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Arrange: a closed database whose page 0 names storage format 2, the format before #1253.
+            await using (var engine = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root }))
+            {
+                var db = await engine.CreateDatabaseAsync("legacy");
+                await using var session = await db.CreateSessionAsync();
+                await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "a" });
+            }
+
+            StorageFormatFiles.WriteVersion(Path.Combine(root, "legacy", "graph.dat"), version: 2);
+            var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+            // Act
+            await using var reopened = GraphDatabaseEngine.Create("graph-engine", new() { RootPath = root });
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
+
+            // Assert: the storage's coded refusal, named for the database; nothing written.
+            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + StorageFormatException.ErrorCode + ": ", Case.Sensitive);
+            failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
+            reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            await reopened.DisposeAsync();
+
+            Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length.ShouldBe(before.Count);
+            foreach (var (path, bytes) in before)
+            {
+                File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+            }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
+    /// <summary>
+    /// The engine's lookup is typed (concrete-types plan, §6.5): an <c>out var</c> call binds the
+    /// typed overload, and an explicitly typed base <c>out</c> still binds the base's lookup.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Engine: the typed lookup binds an out-var call, and a base-typed out binds the base's")]
+    public async Task TryGetDatabase_OutVarAndBaseTypedOut_ShouldBindTheTypedAndTheBaseLookups()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        var database = await engine.CreateDatabaseAsync("graph");
+
+        // Act
+        bool typedFound = engine.TryGetDatabase("graph", out var typed);
+        GraphDatabase? lookedUp = typed;
+        bool baseFound = engine.TryGetDatabase("graph", out DatabaseInstance? untyped);
+
+        // Assert
+        typedFound.ShouldBeTrue();
+        lookedUp.ShouldBeSameAs(database);
+        baseFound.ShouldBeTrue();
+        untyped.ShouldBeSameAs(database);
+        database.Engine.ShouldBeSameAs(engine);
+    }
+
+    /// <summary>
+    /// The root engine base's guards (concrete-types plan §6.4, the engine's guards): every member
+    /// checks an empty name, then disposal, then the token, and the enumeration checks disposal
+    /// when it is called. The graph engine's own name rule (a single file-name component) runs in
+    /// its cores, after those checks. Before the base, the engine checked the whole name, then the
+    /// token, then disposal, and the enumeration checked disposal at its first <c>MoveNextAsync</c>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Engine: the base checks an empty name, then disposal, then the token, and the model's name rule after them")]
+    public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
+    {
+        // Arrange
+        var engine = GraphDatabaseEngine.Create("graph-engine", new());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledOpen = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("graph", canceled.Token));
+        var canceledComponent = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("..", canceled.Token));
+        var component = await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(".."));
+        var unnamedLookup = Should.Throw<ArgumentException>(() => engine.TryGetDatabase(default, out _));
+        await engine.DisposeAsync();
+
+        // Act
+        var unnamedCreate = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default, canceled.Token));
+        var disposedCreate = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.CreateDatabaseAsync("graph", canceled.Token));
+        var disposedComponent = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.DropDatabaseAsync(".."));
+        var disposedLookup = Should.Throw<ObjectDisposedException>(() => engine.TryGetDatabase("..", out _));
+        var disposedEnumeration = Should.Throw<ObjectDisposedException>(() => engine.GetDatabasesAsync());
+
+        // Assert
+        canceledOpen.CancellationToken.ShouldBe(canceled.Token);
+        canceledComponent.CancellationToken.ShouldBe(canceled.Token);
+        component.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        unnamedLookup.Message.ShouldStartWith("A database name is required.", Case.Sensitive);
+        unnamedCreate.ParamName.ShouldBe("name");
+        disposedCreate.ShouldNotBeNull();
+        disposedComponent.ShouldNotBeNull();
+        disposedLookup.ShouldNotBeNull();
+        disposedEnumeration.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Databases that fail to close are one component of the engine's disposal aggregate
+    /// (concrete-types plan §6.4): one failure is reported as itself, and two or more inside one
+    /// nested aggregate, "One or more graph databases failed to close.". The engine's aggregate is
+    /// the root base's, "One or more components of engine '{name}' failed to close.". Before the
+    /// root base, the engine's single aggregate, "One or more graph engine components failed to
+    /// close.", held each database's failure directly.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Engine: databases that fail to close are one component of the engine's aggregate, several of them nested")]
+    public async Task DisposeAsync_DatabasesFailToClose_ShouldReportThemAsOneComponent()
+    {
+        // Arrange: quiet workers, and a database of each engine holding a durable write; every
+        // journal flush of the closes fails.
+        var single = await CreateWithWritesAsync("single", databases: 1);
+        var several = await CreateWithWritesAsync("several", databases: 2);
+
+        // Act
+        AggregateException singleFailure;
+        AggregateException severalFailure;
+        using (FaultInjectingJournalStorageStrategy.FailJournalFlushes(100))
+        {
+            singleFailure = await Should.ThrowAsync<AggregateException>(async () => await single.DisposeAsync());
+            severalFailure = await Should.ThrowAsync<AggregateException>(async () => await several.DisposeAsync());
+        }
+
+        // Assert
+        singleFailure.Message.ShouldStartWith("One or more components of engine 'single' failed to close.", Case.Sensitive);
+        singleFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<StorageOfflineException>();
+        severalFailure.Message.ShouldStartWith("One or more components of engine 'several' failed to close.", Case.Sensitive);
+        var databases = severalFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<AggregateException>();
+        databases.Message.ShouldStartWith("One or more graph databases failed to close.", Case.Sensitive);
+        databases.InnerExceptions.Count.ShouldBe(2);
+        databases.InnerExceptions.ShouldAllBe(failure => failure is StorageOfflineException);
+        single.State.ShouldBe(EngineState.Disposed);
+        several.State.ShouldBe(EngineState.Disposed);
+
+        static async Task<GraphDatabaseEngine> CreateWithWritesAsync(string name, int databases)
+        {
+            var engine = GraphDatabaseEngine.Create(name, new GraphDatabaseEngineOptions
+            {
+                StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
+                CheckpointInterval = TimeSpan.FromHours(1),
+                PageWriteBackInterval = TimeSpan.FromHours(1),
+                MaintenanceInterval = TimeSpan.FromHours(1),
+            });
+
+            for (int index = 0; index < databases; index++)
+            {
+                var database = await engine.CreateDatabaseAsync($"{name}-{index}");
+                await using var session = await database.CreateSessionAsync();
+                await database.CreateNodeAsync(session, ["Item"]);
+            }
+
+            return engine;
+        }
     }
 }

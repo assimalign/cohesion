@@ -225,13 +225,13 @@ public sealed class SqlAddColumnWireTests
             .Select(row => row[0]).ShouldBe(new object?[] { 7, 7 });
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await ExecuteAsync(connection, "CREATE TABLE additions (id INT PRIMARY KEY, label TEXT)");
         await ExecuteAsync(connection, "INSERT INTO additions VALUES (1, 'original'), (2, NULL)");
     }
 
-    private static async Task AssertUnchangedAsync(ISqlConnection connection)
+    private static async Task AssertUnchangedAsync(SqlConnection connection)
     {
         var rows = await QueryAsync(connection, "SELECT * FROM additions ORDER BY id");
         rows.Columns.Select(column => column.Name).ShouldBe(["id", "label"]);
@@ -239,9 +239,9 @@ public sealed class SqlAddColumnWireTests
         rows.Select(row => row["label"]).ShouldBe(new object?[] { "original", null });
     }
 
-    private static Task<long> ExecuteAsync(ISqlConnection connection, string sql)
+    private static Task<long> ExecuteAsync(SqlConnection connection, string sql)
         => connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 
-    private static Task<SqlResultSet> QueryAsync(ISqlConnection connection, string sql)
+    private static Task<SqlResultSet> QueryAsync(SqlConnection connection, string sql)
         => connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 }

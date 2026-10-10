@@ -20,6 +20,7 @@ public sealed class SqlFunctionCallExpression : SqlExpression
     {
         FunctionName = functionName;
         Arguments = arguments;
+        Depth = 1 + DepthOf(arguments);
     }
 
     /// <summary>

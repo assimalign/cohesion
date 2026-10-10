@@ -33,7 +33,7 @@ unsigned 8-bit message type. The payload starts at byte 5, and the declared leng
 counts only those payload bytes, not the header. Payloads are limited to 16,777,216
 bytes. Readers check the length before allocation, require the entire declared
 payload, distinguish clean EOF between frames from truncation, and reject oversized
-declarations. Writers apply the same bound. Framing imposes no logical-object
+declarations. Every writer applies the same bound before it writes anything (below). Framing imposes no logical-object
 buffering or transfer policy. The packet view below shows the two fixed header fields.
 
 ```mermaid
@@ -82,9 +82,93 @@ one family when composed and reject exchanges belonging to another family. Paylo
 interpretation belongs exclusively to that endpoint's model codec. Unknown identifiers
 are protocol violations; session code reports Error(ProtocolViolation) and closes.
 
-The low-level ProtocolFraming reader/writer remain available for diagnostics and
-framing tests. They deliberately do not dispatch payloads or infer model semantics.
-Applications use ProtocolChannel for their endpoint's validated exchange.
+`ProtocolFrameReader.Create` and `ProtocolFrameWriter.Create` return the low-level
+stream reader and writer, for diagnostics, framing tests and a server's at-capacity
+rejection (one Error frame written before any session or channel exists). They
+deliberately do not dispatch payloads or infer model semantics. Applications use
+ProtocolChannel for their endpoint's validated exchange.
+
+## Frame reader and writer types
+
+`ProtocolFrameReader` and `ProtocolFrameWriter` are public abstract classes, not
+interfaces: the Database area is concrete-first (`.claude/rules/database-area.md`).
+Each has a variant set. The stream reader and writer behind `Create` encode the
+envelope; every other leaf decorates one of them:
+
+| Leaf | Assembly | Adds |
+| --- | --- | --- |
+| stream reader / writer (internal) | Database.Protocol | the envelope; on the reader, the declared-length bound |
+| `ProtocolChannel`'s family reader / writer (private) | Database.Protocol | the family check in both directions |
+| `ClientFrameReader` / `ClientFrameWriter` (internal) | Database.Client | a closed pipe's `InvalidOperationException` becomes `IOException` |
+| Blob's error reader / frame writer (private) | Database.Blob.Client | closed pipes, and on the reader Error frames, become `DatabaseClientException` |
+
+Because leaves live in three assemblies, the constructors are `protected`. The public
+members (`ReadFrameAsync`, `WriteFrameAsync`, `FlushAsync`, `DisposeAsync`) are
+non-virtual and call `protected abstract` cores (`ReadFrameCoreAsync`,
+`WriteFrameCoreAsync`, `FlushCoreAsync`); `DisposeAsyncCore` is a `protected virtual`
+lifecycle hook whose default does nothing, so a view over a shared reader or writer
+(Blob's) does not override it. The `Create` factories replace the former
+`ProtocolFraming` static class, the `Aes.Create()` shape.
+
+**The writer's payload bound is the base's (owner decision 29 of 2026-10-06).** The public,
+non-virtual `WriteFrameAsync` refuses a payload longer than
+`ProtocolFrameHeader.MaxPayloadLength` with a `ProtocolException` before it calls the core
+(rule 4: public members own argument validation), so every writer refuses an oversized payload
+the same way and before anything reaches the transport: the stream writer, the channel's family
+writer, the client decorators, and any leaf another assembly adds. Until then the check sat in
+the stream writer's core, the one writer that encodes the envelope, which a leaf that did not
+forward to it skipped. The bound now runs before every core, so the error order is fixed: **a
+frame that fails both the bound and `ProtocolChannel`'s family check reports the bound**; a frame
+that fails only the family check still reports the family. The bound is thrown by the call
+itself, not through the returned task, as the channel's family check is. `ProtocolFramingTests` pins both
+(`WriteFrame_OversizedPayload_EveryWriterShouldRefuseBeforeItsCore`,
+`Channel_OversizedPayloadOutsideTheFamily_ShouldReportTheBoundFirst`). The reader's bound stays
+in the stream reader's core, where the declared length is decoded. The other public members add
+no check of their own.
+
+## Diagnostics
+
+The child root reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Protocol` (`src/Internal/EventSource/ProtocolEventSource.cs`): a
+Verbose frame trace under the `Frames` keyword (`0x1`), so a tool takes it alone with
+`dotnet-trace collect --providers Assimalign.Cohesion.Database.Protocol:0x1:5`. A frame carries its
+message type and payload length, never its payload.
+The protocol writes no failure events (a frame failure is its catcher's, below); the conventions
+every Database source shares are in the area's
+[`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `FrameRead` | Verbose | `Frames` | `messageType` (the `ProtocolMessageType` name, or its number for a model identifier), `payloadLength` |
+| 2 | `FrameWritten` | Verbose | `Frames` | `messageType`, `payloadLength` |
+
+**The stream leaves write the events, from their cores.** `ProtocolStreamFrameReader` and
+`ProtocolStreamFrameWriter`, the leaves `Create` returns, are the only ones that touch the
+transport, so they write `FrameRead` and `FrameWritten` at the end of `ReadFrameCoreAsync` and
+`WriteFrameCoreAsync`. Every other leaf in the table above decorates a stream leaf through its
+public member, so writing at every layer would report one wire frame two or three times (a
+client's response passes the client decorator, the channel's family reader and the stream reader);
+written in the stream cores, a frame is reported once, where it crosses the transport, and the
+public bases carry no tracing and no check of their own type. A frame the channel's family check
+refuses on read was still read from the transport and is reported; one it refuses on write never
+reaches the transport and is not reported. An application's own leaf over another transport is not
+traced. `FrameRead` follows a complete frame; the clean end of the stream writes nothing, and nor
+does a truncated or oversized frame, which the core refuses. `FrameWritten` follows a completed
+write, before any flush.
+
+**The trace costs nothing while nobody takes it.** The stream cores are already asynchronous
+methods, so the trace adds one `IsEnabled(Verbose, Frames)` check per frame and no wrapper, task
+or allocation; the public members return the core's task unchanged. No counters: the SQL server
+writes one frame per result row, and a process-wide count updated per frame by every session would
+be a contention point. Frame failures (`ProtocolException`) are not events here: the server
+session or the client that catches one reports it, with its session or connection.
+
+`ProtocolEventSourceTests` checks the name, the strict manifest, one event per frame through a
+`ProtocolChannel` (and through a transport that completes asynchronously), nothing without the
+keyword, and that the reader and writer allocate no more than their stream cores while nobody
+listens (zero bytes per frame in Release). The allocation tests measure every call without an
+await and fail if one did not complete synchronously, so the per-thread allocation count cannot
+miss work that moved to another thread.
 
 ## Shared exchange and payloads
 
@@ -127,8 +211,14 @@ authenticators receive response evidence as opaque bytes. Ready is empty in 1.0.
 Ping, Pong, and Terminate have empty payloads. Error is `u16 code + string message`.
 Codes are append-only: Internal=0, UnsupportedVersion=1, AuthenticationFailed=2,
 NotAuthorized=3, DatabaseNotFound=4, ParseFailure=5, ExecutionFailure=6,
-TransactionAborted=7, ProtocolViolation=8, Unavailable=9. Statement failures can
+TransactionAborted=7, ProtocolViolation=8, Unavailable=9, ConnectionFailure=10. Statement failures can
 leave a session ready; framing, handshake, or ordering violations terminate it.
+`ConnectionFailure` is the one client-local code: the client core raises it when the transport
+dial fails, and no server sends it (the client core reads an error frame that carries it as a
+`ProtocolViolation`). It shares the taxonomy so a client exception carries one code
+type, as SQLSTATE class 08 holds `08001` (`sqlclient_unable_to_establish_sqlconnection`), which
+a client raises (PostgreSQL `src/backend/utils/errcodes.txt:108`; postgres_fdw raises it when it
+cannot reach its remote server, `contrib/postgres_fdw/connection.c:661-666`).
 
 ## Version decision
 

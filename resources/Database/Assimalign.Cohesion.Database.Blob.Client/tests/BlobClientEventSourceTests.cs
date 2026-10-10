@@ -1,0 +1,389 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Tracing;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Database.Blob.Client.Internal;
+using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Protocol;
+
+namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
+
+/// <summary>
+/// Serializes the tests that observe the Blob client's event source: the source is process-wide.
+/// </summary>
+[CollectionDefinition(nameof(BlobClientEventSourceCollection), DisableParallelization = true)]
+public class BlobClientEventSourceCollection
+{
+}
+
+/// <summary>
+/// The Blob client's event source against the repository's EventSource convention: each transfer
+/// of each public member starts and stops, or fails, once; a download stops when its last chunk is
+/// verified; a listing failure its consumer never saw is reported once by the cleanup; and no blob
+/// name or content is written, not even inside the server's failure messages.
+/// </summary>
+[Collection(nameof(BlobClientEventSourceCollection))]
+public sealed class BlobClientEventSourceTests
+{
+    private const string SecretName = "private/secret-report.bin";
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should be named for its assembly")]
+    public void GetName_BlobClientEventSource_ShouldEqualAssemblyName()
+    {
+        // Act
+        string name = EventSource.GetName(typeof(BlobClientEventSource));
+
+        // Assert
+        name.ShouldBe(typeof(BlobClientEventSource).Assembly.GetName().Name);
+        name.ShouldBe("Assimalign.Cohesion.Database.Blob.Client");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should generate a manifest in strict mode")]
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = "Test-only manifest validation reflects over the event source; test assemblies are not trimmed.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2111:DynamicallyAccessedMembers", Justification = "Test-only manifest validation reflects over the event source; test assemblies are not trimmed.")]
+    public void GenerateManifest_StrictMode_ShouldSucceed()
+    {
+        // Act
+        string? manifest = EventSource.GenerateManifest(typeof(BlobClientEventSource), assemblyPathToIncludeInManifest: null, EventManifestOptions.Strict);
+
+        // Assert
+        manifest.ShouldNotBeNull();
+        manifest.ShouldContain("Assimalign.Cohesion.Database.Blob.Client", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should report each transfer of each member once, with its declared payload")]
+    public async Task Transfers_EachMember_ShouldReportEachOnce()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        byte[] content = new byte[3 * 1024];
+        Random.Shared.NextBytes(content);
+        using var recorder = new BlobClientEventRecorder();
+        BlobClientException failure;
+
+        // Act: upload, download to its end, read the properties, list, delete; then download the
+        // deleted blob, which the server refuses.
+        await using (BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token))
+        {
+            (await connection.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token)).ShouldBe(content.Length);
+            await using (Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token))
+            {
+                var copy = new MemoryStream();
+                await download.CopyToAsync(copy, timeout.Token);
+                copy.Length.ShouldBe(content.Length);
+            }
+
+            (await connection.GetPropertiesAsync("files", SecretName, timeout.Token)).ShouldNotBeNull();
+            int listed = 0;
+            await foreach (BlobProperties _ in connection.GetBlobsAsync("files", cancellationToken: timeout.Token))
+            {
+                listed++;
+            }
+
+            listed.ShouldBe(1);
+            (await connection.DeleteAsync("files", SecretName, timeout.Token)).ShouldBeTrue();
+            failure = await Should.ThrowAsync<BlobClientException>(async () => await connection.DownloadAsync("files", SecretName, timeout.Token));
+        }
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "app")).ToArray();
+        events.Select(e => (e.EventName, Operation: (string)e.Payload![1]!)).ShouldBe(
+        [
+            ("TransferStart", "Upload"),
+            ("TransferStop", "Upload"),
+            ("TransferStart", "Download"),
+            ("TransferStop", "Download"),
+            ("TransferStart", "GetProperties"),
+            ("TransferStop", "GetProperties"),
+            ("TransferStart", "List"),
+            ("TransferStop", "List"),
+            ("TransferStart", "Delete"),
+            ("TransferStop", "Delete"),
+            ("TransferStart", "Download"),
+            ("TransferFailed", "Download"),
+            ("TransferStop", "Download"),
+        ]);
+
+        var start = events[0];
+        start.EventId.ShouldBe(1);
+        start.Level.ShouldBe(EventLevel.Verbose);
+        (start.Keywords & BlobClientEventSource.Keywords.Transfers).ShouldBe(BlobClientEventSource.Keywords.Transfers);
+        start.PayloadNames.ShouldBe(["database", "operation", "container"]);
+        start.Payload.ShouldBe(["app", "Upload", "files"]);
+
+        var uploaded = events[1];
+        uploaded.EventId.ShouldBe(2);
+        uploaded.Level.ShouldBe(EventLevel.Verbose);
+        uploaded.PayloadNames.ShouldBe(["database", "operation", "container", "status", "bytes", "durationMilliseconds"]);
+        uploaded.Payload![3].ShouldBe("Success");
+        uploaded.Payload[4].ShouldBe((long)content.Length);
+        ((double)uploaded.Payload[5]!).ShouldBeGreaterThan(0d);
+        events[3].Payload![4].ShouldBe((long)content.Length, "A download stops when its last chunk is verified, with the bytes it received.");
+        events[5].Payload![4].ShouldBe(0L);
+
+        // The server's refusal names the blob; the event writes its code and type, never the message.
+        var failed = events[11];
+        failed.EventId.ShouldBe(3);
+        failed.Level.ShouldBe(EventLevel.Error);
+        failed.PayloadNames.ShouldBe(["database", "operation", "container", "code", "exceptionType", "durationMilliseconds"]);
+        failed.Payload![3].ShouldBe(failure.Code.ToString());
+        failure.Message.ShouldContain(SecretName, Case.Sensitive);
+        failed.Payload[4].ShouldBe(typeof(BlobClientException).FullName);
+        events[12].Payload!.Take(5).ShouldBe(["app", "Download", "files", "Error", 0L]);
+
+        // No event carries the blob's name.
+        events.SelectMany(e => e.Payload!).OfType<string>()
+            .ShouldNotContain(value => value.Contains("secret", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should close a download its caller abandoned, and a cancelled transfer, with a Cancelled stop and no failure")]
+    public async Task Transfers_AbandonedOrCancelled_ShouldWriteACancelledStop()
+    {
+        // Arrange: a blob several chunks long, so its copy cannot finish before the caller abandons it.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        byte[] content = new byte[512 * 1024];
+        Random.Shared.NextBytes(content);
+        await using (BlobConnection setup = await harness.Client.ConnectAsync(timeout.Token))
+        {
+            await setup.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token);
+        }
+
+        using var recorder = new BlobClientEventRecorder();
+
+        // Act: a download disposed before its first read, then a metadata read whose token was
+        // canceled before it started.
+        await using (BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token))
+        {
+            Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token);
+            await download.DisposeAsync();
+        }
+
+        await using (BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token))
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await connection.GetPropertiesAsync("files", SecretName, new CancellationToken(canceled: true)));
+        }
+
+        // Assert: each start is closed by a Cancelled stop, and no failure is written.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "app")).ToArray();
+        events.Select(e => (e.EventName, Operation: (string)e.Payload![1]!)).ShouldBe(
+        [
+            ("TransferStart", "Download"),
+            ("TransferStop", "Download"),
+            ("TransferStart", "GetProperties"),
+            ("TransferStop", "GetProperties"),
+        ]);
+        events[1].Payload![3].ShouldBe("Cancelled");
+        events[3].Payload![3].ShouldBe("Cancelled");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should report a failure that carries no wire code with an empty code, then an Error stop")]
+    public async Task GetPropertiesAsync_AnotherExchangeActive_ShouldWriteAnUncodedFailureThenErrorStop()
+    {
+        // Arrange: an open download, several chunks long, holds the connection's one exchange.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        byte[] content = new byte[512 * 1024];
+        Random.Shared.NextBytes(content);
+        await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
+        await connection.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token);
+        using var recorder = new BlobClientEventRecorder();
+
+        // Act
+        InvalidOperationException overlapping;
+        Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token);
+        try
+        {
+            overlapping = await Should.ThrowAsync<InvalidOperationException>(async () =>
+                await connection.GetPropertiesAsync("files", SecretName, timeout.Token));
+        }
+        finally
+        {
+            await download.DisposeAsync();
+        }
+
+        // Assert: the client's own refusal has no wire code, so the code is empty.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "app") && Equals(e.Payload?[1], "GetProperties")).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["TransferStart", "TransferFailed", "TransferStop"]);
+        events[1].PayloadNames.ShouldBe(["database", "operation", "container", "code", "exceptionType", "durationMilliseconds"]);
+        events[1].Payload![3].ShouldBe(string.Empty);
+        events[1].Payload![4].ShouldBe(typeof(InvalidOperationException).FullName);
+        events[1].Payload!.ShouldNotContain(overlapping.Message);
+        events[2].Payload![3].ShouldBe("Error");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should write a failure whose start was not written, but no TransferStop for it")]
+    public async Task TransferEnded_StartNotWritten_ShouldWriteTheFailureButNoStop()
+    {
+        // Arrange: a transfer whose start a listener that attached late never saw, beside one it saw.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
+        using var recorder = new BlobClientEventRecorder();
+        var failure = new InvalidOperationException("An exchange is already active on this connection.");
+
+        // Act
+        BlobClientEventSource.Log.TransferEnded(connection, "GetProperties", "files", startWritten: false, failure, 0, System.Diagnostics.Stopwatch.GetTimestamp());
+        BlobClientEventSource.Log.TransferEnded(connection, "GetProperties", "files", startWritten: true, failure, 0, System.Diagnostics.Stopwatch.GetTimestamp());
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        recorder.Events.Where(e => Equals(e.Payload?[0], "app")).Select(e => e.EventName)
+            .ShouldBe(["TransferFailed", "TransferFailed", "TransferStop"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should report an upload refused over an existing blob without the blob's name")]
+    public async Task UploadAsync_ExistingBlobWithoutOverwrite_ShouldReportFailureWithoutName()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
+        await connection.UploadAsync("files", SecretName, new MemoryStream(new byte[] { 1, 2, 3 }), cancellationToken: timeout.Token);
+        using var recorder = new BlobClientEventRecorder();
+
+        // Act
+        var failure = await Should.ThrowAsync<BlobClientException>(async () =>
+            await connection.UploadAsync("files", SecretName, new MemoryStream(new byte[] { 4, 5, 6 }), overwrite: false, cancellationToken: timeout.Token));
+
+        // Assert
+        failure.Message.ShouldContain(SecretName, Case.Sensitive);
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], "app")).ToArray();
+        events.Select(e => (e.EventName, Operation: (string)e.Payload![1]!)).ShouldBe([("TransferStart", "Upload"), ("TransferFailed", "Upload"), ("TransferStop", "Upload")]);
+        events[1].Payload![4].ShouldBe(typeof(BlobClientException).FullName);
+        events[2].Payload![3].ShouldBe("Error");
+        events.SelectMany(e => e.Payload!).OfType<string>()
+            .ShouldNotContain(value => value.Contains("secret", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should report a listing failure its consumer never saw once, from the enumeration's cleanup")]
+    public async Task GetBlobsAsync_ConsumerStopsBeforeWorkerFailureSurfaces_ShouldReportListCleanupFailedOnce()
+    {
+        // Arrange: a peer that sends one listing item and then a frame no listing accepts, so the
+        // listing's worker fails while its consumer still holds the first item.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        string database = "evt" + Guid.NewGuid().ToString("N");
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = BlobClient.Create(new BlobClientOptions
+        {
+            Settings = new DatabaseConnectionSettings { Database = database, Principal = "tester", EndPoint = listener.EndPoint },
+            ConnectionFactory = listener.CreateFactory(),
+        });
+        var peerClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task peer = ServeMalformedListingAsync(listener, peerClosed, timeout.Token);
+        using var recorder = new BlobClientEventRecorder();
+        int consumed = 0;
+
+        // Act: take the first item, wait until the worker has failed and closed its broken
+        // connection, then stop enumerating, so the cleanup awaits a failed worker, not a canceled one.
+        await using (BlobConnection connection = await client.ConnectAsync(timeout.Token))
+        {
+            await foreach (BlobProperties _ in connection.GetBlobsAsync("files", cancellationToken: timeout.Token))
+            {
+                consumed++;
+                await peerClosed.Task.WaitAsync(timeout.Token);
+                break;
+            }
+        }
+
+        await peer.WaitAsync(timeout.Token);
+
+        // Assert
+        consumed.ShouldBe(1);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], database)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["TransferStart", "TransferFailed", "TransferStop", "ListCleanupFailed"]);
+        events[1].Payload![3].ShouldBe(nameof(ProtocolErrorCode.ProtocolViolation));
+        events[2].Payload![3].ShouldBe("Error");
+
+        var swallowed = events[3];
+        swallowed.EventId.ShouldBe(4);
+        swallowed.Level.ShouldBe(EventLevel.Warning);
+        swallowed.PayloadNames.ShouldBe(["database", "container", "code", "exceptionType"]);
+        swallowed.Payload.ShouldBe([database, "files", nameof(ProtocolErrorCode.ProtocolViolation), typeof(BlobClientException).FullName]);
+    }
+
+    private static async Task ServeMalformedListingAsync(InMemoryConnectionListener listener, TaskCompletionSource closed, CancellationToken token)
+    {
+        try
+        {
+            await using var transport = await listener.AcceptAsync(token);
+            await using var channel = new ProtocolChannel(transport.AsStream(), BlobProtocol.Family);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Startup);
+            await WriteAsync(channel, ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.AuthenticateResponse);
+            await WriteAsync(channel, ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)BlobProtocolMessageType.List);
+            var item = new BlobProperties("item", 1, null, 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
+            await WriteAsync(channel, (ProtocolMessageType)BlobProtocolMessageType.Properties, new BlobPropertiesMessage(item).Encode(), token);
+            await WriteAsync(channel, (ProtocolMessageType)BlobProtocolMessageType.TransferComplete,
+                new BlobTransferCompleteMessage(0).Encode(), token);
+            try
+            {
+                // The client closes the connection its failed listing broke.
+                while (await channel.Reader.ReadFrameAsync(token) is not null)
+                {
+                }
+            }
+            catch (Exception exception) when (exception is IOException or ConnectionAbortedException or ConnectionResetException)
+            {
+            }
+        }
+        finally
+        {
+            closed.TrySetResult();
+        }
+    }
+
+    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolChannel channel, CancellationToken token)
+    {
+        var frame = await channel.Reader.ReadFrameAsync(token);
+        frame.ShouldNotBeNull();
+        return frame.Value;
+    }
+
+    private static async ValueTask WriteAsync(ProtocolChannel channel, ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken token)
+    {
+        await channel.Writer.WriteFrameAsync(new(type, payload), token);
+        await channel.Writer.FlushAsync(token);
+    }
+
+    /// <summary>
+    /// Records the events the Blob client's event source writes.
+    /// </summary>
+    private sealed class BlobClientEventRecorder : EventListener
+    {
+        private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
+
+        public BlobClientEventRecorder()
+        {
+            EnableEvents(BlobClientEventSource.Log, EventLevel.Verbose, EventKeywords.All);
+        }
+
+        public IReadOnlyList<EventWrittenEventArgs> Events => _events.ToArray();
+
+        protected override void OnEventWritten(EventWrittenEventArgs eventData)
+        {
+            if (ReferenceEquals(eventData.EventSource, BlobClientEventSource.Log))
+            {
+                _events.Enqueue(eventData);
+            }
+        }
+    }
+}

@@ -48,19 +48,20 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
         var builder = new RecordingApplicationBuilder();
 
         // Act
-        builder.AddSql((context, options) =>
+        builder.AddSql("verb-engine", sql =>
         {
-            options.EngineName = "verb-engine";
-            options.RootPath = _rootPath;
-            options.Durability = StorageCommitDurability.Grouped;
+            sql.Options.RootPath = _rootPath;
+            sql.Options.Durability = StorageCommitDurability.Grouped;
         });
 
         Directory.Exists(_rootPath).ShouldBeFalse();
         builder.Factories.ShouldHaveSingleItem();
+        builder.Names.ShouldBe(["verb-engine"]);
         using var engine = (SqlDatabaseEngine)builder.MaterializeEngine();
 
-        // Assert: construction happens only when the deferred factory executes. A data
-        // machine is operational once construction completes.
+        // Assert: the name is reserved when the verb is called, and construction happens only
+        // when the deferred factory executes. A data machine is operational once construction
+        // completes.
         builder.Factories.ShouldHaveSingleItem();
 
         engine.Name.ShouldBe("verb-engine");
@@ -73,13 +74,12 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
     {
         var builder = new RecordingApplicationBuilder();
         bool serverCreated = false;
-        builder.AddSql((context, options) =>
+        builder.AddSql("server-verb", sql =>
         {
-            options.EngineName = "server-verb";
-            options.AddServer(engine =>
+            sql.AddServer(engine =>
             {
                 serverCreated = true;
-                return SqlDatabaseServer.Create((SqlDatabaseEngine)engine, new SqlDatabaseServerOptions
+                return SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions
                 {
                     Listener = new Assimalign.Cohesion.Connections.InMemory.InMemoryConnectionListener(),
                 });
@@ -90,7 +90,7 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
         serverCreated.ShouldBeTrue();
         var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - AddSql: Defaults register an in-memory engine that serves SQL")]
@@ -98,13 +98,13 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
     {
         // Arrange: no root path — the in-memory strategy.
         var builder = new RecordingApplicationBuilder();
-        builder.AddSql((context, options) => { });
+        builder.AddSql("defaults", _ => { });
         await using var engine = (SqlDatabaseEngine)builder.MaterializeEngine();
 
         // Act: drive the registered engine end-to-end through the root contracts —
         // no start ceremony, the engine is operational after construction.
-        IDatabase database = await engine.CreateDatabaseAsync("builder-db", TestContextToken());
-        await using IDatabaseSession session = await database.CreateSessionAsync(TestContextToken());
+        SqlDatabase database = await engine.CreateDatabaseAsync("builder-db", TestContextToken());
+        await using SqlDatabaseSession session = await database.CreateSessionAsync(TestContextToken());
 
         await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY, label VARCHAR(50));", cancellationToken: TestContextToken());
         await session.ExecuteAsync("INSERT INTO items (id, label) VALUES (1, 'one'), (2, 'two');", cancellationToken: TestContextToken());

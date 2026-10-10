@@ -44,11 +44,14 @@ internal static class Program
     }
 
     private static BlobDatabaseEngine CreateEngine(string root)
-        => BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions
+        => BlobDatabaseEngine.Create("blob-process-fixture", new BlobDatabaseEngineOptions
         {
-            EngineName = "blob-process-fixture",
             RootPath = root,
             CheckpointInterval = TimeSpan.FromHours(1),
+
+            // No size-triggered checkpoint either (#1254): the round trip's recovery image must
+            // keep the large object's whole journal, which outgrows the 256 MiB default.
+            CheckpointJournalSize = 0,
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
             PageWriteBackBatchSize = 4096
@@ -66,8 +69,9 @@ internal static class Program
         string recoveryRoot = Path.Combine(root, "recovery-image");
         await using (var engine = CreateEngine(root))
         {
-            var database = (IBlobDatabase)await engine.CreateDatabaseAsync("large", token);
-            var container = await database.CreateContainerAsync("objects", token);
+            var database = await engine.CreateDatabaseAsync("large", token);
+            await using var session = await database.CreateSessionAsync(token);
+            var container = await session.CreateContainerAsync("objects", token);
             await using (var output = await container.OpenWriteAsync("payload", cancellationToken: token))
             {
                 expectedHash = await WritePatternAsync(output, LargeBlobLength, 17, token);
@@ -100,8 +104,9 @@ internal static class Program
         // readback must obey the bound too, not only the upload stream.
         await using (var reopened = CreateEngine(recoveryRoot))
         {
-            var database = (IBlobDatabase)await reopened.OpenDatabaseAsync("large", token);
-            var container = await database.GetContainerAsync("objects", token);
+            var database = await reopened.OpenDatabaseAsync("large", token);
+            await using var session = await database.CreateSessionAsync(token);
+            var container = await session.GetContainerAsync("objects", token);
             await VerifyAsync(container, "payload", LargeBlobLength, expectedHash, token);
         }
 
@@ -114,10 +119,12 @@ internal static class Program
         // the process after READY so no stream, transaction, or engine cleanup
         // can turn the crash test into a graceful shutdown test.
         var engine = CreateEngine(root);
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("existing", token);
-        var container = await database.CreateContainerAsync("objects", token);
-        var otherDatabase = (IBlobDatabase)await engine.CreateDatabaseAsync("new-object", token);
-        var otherContainer = await otherDatabase.CreateContainerAsync("objects", token);
+        var database = await engine.CreateDatabaseAsync("existing", token);
+        var session = await database.CreateSessionAsync(token);
+        var container = await session.CreateContainerAsync("objects", token);
+        var otherDatabase = await engine.CreateDatabaseAsync("new-object", token);
+        var otherSession = await otherDatabase.CreateSessionAsync(token);
+        var otherContainer = await otherSession.CreateContainerAsync("objects", token);
         string committedHash;
         await using (var output = await container.OpenWriteAsync("committed", cancellationToken: token))
         {
@@ -154,7 +161,13 @@ internal static class Program
         {
             if (worker.Kind == kind)
             {
-                ((DatabaseEngineWorker)worker).RunIteration(token);
+                // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
+                var guided = (DatabaseEngineWorker)worker;
+                if (!guided.RunIteration(token))
+                {
+                    throw new InvalidOperationException($"The {kind} pass failed.", guided.Fault);
+                }
+
                 return;
             }
         }
@@ -181,7 +194,7 @@ internal static class Program
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
-    private static async Task VerifyAsync(IBlobContainer container, string name, long length, string expectedHash, CancellationToken token)
+    private static async Task VerifyAsync(BlobContainer container, string name, long length, string expectedHash, CancellationToken token)
     {
         var properties = await container.GetPropertiesAsync(name, token);
         if (properties?.Length != length)

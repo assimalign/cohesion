@@ -1,31 +1,45 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+/// <summary>
+/// One statement of a session: an OQL statement or a collection or document operation. It owns its
+/// transaction context (the session's explicit transaction's, or an autocommit context of its own),
+/// the hold it keeps on the session and its admission into the explicit transaction, until it
+/// completes or is aborted. Every statement has a session (owner decision 32 of 2026-10-06).
+/// </summary>
 internal sealed class DocumentOperation
 {
-    private readonly DocumentDatabaseInstance _database;
-    private readonly DocumentDatabaseSession? _session;
+    private readonly DocumentDatabase _database;
+    private readonly DocumentDatabaseSession _session;
     private readonly DocumentDatabaseTransaction? _transaction;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
-    private ITransactionContext? _snapshotPin;
+    private TransactionContext? _snapshotPin;
     private int _finished;
-    internal DocumentOperation(DocumentDatabaseInstance database, DocumentDatabaseSession? session, ITransactionContext context, DocumentDatabaseTransaction? transaction)
+
+    /// <summary>Initializes a new instance of the <see cref="DocumentOperation"/> class.</summary>
+    /// <param name="database">The database the statement runs on.</param>
+    /// <param name="session">
+    /// The session the statement holds, which the operation releases when it finishes.
+    /// </param>
+    /// <param name="context">The transaction context the statement runs under.</param>
+    /// <param name="transaction">The explicit transaction that admitted the statement, or null for autocommit.</param>
+    internal DocumentOperation(DocumentDatabase database, DocumentDatabaseSession session, TransactionContext context, DocumentDatabaseTransaction? transaction)
     {
         _database = database;
         _session = session;
         Context = context;
         _context = context;
         _transaction = transaction;
-        if (transaction is not null)
-        {
-            transaction.Operations++;
-        }
     }
-    internal ITransactionContext Context { get; private set; }
+
+    internal TransactionContext Context { get; private set; }
+
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {
         if (_transaction?.IsolationLevel == IsolationLevel.ReadCommitted)
@@ -34,18 +48,21 @@ internal sealed class DocumentOperation
             // may commit while the operation is open, so the refreshing transaction
             // context alone cannot preserve the statement's original horizon.
             _snapshotPin = await _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
-            Context = new DocumentStatementContext(_context, _context.Snapshot);
+            Context = _context.PinStatementSnapshot();
         }
     }
+
     internal void EnsureActive()
     {
-        _database.ThrowIfDisposed();
-        _session?.ThrowIfNotOpen();
+        _database.EnsureNotDisposed();
+        _database.ThrowIfOffline();
+        _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw new DatabaseException("The document operation's transaction is no longer active.");
         }
     }
+
     internal async ValueTask CompleteAsync()
     {
         await _completionGate.WaitAsync().ConfigureAwait(false);
@@ -66,7 +83,10 @@ internal sealed class DocumentOperation
         }
         finally { _completionGate.Release(); }
     }
-    internal async ValueTask AbortAsync()
+
+    /// <summary>Ends a failed or abandoned operation, rolling back the transaction it ran in.</summary>
+    /// <param name="cause">The failure the caller observed, or why the operation was abandoned.</param>
+    internal async ValueTask AbortAsync(Exception cause)
     {
         // Session disposal and the failing operation's catch path can both
         // arrive here. Only one path may perform logical rollback and release
@@ -76,8 +96,17 @@ internal sealed class DocumentOperation
         {
             try
             {
-                if (Context.State == TransactionState.Active)
+                if (_transaction is not null)
                 {
+                    // Document storage cannot undo one statement of a transaction, so a failed
+                    // statement aborts its whole explicit transaction, which records the cause
+                    // and refuses later statements until the caller rolls back (#1225).
+                    await _transaction.AbortForFailedStatementAsync(cause).ConfigureAwait(false);
+                }
+                else if (Context.State == TransactionState.Active && !_database.IsOffline)
+                {
+                    // An offline database undoes nothing (#1243): the reopen's recovery aborts
+                    // the operation's transaction.
                     await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
                 }
             }
@@ -88,11 +117,13 @@ internal sealed class DocumentOperation
         }
         finally { _completionGate.Release(); }
     }
+
     private async ValueTask FinishAsync()
     {
         try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
         finally { Finish(); }
     }
+
     private void Finish()
     {
         if (Interlocked.Exchange(ref _finished, 1) != 0)
@@ -100,46 +131,16 @@ internal sealed class DocumentOperation
             return;
         }
 
-        if (_transaction is not null)
-        {
-            _transaction.Operations--;
-        }
-
-        _session?.Untrack(this);
+        // The statement ends its admission into the explicit transaction and its hold on the session.
+        _session.ReleaseOperation(_transaction);
     }
 
     private async ValueTask ReleaseSnapshotPinAsync()
     {
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
-        if (pin?.State == TransactionState.Active)
+        if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }
     }
-}
-
-// One read-committed statement gets one visibility decision, including every
-// metadata lookup and all document content. Lifecycle operations use the original
-// context; physical brackets and record stamps use this identical writer sequence.
-internal sealed class DocumentStatementContext : ITransactionContext
-{
-    private readonly ITransactionContext _context;
-    private readonly TransactionSnapshot _snapshot;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DocumentStatementContext"/> class.
-    /// </summary>
-    /// <param name="context">The original transaction context that supplies identity, sequence, isolation, and state.</param>
-    /// <param name="snapshot">The snapshot captured for the statement's single visibility decision.</param>
-    public DocumentStatementContext(ITransactionContext context, TransactionSnapshot snapshot)
-    {
-        _context = context;
-        _snapshot = snapshot;
-    }
-
-    public TransactionId Id => _context.Id;
-    public TransactionSequence Sequence => _context.Sequence;
-    public IsolationLevel IsolationLevel => _context.IsolationLevel;
-    public TransactionState State => _context.State;
-    public TransactionSnapshot Snapshot => _snapshot;
 }

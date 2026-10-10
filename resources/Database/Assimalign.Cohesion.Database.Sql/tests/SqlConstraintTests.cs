@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlConstraintTests
 {
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();
@@ -29,7 +29,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task Constraints_InsertUpdateDelete_ShouldEnforceAndCascadeAtomically()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-basic" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-basic", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE parent (id INT PRIMARY KEY)");
@@ -57,7 +57,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task RestrictAndRecursiveCascade_ShouldNotPartiallyDelete()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-chain" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-chain", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");
@@ -79,7 +79,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task Unique_ConcurrentExplicitTransactions_ExactlyOneWins()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-race" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-race", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var first = await database.CreateSessionAsync();
         await using var second = await database.CreateSessionAsync();
@@ -100,7 +100,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task FailedMultirowUniqueStatement_ShouldPreservePriorStatementAndRollbackKeys()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-statement" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-statement", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT, CONSTRAINT uq_id UNIQUE(id))");
@@ -117,7 +117,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task ForeignKey_ConcurrentChildCommit_ShouldBlockSnapshotParentDelete()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-skew" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-skew", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var parent = await database.CreateSessionAsync();
         await using var child = await database.CreateSessionAsync();
@@ -138,7 +138,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task ForeignKey_SnapshotMustSeeParentAndLatestDeletedParentCannotAuthorizeInsert()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-snapshot" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-snapshot", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var parent = await database.CreateSessionAsync();
         await using var child = await database.CreateSessionAsync();
@@ -157,7 +157,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task ChecksAndNullableReferences_ShouldUseSqlNullSemantics()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-null" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-null", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (a INT, b INT, CONSTRAINT uq_pair UNIQUE(a,b))");
@@ -177,17 +177,17 @@ public sealed class SqlConstraintTests
     [InlineData("COUNT(qty) > 0")]
     public async Task CheckInvalidPredicates_ShouldFailBeforeTablePublication(string predicate)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-invalid" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-invalid", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"CREATE TABLE t (qty INT CHECK ({predicate}))"));
-        ((SqlDatabaseInstance)database).Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
     }
 
     [Fact]
     public async Task AlterConstraints_ShouldValidateExistingRowsAndProtectDependencies()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-alter" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-alter", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");
@@ -212,7 +212,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task ForeignKeyLookups_ShouldSeekExistingIndexes()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-seek" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-seek", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");
@@ -220,11 +220,11 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("CREATE INDEX child_parent ON c(pid)");
         await session.ExecuteAsync("INSERT INTO p VALUES " + string.Join(',', Enumerable.Range(1, 100).Select(id => $"({id})")));
         await session.ExecuteAsync("INSERT INTO c VALUES (1, 50)");
-        var metrics = ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldStartWith("constraint-seek:");
         metrics.RecordsExamined.ShouldBe(1);
         await session.ExecuteAsync("DELETE FROM p WHERE id = 50");
-        metrics = ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+        metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldBe("constraint-seek:child_parent");
         metrics.RecordsExamined.ShouldBe(101);
         (await Rows(session, "SELECT id FROM c")).ShouldBeEmpty();
@@ -233,7 +233,7 @@ public sealed class SqlConstraintTests
     [Fact]
     public async Task CompositeForeignKey_ShouldSeekReorderedPartialChildIndex()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-prefix" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-prefix", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (a INT, b INT, CONSTRAINT uq_pair UNIQUE(a,b))");
@@ -242,7 +242,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("INSERT INTO p VALUES (1, 7), (2, 7), (3, 8)");
         await session.ExecuteAsync("INSERT INTO c VALUES (1, 7), (2, 7), (3, 8)");
         await session.ExecuteAsync("DELETE FROM p WHERE a = 1");
-        var metrics = ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldBe("constraint-seek:child_b");
         metrics.RecordsExamined.ShouldBe(5);
         (await Rows(session, "SELECT a FROM c ORDER BY a")).Select(row => row[0]).ShouldBe(new object?[] { 2, 3 });
@@ -254,7 +254,7 @@ public sealed class SqlConstraintTests
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-constraints", Guid.NewGuid().ToString("N"));
         try
         {
-            await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-restart", RootPath = directory }))
+            await using (var engine = SqlDatabaseEngine.Create("constraint-restart", new SqlDatabaseEngineOptions { RootPath = directory }))
             {
                 var database = await engine.CreateDatabaseAsync("db");
                 await using var session = await database.CreateSessionAsync();
@@ -263,7 +263,7 @@ public sealed class SqlConstraintTests
                 await session.ExecuteAsync("INSERT INTO p VALUES (1)");
                 await session.ExecuteAsync("INSERT INTO c VALUES (1, 1, 'kept')");
             }
-            await using var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-restart", RootPath = directory });
+            await using var reopenedEngine = SqlDatabaseEngine.Create("constraint-restart", new SqlDatabaseEngineOptions { RootPath = directory });
             var reopened = await reopenedEngine.OpenDatabaseAsync("db");
             await using var reopenedSession = await reopened.CreateSessionAsync();
             await Should.ThrowAsync<SqlConstraintViolationException>(async () => await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (9, 1, 'new')"));

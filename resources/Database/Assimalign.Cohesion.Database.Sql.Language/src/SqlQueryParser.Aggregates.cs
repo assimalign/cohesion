@@ -39,12 +39,6 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Identifies the aggregate names implemented by the SQL grouping executor.
-    /// </summary>
-    private static bool IsAggregateFunction(string name) => name.ToUpperInvariant() is
-        "COUNT" or "SUM" or "AVG" or "MIN" or "MAX";
-
-    /// <summary>
     /// Recognizes aggregate extensions without reserving their names as column identifiers.
     /// </summary>
     private static bool TryGetUnsupportedAggregateClause(TokenLexer lexer, out string clause, out int end)

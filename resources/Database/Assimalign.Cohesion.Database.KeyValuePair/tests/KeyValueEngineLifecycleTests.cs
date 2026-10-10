@@ -2,12 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
@@ -42,7 +46,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     public void Create_NewEngine_ShouldBeOperationalWithWorkerInventory()
     {
         // Arrange / Act
-        using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-inventory" });
+        using var engine = KeyValueDatabaseEngine.Create("kv-inventory", new KeyValueDatabaseEngineOptions());
 
         // Assert
         engine.State.ShouldBe(EngineState.Running);
@@ -63,11 +67,11 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     public async Task DatabaseLifecycle_CreateEnumerateDrop_ShouldRoundTrip()
     {
         // Arrange
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions());
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions());
 
         // Act
         var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
-        database.ShouldBeAssignableTo<IKeyValueDatabase>();
+        database.ShouldBeOfType<KeyValueDatabase>();
 
         var names = new List<string>();
         await foreach (var found in engine.GetDatabasesAsync(TestTimeout.Token()))
@@ -75,10 +79,19 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
             names.Add(found.Name);
         }
 
+        // The typed overload binds an out-var lookup; an explicitly typed base out still binds the base's.
+        bool typedFound = engine.TryGetDatabase("kv", out var typed);
+        KeyValueDatabase? lookedUp = typed;
+        bool baseFound = engine.TryGetDatabase("kv", out DatabaseInstance? untyped);
+
         await engine.DropDatabaseAsync("kv", TestTimeout.Token());
 
         // Assert
         names.ShouldBe(["kv"]);
+        typedFound.ShouldBeTrue();
+        lookedUp.ShouldBeSameAs(database);
+        baseFound.ShouldBeTrue();
+        untyped.ShouldBeSameAs(database);
         engine.TryGetDatabase("kv", out _).ShouldBeFalse();
         await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("kv", TestTimeout.Token()));
     }
@@ -87,7 +100,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     public async Task Dispose_Twice_ShouldBeIdempotentAndTerminal()
     {
         // Arrange
-        var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions());
+        var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions());
         await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
 
         // Act
@@ -99,6 +112,91 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         Should.Throw<ObjectDisposedException>(() => engine.TryGetDatabase("kv", out _));
     }
 
+    /// <summary>
+    /// The root engine base's guards (concrete-types plan §6.4, the engine's guards): every member
+    /// checks the name, then disposal, then the token, and the enumeration checks disposal when it
+    /// is called. Before the base, the engine checked disposal first, did not check the name in
+    /// <c>TryGetDatabase</c>, and checked disposal at the enumeration's first <c>MoveNextAsync</c>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Engine: the base checks the name, then disposal, then the token, and the enumeration at its call")]
+    public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
+    {
+        // Arrange
+        var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledOpen = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("kv", canceled.Token));
+        var unnamedLookup = Should.Throw<ArgumentException>(() => engine.TryGetDatabase(default, out _));
+        await engine.DisposeAsync();
+
+        // Act
+        var unnamedCreate = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default, canceled.Token));
+        var disposedCreate = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.CreateDatabaseAsync("kv", canceled.Token));
+        var disposedEnumeration = Should.Throw<ObjectDisposedException>(() => engine.GetDatabasesAsync());
+
+        // Assert
+        canceledOpen.ShouldNotBeNull();
+        unnamedLookup.Message.ShouldStartWith("A database name is required.", Case.Sensitive);
+        unnamedCreate.ParamName.ShouldBe("name");
+        disposedCreate.ShouldNotBeNull();
+        disposedEnumeration.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Databases that fail to close are one component of the engine's disposal aggregate
+    /// (concrete-types plan §6.4): one failure is reported as itself, and two or more inside one
+    /// nested aggregate, "One or more key-value databases failed to close.". Before the root base,
+    /// the engine's single aggregate held each database's failure directly.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Engine: databases that fail to close are one component of the engine's aggregate, several of them nested")]
+    public async Task DisposeAsync_DatabasesFailToClose_ShouldReportThemAsOneComponent()
+    {
+        // Arrange: quiet workers, and a database of each engine holding a durable write; every
+        // journal flush of the closes fails.
+        var single = await CreateWithWritesAsync("single", databases: 1);
+        var several = await CreateWithWritesAsync("several", databases: 2);
+
+        // Act
+        AggregateException singleFailure;
+        AggregateException severalFailure;
+        using (FaultInjectingJournalStorageStrategy.FailJournalFlushes(100))
+        {
+            singleFailure = await Should.ThrowAsync<AggregateException>(async () => await single.DisposeAsync());
+            severalFailure = await Should.ThrowAsync<AggregateException>(async () => await several.DisposeAsync());
+        }
+
+        // Assert
+        singleFailure.Message.ShouldStartWith("One or more components of engine 'single' failed to close.", Case.Sensitive);
+        singleFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<StorageOfflineException>();
+        severalFailure.Message.ShouldStartWith("One or more components of engine 'several' failed to close.", Case.Sensitive);
+        var databases = severalFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<AggregateException>();
+        databases.Message.ShouldStartWith("One or more key-value databases failed to close.", Case.Sensitive);
+        databases.InnerExceptions.Count.ShouldBe(2);
+        databases.InnerExceptions.ShouldAllBe(failure => failure is StorageOfflineException);
+        single.State.ShouldBe(EngineState.Disposed);
+        several.State.ShouldBe(EngineState.Disposed);
+
+        static async Task<KeyValueDatabaseEngine> CreateWithWritesAsync(string name, int databases)
+        {
+            var engine = KeyValueDatabaseEngine.Create(name, new KeyValueDatabaseEngineOptions
+            {
+                StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
+                CheckpointInterval = TimeSpan.FromHours(1),
+                PageWriteBackInterval = TimeSpan.FromHours(1),
+                MaintenanceInterval = TimeSpan.FromHours(1),
+            });
+
+            for (int index = 0; index < databases; index++)
+            {
+                var database = await engine.CreateDatabaseAsync($"{name}-{index}", TestTimeout.Token());
+                await using var session = await database.CreateSessionAsync();
+                await database.PutAsync(session, Bytes("key"), Bytes("value"), cancellationToken: TestTimeout.Token());
+            }
+
+            return engine;
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Recovery: Committed entries and the primary index survive a restart over both file sets")]
     public async Task Restart_CommittedEntries_ShouldRecoverDataAndIndex()
     {
@@ -107,9 +205,9 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         // primary-index re-attachment together.
         var putETags = new Dictionary<string, long>();
 
-        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
-            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
             await using var session = await database.CreateSessionAsync();
 
             foreach (string key in new[] { "alpha", "bravo", "charlie" })
@@ -122,9 +220,9 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         }
 
         // Act: a fresh engine over the same root.
-        await using (var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        await using (var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
-            var database = (IKeyValueDatabase)await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
+            var database = await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
             await using var session = await database.CreateSessionAsync();
 
             // Assert: point reads ride the recovered primary index (a get IS an
@@ -155,9 +253,9 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         // Arrange: an explicit transaction writes but never commits; the engine
         // disposes underneath it (the abort path) — and, decisively, the reopen
         // must classify + scrub whatever reached the journal.
-        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
-            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
             await using var session = await database.CreateSessionAsync();
             await database.PutAsync(session, Bytes("committed"), Bytes("stays"), cancellationToken: TestTimeout.Token());
 
@@ -167,9 +265,9 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         }
 
         // Act
-        await using (var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        await using (var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
-            var database = (IKeyValueDatabase)await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
+            var database = await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
             await using var session = await database.CreateSessionAsync();
 
             // Assert
@@ -184,20 +282,171 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     {
         // Arrange: create a database, then forge its catalog's format marker to a
         // future version (the compatibility gate is the catalog marker).
-        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
-            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
-            var instance = (Internal.KeyValueDatabaseInstance)database;
-            await instance.Catalog.SetEntrySpaceFormatVersionAsync(99, TestTimeout.Token());
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await database.Catalog.SetEntrySpaceFormatVersionAsync(99, TestTimeout.Token());
         }
 
         // Act / Assert
-        await using (var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        await using (var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
                 await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
 
-            failure.Message.ShouldContain("format", Case.Insensitive);
+            failure.Message.ShouldContain("uses entry-space format 99, but this engine supports only format 2", Case.Sensitive);
+            failure.Message.ShouldContain("newer engine");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A new database is stamped with entry-space format 2 and reopens (#1194)")]
+    public async Task Create_ShouldStampCurrentEntrySpaceFormat()
+    {
+        // Arrange / Act
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            var catalog = database.Catalog;
+            catalog.EntrySpaceFormatVersion.ShouldBe(2);
+            catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        }
+
+        // Assert
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var reopenedDatabase = await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
+        reopenedDatabase.Catalog.EntrySpaceFormatVersion.ShouldBe(2);
+        await using var reader = await reopenedDatabase.CreateSessionAsync();
+        Text((await reopenedDatabase.GetAsync(reader, Bytes("alpha"), TestTimeout.Token()))!.Value.Value).ShouldBe("one");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database on entry-space format 1 is refused at open, its files untouched (#1194)")]
+    public async Task Open_OlderEntrySpaceFormat_ShouldBeRefusedWithoutTouchingFiles()
+    {
+        // Arrange: a closed database whose marker reads 1, as every engine before #1194
+        // stamped it (their primary index trees are in B-tree page format 1).
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+            await database.Catalog.SetEntrySpaceFormatVersionAsync(1, TestTimeout.Token());
+        }
+
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+
+        // Assert: the refusal names the database, both formats and the remedy, and the
+        // gate read only the catalog: nothing was written.
+        failure.Message.ShouldStartWith("Database 'kv' uses entry-space format 1, but this engine supports only format 2.", Case.Sensitive);
+        failure.Message.ShouldContain("#1152");
+        reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
+        await reopened.DisposeAsync();
+
+        foreach (var (path, bytes) in before)
+        {
+            File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose catalog registers no primary index (an interrupted creation) opens on entry-space format 2")]
+    public async Task Open_CatalogWithoutRegistration_ShouldBootstrapOnCurrentFormat()
+    {
+        // Arrange: a database whose creation stopped before its catalog held anything —
+        // modelled by a created, empty database whose catalog file set is gone. The
+        // reopened catalog reads as format 1 with no registration.
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+        }
+
+        Directory.Delete(Path.Combine(_rootPath, "kv" + KeyValueDatabaseEngine.CatalogSuffix), recursive: true);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var database = await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
+
+        // Assert: the primary index was bootstrapped and the current marker stamped.
+        var catalog = database.Catalog;
+        catalog.EntrySpaceFormatVersion.ShouldBe(2);
+        catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+        await using var session = await database.CreateSessionAsync();
+        await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        Text((await database.GetAsync(session, Bytes("alpha"), TestTimeout.Token()))!.Value.Value).ShouldBe("one");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose primary index is in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    public async Task Open_PrimaryIndexInFormatOne_ShouldBeRefused()
+    {
+        // Arrange: a closed database whose index pages are rewritten into the layout
+        // engines before #1194 wrote (entries ordered by key alone, no page stamp).
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        }
+
+        LegacyBTreePages.DowngradeDataFiles(_rootPath).ShouldBeGreaterThan(0);
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+
+        // Assert: the coded refusal names the database and both formats, and the open
+        // wrote nothing — it failed before recovery's scrub and checkpoint.
+        failure.Message.ShouldStartWith("Database 'kv' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
+        failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
+
+        foreach (var (path, bytes) in before)
+        {
+            File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+        }
+    }
+
+    /// <summary>
+    /// The storage refuses a file set in another storage format with <c>COHDBS001</c> (#1251).
+    /// A database has a data and a catalog file set, so the engine names the database and the
+    /// one that was refused.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: a file set in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming the database and the file set, its files untouched (#1251, #1253)")]
+    [InlineData("data")]
+    [InlineData("catalog")]
+    public async Task Open_FileSetInStorageFormatTwo_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
+    {
+        // Arrange: a closed database whose page 0 in one file set names storage format 2, the format before #1253.
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        }
+
+        string storageName = role == "catalog" ? "kv" + KeyValueDatabaseEngine.CatalogSuffix : "kv";
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 2);
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+
+        // Assert
+        failure.Message.ShouldStartWith(
+            $"Database 'kv' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
+            Case.Sensitive);
+        failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
+        reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
+        Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).Length.ShouldBe(before.Count);
+        foreach (var (path, bytes) in before)
+        {
+            File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
         }
     }
 }

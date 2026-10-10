@@ -17,35 +17,27 @@ using Assimalign.Cohesion.Database.Storage;
 /// and the plan executor runs it against shared storage inside the session's
 /// storage transaction (which owns write-ahead logging and durability).
 /// </summary>
-internal sealed class SqlQueryExecutor : IQueryExecutor
+internal sealed class SqlQueryExecutor
 {
     private readonly SqlStorage _storage;
-    private readonly ISqlCatalog _catalog;
-    private readonly IIndexManager _indexManager;
+    private readonly SqlCatalog _catalog;
+    private readonly BTreeIndexManager _indexManager;
+    private readonly SqlBoundTableCache _definitions;
 
-    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager)
+    internal SqlQueryExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
+        _definitions = definitions;
     }
 
-    internal ISqlCatalogSnapshot CaptureCatalogSnapshot() => SqlCatalog.CaptureSnapshot(_catalog);
+    internal SqlCatalogSnapshot CaptureCatalogSnapshot() => _catalog.CaptureSnapshot();
 
     /// <summary>
-    /// Public interface method — requires a transaction context from the session.
-    /// </summary>
-    public Task<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new NotSupportedException(
-            "SQL query execution requires a transaction context. Use IDatabaseSession.ExecuteAsync() instead.");
-    }
-
-    /// <summary>
-    /// Internal execution method that receives the statement's transaction
-    /// context: the MVCC context (write stamps, visibility snapshot) and the
-    /// paired storage bracket the mutations ride.
+    /// Executes a statement inside the statement's transaction context: the MVCC
+    /// context (write stamps, visibility snapshot) and the paired storage bracket
+    /// the mutations ride.
     /// </summary>
     internal Task<QueryResult> ExecuteAsync(QueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
     {
@@ -57,7 +49,7 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
             throw new DatabaseException($"Expected SqlQueryRequest but received {request.GetType().Name}.");
         }
 
-        var planner = new SqlPlanner(_catalog, sqlRequest.Parameters);
+        var planner = new SqlPlanner(_catalog, sqlRequest.Parameters, _definitions.Functions);
         SqlPlan plan;
         try
         {
@@ -69,7 +61,7 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
                 [new Diagnostic { Code = "COHDBL001", Message = exception.Message, Severity = DiagnosticSeverity.Error }]));
         }
 
-        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, sqlRequest.Parameters);
+        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         return executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 }

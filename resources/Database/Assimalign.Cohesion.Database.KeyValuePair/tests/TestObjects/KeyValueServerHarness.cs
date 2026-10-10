@@ -32,9 +32,14 @@ internal sealed class KeyValueServerHarness : IAsyncDisposable
 
     public const string DatabaseName = "kv";
 
-    public static async Task<KeyValueServerHarness> StartAsync(Action<KeyValueDatabaseServerOptions>? configure = null)
+    public static async Task<KeyValueServerHarness> StartAsync(
+        Action<KeyValueDatabaseServerOptions>? configure = null,
+        Action<KeyValueDatabaseEngineOptions>? configureEngine = null,
+        string engineName = "kv-wire")
     {
-        var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-wire" });
+        var engineOptions = new KeyValueDatabaseEngineOptions();
+        configureEngine?.Invoke(engineOptions);
+        var engine = KeyValueDatabaseEngine.Create(engineName, engineOptions);
         await engine.CreateDatabaseAsync(DatabaseName);
 
         var listener = new InMemoryConnectionListener();

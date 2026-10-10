@@ -2,7 +2,7 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// Identifies the role of an engine-owned background worker
-/// (<see cref="IDatabaseEngineWorker"/>) so a host can map each worker onto its
+/// (<see cref="DatabaseEngineWorker"/>) so a host can map each worker onto its
 /// execution model without knowing the engine's concrete types.
 /// </summary>
 public enum DatabaseEngineWorkerKind : byte

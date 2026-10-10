@@ -1,0 +1,477 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Storage.Internal;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage.Units;
+
+namespace Assimalign.Cohesion.Database.Storage.Tests;
+
+/// <summary>
+/// A failed durable flush takes the storage offline (#1243): the failing call and every later
+/// write throw <see cref="StorageOfflineException"/>, nothing more reaches the journal or the data
+/// file, closing writes nothing, and the reopen's recovery decides the outcome of the commit whose
+/// flush failed. PostgreSQL raises PANIC on a failed WAL fsync (<c>issue_xlog_fsync</c>,
+/// <c>xlog.c:9877-9937</c>) and, with <c>data_sync_retry</c> off, on a failed data-file fsync
+/// (<c>data_sync_elevel</c>, <c>fd.c:3966-3987</c>).
+/// </summary>
+public sealed class StorageOfflineTests
+{
+    /// <summary>
+    /// The commit record is appended, then its durable flush fails. The storage goes offline, the
+    /// bracket ends committed in memory, and every later write is refused without reaching either
+    /// file. Whether the commit survives is the reopen's recovery's decision: it does when the
+    /// record's bytes reached the media anyway (a write-through journal), and it does not when they
+    /// were lost with the failed flush (a flush-gated journal).
+    /// </summary>
+    /// <param name="recordReachedTheMedia">True for a journal whose writes reach the media without a flush.</param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: a commit whose journal flush fails takes the storage offline and recovery decides")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Commit_JournalFlushFails_ShouldTakeTheStorageOfflineAndLeaveTheOutcomeToRecovery(bool recordReachedTheMedia)
+    {
+        // Arrange
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point, journalWriteThrough: recordReachedTheMedia);
+        var (keptPage, keptSlot) = storage.Insert("kept");
+        var transaction = storage.BeginTransaction();
+        storage.Insert(transaction, "unconfirmed");
+        storage.JournalFaults.FailNextFlush();
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => transaction.Commit());
+        int writesAtTheFailure = point.Writes;
+        var liveAtTheFailure = storage.CaptureLive();
+        bool activeAfterTheFailure = transaction.IsActive;
+        var refusals = new Exception[]
+        {
+            Should.Throw<StorageOfflineException>(() => storage.BeginTransaction()),
+            Should.Throw<StorageOfflineException>(() => storage.BeginTransaction(10_000)),
+            Should.Throw<StorageOfflineException>(() => storage.ReserveTransactionSequence()),
+            Should.Throw<StorageOfflineException>(() => storage.Checkpoint()),
+            Should.Throw<StorageOfflineException>(() => storage.Log.AppendBegin(1_000)),
+            Should.Throw<StorageOfflineException>(() => storage.Log.AppendCommit(1_000)),
+            Should.Throw<StorageOfflineException>(() => storage.Log.Flush(forceDurable: true)),
+            Should.Throw<StorageOfflineException>(() => storage.FlushHeader()),
+        };
+        int writtenBack = storage.WriteBackDirtyPages(64);
+        bool flushedCommits = storage.FlushPendingCommits();
+        transaction.Dispose();
+        storage.Dispose();
+        using var reopened = TornStorage.Open(storage.CaptureDurable(), checkpointOnOpen: true);
+
+        // Assert: the first failure names the flush, every refusal carries the same cause, and
+        // nothing reached either file after the failure, the close included.
+        error.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        error.InnerException.ShouldBeOfType<IOException>();
+        error.CommitRecordWritten.ShouldBeTrue();
+        activeAfterTheFailure.ShouldBeFalse();
+        storage.IsOffline.ShouldBeTrue();
+        storage.OfflineError.ShouldNotBeNull().InnerException.ShouldBeSameAs(error.InnerException);
+        storage.OfflineError!.CommitRecordWritten.ShouldBeFalse();
+        refusals.ShouldAllBe(refusal => refusal.Message.StartsWith(StorageOfflineException.ErrorCode, StringComparison.Ordinal)
+            && refusal.InnerException == error.InnerException
+            && !((StorageOfflineException)refusal).CommitRecordWritten);
+        writtenBack.ShouldBe(0);
+        flushedCommits.ShouldBeFalse();
+        point.Writes.ShouldBe(writesAtTheFailure);
+        storage.CaptureLive().Data.ShouldBe(liveAtTheFailure.Data);
+        storage.CaptureLive().Journal.ShouldBe(liveAtTheFailure.Journal);
+        reopened.Read(keptPage, keptSlot).ShouldBe("kept");
+        reopened.ScanText().Contains("unconfirmed").ShouldBe(recordReachedTheMedia);
+        reopened.IsOffline.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A durable flush of the data file fails during a checkpoint, after the dirty pages were
+    /// written back and recorded clean. A retry used to flush nothing new, succeed, and truncate the
+    /// journal, although the operating system may have dropped those write-backs (PostgreSQL's
+    /// "fsyncgate"). The storage now goes offline instead: the retry is refused, the journal keeps
+    /// every record, and the reopen rebuilds the committed rows from it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: a data flush failure at a checkpoint keeps the journal for recovery")]
+    public void Checkpoint_DataFlushFails_ShouldGoOfflineAndKeepTheJournal()
+    {
+        // Arrange: two committed rows on two pages the checkpoint will write back.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point);
+        var pages = storage.FillPages(2);
+        long journalLength = storage.JournalLength;
+        storage.DataFaults.FailFlushAfterWriteAt = pages[0] * Page.Size;
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        int writesAtTheFailure = point.Writes;
+        var retry = Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        storage.Dispose();
+        var images = storage.CaptureDurable();
+
+        // The write-backs the failed flush reported on are lost, as the operating system may
+        // have dropped them: only the journal can bring the rows back.
+        images.Data.AsSpan((int)(pages[0] * Page.Size), Page.Size).Clear();
+        images.Data.AsSpan((int)(pages[1] * Page.Size), Page.Size).Clear();
+        using var reopened = TornStorage.Open(images, checkpointOnOpen: true);
+
+        // Assert
+        error.Message.ShouldContain("durable flush of the data file");
+        retry.InnerException.ShouldBeSameAs(error.InnerException);
+        storage.DataFaults.FailedFlushes.ShouldBe(1);
+        point.Writes.ShouldBe(writesAtTheFailure);
+        storage.JournalLength.ShouldBe(journalLength);
+        reopened.CountRecords(7).ShouldBe(2);
+    }
+
+    /// <summary>
+    /// An offline storage writes no page, not even one whose LSN the journal already made durable or
+    /// one that carries no LSN at all, and grows no file: an eviction that would write a dirty page
+    /// back is refused, and so is a record change that would allocate.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: an offline storage evicts no dirty page and extends no file")]
+    public void BufferPool_StorageOffline_ShouldRefuseEveryWriteBackAndExtension()
+    {
+        // Arrange: committed pages fill most of a small pool; one more is dirty but durable.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point, poolCapacity: 8);
+        var pages = storage.FillPages(12);
+        var open = storage.BeginTransaction();
+        var transaction = storage.BeginTransaction();
+        storage.Insert(transaction, "dirty");
+        storage.JournalFaults.FailNextFlush();
+        Should.Throw<StorageOfflineException>(() => transaction.Commit());
+        int writesAtTheFailure = point.Writes;
+        long dataLength = storage.Data.Length;
+
+        // Act: read every page, which must evict dirty pages to make room.
+        Exception? evictionRefusal = null;
+        foreach (long page in pages)
+        {
+            try
+            {
+                using var handle = storage.PageManager.GetPage((PageId)page);
+            }
+            catch (StorageOfflineException exception)
+            {
+                evictionRefusal = exception;
+                break;
+            }
+        }
+
+        // A bracket begun before the failure would need a new page for this record.
+        var growth = Should.Throw<StorageOfflineException>(() => storage.Insert(open, new string('x', 7_000)));
+
+        // Assert
+        evictionRefusal.ShouldNotBeNull();
+        growth.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        point.Writes.ShouldBe(writesAtTheFailure);
+        storage.Data.Length.ShouldBe(dataLength);
+    }
+
+    /// <summary>
+    /// Under grouped durability the flush worker's group flush fails. The committers waiting for it
+    /// are released at once with the offline error, not after their self-help window.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: a failed group flush releases its waiting committers at once")]
+    public void FlushPendingCommits_GroupFlushFails_ShouldReleaseWaitingCommittersAtOnce()
+    {
+        // Arrange: a window far longer than the test, so only the release can end the wait. The
+        // committer has a thread of its own and the waits block this one: parallel test classes can
+        // keep a pool work item, or an await's continuation, waiting for seconds
+        // (StorageWorkerSupportTests.AssertGroupedCommitCompletesOnWorkerFlush).
+        var storage = TornStorage.Create(journalWriteThrough: false);
+        storage.CommitDurability = StorageCommitDurability.Grouped;
+        storage.GroupCommitWindow = TimeSpan.FromMinutes(5);
+        using var pending = new ManualResetEventSlim();
+        storage.OnCommitPending = pending.Set;
+        var transaction = storage.BeginTransaction();
+        storage.Insert(transaction, "grouped");
+        var watch = Stopwatch.StartNew();
+        var commit = Task.Factory.StartNew(transaction.Commit, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        pending.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+        storage.JournalFaults.FailNextFlush();
+
+        // Act: the worker's pass.
+        bool flushed = storage.FlushPendingCommits();
+        ((IAsyncResult)commit).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+        var error = Should.Throw<StorageOfflineException>(() => commit.GetAwaiter().GetResult());
+        watch.Stop();
+
+        // Assert: released long before the window would have run out.
+        flushed.ShouldBeFalse();
+        error.InnerException.ShouldBeOfType<IOException>();
+        (watch.Elapsed / storage.GroupCommitWindow).ShouldBeLessThan(0.1);
+        storage.IsOffline.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// An LSN that was durable before the failure is still confirmed: its durability was
+    /// established, so a caller that asks for it is not told its commit is unconfirmed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: an LSN durable before the failure is still confirmed")]
+    public void EnsureDurable_LsnDurableBeforeTheFailure_ShouldStillBeConfirmed()
+    {
+        // Arrange
+        var storage = TornStorage.Create(journalWriteThrough: false);
+        long confirmed = storage.Log.AppendBegin(500);
+        storage.Log.EnsureDurable(confirmed);
+        long unconfirmed = storage.Log.AppendBegin(501);
+        storage.JournalFaults.FailNextFlush();
+        Should.Throw<StorageOfflineException>(() => storage.Log.EnsureDurable(unconfirmed));
+
+        // Act
+        storage.Log.EnsureDurable(confirmed);
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.Log.EnsureDurable(unconfirmed));
+
+        // Assert
+        refusal.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        storage.Log.DurableLsn.ShouldBe(confirmed);
+    }
+
+    /// <summary>
+    /// The offline error is found wherever an engine's layers wrapped it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: Find locates the offline error in inner and aggregate exceptions")]
+    public void Find_WrappedOfflineError_ShouldReturnIt()
+    {
+        // Arrange
+        var storage = TornStorage.Create(journalWriteThrough: false);
+        long lsn = storage.Log.AppendBegin(9);
+        storage.JournalFaults.FailNextFlush();
+        var offline = Should.Throw<StorageOfflineException>(() => storage.Log.EnsureDurable(lsn));
+        var wrapped = new InvalidOperationException("outer", new AggregateException(new IOException("other"), new Exception("inner", offline)));
+
+        // Act & Assert
+        StorageOfflineException.Find(wrapped).ShouldBeSameAs(offline);
+        StorageOfflineException.Find(new IOException("unrelated")).ShouldBeNull();
+        StorageOfflineException.Find(null).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// Two storages of one database (a data and a catalog file set) are wired to take each other
+    /// offline from <see cref="Storage.OnOffline"/>. A journal fsync of the first fails: the second
+    /// is offline before the failing call returns, each hook runs exactly once, and the hook runs
+    /// outside the failing journal's lock, so another thread can take that lock meanwhile (the
+    /// handlers of two storages failing together cannot deadlock). Nothing more reaches the
+    /// second storage's files (#1243 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: OnOffline takes a second file set offline at once, once, outside the journal lock")]
+    public void OnOffline_JournalFlushFails_ShouldTakeTheOtherFileSetOfflineAtOnce()
+    {
+        // Arrange: the second storage holds a dirty page its write-back would write.
+        var firstPoint = new CrashPoint();
+        var secondPoint = new CrashPoint();
+        var first = TornStorage.Create(firstPoint, journalWriteThrough: false);
+        var second = TornStorage.Create(secondPoint, journalWriteThrough: false);
+        second.Insert("dirty");
+        int firstRaised = 0;
+        int secondRaised = 0;
+        bool secondOfflineInTheHook = false;
+        bool journalLockFreeInTheHook = false;
+        first.OnOffline = error =>
+        {
+            firstRaised++;
+            second.TakeOffline(error);
+            secondOfflineInTheHook = second.IsOffline;
+            // A flush takes the journal's lock (and is refused): it completes only if the hook
+            // does not hold that lock. It runs on a thread of its own: started with Task.Run it
+            // waited behind parallel test classes' pool work for over 4 s on 4 cores.
+            journalLockFreeInTheHook = Task.Factory.StartNew(
+                () => Record.Exception(() => first.Log.Flush()),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Wait(TimeSpan.FromSeconds(10));
+        };
+        second.OnOffline = error =>
+        {
+            secondRaised++;
+            first.TakeOffline(error);
+        };
+        long lsn = first.Log.AppendBegin(7);
+        first.JournalFaults.FailNextFlush();
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => first.Log.EnsureDurable(lsn));
+        int secondWritesAtTheFailure = secondPoint.Writes;
+        int writtenBack = second.WriteBackDirtyPages(64);
+        var refusal = Should.Throw<StorageOfflineException>(() => second.BeginTransaction());
+        second.Dispose();
+
+        // Assert
+        firstRaised.ShouldBe(1);
+        secondRaised.ShouldBe(1);
+        secondOfflineInTheHook.ShouldBeTrue();
+        journalLockFreeInTheHook.ShouldBeTrue();
+        second.OfflineError.ShouldBeSameAs(error);
+        refusal.InnerException.ShouldBeSameAs(error.InnerException);
+        writtenBack.ShouldBe(0);
+        secondPoint.Writes.ShouldBe(secondWritesAtTheFailure);
+    }
+
+    /// <summary>
+    /// An engine gives up on a storage (owner decision 25 of 2026-10-06): a worker's work on it
+    /// kept failing, or its journal passed the engine's cap. The storage goes offline exactly as
+    /// after a failed durable flush: <see cref="Storage.OnOffline"/> is raised once, every later
+    /// write is refused with the engine's cause, nothing more reaches either file, closing included,
+    /// and a second give-up keeps the first error.
+    /// </summary>
+    /// <param name="cause">The engine's cause.</param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: an engine gives up on a storage with its own cause, offline as after a failed flush")]
+    [InlineData(StorageOfflineCause.CheckpointFailures)]
+    [InlineData(StorageOfflineCause.PageWriteBackFailures)]
+    [InlineData(StorageOfflineCause.WriteAheadFlushFailures)]
+    [InlineData(StorageOfflineCause.VersionPurgeFailures)]
+    [InlineData(StorageOfflineCause.JournalSizeLimit)]
+    public void TakeOffline_EngineCause_ShouldTakeTheStorageOfflineOnce(StorageOfflineCause cause)
+    {
+        // Arrange: a dirty page the write-back would write while the storage is online.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point);
+        storage.Insert("dirty");
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
+        var failure = new IOException("Injected page write failure");
+        const string reason = "the engine's checkpoint worker 'engine/checkpoint' failed on database 'd' on 3 passes in a row over 100 s, at least the engine's window of 100 s";
+
+        // Act
+        bool taken = storage.TakeOffline(cause, reason, failure);
+        int writesAtTheGiveUp = point.Writes;
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.BeginTransaction());
+        bool again = storage.TakeOffline(cause, "a second give-up", new IOException("later"));
+        int writtenBack = storage.WriteBackDirtyPages(64);
+        storage.Dispose();
+
+        // Assert
+        taken.ShouldBeTrue();
+        again.ShouldBeFalse();
+        var error = raised.ShouldHaveSingleItem();
+        storage.OfflineError.ShouldBeSameAs(error);
+        error.Cause.ShouldBe(cause);
+        error.InnerException.ShouldBeSameAs(failure);
+        error.CommitRecordWritten.ShouldBeFalse();
+        error.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        error.Message.ShouldContain(reason);
+        error.Message.ShouldContain("Injected page write failure");
+        refusal.Cause.ShouldBe(cause);
+        refusal.InnerException.ShouldBeSameAs(failure);
+        writtenBack.ShouldBe(0);
+        point.Writes.ShouldBe(writesAtTheGiveUp);
+    }
+
+    /// <summary>
+    /// Only the storage reports a failure of its own device operations: an engine that names one
+    /// as its reason to give up is refused, and the storage stays online.
+    /// </summary>
+    /// <param name="cause">A device cause.</param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: an engine cannot take a storage offline with a device cause")]
+    [InlineData(StorageOfflineCause.JournalFlush)]
+    [InlineData(StorageOfflineCause.DataFlush)]
+    [InlineData(StorageOfflineCause.HeaderWrite)]
+    public void TakeOffline_DeviceCause_ShouldBeRefused(StorageOfflineCause cause)
+    {
+        // Arrange
+        var storage = TornStorage.Create(new CrashPoint());
+
+        // Act
+        var error = Should.Throw<ArgumentOutOfRangeException>(() => storage.TakeOffline(cause, "a device failure", new IOException("fsync failed")));
+        Should.Throw<ArgumentException>(() => storage.TakeOffline(StorageOfflineCause.CheckpointFailures, " ", new IOException("failed")));
+        Should.Throw<ArgumentNullException>(() => storage.TakeOffline(StorageOfflineCause.CheckpointFailures, "a reason", null!));
+
+        // Assert
+        error.ParamName.ShouldBe("cause");
+        storage.IsOffline.ShouldBeFalse();
+        storage.Dispose();
+    }
+
+    /// <summary>
+    /// A durable flush of the data file fails at a checkpoint: <see cref="Storage.OnOffline"/> is
+    /// raised exactly once with that error, although the data-file path also latches the journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: OnOffline is raised once for a failed data-file flush")]
+    public void OnOffline_DataFlushFails_ShouldBeRaisedOnce()
+    {
+        // Arrange
+        var storage = TornStorage.Create(new CrashPoint());
+        var pages = storage.FillPages(1);
+        storage.DataFaults.FailFlushAfterWriteAt = pages[0] * Page.Size;
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        storage.TakeOffline(error);
+        storage.Dispose();
+
+        // Assert
+        raised.ShouldHaveSingleItem().ShouldBeSameAs(error);
+        error.CommitRecordWritten.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A checkpoint's header slot write is in flight when a drain of the journal fails and takes
+    /// the storage offline; then the slot write itself fails, or the durable flush after it does.
+    /// The drain's error stays the storage's (#1268 review): <see cref="Storage.OnOffline"/> was
+    /// raised with it once, and <see cref="Storage.OfflineError"/>, the failing checkpoint and every
+    /// later refusal report it, not the header write's or the data flush's own failure. Before the
+    /// review the storage kept a latch of its own beside the journal's and read it first, so the
+    /// later failure replaced the error <see cref="Storage.OnOffline"/> had reported: an engine's
+    /// refusals named the header write while the journal's refusals and the abandoned lock waits
+    /// named the drain.
+    /// </summary>
+    /// <param name="failTheFlush">
+    /// True to fail the durable data flush after the slot write (a data-flush failure) rather than
+    /// the slot write itself (a header-write failure).
+    /// </param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: a header write failing after a drain took the storage offline keeps the drain's error")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OfflineError_HeaderWriteFailsAfterADrainFailed_ShouldKeepTheDrainsError(bool failTheFlush)
+    {
+        // Arrange: the next checkpoint's slot write first fails a drain of the journal, as a drain
+        // on another thread would while that write is in flight, then fails itself.
+        var storage = TornStorage.Create(new CrashPoint());
+        storage.Insert("before the fault");
+        long slotOffset = StorageHeaderPage.SlotOffset(1 - storage.HeaderState.Slot);
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
+        StorageOfflineException? drainError = null;
+        StorageOfflineException? offlineAfterTheDrain = null;
+        storage.DataFaults.OnWriteAt = (slotOffset, () =>
+        {
+            storage.Log.AppendOperation(0, [1, 2, 3]);
+            storage.JournalFaults.FailNextWrite();
+            drainError = Should.Throw<StorageOfflineException>(() => storage.Log.Flush());
+            offlineAfterTheDrain = storage.OfflineError;
+        });
+        if (failTheFlush)
+        {
+            storage.DataFaults.FailFlushAfterWriteAt = slotOffset;
+        }
+        else
+        {
+            storage.DataFaults.FailWriteAt = slotOffset;
+        }
+
+        // Act
+        var checkpointError = Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.BeginTransaction());
+        var journalRefusal = Should.Throw<StorageOfflineException>(() => storage.Log.AppendBegin(1_000));
+        storage.Dispose();
+
+        // Assert: one error throughout, the drain's, and the later failure did happen.
+        var drain = drainError.ShouldNotBeNull();
+        drain.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offlineAfterTheDrain.ShouldBeSameAs(drain);
+        storage.OfflineError.ShouldBeSameAs(drain);
+        raised.ShouldHaveSingleItem().ShouldBeSameAs(drain);
+        new[] { checkpointError, refusal, journalRefusal }.ShouldAllBe(e => e.Cause == StorageOfflineCause.JournalFlush && e.InnerException == drain.InnerException);
+        storage.HeaderFaulted.ShouldBeTrue();
+        storage.DataFaults.FailedFlushes.ShouldBe(failTheFlush ? 1 : 0);
+    }
+}

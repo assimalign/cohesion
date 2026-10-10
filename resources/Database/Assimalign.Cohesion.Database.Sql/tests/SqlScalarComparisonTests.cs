@@ -231,7 +231,7 @@ public sealed class SqlScalarComparisonTests
     }
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "comparison-tests" });
+        => SqlDatabaseEngine.Create("comparison-tests", new SqlDatabaseEngineOptions());
 
     private static byte[] BinaryValue(byte finalByte)
     {
@@ -241,11 +241,11 @@ public sealed class SqlScalarComparisonTests
         return bytes;
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement,
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement,
         IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(statement, parameters, CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement,
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement,
         IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<QueryResultSet>();

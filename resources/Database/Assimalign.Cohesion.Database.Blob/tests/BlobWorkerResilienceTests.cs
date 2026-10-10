@@ -1,0 +1,1414 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Tests;
+using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Blob.Tests;
+
+/// <summary>
+/// The blob engine's background workers under device faults that fire on their own threads
+/// (#1268): a checkpoint or page write-back whose page writes fail is reported while the fault
+/// lasts, retried after the worker's backoff, and recovers when the fault clears, while the
+/// engine's other database keeps its work; a failed group-commit drain (#1252) or fsync and a
+/// failed header slot write take only their database offline, and every later operation on it is
+/// refused with COHDBB002 while nothing more is written to it.
+/// </summary>
+public sealed class BlobWorkerResilienceTests
+{
+    private const string Failing = "failing";
+    private const string Healthy = "healthy";
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a checkpoint whose page writes fail is retried after a backoff, and recovers when the fault clears")]
+    public async Task CheckpointWorker_PageWritesFail_ShouldRetryAndRecoverWhileOtherDatabasesCheckpoint()
+    {
+        // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var workers = engine.Workers.ToArray();
+        var faults = strategy.Faults(Failing);
+
+        // Act: every data page write of one database fails while its journal is due.
+        faults.FailPageWrites = true;
+        var during = Stopwatch.StartNew();
+        await UploadAsync(failing, 100, 20);
+        bool retried = await Eventually(() => worker.ConsecutiveFailures >= 2);
+        var stateDuringTheFault = engine.State;
+        var fault = worker.Fault;
+
+        // The other database's checkpoints go on meanwhile.
+        await UploadAsync(healthy, 100, 20);
+        long healthyWritten = healthy.DataStorage.JournalLength;
+        bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
+        long failedPasses = worker.FailureCount;
+        var elapsed = during.Elapsed;
+        long failingJournal = failing.DataStorage.JournalLength;
+
+        faults.FailPageWrites = false;
+        bool recovered = await Eventually(() => engine.State == EngineState.Running && failing.DataStorage.JournalLength < failingJournal);
+
+        // Assert
+        retried.ShouldBeTrue();
+        stateDuringTheFault.ShouldBe(EngineState.Faulted);
+        Mentions(fault, "Injected page write failure").ShouldBeTrue(fault?.ToString());
+        healthyCheckpointed.ShouldBeTrue();
+        ((double)failedPasses).ShouldBeLessThanOrEqualTo(elapsed / DatabaseEngineWorker.FailureBackoff + 2);
+        recovered.ShouldBeTrue();
+        worker.Fault.ShouldBeNull();
+        worker.ConsecutiveFailures.ShouldBe(0);
+        engine.Workers.ShouldBe(workers);
+        engine.OfflineDatabases.ShouldBeEmpty();
+        (await CountAsync(failing)).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// One database whose checkpoints keep failing must not slow the checkpoints of the engine's
+    /// other databases (#1268 review): only the failing database is backed off. A worker-wide
+    /// backoff held the healthy database to one checkpoint a second, and its journal grew to
+    /// hundreds of times the trigger. The guarantee is the floor: over the window the healthy
+    /// database must take more than twice the checkpoints such a backoff allows,
+    /// 2 × (window / backoff + 1) = 14, which fails every worker-wide backoff or stall of one
+    /// backoff a pass. A smaller slowdown can pass (the remarks).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two engines write over the same window, so whatever else the machine runs slows both
+    /// alike. Measured one after the other, the parallel test run alone moved the ratio anywhere
+    /// from a quarter to four times, with no fault in either window, and failed the bound on a
+    /// three-core runner.
+    /// </para>
+    /// <para>
+    /// Measured together, the share of the no-fault checkpoints still moved with the machine, not
+    /// the fault. Under load an engine's checkpoints come in phases: for stretches of a few hundred
+    /// milliseconds to several seconds its writer runs ahead and it takes up to ten times fewer
+    /// per write, and the two engines enter those phases independently. Over a two-second window
+    /// the share fell to 0.29-0.44 beside another engine's suite and to 0.37 pinned to three cores,
+    /// against a bound of half. The window is now six seconds, compared second by second, so a
+    /// stall of a second or two in one engine moves only the seconds it covers; but two engines in
+    /// different phases for the whole window still held the median second's share at 0.28 in a
+    /// parallel run of the whole suite.
+    /// </para>
+    /// <para>
+    /// So the bound that decides comes from the worker-wide backoff's signature instead of from
+    /// half: the floor the test always had. The backoff leaves the healthy database about one
+    /// checkpoint a second whatever it writes, 5 to 7 in the window, where a healthy database took
+    /// 105 to 3,203 in 100 runs pinned to three cores, half of them beside another engine's suite.
+    /// A worker-wide backoff, a pass that stalls a backoff for each failure, and a pass that waits
+    /// out the failing database's backoff instead of skipping it failed the floor in all 45 of
+    /// their runs across the five engines. A smaller slowdown can pass: before storage format 3
+    /// (#1253), a worker-wide pause of 250 ms after every pass left 17 to 23 checkpoints in the
+    /// window and passed 34 of 65 runs on three cores, because a loaded engine with no fault drops
+    /// to a few checkpoints a second itself, and no bound on a count tells the two apart. Catching
+    /// it needs a deterministic signal from the worker, which is required follow-up work (the SQL
+    /// engine's DESIGN.md, "Engine-owned background workers").
+    /// </para>
+    /// <para>
+    /// The median second's share of the no-fault checkpoints is a secondary signal, asserted when
+    /// at least two seconds count: it must reach a tenth, where the backoff's share is near 0.001
+    /// on a three-core runner and 0.03 to 0.06 beside three busy threads. It adds little to the
+    /// floor: the backoff and stall passed it in 2 of their 45 runs. A second counts only when the
+    /// no-fault engine took a checkpoint in it and neither engine's writer was starved in it,
+    /// writing nothing or under a tenth of its mean second. Scored as zero, the seconds in which
+    /// the scheduler gave the faulted engine's writer no CPU failed a run with the engine
+    /// unchanged, its writer idle four seconds of six. It is no rare stall: in 100 runs with the
+    /// engine unchanged, the no-fault engine's writer went a whole second without a write in 14
+    /// and the faulted engine's in 17.
+    /// </para>
+    /// <para>
+    /// Each counted second's share is taken over the second and per write, whichever is larger.
+    /// Now and then the scheduler starved one engine's writer (920 writes against 50,790 over a
+    /// window pinned to three cores): its checkpointer kept up with what little was written, in
+    /// far fewer checkpoints, so the count compared the writers. Per write the comparison is the
+    /// checkpointers' again, except when the starved writer is the no-fault engine's: a
+    /// checkpointer with little to do keeps up better per write than a busy one, and there the
+    /// count is the fair one.
+    /// </para>
+    /// <para>
+    /// The journal peak is no longer compared with the no-fault peak: over six seconds beside
+    /// another suite, a healthy engine's journal peaked at 544 MB, within what the worker-wide
+    /// backoff reached (470 MB to 1.1 GB), while the checkpoint counts still told the two apart by
+    /// hundreds of times. It is reported.
+    /// </para>
+    /// <para>
+    /// The window ends early once the healthy database's data file and journal hold
+    /// <see cref="PaceFileBound"/> bytes together, so the test double's memory streams stay far
+    /// from their 2 GiB capacity on any runner, but never before two backoffs. The window starts
+    /// after the failing database's first failure, and the worker retries it a backoff later, so
+    /// that retry and two seconds that can count toward the share always fall inside the window: a
+    /// window the bound ended in under a second failed a healthy engine for want of a failed pass,
+    /// in 3 of 10 runs with the bound forced to 4 MiB, and in none of 10 once the window ran two
+    /// backoffs. An early end only shortens the time in which a worker-wide backoff takes its
+    /// checkpoint a second, so the floor still exceeds twice what such a backoff allows, and the
+    /// seconds after the end have no writes and do not count toward the share. The bound is a
+    /// backstop, not the window's usual end: the report gives the data file's length, and says when
+    /// the bound ended the window.
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
+    public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
+    {
+        // Act: the same load with no fault and with the failing database's page writes failing,
+        // in two engines whose windows start together, on the thread pool.
+        var baselineReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var faultedReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var start = Task.WhenAll(baselineReady.Task, faultedReady.Task);
+        var paces = await Task.WhenAll(
+            Task.Run(() => MeasureHealthyCheckpointsAsync(fault: false, baselineReady, start)),
+            Task.Run(() => MeasureHealthyCheckpointsAsync(fault: true, faultedReady, start)));
+        var baseline = paces[0];
+        var faulted = paces[1];
+
+        // Assert: the fault fired and was retried, and the healthy database kept a pace a
+        // worker-wide backoff cannot reach: more than twice its checkpoints over the window. The
+        // median counted second's share of the no-fault engine's is a secondary signal (the remarks).
+        double[] shares = faulted.SharesOf(baseline);
+        string report = $"no fault: {baseline}; fault: {faulted}; shares of the {shares.Length} seconds that count {string.Join(" ", shares.Select(share => $"{share:F2}"))}";
+        faulted.FailedPasses.ShouldBeGreaterThanOrEqualTo(1, report);
+        ((double)faulted.Checkpoints).ShouldBeGreaterThan(2 * (PaceWindow / DatabaseEngineWorker.FailureBackoff + 1), report);
+        if (shares.Length >= 2)
+        {
+            CheckpointPace.Median(shares).ShouldBeGreaterThanOrEqualTo(PaceShareBound, report);
+        }
+    }
+
+    /// <summary>
+    /// One database's checkpoint that hangs in a durable flush of its data file — an fsync its
+    /// device does not answer — must not hold back the checkpoints of the engine's other databases.
+    /// Before the checkpoint lanes, the worker visited the databases one by one on its own thread, so
+    /// the hung fsync stopped every checkpoint of the engine until it returned: a device that took
+    /// seconds to answer, or to fail, stalled every other database's journal truncation for as long.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoint fsync hangs does not hold back the other database's checkpoints")]
+    public async Task CheckpointWorker_OneDatabaseFsyncHangs_ShouldKeepCheckpointingTheOthers()
+    {
+        // Arrange: checkpoints by journal size; nothing else writes pages back.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = PaceJournalSize;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var stalled = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var stalledFaults = strategy.Faults(Failing);
+        var healthyFaults = strategy.Faults(Healthy);
+
+        try
+        {
+            // The stalled database's journal grows past the size with its trigger off, so no
+            // statement takes its checkpoint over: the worker runs it, and hangs in its data fsync.
+            stalled.DataStorage.CheckpointJournalSize = 0;
+            for (int id = 0; stalled.DataStorage.JournalLength < PaceJournalSize; id += 10)
+            {
+                await UploadAsync(stalled, id, 10);
+            }
+
+            stalledFaults.StallDataFlushes();
+            stalled.DataStorage.CheckpointJournalSize = PaceJournalSize;
+            bool hung = await Eventually(() => stalledFaults.StalledDataFlushes > 0);
+            long stalledJournal = stalled.DataStorage.JournalLength;
+
+            // Act: while the fsync hangs, the healthy database's journal passes the size again and again.
+            long checkpoints = healthyFaults.HeaderWrites;
+            var watch = Stopwatch.StartNew();
+            for (int id = 0; healthyFaults.HeaderWrites - checkpoints < 3 && watch.Elapsed < StallWindow; id += 10)
+            {
+                await UploadAsync(healthy, id, 10);
+            }
+
+            long healthyCheckpoints = healthyFaults.HeaderWrites - checkpoints;
+            bool stillHung = stalledFaults.StalledDataFlushes > 0;
+            long stalledJournalDuringTheHang = stalled.DataStorage.JournalLength;
+
+            stalledFaults.ReleaseDataFlushes();
+            bool stalledCheckpointed = await Eventually(() => stalled.DataStorage.JournalLength < stalledJournal);
+
+            // Assert: the healthy database was checkpointed while the other's checkpoint hung, and
+            // the hung checkpoint completed once its device answered.
+            hung.ShouldBeTrue();
+            healthyCheckpoints.ShouldBeGreaterThanOrEqualTo(3, $"healthy checkpoints while the other database's fsync hung for {watch.Elapsed}");
+            stillHung.ShouldBeTrue();
+            stalledJournalDuringTheHang.ShouldBe(stalledJournal);
+            stalledCheckpointed.ShouldBeTrue();
+            worker.Fault.ShouldBeNull();
+            engine.State.ShouldBe(EngineState.Running);
+            engine.OfflineDatabases.ShouldBeEmpty();
+        }
+        finally
+        {
+            stalledFaults.Clear();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a page write-back that fails is retried after a backoff, and the pages reach the file once the fault clears")]
+    public async Task PageWriteBackWorker_PageWritesFail_ShouldRetryAndRecoverWhileOtherDatabasesAreWritten()
+    {
+        // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
+        var faults = strategy.Faults(Failing);
+        var healthyFaults = strategy.Faults(Healthy);
+
+        // Act: the failing database's page writes fail while it has dirty pages.
+        faults.FailPageWrites = true;
+        var during = Stopwatch.StartNew();
+        await UploadAsync(failing, 100, 20);
+        bool retried = await Eventually(() => worker.ConsecutiveFailures >= 2);
+        var stateDuringTheFault = engine.State;
+        var fault = worker.Fault;
+
+        // The other database's pages are written back meanwhile.
+        long healthyWrites = healthyFaults.PageWrites;
+        await UploadAsync(healthy, 100, 20);
+        bool healthyWritten = await Eventually(() => healthyFaults.PageWrites > healthyWrites);
+        long failedPasses = worker.FailureCount;
+        var elapsed = during.Elapsed;
+
+        var atTheClear = strategy.Capture(Failing).Data;
+        faults.FailPageWrites = false;
+        bool recovered = await Eventually(() =>
+            engine.State == EngineState.Running && !strategy.Capture(Failing).Data.AsSpan().SequenceEqual(atTheClear));
+
+        // Assert
+        retried.ShouldBeTrue();
+        stateDuringTheFault.ShouldBe(EngineState.Faulted);
+        Mentions(fault, "Injected page write failure").ShouldBeTrue(fault?.ToString());
+        healthyWritten.ShouldBeTrue();
+        ((double)failedPasses).ShouldBeLessThanOrEqualTo(elapsed / DatabaseEngineWorker.FailureBackoff + 2);
+        recovered.ShouldBeTrue();
+        worker.Fault.ShouldBeNull();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        (await CountAsync(failing)).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// The flush worker's group flush fails in either of its two steps: the drain of the journal's
+    /// append buffer (#1252) or the fsync after it (#1243). Either takes only its database offline
+    /// with <see cref="StorageOfflineCause.JournalFlush"/>, on the worker's thread, while the worker
+    /// records no failure of its own and keeps flushing the other database (#1268).
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Workers: a group-commit drain or fsync failure takes only its database offline, and the flush worker keeps serving the others")]
+    [InlineData(DeviceFault.JournalFlush)]
+    [InlineData(DeviceFault.JournalWrite)]
+    public async Task WriteAheadFlushWorker_JournalFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing(DeviceFault fault)
+    {
+        // Arrange: grouped commits wait up to two seconds for the flush worker before they flush
+        // themselves, so a commit that returns sooner was flushed by the worker.
+        var window = TimeSpan.FromSeconds(2);
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = window;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        var faults = strategy.Faults(Failing);
+        await using var session = await failing.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+
+        // Act: the failing database's journal drain, or its fsync, fails under the worker's group
+        // flush.
+        faults.SwitchOn(fault);
+        var watch = Stopwatch.StartNew();
+        var error = await Record.ExceptionAsync(async () => await WriteAsync(files, "lost", "lost"));
+        var failedCommit = watch.Elapsed;
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+
+        // The worker keeps flushing the other database's grouped commits.
+        var latencies = await TimedUploadsAsync(healthy, 5);
+
+        faults.Clear();
+        var reopened = await engine.OpenDatabaseAsync(Failing);
+
+        // Assert: a failed drain ends the group flush before its fsync.
+        bool drain = fault == DeviceFault.JournalWrite;
+        StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
+        (failedCommit / window).ShouldBeLessThan(1.0);
+        (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
+
+        // The root engine base names each pump thread for its worker (concrete-types plan §6.4,
+        // engine composition), where the model named it "{engine}/{kind}" ("blob-engine/WriteAheadFlush").
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        worker.Name.ShouldBe(engine.Name + "/wal-flush");
+        (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
+        refusal.Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        refusal.Message.ShouldContain("a write or flush of the journal");
+        StorageOfflineException.Find(refusal)!.Message.ShouldContain(drain ? "a write of the journal" : "a durable flush of the journal");
+        (latencies.Max() / window).ShouldBeLessThan(1.0, $"grouped commit latencies {string.Join(", ", latencies)}");
+        worker.Fault.ShouldBeNull();
+        worker.FailureCount.ShouldBe(0);
+        engine.State.ShouldBe(EngineState.Running);
+        reopened.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a failed header slot write takes the database offline: later operations are refused and its files stop growing")]
+    public async Task CheckpointWorker_HeaderWriteFails_ShouldTakeTheDatabaseOfflineUntilReopened()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        await UploadAsync(failing, 0, 10);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+        await using var session = await failing.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+
+        // Act: the next checkpoint's header slot write fails.
+        faults.FailHeaderWrites = true;
+        await WriteAsync(files, "k10", "before the fault");
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        long journalAtTheFault = failing.DataStorage.JournalLength;
+        var atTheFault = strategy.Capture(Failing);
+
+        var refusals = new List<DatabaseOfflineException>
+        {
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync()),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.OpenWriteAsync("k11")),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.BeginTransactionAsync()),
+        };
+
+        // The checkpoint worker keeps visiting the engine: the healthy database is checkpointed.
+        await UploadAsync(healthy, 0, 10);
+        long healthyWritten = healthy.DataStorage.JournalLength;
+        bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
+        var after = strategy.Capture(Failing);
+
+        faults.Clear();
+        var reopened = await engine.OpenDatabaseAsync(Failing);
+
+        // Assert
+        offline.ShouldBeTrue();
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
+        StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
+        faults.HeaderWriteFailures.ShouldBe(1);
+        failing.DataStorage.JournalLength.ShouldBe(journalAtTheFault);
+        after.Data.ShouldBe(atTheFault.Data);
+        after.Journal.ShouldBe(atTheFault.Journal);
+        healthyCheckpointed.ShouldBeTrue();
+        worker.Fault.ShouldBeNull();
+        worker.FailureCount.ShouldBe(0);
+        engine.State.ShouldBe(EngineState.Running);
+        reopened.IsOffline.ShouldBeFalse();
+        (await CountAsync(reopened)).ShouldBe(11);
+    }
+
+    /// <summary>
+    /// Two writers in flight when a failed header slot write, journal fsync or journal drain takes
+    /// the database offline (#1268 review): the writer holding the database writer lock keeps it,
+    /// because an offline database undoes nothing and releasing the lock without the undo would
+    /// hand the next writer versions that were never undone, so the writer queued behind it must
+    /// end with the coded refusal instead. Before the review it waited until the database was
+    /// reopened. The drain of the journal's append buffer (#1252) goes offline through the same
+    /// hook, so it ends the wait too, with <see cref="StorageOfflineCause.JournalFlush"/> as the
+    /// cause.
+    /// </summary>
+    /// <remarks>
+    /// The queued session looks its container up before the fault, and its write is started on the
+    /// test's own flow. The lookup is an autocommit read of its own, whose commit appends a commit
+    /// record and drains the journal for it. Inside a <c>Task.Run</c> body, as the test had it, the
+    /// lookup committed after the fault whenever the thread pool started that body more than the
+    /// 100 ms the test waited late (a three-core macOS runner under the whole suite): its drain was
+    /// the first to fail, and the queued session got
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>, which is right for a commit whose
+    /// record was appended before its flush failed (#1243), while its write never reached the lock.
+    /// <see cref="BlobContainer.OpenWriteAsync"/> returns only once its request waits for the lock:
+    /// the operation's begin and every step before the wait complete synchronously and append only
+    /// its begin record, so the writer is queued, and nothing of its own drains, before the fault
+    /// switches on.
+    /// </remarks>
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Workers: a writer queued for the writer lock when the database goes offline ends with the coded refusal")]
+    [InlineData(DeviceFault.HeaderWrite)]
+    [InlineData(DeviceFault.JournalFlush)]
+    [InlineData(DeviceFault.JournalWrite)]
+    public async Task QueuedWriter_DatabaseGoesOffline_ShouldEndWithTheOfflineRefusal(DeviceFault fault)
+    {
+        // Arrange: the checkpointer looks every 100 ms; one writer holds the database writer lock in
+        // an explicit transaction, and another queues behind it.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var failing = await CreateAsync(engine, Failing);
+        var faults = strategy.Faults(Failing);
+        await using var holder = await failing.CreateSessionAsync();
+        await using var queued = await failing.CreateSessionAsync();
+        var queuedFiles = await queued.GetContainerAsync("files");
+        _ = await holder.BeginTransactionAsync();
+        await WriteAsync(await holder.GetContainerAsync("files"), "held", "held");
+        var waiting = WriteAsync(queuedFiles, "queued", "queued");
+        bool queuedWhileOnline = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2;
+        string queuedState = $"queued {waiting.Status}, {failing.Coordinator.GetOpenContexts().Count} open contexts, offline {failing.IsOffline}";
+
+        // Act: the next checkpoint's header slot write, its journal fsync, or the drain of the
+        // journal's append buffer that leads it, fails.
+        faults.SwitchOn(fault);
+
+        // The holder writes again, so the next checkpoint is due (it may already be refused).
+        await Record.ExceptionAsync(async () => await WriteAsync(await holder.GetContainerAsync("files"), "held-2", "held-2"));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
+        var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
+        var holderRefusal = await Record.ExceptionAsync(async () => await WriteAsync(await holder.GetContainerAsync("files"), "after", "after"));
+
+        faults.Clear();
+        var reopened = await engine.OpenDatabaseAsync(Failing);
+
+        // Assert: both writers got the coded refusal naming what failed, and the reopen kept
+        // neither write.
+        queuedWhileOnline.ShouldBeTrue(queuedState);
+        offline.ShouldBeTrue();
+        ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
+        queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(fault == DeviceFault.HeaderWrite ? StorageOfflineCause.HeaderWrite : StorageOfflineCause.JournalFlush);
+        holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        reopened.IsOffline.ShouldBeFalse();
+        (await CountAsync(reopened)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The holder's own upload takes the database offline: its chunks overflow the journal's
+    /// append buffer (#1252), whose drain fails. The failed operation aborts the holder's explicit
+    /// transaction (#1225), but an offline database undoes nothing (#1268), so the abort rolls
+    /// nothing back and releases no lock: the holder keeps the database writer lock, and the writer
+    /// queued behind it ends with the coded refusal instead of being granted the lock. The queued
+    /// writer is started after the fault switched on, the latest it can start, and still drains
+    /// nothing before it waits, so the holder's drain is the one failure. Nothing else drains: the
+    /// workers' intervals are an hour.
+    /// </summary>
+    /// <remarks>
+    /// The lock alone does not show that the abort rolled nothing back. A rollback the abort hands
+    /// the kernel on the offline database ends the holder's context and fails its undo, which the
+    /// kernel defers with the writer lock still held (#1226): the lock checks pass, and so would a
+    /// count of the version store's ledger, which keeps the undo's entries for the retry. So the
+    /// test also checks what only a rollback changes: the holder's context is still active and
+    /// open in the coordinator, and no undo waits for a retry.
+    /// </remarks>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a holder whose upload's journal drain fails keeps the writer lock through its abort, and the queued writer gets the coded refusal")]
+    public async Task QueuedWriter_HolderUploadDrainFails_ShouldKeepTheHolderLockAndRefuseTheQueuedWriter()
+    {
+        // Arrange: one writer holds the database writer lock in an explicit transaction; the other
+        // session has looked its container up, and every journal write fails from now on.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy));
+        var failing = await CreateAsync(engine, Failing);
+        var faults = strategy.Faults(Failing);
+        await using var holder = await failing.CreateSessionAsync();
+        await using var queued = await failing.CreateSessionAsync();
+        var queuedFiles = await queued.GetContainerAsync("files");
+        var transaction = await holder.BeginTransactionAsync();
+        var holderFiles = await holder.GetContainerAsync("files");
+        await WriteAsync(holderFiles, "held", "held");
+        var holderContext = transaction.Context;
+        faults.SwitchOn(DeviceFault.JournalWrite);
+
+        var waiting = WriteAsync(queuedFiles, "queued", "queued");
+        bool queuedWithoutADrain = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2
+            && faults.JournalWriteFailures == 0 && !failing.IsOffline;
+        string queuedState = $"queued {waiting.Status}, {failing.Coordinator.GetOpenContexts().Count} open contexts, " +
+            $"{faults.JournalWriteFailures} journal write failures, offline {failing.IsOffline}";
+
+        // Act: the holder uploads more than the append buffer holds. The bytes are not zero: since
+        // #1253 a fresh page's pre-image is zero and the journal records only bytes that differ,
+        // so a zero upload would journal almost nothing and never reach the failing drain.
+        var payload = new byte[4 * 1024 * 1024];
+        new Random(1268).NextBytes(payload);
+        var holderRefusal = await Record.ExceptionAsync(async () =>
+        {
+            await using var stream = await holderFiles.OpenWriteAsync("large");
+            await stream.WriteAsync(payload);
+        });
+        bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
+        var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
+
+        // The database writer lock is still the holder's: another owner cannot take it, the
+        // holder's own request is a re-grant.
+        var locks = failing.Coordinator.LockManager;
+        bool heldByAnother = !locks.TryAcquire(new TransactionSequence(ulong.MaxValue), LockResource.Database(), LockMode.Exclusive);
+        bool heldByTheHolder = locks.TryAcquire(holderContext.Sequence, LockResource.Database(), LockMode.Exclusive);
+        var holderState = transaction.State;
+
+        // The abort rolled nothing back: the kernel never ended the holder's context, and no undo
+        // was deferred for a retry.
+        var holderContextState = holderContext.State;
+        bool holderContextOpen = failing.Coordinator.GetOpenContexts().Contains(holderContext);
+        var deferredUndos = failing.Coordinator.VersionStore.PendingAbortedPurges;
+
+        faults.Clear();
+        var reopened = await engine.OpenDatabaseAsync(Failing);
+
+        // Assert
+        queuedWithoutADrain.ShouldBeTrue(queuedState);
+        holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(holderRefusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        faults.JournalWriteFailures.ShouldBe(1);
+        holderState.ShouldBe(TransactionState.Faulted);
+        ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
+        queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        heldByAnother.ShouldBeTrue();
+        heldByTheHolder.ShouldBeTrue();
+        holderContextState.ShouldBe(TransactionState.Active, "the offline abort started a rollback of the holder's context");
+        holderContextOpen.ShouldBeTrue("the offline abort ended the holder's context in the coordinator");
+        deferredUndos.ShouldBeEmpty("the offline abort attempted an undo, and deferred it");
+        reopened.IsOffline.ShouldBeFalse();
+        (await CountAsync(reopened)).ShouldBe(0);
+    }
+
+    // Since the engine derives from DatabaseEngine (concrete-types plan, phase 4), a registered
+    // worker is a DatabaseEngineWorker, whose loop lets nothing escape: the pass that throws is
+    // recorded and the next one runs after the backoff. The interface-only worker this test drove
+    // until then cannot be registered any more.
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a registered worker whose pass throws is run again, and the engine reports Faulted")]
+    public async Task Pump_RegisteredWorkerPassThrows_ShouldRunItAgainAndReportFaulted()
+    {
+        // Arrange
+        var worker = new EscapingWorker();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
+        builder.AddWorker(_ => worker);
+        await using var engine = builder.Build();
+
+        // Act
+        bool restarted = await Eventually(() => worker.Runs >= 2);
+        var state = engine.State;
+        await engine.DisposeAsync();
+
+        // Assert
+        restarted.ShouldBeTrue();
+        state.ShouldBe(EngineState.Faulted);
+        worker.Stopped.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The checkpointer skips a database its holder closed, rather than only tolerating its
+    /// disposed storage (#1289). A close that is not idle leaves the journal untruncated: here
+    /// another storage bracket holds every page through the close, so the rolled-back
+    /// transaction's deferred undo still fails when the close retries it, and the close keeps its
+    /// writer in flight (#1226). The closed storage then stays due for a checkpoint that can never
+    /// run, and the storage refuses it with <see cref="StorageTransactionException"/>, not
+    /// <see cref="ObjectDisposedException"/>, so <c>BlobDatabaseEngine.IsOpen</c> does not cover
+    /// it. Without the skip, the failure the checkpointer had recorded for the database never ended
+    /// and the engine reported <see cref="EngineState.Faulted"/> for good;
+    /// <c>BlobCheckpointWorker.IsCheckpointDue</c> is false for a closed database, so the first
+    /// pass after the failure's backoff ends the record. The KeyValuePair, Graph, Documents and Sql
+    /// suites carry the same test.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a failing database closed with a writer in flight ends its checkpoint failure, and the engine runs again")]
+    public async Task CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning()
+    {
+        // Arrange: the checkpointer looks every 100 ms and records a failure for a database whose
+        // page writes fail.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var failing = await CreateAsync(engine, Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+        faults.FailPageWrites = true;
+        await UploadAsync(failing, 0, 20);
+        bool failed = await Eventually(() => worker.ConsecutiveFailures >= 1);
+
+        // A rolled-back transaction whose undo is deferred: another bracket holds every page
+        // through the close, so no checkpoint of the storage can run from here on either.
+        await using (var session = await failing.CreateSessionAsync())
+        {
+            var files = await session.GetContainerAsync("files");
+            var transaction = await session.BeginTransactionAsync();
+            await WriteAsync(files, "rolled", "rolled back");
+            faults.FailPageWrites = false;
+            _ = PageWriteLockHolder.LockEveryPage(failing.DataStorage); // abandoned with the storage
+            await transaction.RollbackAsync();
+        }
+
+        // Act: the close retries the undo, which fails the same way, and keeps the writer in flight.
+        await Should.ThrowAsync<StorageTransactionException>(async () => await failing.DisposeAsync());
+        bool recovered = await Eventually(() => engine.State == EngineState.Running && worker.Fault is null);
+
+        // Assert
+        failed.ShouldBeTrue();
+        recovered.ShouldBeTrue($"{engine.State}: {worker.Name} {worker.ConsecutiveFailures} consecutive failed passes, {worker.Fault}");
+        worker.ConsecutiveFailures.ShouldBe(0);
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A checkpoint failure that persists takes the database offline (owner decisions 25 of
+    /// 2026-10-06 and 42 of 2026-10-07): once the checkpoint worker's failures of it have lasted the
+    /// engine's window across its minimum of failed passes, the engine takes it offline with
+    /// <see cref="StorageOfflineCause.CheckpointFailures"/>, and only it: the other database stays
+    /// online and keeps being checkpointed. The window is measured on the engine's clock, which the
+    /// test moves: the minimum of failed passes, each a backoff after the one before it, leaves the
+    /// database online while the window has not passed, and the first failed pass past it takes the
+    /// database offline. Every operation is then refused with COHDBB002, and once the fault clears the
+    /// reopen brings the database back with its blobs. Before decision 25 the worker retried it
+    /// every second for as long as the process ran, and its journal grew without bound.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a checkpoint failure that persists past the window across the minimum of passes takes only its database offline")]
+    public async Task CheckpointWorker_FailurePersistsPastTheWindow_ShouldTakeOnlyItsDatabaseOffline()
+    {
+        // Arrange: the checkpointer looks every 100 ms; the default window of 100 s and minimum of
+        // three failed passes, on a clock the test moves.
+        var clock = new ManualTimeProvider();
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
+        options.TimeProvider = clock;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+
+        // Act: every data page write of one database fails while its journal is due, for good. The
+        // minimum of failed passes, a backoff apart, passes inside the window.
+        faults.FailPageWrites = true;
+        await UploadAsync(failing, 0, 20);
+        bool failedTheMinimum = await Eventually(() => worker.FailureCount >= DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+        bool onlineInsideTheWindow = !failing.IsOffline && engine.OfflineDatabases.Count == 0;
+        long passesInsideTheWindow = worker.FailureCount;
+
+        // The window passes on the engine's clock; the next failed pass gives up on the database.
+        clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+        var error = engine.GetOfflineError(Failing);
+
+        // The checkpointer keeps serving the other database, and the failure record ends.
+        await UploadAsync(healthy, 0, 20);
+        long healthyWritten = healthy.DataStorage.JournalLength;
+        bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
+        bool running = await Eventually(() => worker.Fault is null && engine.State == EngineState.Running);
+        long failedPasses = worker.FailureCount;
+        var offlineList = engine.OfflineDatabases.ToArray();
+
+        faults.Clear();
+        var reopened = await engine.OpenDatabaseAsync(Failing);
+
+        // Assert: online through the minimum of passes inside the window, offline on a failed pass
+        // past it.
+        failedTheMinimum.ShouldBeTrue();
+        onlineInsideTheWindow.ShouldBeTrue();
+        offline.ShouldBeTrue();
+        failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
+        refusal.Code.ShouldBe("COHDBB002");
+        refusal.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        refusal.Message.ShouldContain("its checkpoints kept failing");
+        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
+        cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
+        cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain("passes in a row over 100 s, at least the engine's window of 100 s", Case.Sensitive);
+        Mentions(refusal, "Injected page write failure").ShouldBeTrue(refusal.ToString());
+        error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
+        offlineList.ShouldBe([(DatabaseName)Failing]);
+        healthy.IsOffline.ShouldBeFalse();
+        healthyCheckpointed.ShouldBeTrue();
+        running.ShouldBeTrue();
+        reopened.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        (await CountAsync(reopened)).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// A journal that grows past the engine's cap while its checkpoints fail takes the database
+    /// offline on its second failed checkpoint in a row (owner decision 25 and its review), long
+    /// before the failure window, with
+    /// <see cref="StorageOfflineCause.JournalSizeLimit"/>, and only that database: under load the
+    /// journal would otherwise fill the device first.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a journal past the cap while its checkpoints fail takes only its database offline")]
+    public async Task CheckpointWorker_JournalPastTheCap_ShouldTakeOnlyItsDatabaseOffline()
+    {
+        // Arrange: checkpoints by journal size, a cap of four times the size, and a minimum of failed
+        // passes out of reach.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = PaceJournalSize;
+        options.JournalSizeLimit = 4 * PaceJournalSize;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+
+        // Act: the failing database's journal grows past the cap while its checkpoints fail.
+        faults.FailPageWrites = true;
+        try
+        {
+            for (int id = 0; failing.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
+            {
+                await UploadAsync(failing, id, 10);
+            }
+        }
+        catch (DatabaseOfflineException)
+        {
+            // A failed checkpoint found the journal past the cap between two writes.
+        }
+
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        long failedPasses = worker.FailureCount;
+        bool failedTwice = await Eventually(() => worker.FailureCount >= 2);
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+
+        // The other database is still checkpointed by size.
+        long checkpoints = strategy.Faults(Healthy).HeaderWrites;
+        for (int id = 0; strategy.Faults(Healthy).HeaderWrites == checkpoints && id < 100_000; id += 10)
+        {
+            await UploadAsync(healthy, id, 10);
+        }
+
+        // Assert
+        offline.ShouldBeTrue();
+        // Long before the window: fewer failed passes than the window holds at the backoff.
+        failedPasses.ShouldBeLessThan((long)(DatabaseEngine.DefaultWorkerFailureWindow / DatabaseEngineWorker.FailureBackoff));
+        failedTwice.ShouldBeTrue();
+        refusal.Code.ShouldBe("COHDBB002");
+        refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");
+        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
+        cause.Cause.ShouldBe(StorageOfflineCause.JournalSizeLimit);
+        cause.Message.ShouldContain($"past the engine's limit of {options.JournalSizeLimit} bytes");
+        cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain("passes in a row");
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
+        healthy.IsOffline.ShouldBeFalse();
+        strategy.Faults(Healthy).HeaderWrites.ShouldBeGreaterThan(checkpoints);
+    }
+
+    /// <summary>
+    /// A journal that reached the engine's cap with no failure at all (a starved checkpointer,
+    /// #1283) is not taken offline by one transient checkpoint failure (owner decision 25 review):
+    /// the cap needs a second failed checkpoint in a row. Here the journal grows past the cap while
+    /// no checkpoint is due, one checkpoint then fails, the fault clears before the worker's retry,
+    /// and the retried checkpoint truncates the journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: one transient checkpoint failure of a journal already past the cap leaves the database online")]
+    public async Task CheckpointWorker_JournalPastTheCapOneTransientFailure_ShouldLeaveTheDatabaseOnline()
+    {
+        // Arrange: no checkpoint is due (no size trigger, an hour's time backstop) while the journal
+        // grows past a cap of four times the pace size, with no fault.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = 0;
+        options.JournalSizeLimit = 4 * PaceJournalSize;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var database = await CreateAsync(engine, Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+        for (int id = 0; database.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
+        {
+            await UploadAsync(database, id, 10);
+        }
+
+        long grown = database.DataStorage.JournalLength;
+
+        // Act: the size trigger is armed and the first checkpoint fails; the fault clears before
+        // the worker retries the database a backoff later.
+        faults.FailPageWrites = true;
+        database.DataStorage.CheckpointJournalSize = PaceJournalSize;
+        bool failed = await Eventually(() => worker.FailureCount >= 1);
+        faults.FailPageWrites = false;
+        bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
+
+        // Assert
+        grown.ShouldBeGreaterThanOrEqualTo(options.JournalSizeLimit);
+        failed.ShouldBeTrue();
+        truncated.ShouldBeTrue();
+        worker.FailureCount.ShouldBe(1);
+        database.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.State.ShouldBe(EngineState.Running);
+    }
+
+    /// <summary>
+    /// A database opened from a copied file set carries the original's name in its file header
+    /// (a storage reads its name from there when it opens). The page write-back worker reports and
+    /// escalates under the database's name in the engine, so the copy's persistent page write
+    /// failures take only the copy offline, with its own cause (owner decision 25 review). Reported
+    /// under the storage's name, they took the original offline and left the copy failing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database opened from a copied file set goes offline for its own write-back failures, never the original")]
+    public async Task PageWriteBackWorker_CopiedFileSet_ShouldTakeOnlyTheCopyOffline()
+    {
+        // Arrange: the page writer runs every 50 ms; the engine gives up after three failed
+        // passes (a window of one tick).
+        const string Copy = "copy";
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy, writeBack: TimeSpan.FromMilliseconds(50));
+        options.WorkerFailureWindow = TimeSpan.FromTicks(1);
+        options.WorkerFailureMinimumPasses = 3;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var original = await CreateAsync(engine, Failing);
+        await UploadAsync(original, 0, 10);
+        await original.DisposeAsync();
+        strategy.CopyDatabase(Failing, Copy);
+        original = await engine.OpenDatabaseAsync(Failing);
+        var copy = await engine.OpenDatabaseAsync(Copy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
+
+        // Act: every page write of the copy fails while it has dirty pages.
+        strategy.Faults(Copy).FailPageWrites = true;
+        await UploadAsync(copy, 100, 20);
+        bool offline = await Eventually(() => engine.OfflineDatabases.Count > 0 && worker.Fault is null);
+        var error = engine.GetOfflineError(Copy);
+        strategy.Faults(Copy).FailPageWrites = false;
+
+        // Assert
+        ((string)copy.DataStorage.Name).ShouldBe(Failing);
+        offline.ShouldBeTrue();
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)Copy]);
+        error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.PageWriteBackFailures);
+        error.Message.ShouldContain($"database '{Copy}'");
+        original.IsOffline.ShouldBeFalse();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        (await CountAsync(original)).ShouldBe(10);
+    }
+
+    /// <summary>
+    /// A transient checkpoint failure leaves the database online (owner decisions 25 and 42): a
+    /// streak of the minimum of failed passes ends when the fault clears and a checkpoint finishes,
+    /// 60 s into the window on the engine's clock; a second streak starts the window again, so the
+    /// database is never taken offline although its two streaks span 120 s of the clock.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a transient checkpoint failure under the window leaves the database online, and the window starts again")]
+    public async Task CheckpointWorker_TransientFailureUnderTheWindow_ShouldLeaveTheDatabaseOnline()
+    {
+        // Arrange: the checkpointer looks every 100 ms; the default window of 100 s and minimum of
+        // three failed passes, on a clock the test moves.
+        var clock = new ManualTimeProvider();
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
+        options.TimeProvider = clock;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var failing = await CreateAsync(engine, Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+
+        // Act: two transient faults, each failing the minimum of passes over 60 s of the clock.
+        var rounds = new List<(bool Failed, bool Recovered)>();
+        for (int round = 0; round < 2; round++)
+        {
+            faults.FailPageWrites = true;
+            long before = worker.FailureCount;
+            await UploadAsync(failing, round * 100, 20);
+            bool failed = await Eventually(() => worker.FailureCount > before);
+            clock.Advance(TimeSpan.FromSeconds(60));
+            failed &= await Eventually(() => worker.ConsecutiveFailures >= DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+            faults.FailPageWrites = false;
+            long journal = failing.DataStorage.JournalLength;
+            bool recovered = await Eventually(() => worker.Fault is null && failing.DataStorage.JournalLength < journal);
+            rounds.Add((failed, recovered));
+        }
+
+        // Assert
+        rounds.ShouldAllBe(round => round.Failed && round.Recovered);
+        worker.FailureCount.ShouldBeGreaterThanOrEqualTo(2 * DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+        clock.Elapsed.ShouldBe(TimeSpan.FromSeconds(120));
+        failing.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.State.ShouldBe(EngineState.Running);
+        (await CountAsync(failing)).ShouldBe(40);
+    }
+
+    /// <summary>
+    /// A full version-purge pass that fails on one database is run again for that database alone a
+    /// backoff after the failure, not at the next maintenance interval (owner decision 46), and the
+    /// database's failure ends with the first retry that completes once the fault clears. The full
+    /// pass and its retries are scheduled on the engine's clock, which the test moves, and the test
+    /// runs the passes; the maintenance interval is an hour, so only the retry runs the full pass
+    /// again. Before the decision a pass between full passes only retried deferred undo, so a failing
+    /// full pass held its database's failure, and Blob's refusal of it, for a whole interval.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a failed full version-purge pass is retried for its database alone after the backoff, and its failure ends once a retry completes")]
+    public async Task VersionPurgeWorker_FullPassFails_ShouldRetryItAfterTheBackoffAndRecover()
+    {
+        // Arrange: a full pass due once an hour on a clock the test moves; a hook fails one
+        // database's full pass until the test clears it.
+        var clock = new ManualTimeProvider();
+        var options = Options(new FaultInjectingJournalStorageStrategy());
+        options.TimeProvider = clock;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        await engine.CreateDatabaseAsync(Failing);
+        await engine.CreateDatabaseAsync(Healthy);
+        var worker = (BlobVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
+        var fullPasses = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+        bool fail = true;
+        worker.BeforeFullPass = database =>
+        {
+            fullPasses.AddOrUpdate(database.Name, 1, static (_, count) => count + 1);
+            if (Volatile.Read(ref fail) && database.Name == Failing)
+            {
+                throw new InvalidOperationException("Injected version purge failure");
+            }
+        };
+
+        // Act: the first full pass fails on one database.
+        clock.Advance(options.MaintenanceInterval);
+        worker.RunIteration(CancellationToken.None);
+        var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Refused: engine.HasFailingWorker(Failing));
+
+        // A pass before the backoff has passed does not run it again, and keeps the failure.
+        worker.RunIteration(CancellationToken.None);
+        var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(Failing), Refused: engine.HasFailingWorker(Failing));
+
+        // The backoff passes: the full pass runs again for the failing database alone, and fails.
+        clock.Advance(DatabaseEngineWorker.FailureBackoff);
+        worker.RunIteration(CancellationToken.None);
+        var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Failures: worker.ConsecutiveFailures);
+
+        // The fault clears; the next retry, a backoff later, completes.
+        Volatile.Write(ref fail, false);
+        clock.Advance(DatabaseEngineWorker.FailureBackoff);
+        worker.RunIteration(CancellationToken.None);
+
+        // Assert
+        afterTheFailure.ShouldBe((1, 1, true));
+        beforeTheBackoff.ShouldBe((1, true));
+        afterTheRetry.ShouldBe((2, 1, 2));
+        fullPasses.GetValueOrDefault(Failing).ShouldBe(3);
+        fullPasses.GetValueOrDefault(Healthy).ShouldBe(1);
+        worker.Fault.ShouldBeNull();
+        worker.ConsecutiveFailures.ShouldBe(0);
+        engine.HasFailingWorker(Failing).ShouldBeFalse();
+        engine.State.ShouldBe(EngineState.Running);
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A full version-purge pass that keeps failing takes only its database offline at about the
+    /// engine's worker failure window (owner decisions 42 and 46): retried a backoff after each
+    /// failure, its third failed pass in a row comes 101 s after its first on the engine's clock,
+    /// which the test moves, past the default window of 100 s. Retried only at the next maintenance
+    /// interval, an hour here, it took two more intervals.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a full version-purge pass that keeps failing takes only its database offline at about the window, not intervals later")]
+    public async Task VersionPurgeWorker_FullPassKeepsFailing_ShouldTakeOnlyItsDatabaseOfflineAtAboutTheWindow()
+    {
+        // Arrange: the default window of 100 s and minimum of three failed passes, and a full pass
+        // due once an hour, on a clock the test moves; a hook fails one database's full pass.
+        var clock = new ManualTimeProvider();
+        var options = Options(new FaultInjectingJournalStorageStrategy());
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
+        options.TimeProvider = clock;
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var worker = (BlobVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
+        worker.BeforeFullPass = database =>
+        {
+            if (database.Name == Failing)
+            {
+                throw new InvalidOperationException("Injected version purge failure");
+            }
+        };
+
+        // Act: the full pass fails, its retry a backoff later fails, and the retry once the window
+        // has passed is the third failed pass in a row.
+        clock.Advance(options.MaintenanceInterval);
+        worker.RunIteration(CancellationToken.None);
+        clock.Advance(DatabaseEngineWorker.FailureBackoff);
+        worker.RunIteration(CancellationToken.None);
+        bool onlineInsideTheWindow = !failing.IsOffline && engine.OfflineDatabases.Count == 0;
+        clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
+        worker.RunIteration(CancellationToken.None);
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+
+        // Assert
+        onlineInsideTheWindow.ShouldBeTrue();
+        offline.ShouldBeTrue();
+        refusal.Code.ShouldBe("COHDBB002");
+        refusal.Message.ShouldContain("its version purge kept failing");
+        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
+        cause.Cause.ShouldBe(StorageOfflineCause.VersionPurgeFailures);
+        cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain("on 3 passes in a row over 101 s, at least the engine's window of 100 s", Case.Sensitive);
+        Mentions(refusal, "Injected version purge failure").ShouldBeTrue(refusal.ToString());
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
+        healthy.IsOffline.ShouldBeFalse();
+        await using var healthySession = await healthy.CreateSessionAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: the worker failure window, its minimum of passes and the journal cap have their defaults, are validated, and reach the engine through the builder")]
+    public async Task Options_WorkerLimits_ShouldDefaultValidateAndReachTheEngine()
+    {
+        // Arrange
+        var defaults = new BlobDatabaseEngineOptions();
+        var builder = BlobDatabaseEngine.CreateBuilder("blob-engine");
+        builder.Options.WorkerFailureWindow = TimeSpan.FromSeconds(30);
+        builder.Options.WorkerFailureMinimumPasses = 4;
+        builder.Options.JournalSizeLimit = 512L * 1024 * 1024;
+
+        // Act
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", new());
+        await using var timeOnly = BlobDatabaseEngine.Create("blob-engine", new() { CheckpointJournalSize = 0 });
+        await using var built = builder.Build();
+
+        // Assert: a hundred seconds across at least three failed passes (owner decision 42), and
+        // four times the checkpoint size (1 GiB at its default, or with the size trigger off); a
+        // window that is not positive or past the maximum, a minimum below one pass, and a journal
+        // limit set below the checkpoint size are refused.
+        defaults.WorkerFailureWindow.ShouldBe(DatabaseEngine.DefaultWorkerFailureWindow);
+        defaults.WorkerFailureMinimumPasses.ShouldBe(DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+        defaults.JournalSizeLimit.ShouldBe(0);
+        engine.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(100));
+        engine.WorkerFailureMinimumPasses.ShouldBe(3);
+        engine.JournalSizeLimit.ShouldBe(4 * defaults.CheckpointJournalSize);
+        timeOnly.JournalSizeLimit.ShouldBe(1024L * 1024 * 1024);
+        built.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(30));
+        built.WorkerFailureMinimumPasses.ShouldBe(4);
+        built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { WorkerFailureWindow = TimeSpan.Zero }))
+            .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.WorkerFailureWindow));
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
+            .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.WorkerFailureWindow));
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { WorkerFailureMinimumPasses = 0 }))
+            .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.WorkerFailureMinimumPasses));
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { JournalSizeLimit = -1 }))
+            .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.JournalSizeLimit));
+        Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create("blob-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
+            .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.JournalSizeLimit));
+    }
+
+    // The checkpoint trigger, the load window of the pace test, compared second by second, and the
+    // share of the no-fault checkpoints the median counted second must keep (the test's remarks).
+    // The writer outpaces the checkpointer in memory, so even with no fault the journal peaks at
+    // many times the trigger.
+    private const long PaceJournalSize = 64 * 1024;
+    private const double PaceShareBound = 0.1;
+    private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan PaceSecond = TimeSpan.FromSeconds(1);
+
+    // The most the healthy database's data file and journal hold together before the pace window
+    // ends early. Each file is one MemoryStream in the test double, which cannot pass 2 GiB: while
+    // every transaction took a content page of its own, a six-second window on a fast runner grew
+    // the document engine's data file past that and failed its test with
+    // ArgumentOutOfRangeException. A quarter of the cap keeps both files, and the memory of two
+    // engines' file sets, clear of it on any runner. It is a backstop, not the window's usual end,
+    // and the window runs two backoffs before it applies: passing 2 GiB in those two seconds would
+    // take more than 1 GB/s. Blob's uploads are small so that a six-second window stays far below
+    // it too (UploadSize).
+    private const long PaceFileBound = 512L * 1024 * 1024;
+
+    // The bytes of each blob UploadAsync writes. The pace test's healthy data file grows with them.
+    // At 2 KiB, three to a page, an upload took 2.8 KB of it, and one window inside a full suite
+    // pinned to three cores grew it to 343 MB in 121,000 uploads: on a runner a few times faster,
+    // the bound would have ended most windows. At 512 bytes an upload takes 0.69 KB, 129 MB in the
+    // fastest such window seen (187,000 uploads).
+    private const int UploadSize = 512;
+
+    // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
+    private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Writes to the healthy database for <see cref="PaceWindow"/>, with checkpoints triggered by
+    /// journal size, while the failing database's checkpoint is due and, under the fault, fails.
+    /// The window starts with <paramref name="start"/>, once the engine reported itself
+    /// <paramref name="ready"/>.
+    /// </summary>
+    private static async Task<CheckpointPace> MeasureHealthyCheckpointsAsync(bool fault, TaskCompletionSource ready, Task start)
+    {
+        try
+        {
+            var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+            var options = Options(strategy);
+            options.CheckpointJournalSize = PaceJournalSize;
+            await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
+            var failing = await CreateAsync(engine, Failing);
+            var healthy = await CreateAsync(engine, Healthy);
+            var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+            var failingFaults = strategy.Faults(Failing);
+            var healthyFaults = strategy.Faults(Healthy);
+
+            failingFaults.FailPageWrites = fault;
+            try
+            {
+                // The failing database's journal reaches the trigger (or, with no fault, is checkpointed).
+                long failingCheckpoints = failingFaults.HeaderWrites;
+                for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize && failingFaults.HeaderWrites == failingCheckpoints; id += 10)
+                {
+                    await UploadAsync(failing, id, 10);
+                }
+
+                if (fault)
+                {
+                    (await Eventually(() => worker.FailureCount >= 1)).ShouldBeTrue();
+                }
+
+                // Both windows start together, each on a thread of its own.
+                ready.SetResult();
+                await start;
+                await Task.Yield();
+
+                long checkpoints = healthyFaults.HeaderWrites;
+                long failedPasses = worker.FailureCount;
+                long peak = 0;
+                long writes = 0;
+                var checkpointsBySecond = new long[(int)(PaceWindow / PaceSecond)];
+                var writesBySecond = new long[checkpointsBySecond.Length];
+                int second = 0;
+                TimeSpan? endedByBound = null;
+                var watch = Stopwatch.StartNew();
+                for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
+                {
+                    if (watch.Elapsed >= 2 * DatabaseEngineWorker.FailureBackoff && FileBytes(healthy) >= PaceFileBound)
+                    {
+                        endedByBound = watch.Elapsed;
+                        break;
+                    }
+
+                    await UploadAsync(healthy, id, 10);
+                    writes += 10;
+                    peak = Math.Max(peak, healthy.DataStorage.JournalLength);
+                    for (; second < checkpointsBySecond.Length && watch.Elapsed >= PaceSecond * (second + 1); second++)
+                    {
+                        checkpointsBySecond[second] = healthyFaults.HeaderWrites - checkpoints;
+                        writesBySecond[second] = writes;
+                    }
+                }
+
+                for (; second < checkpointsBySecond.Length; second++)
+                {
+                    checkpointsBySecond[second] = healthyFaults.HeaderWrites - checkpoints;
+                    writesBySecond[second] = writes;
+                }
+
+                return new CheckpointPace(checkpointsBySecond, writesBySecond, peak, worker.FailureCount - failedPasses,
+                    healthy.DataStorage.Data.Length, endedByBound);
+            }
+            finally
+            {
+                failingFaults.Clear();
+            }
+        }
+        catch (Exception exception)
+        {
+            // An engine whose setup failed must not leave the other one's window waiting.
+            ready.TrySetException(exception);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The healthy database's checkpoints and writes counted at the end of each second of the
+    /// window, its journal peak, the worker's failed passes over the window, the healthy data
+    /// file's length at the end, and when <see cref="PaceFileBound"/> ended the window, if it did.
+    /// </summary>
+    private sealed record CheckpointPace(long[] CheckpointsBySecond, long[] WritesBySecond, long PeakJournal, long FailedPasses,
+        long DataLength, TimeSpan? EndedByBound)
+    {
+        /// <summary>Gets the checkpoints over the window.</summary>
+        public long Checkpoints => CheckpointsBySecond[^1];
+
+        /// <summary>
+        /// Gets, for each second of the window that counts, the share of
+        /// <paramref name="baseline"/>'s checkpoints this pace kept, over the second or per write,
+        /// whichever is larger. A second in which the baseline took no checkpoint, or in which
+        /// either engine's writer was starved (it wrote nothing, or under a tenth of its mean
+        /// second), says nothing about the fault: it is left out, not scored as zero or infinity.
+        /// </summary>
+        /// <param name="baseline">The pace with no fault, over the same window.</param>
+        /// <returns>The shares of the seconds that count, in order.</returns>
+        public double[] SharesOf(CheckpointPace baseline)
+        {
+            double starved = WritesBySecond[^1] / (10.0 * WritesBySecond.Length);
+            double baselineStarved = baseline.WritesBySecond[^1] / (10.0 * WritesBySecond.Length);
+            var shares = new List<double>(CheckpointsBySecond.Length);
+            for (int second = 0; second < CheckpointsBySecond.Length; second++)
+            {
+                long baselineCheckpoints = InSecond(baseline.CheckpointsBySecond, second);
+                long baselineWrites = InSecond(baseline.WritesBySecond, second);
+                long writes = InSecond(WritesBySecond, second);
+                if (baselineCheckpoints == 0 || writes == 0 || writes < starved || baselineWrites < baselineStarved)
+                {
+                    continue;
+                }
+
+                double perSecond = (double)InSecond(CheckpointsBySecond, second) / baselineCheckpoints;
+                shares.Add(Math.Max(perSecond, perSecond * baselineWrites / writes));
+            }
+
+            return [.. shares];
+        }
+
+        /// <summary>Gets the median of <paramref name="values"/>.</summary>
+        /// <param name="values">The values.</param>
+        /// <returns>The median.</returns>
+        public static double Median(double[] values)
+        {
+            var sorted = values.Order().ToArray();
+            int middle = sorted.Length / 2;
+            return sorted.Length % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+        }
+
+        /// <inheritdoc />
+        public override string ToString()
+            => $"{Checkpoints} checkpoints in {WritesBySecond[^1]} writes (by second {string.Join(" ", CheckpointsBySecond.Select((count, second) => $"{InSecond(CheckpointsBySecond, second)}/{InSecond(WritesBySecond, second)}"))}), " +
+               $"journal peak {PeakJournal}, {FailedPasses} failed passes, data file {DataLength}" +
+               (EndedByBound is { } ended ? $", window ended by the file bound at {ended.TotalSeconds:F1} s" : "");
+
+        private static long InSecond(long[] counts, int second) => counts[second] - (second == 0 ? 0 : counts[second - 1]);
+    }
+
+    // What a database's two growing files hold together: the bound the pace window keeps under.
+    private static long FileBytes(BlobDatabase database)
+        => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
+
+    // The worker failure minimum of passes and the journal cap are out of reach unless a test sets
+    // them (owner decisions 25 and 42): the retry tests keep a database failing for seconds on purpose, and the pace
+    // test's failing database fails for its whole window.
+    private static BlobDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
+    {
+        StorageStrategy = strategy,
+        CheckpointInterval = checkpoint ?? TimeSpan.FromHours(1),
+        PageWriteBackInterval = writeBack ?? TimeSpan.FromHours(1),
+        MaintenanceInterval = TimeSpan.FromHours(1),
+        WorkerFailureMinimumPasses = int.MaxValue,
+        JournalSizeLimit = long.MaxValue,
+    };
+
+    private static DatabaseEngineWorker WorkerOf(BlobDatabaseEngine engine, DatabaseEngineWorkerKind kind)
+        => engine.Workers.OfType<DatabaseEngineWorker>().Single(worker => worker.Kind == kind);
+
+    private static async Task<BlobDatabase> CreateAsync(BlobDatabaseEngine engine, string name)
+    {
+        var database = await engine.CreateDatabaseAsync(name);
+        await AutocommitContainer.CreateAsync(database, "files");
+        return database;
+    }
+
+    private static async Task WriteAsync(BlobContainer container, string name, string content)
+    {
+        await using var stream = await container.OpenWriteAsync(name);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(content));
+    }
+
+    private static async Task WriteAsync(AutocommitContainer container, string name, string content)
+    {
+        await using var stream = await container.OpenWriteAsync(name);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(content));
+    }
+
+    private static async Task UploadAsync(BlobDatabase database, int first, int count)
+    {
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        for (int id = first; id < first + count; id++)
+        {
+            await WriteAsync(files, $"k{id}", new string('x', UploadSize));
+        }
+    }
+
+    private static async Task<List<TimeSpan>> TimedUploadsAsync(BlobDatabase database, int count)
+    {
+        var latencies = new List<TimeSpan>();
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        for (int id = 0; id < count; id++)
+        {
+            var watch = Stopwatch.StartNew();
+            await WriteAsync(files, $"grouped-{id}", "grouped");
+            latencies.Add(watch.Elapsed);
+        }
+
+        return latencies;
+    }
+
+    private static async Task<int> CountAsync(BlobDatabase database)
+    {
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        int count = 0;
+        await foreach (var _ in files.GetBlobsAsync())
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private static bool Mentions(Exception? error, string text)
+    {
+        for (int depth = 0; error is not null && depth < 16; depth++, error = error.InnerException)
+        {
+            if (error.Message.Contains(text, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Polls a condition the engine's workers make true, for at most the test timeout.
+    private static async Task<bool> Eventually(Func<bool> condition)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (watch.Elapsed > Timeout)
+            {
+                return false;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A registered worker whose first pass throws; later passes run until cancelled, so the
+    /// failure stays recorded (no pass ran to its end) while the test reads the engine's state.
+    /// </summary>
+    private sealed class EscapingWorker : DatabaseEngineWorker
+    {
+        private int _runs;
+        private int _stopped;
+
+        public EscapingWorker()
+            : base("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
+
+        public int Runs => Volatile.Read(ref _runs);
+
+        public bool Stopped => Volatile.Read(ref _stopped) != 0;
+
+        protected override void RunIterationCore(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _runs) == 1)
+            {
+                throw new InvalidOperationException("The worker's pass failed.");
+            }
+
+            cancellationToken.WaitHandle.WaitOne();
+            Volatile.Write(ref _stopped, 1);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+    }
+}

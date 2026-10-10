@@ -8,17 +8,51 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 
 ## Scope
 
-- **Pages** — 8 KiB `Page` unit with a 96-byte header (id, LSN, CRC-32 checksum, type,
+- **Pages** — 8 KiB `Page` unit with a 96-byte header (id, LSN, CRC-32C checksum, type,
   flags, slot bookkeeping), `SlottedPage` variable-length record layout, `PageSlot`
   directory entries.
-- **Buffer pool** — `IStorageBufferPool` pin/unpin caching over a `StorageStream`;
-  checksum stamped on write-back, verified on load.
-- **Page management** — `IStoragePageManager` allocation/free/retrieval/flush;
-  `IStorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
+- **Buffer pool** — an internal pin/unpin cache over a `StorageStream`;
+  checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
+  resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
+- **Page management** — the sealed `StoragePageManager` (allocation/free/retrieval/flush);
+  the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
-  pages and `IStorageUnitIterator` full scans.
-- **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
-  markers, CRC-protected frames, and recovery replay of committed operations.
+  pages, storage transactions (`StorageTransaction`), and `StorageUnitIterator` full scans.
+  A rollback restores each page in one copy that record reads confirm against, so a committed
+  record beside a failed bracket's changes is never read as reclaimed; a structure whose readers
+  take no page write lock (a B-tree) writes its pages under its `StoragePageLatch`, and a
+  rollback restores them last, under that latch (#1371).
+- **Journal** — `StorageJournal` write-ahead logging with begin/commit/rollback
+  markers and CRC-32C-protected frames. A page is journaled as a full image once per
+  checkpoint interval, on its first change since the checkpoint, and each commit journals only
+  the bytes it changed (a page delta, or a committed full image past half a page); recovery is
+  ordered redo from the checkpoint, each delta applied on the LSN it names (storage format 3,
+  #1253). A debug consistency check (`COHESION_STORAGE_CONSISTENCY_CHECKS=1`) replays every
+  record onto a shadow page and compares it with the buffer pool, and refuses any page changed
+  outside a storage transaction, imaged since the checkpoint or not. Appends go
+  to a user-space buffer, frames built in place, which drains to the operating system in one
+  write before every commit is acknowledged (every durability mode), every reader, the
+  write-ahead gate and a checkpoint's truncation (#1252, PostgreSQL's WAL buffers).
+- **Offline on a failed journal write, fsync or header write** — a durable flush of the journal
+  or the data file (#1243), a write of the journal's buffer (#1252), or a header slot write
+  that fails once issued (#1268) takes the storage offline (`StorageOfflineException`,
+  `COHDBS002`): nothing more is written to either file, closing included, until the file set
+  is reopened and its recovery
+  decides every unconfirmed commit (PostgreSQL's PANIC on a failed WAL fsync).
+  `StorageOfflineException.Cause` (`StorageOfflineCause`: `JournalFlush`, `DataFlush`,
+  `HeaderWrite`) names what failed, and the first failure is kept for the life of the instance.
+  `OnOffline` is raised once when it happens, with that failure, so an engine takes a
+  database's other file sets offline in the same moment, and `CommitRecordWritten` marks a
+  commit that may survive.
+- **Checkpoint triggers** — `CheckpointJournalSize` asks for a checkpoint when the journal
+  reaches a size (`OnCheckpointNeeded`), and `IsCheckpointDue(interval)` adds a time backstop
+  that skips idle journals; engines default to 256 MiB and 5 minutes (#1254).
+- **File header** — page 0: an identity block written at creation and two alternating,
+  separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
+  copy of the identity block), so a torn header write cannot make a file set unopenable.
+  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 3;
+  any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
+  path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
   (`.log`), and backup (`.bak`), wrapped by `StorageStream`.
 
@@ -35,7 +69,10 @@ for the canonical example):
 ```csharp
 public sealed class SqlStorage : Storage
 {
-    public override StorageModel Model => StorageModel.Sql;
+    // The model is fixed per storage: the base keeps it in a field its constructor sets.
+    private SqlStorage(StorageStream data, StorageStream journal, StorageStream backup)
+        : base(StorageModel.Sql, data, journal, backup) { }
+
     // static Create(...)/Open(...) factories call InitializeNew/OpenExisting
 }
 ```

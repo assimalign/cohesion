@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		THROW-AWAY developer tool: a MAUI desktop editor for exercising the Cohesion Database engines
+		as a consumer (SQL / OQL / GQL workspaces, key-value and blob browsers, headless smoke mode).
+		Not a product: no docs/, no tests, no solution/CI/inventory wiring, never packed.
+	-->
+	<!-- Deviates from the repo project-layout and documentation rules (src/ + tests/ + docs/ shape,
+	     docs/OVERVIEW.md and docs/DESIGN.md) per owner's request: a throw-away tool, documented by
+	     its README only. -->
+	<!-- Deviates from the repo L1/L2/L3 layering rule per owner's request: this tooling (L1)
+	     project references resources/Database (L3) engines and clients because exercising them
+	     as a consumer is its only purpose. Nothing references this project. -->
+	<!-- IsPackable=false below is load-bearing: the release-inventory blind-spot guard
+	     (CohesionPackaging.psm1) treats any source-bearing tooling project as packable unless its
+	     body sets IsPackable=false unconditionally. Keep it outside any Condition. -->
+	<PropertyGroup>
+		<!-- tooling/Directory.Build.props sets TargetFramework=net10.0; this tool is Windows-only MAUI. -->
+		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+		<OutputType>WinExe</OutputType>
+		<RootNamespace>Assimalign.Cohesion.Database.Studio</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.Database.Studio</AssemblyName>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+		<!-- Repo rule: no global usings; every file declares its usings explicitly. -->
+		<ImplicitUsings>disable</ImplicitUsings>
+		<IsPackable>false</IsPackable>
+		<IsAotCompatible>true</IsAotCompatible>
+
+		<!-- Unpackaged so `dotnet run` and double-clicking the exe both work. -->
+		<WindowsPackageType>None</WindowsPackageType>
+		<ApplicationTitle>Cohesion Database Studio</ApplicationTitle>
+		<ApplicationId>com.assimalign.cohesion.database.studio</ApplicationId>
+		<ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+
+		<!-- Program.cs owns Main so the smoke switch runs headless before any WinUI window exists. -->
+		<DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+
+		<!-- The repo emits generated sources under obj/ in Debug; the WinRT generator's file names
+		     push those paths past 370 characters here (MAX_PATH is 260 on this machine). -->
+		<EmitCompilerGeneratedFiles>false</EmitCompilerGeneratedFiles>
+	</PropertyGroup>
+
+	<!--
+		Deviates from the repo CohesionPackageReference and no-Microsoft.Extensions.* rules per the
+		owner's request for a MAUI desktop tool: MAUI's own package (versioned by the installed
+		workload through $(MauiVersion)) brings Microsoft.Extensions.* transitively. This project is
+		IsPackable=false and referenced by nothing, so none of it reaches a shipped package.
+	-->
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+	</ItemGroup>
+
+	<!--
+		Engines, servers, and clients by assembly name (Build.References.Projects.targets indexes
+		libraries\ and resources\ for every project in the repo, tooling\ included).
+	-->
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
+	</ItemGroup>
+</Project>

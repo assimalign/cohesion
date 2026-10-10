@@ -35,7 +35,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Every private field — instance or static — is `_camelCase`
 - [ ] Assembly attributes, `InternalsVisibleTo` included, live in `Properties/AssemblyInfo.cs`, not the csproj
 - [ ] One public type per file (with grouped root-first naming for variant families, e.g., `Http2Frame.Header.cs`)
-- [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`)
+- [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`); `resources/Database/**` is concrete-first and follows `database-area.md` instead
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)
 - [ ] Internal types are `internal`, not `public`
 - [ ] No new `InternalsVisibleTo` between two shipped libraries — tests only (see `general-rules.md`)

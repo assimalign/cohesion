@@ -16,8 +16,8 @@ public sealed class SqlConstraintRaceTests
     [Fact]
     public async Task CreateUniqueIndex_DuplicateBackfill_ShouldReportTheSameConstraintViolation()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-unique-backfill" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        await using var engine = SqlDatabaseEngine.Create("constraint-unique-backfill", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES (7), (7)");
@@ -34,7 +34,7 @@ public sealed class SqlConstraintRaceTests
     [Fact]
     public async Task UniqueViolation_ShouldIncludeSafeScalarOffendingValue()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-safe-value" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-safe-value", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT CONSTRAINT uq UNIQUE)");
@@ -54,8 +54,8 @@ public sealed class SqlConstraintRaceTests
     [InlineData("CREATE UNIQUE INDEX uq ON t(val)", "UPDATE t SET val = 1 WHERE id = 2")]
     public async Task DdlPublishingWhileDmlWaits_ShouldNeverBypassNewConstraint(string ddl, string write)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-ddl-race" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        await using var engine = SqlDatabaseEngine.Create("constraint-ddl-race", new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT, val INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES (1, 1), (2, 2)");
@@ -75,7 +75,7 @@ public sealed class SqlConstraintRaceTests
             // Execute actual DDL under the held context, avoiding timing sleeps
             // and production hooks. This exercises the same planner/apply/catalog
             // path as the session's auto-commit bracket.
-            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager);
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
             await executor.ExecuteAsync(SqlQueryRequest.FromSql(ddl),
                 new SqlStatementContext(ddlContext, coordinator), TestTimeout.Token());
             await coordinator.CommitAsync(ddlContext, TestTimeout.Token());
@@ -102,7 +102,7 @@ public sealed class SqlConstraintRaceTests
     [InlineData(false)]
     public async Task CascadeAndRestrictPaths_ShouldUseTheCompleteDeleteSetRegardlessOfDeclarationOrder(bool cascadeFirst)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-cascade-order" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-cascade-order", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");
@@ -122,7 +122,7 @@ public sealed class SqlConstraintRaceTests
     [InlineData("(2, 1), (1, NULL)")]
     public async Task SelfReference_DeleteAll_ShouldNotDependOnPhysicalRowOrder(string values)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-self-order" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-self-order", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE nodes (id INT PRIMARY KEY, parent INT REFERENCES nodes(id) ON DELETE RESTRICT)");
@@ -134,7 +134,7 @@ public sealed class SqlConstraintRaceTests
     [Fact]
     public async Task ForeignKeyComponent_ConcurrentWritesToDifferentTables_ShouldNotSerialize()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-component-concurrency" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-component-concurrency", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var setup = await database.CreateSessionAsync();
         await using var first = await database.CreateSessionAsync();
@@ -188,7 +188,7 @@ public sealed class SqlConstraintRaceTests
     [Fact]
     public async Task ParentDelete_ConcurrentUncommittedChildDelete_ShouldNotStrandTheRestoredChild()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-released-reference" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-released-reference", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var child = await database.CreateSessionAsync();
         await using var parent = await database.CreateSessionAsync();
@@ -217,7 +217,7 @@ public sealed class SqlConstraintRaceTests
     [Fact]
     public async Task CyclicCascade_ShouldDeleteEachRowOnceAndRollbackTogether()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-cycle" });
+        await using var engine = SqlDatabaseEngine.Create("constraint-cycle", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE a (id INT PRIMARY KEY, bid INT)");
@@ -235,7 +235,7 @@ public sealed class SqlConstraintRaceTests
         (await Rows(session, "SELECT id FROM b")).Count.ShouldBe(1);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

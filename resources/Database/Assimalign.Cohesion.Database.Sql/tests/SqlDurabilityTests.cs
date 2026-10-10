@@ -46,7 +46,7 @@ public sealed class SqlDurabilityTests : IDisposable
 
     private static SqlQueryRequest CreateTableRequest() => SqlQueryRequest.FromSql("CREATE TABLE t (label VARCHAR(100));");
 
-    private static async Task<int> CountRowsAsync(IDatabaseSession session)
+    private static async Task<int> CountRowsAsync(SqlDatabaseSession session)
     {
         var result = await session.ExecuteAsync(SelectRequest());
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -64,7 +64,7 @@ public sealed class SqlDurabilityTests : IDisposable
     public async Task Rollback_AfterInsert_ShouldUndoAppliedMutations()
     {
         // Arrange
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "durability", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("durability", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = engine;
 
         var database = await engine.CreateDatabaseAsync("rollback-db");
@@ -85,7 +85,7 @@ public sealed class SqlDurabilityTests : IDisposable
     public async Task Restart_AfterCommit_ShouldRecoverCommittedRows()
     {
         // Arrange: write two committed rows, then dispose the engine (clean shutdown).
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "durability", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("durability", new SqlDatabaseEngineOptions { RootPath = _rootPath });
 
         var database = await engine.CreateDatabaseAsync("restart-db");
         await using (var session = await database.CreateSessionAsync())
@@ -100,7 +100,7 @@ public sealed class SqlDurabilityTests : IDisposable
         await engine.DisposeAsync();
 
         // Act: a fresh engine over the same root reopens the database.
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "durability", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("durability", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var __ = reopenedEngine;
 
         var reopenedDatabase = await reopenedEngine.OpenDatabaseAsync("restart-db");

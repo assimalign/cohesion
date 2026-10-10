@@ -71,7 +71,7 @@ public sealed class SqlCastTests
     [MemberData(nameof(SuccessfulConversions))]
     public async Task Cast_SupportedPair_ShouldConvertProjection(object source, string target, DatabaseType type, object expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-projection" });
+        await using var engine = SqlDatabaseEngine.Create("cast-projection", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -119,7 +119,7 @@ public sealed class SqlCastTests
     [InlineData("CAST(TRUE AS INT)")]
     public async Task Cast_InvalidValue_ShouldReportConversionError(string expression)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-errors" });
+        await using var engine = SqlDatabaseEngine.Create("cast-errors", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -154,7 +154,7 @@ public sealed class SqlCastTests
     [MemberData(nameof(UnsupportedSources))]
     public async Task Cast_UnsupportedSource_ShouldReject(object source)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-source" });
+        await using var engine = SqlDatabaseEngine.Create("cast-source", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -172,7 +172,7 @@ public sealed class SqlCastTests
     [InlineData("unknown_type")]
     public async Task Cast_UnknownTarget_ShouldRejectAtParseTime(string target)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-target" });
+        await using var engine = SqlDatabaseEngine.Create("cast-target", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -193,7 +193,7 @@ public sealed class SqlCastTests
     [InlineData("CREATE TABLE checks (value TEXT CHECK(CAST(value AS INT) > 0));")]
     public async Task Cast_UnsupportedSchemaExpression_ShouldReject(string statement)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-schema" });
+        await using var engine = SqlDatabaseEngine.Create("cast-schema", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -205,7 +205,7 @@ public sealed class SqlCastTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: null and empty projections retain target metadata")]
     public async Task Cast_NullAndEmptyResults_ShouldRetainTargetMetadata()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-null" });
+        await using var engine = SqlDatabaseEngine.Create("cast-null", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -227,7 +227,7 @@ public sealed class SqlCastTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: WHERE predicates consume target values")]
     public async Task Cast_InPredicate_ShouldUseConvertedValues()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-predicate" });
+        await using var engine = SqlDatabaseEngine.Create("cast-predicate", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -250,7 +250,7 @@ public sealed class SqlCastTests
     [InlineData("id = CAST('1.5' AS DECIMAL)", new int[] { })]
     public async Task Cast_IndexedPredicate_ShouldPreserveExactBounds(string predicate, int[] expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-index" });
+        await using var engine = SqlDatabaseEngine.Create("cast-index", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -273,7 +273,7 @@ public sealed class SqlCastTests
     [InlineData(".5", "0.5")]
     public async Task Cast_NumericLiteral_ShouldConvertExactly(string literal, string expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-literal" });
+        await using var engine = SqlDatabaseEngine.Create("cast-literal", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -294,7 +294,7 @@ public sealed class SqlCastTests
     [InlineData("SELECT CAST('12' AS BIGINT) FROM t LIMIT CAST('1' AS SMALLINT);", 12L)]
     public async Task Cast_SmallSignedTarget_ShouldWorkDownstream(string statement, long expected)
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-small-integer" });
+        await using var engine = SqlDatabaseEngine.Create("cast-small-integer", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -308,7 +308,7 @@ public sealed class SqlCastTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - CAST: INSERT and UPDATE expressions convert before storage")]
     public async Task Cast_InWriteExpression_ShouldConvertBeforeStorage()
     {
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cast-write" });
+        await using var engine = SqlDatabaseEngine.Create("cast-write", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("cast");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await SeedAsync(session);
@@ -321,13 +321,13 @@ public sealed class SqlCastTests
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe("43");
     }
 
-    private static async Task SeedAsync(IDatabaseSession session)
+    private static async Task SeedAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE t (id INT);");
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)

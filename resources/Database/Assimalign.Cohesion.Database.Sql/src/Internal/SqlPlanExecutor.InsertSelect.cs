@@ -54,6 +54,7 @@ internal sealed partial class SqlPlanExecutor
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
         var indexes = GetLiveIndexes(table);
+        var defaults = _definitions.Get(table).DefaultValues;
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         foreach (var sourceRow in sourceRows)
         {
@@ -75,10 +76,11 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (!assigned[ordinal])
                 {
-                    values[ordinal] = ResolveDefault(table.Columns[ordinal]);
+                    // The bound DEFAULT's value, or NULL, or the NOT NULL failure, for a column without one.
+                    values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : ResolveDefault(table.Columns[ordinal], null);
                 }
             }
-            rows.Add((SqlRowCodec.Encode(table.ObjectId, table.Columns, values, statement.Transaction.Sequence), values));
+            rows.Add((SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values));
         }
 
         // As with literal INSERT, acquire reference locks and unique-key locks

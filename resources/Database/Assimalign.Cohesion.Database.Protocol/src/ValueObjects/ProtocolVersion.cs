@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <param name="Minor">The minor version; negotiated additive capabilities increment this.</param>
 /// <remarks>
 /// The value type lives with the wire implementation that defines it (this package);
-/// the area root consumes it for the <c>IDatabaseServerSession</c> vocabulary through
+/// the area root consumes it for the <c>DatabaseServerSession</c> vocabulary through
 /// the root's child-root reference. <see cref="Current"/> is the version this
 /// assembly implements.
 /// </remarks>

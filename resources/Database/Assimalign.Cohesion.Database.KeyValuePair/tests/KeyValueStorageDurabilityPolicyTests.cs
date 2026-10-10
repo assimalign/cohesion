@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -27,11 +28,11 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability? durability)
     {
         var options = new KeyValueDatabaseEngineOptions { Durability = durability };
-        await using var engine = KeyValueDatabaseEngine.Create(options);
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", options);
         var database = await engine.CreateDatabaseAsync("memory-default");
         await using var session = await database.CreateSessionAsync();
 
-        var keyValueDatabase = (IKeyValueDatabase)database;
+        var keyValueDatabase = database;
         var put = await keyValueDatabase.PutAsync(session, new byte[] { 1 }, new byte[] { 7 });
         put.Applied.ShouldBeTrue();
         var value = await keyValueDatabase.GetAsync(session, new byte[] { 1 });
@@ -56,7 +57,7 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
     public async Task PhysicalBacking_ShouldDeriveOrHonorDurablePolicy(
         StorageCommitDurability? configured, StorageCommitDurability expected)
     {
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions
         {
             RootPath = _rootPath,
             Durability = configured,
@@ -82,7 +83,7 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
         StorageCommitDurability durability, bool openExisting)
     {
         var strategy = new NonDurableStorageStrategy();
-        await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+        await using var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions
         {
             StorageStrategy = strategy,
             Durability = durability,
@@ -121,11 +122,11 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
         }
     }
 
-    private sealed class NonDurableStorageStrategy : IKeyValueStorageStrategy
+    private sealed class NonDurableStorageStrategy : KeyValueStorageStrategy
     {
         internal List<MemoryStream> Streams { get; } = [];
 
-        public KeyValueStorage CreateStorage(string databaseName)
+        public override KeyValueStorage CreateStorage(string databaseName)
         {
             var data = new MemoryStream();
             var journal = new MemoryStream();
@@ -134,10 +135,10 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
             return KeyValueStorage.Create(data, journal, backup, databaseName);
         }
 
-        public KeyValueStorage OpenStorage(string databaseName) => CreateStorage(databaseName);
+        public override KeyValueStorage OpenStorage(string databaseName) => CreateStorage(databaseName);
 
-        public bool StorageExists(string databaseName) => true;
+        public override bool StorageExists(string databaseName) => true;
 
-        public void DropStorage(string databaseName) { }
+        public override void DropStorage(string databaseName) { }
     }
 }

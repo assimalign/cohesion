@@ -14,10 +14,13 @@ public enum EngineState : byte
     Running = 0,
 
     /// <summary>
-    /// A background worker fault was recorded. The engine keeps serving and its
-    /// correctness guarantees hold (grouped commits self-help within their window,
-    /// checkpoints simply stop truncating), but it runs degraded and the owner
-    /// should replace it.
+    /// A background worker keeps failing. The worker keeps running and retries after
+    /// a backoff, the engine keeps serving and its correctness guarantees hold
+    /// (grouped commits self-help within their window, a checkpoint that cannot run
+    /// leaves the journal untruncated), but it runs degraded and the owner should
+    /// learn why (<see cref="DatabaseEngineWorker.Fault"/>). The state returns to
+    /// <see cref="Running"/> once the failing worker finishes the work its failures
+    /// left (#1268).
     /// </summary>
     Faulted,
 

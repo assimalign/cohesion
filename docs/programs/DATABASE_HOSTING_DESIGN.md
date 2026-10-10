@@ -1,6 +1,6 @@
 # Phase 29 — Database hosting composition
 
-**Status: implemented with the owner-approved corrections below; acceptance evidence is recorded in §13.**
+**Status: implemented with the owner-approved corrections below; acceptance evidence is recorded in §13. §14 records what B1 of the engine extensibility design changed (2026-10-09).**
 Branch `feature/L03.02-mvp-engines`, base `18918601`, 2026-09-19. The owner approved Shape A
 and the implementation corrections captured in §13. Sections 1–12 preserve the Phase 28 review
 record; their proposed signatures and examples are historical wherever §13 supersedes them.
@@ -54,11 +54,13 @@ on area roots. This proposal preserves those commitments.
 The five options types are `SqlDatabaseEngineOptions`, `KeyValueDatabaseEngineOptions`,
 `DocumentDatabaseEngineOptions`, `GraphDatabaseEngineOptions`, and `BlobDatabaseEngineOptions`.
 Each currently carries `EngineName`, `RootPath` (`FileSystemPath?` in the reviewed working tree),
-`Durability`, `GroupCommitWindow`, `CheckpointInterval`, `PageWriteBackInterval`,
+`Durability`, `GroupCommitWindow`, `CheckpointInterval`, `CheckpointJournalSize`,
+`BufferPoolCapacity` (the last two since #1254), `PageWriteBackInterval`,
 `PageWriteBackBatchSize`, and `MaintenanceInterval`. SQL and KeyValue additionally accept
 model-specific storage strategies. All five `*DatabaseEngine.Create(options)` factories create
 live engines with workers; no engine Start/Stop stage is missing. The SQL forwarding
-`SqlDatabaseEngineFactory.Create` does not add deferred behavior.
+`SqlDatabaseEngineFactory.Create` did not add deferred behavior (phase 4 of the concrete-types
+plan deleted it).
 
 ### 2.2 Package ownership and rules
 
@@ -429,6 +431,16 @@ here is a guarantee across application-owned roots, not a claim that today's DI/
 continue after every one of their own child disposals fails (§10).
 
 ## 6. Where Configuration, DI, and Hosting enter
+
+> **Superseded in part (owner request of 2026-10-08).** The concrete builder now exposes the
+> host-level pieces `WebApplicationBuilder` does, as concrete types created when the builder is
+> created: `HostEnvironment Environment`, `ConfigurationManager Configuration` (which loads each
+> provider as it is added; `CreateBuilder(args)` adds the default sources), `LoggerFactoryBuilder
+> Logging` and `ServiceProviderBuilder Services`. `DatabaseApplicationBuildContext` carries their
+> built counterparts (`HostEnvironment`, `ConfigurationManager`, `ServiceProvider`,
+> `LoggerFactory`). The registration facades and their Build-time loading below describe the
+> design before that change; the current text is `Database.Hosting`'s `docs/DESIGN.md`,
+> "Host-level pieces".
 
 ### 6.1 Configuration
 
@@ -1041,7 +1053,8 @@ Each model supplies an options-bearing interface extending IDatabaseEngineBuilde
 `ISqlDatabaseEngineBuilder`, `IKeyValueDatabaseEngineBuilder`, `IDocumentDatabaseEngineBuilder`,
 `IGraphDatabaseEngineBuilder`, and `IBlobDatabaseEngineBuilder`. Each carries EngineName, RootPath
 (`FileSystemPath?`), Durability, StorageStrategy, MaintenanceInterval and the existing group-commit,
-checkpoint and page-write-back options. No strongly typed worker/server factory overloads were
+checkpoint and page-write-back options, including `CheckpointJournalSize` and `BufferPoolCapacity`
+(#1254). No strongly typed worker/server factory overloads were
 added: the common engine factory works, and an explicit SQL/KeyValue cast avoids duplicate overload
 vocabulary. No production algorithm consumes model options generically; the base earns its place
 because worker registration is genuinely model-agnostic. Internal one-shot attachment/compensation
@@ -1141,3 +1154,45 @@ test-file insertions/deletions are recorded in `_out/PHASE29-REPORT.md`, `_out/P
 and `_out/PHASE29-TEST-DELTAS.md`. `_out/phase29-ESCALATIONS.md` records whether any escalation remained.
 The original CI gap is handled by explicitly running Templates and the package-backed Database.Testing
 fixture against freshly packed framework/SDK content rather than trusting the resources path trigger.
+
+## 14. Superseded by B1 of the engine extensibility design (2026-10-09)
+
+B1 of [DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md](DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md) (owner
+decisions 49 to 58 of 2026-10-09) changes the composition §13 records. The earlier sections stay as
+the record of how the surface was reached; where they conflict, this section wins.
+
+- **Every owned engine is named at registration.** The root seam's nameless
+  `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)` became
+  `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, so Hosting reserves the
+  name, and refuses a duplicate, before any factory runs (§13.1's "arbitrary model factory names are
+  necessarily validated when products return" no longer holds). The five model verbs take
+  `(string name, Action<XEngineBuilder>)`; the callback lost the application context, and every model
+  builder is created by `CreateBuilder(name)` and reports `Name`.
+- **Provisioning moved into the model.** `Provision(...)` ×2, `AddDatabase(...)` ×2, `Schemas` and
+  the `DefaultDatabaseProvisioner` host service are deleted. A SQL engine builder declares its
+  databases (`sql.AddDatabase(name, database => ...)`) and provisions them while it is built, inside
+  application `Build()`; servers start only when the application starts, so provisioning still
+  precedes accept. The root's `CompiledSchema`, `SchemaMigrationResult` and the `DatabaseInstance`
+  capability are deleted.
+- **One registration path per kind of thing.** `DatabaseApplicationOptions.Engines`, `.Servers` and
+  `.Services`, the `DatabaseApplication(options)` constructor and `CreateBuilder(options)` are
+  deleted: engines and services register on the builder, and servers on their engine's builder.
+- **The SQL engine builder exposes its settings as `Options`**, copied at Build, instead of fourteen
+  mirrored properties; the other four builders keep theirs until B3.
+
+The composition example, as of B1:
+
+```csharp
+var builder = DatabaseApplication.CreateBuilder(args);
+builder.AddSql("orders", sql =>
+{
+    sql.Options.RootPath = FileSystemPath.Parse("./data/orders");
+    sql.AddDatabase("sales", database => database.Schema(schema =>
+        schema.Table<Order>("orders", table => table.Key(order => order.Id))));
+    sql.AddServer(server => server.Listen(new Uri("tcp://127.0.0.1:5439")));
+});
+builder.AddDocuments("catalog", _ => { });
+await using var application = builder.Build();
+SqlDatabaseEngine orders = application.Context.GetEngine<SqlDatabaseEngine>("orders");
+await application.RunAsync();
+```

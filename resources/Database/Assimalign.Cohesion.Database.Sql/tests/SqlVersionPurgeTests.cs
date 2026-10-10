@@ -22,15 +22,15 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 /// </summary>
 public sealed class SqlVersionPurgeTests
 {
-    private static async Task<(SqlDatabaseInstance Database, IDatabaseSession Session)> CreateSessionAsync(
+    private static async Task<(SqlDatabase Database, SqlDatabaseSession Session)> CreateSessionAsync(
         SqlDatabaseEngine engine, string name)
     {
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         var session = await database.CreateSessionAsync();
         return (database, session);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -49,7 +49,7 @@ public sealed class SqlVersionPurgeTests
         return rows;
     }
 
-    private static int CountPhysicalRecords(SqlDatabaseInstance database)
+    private static int CountPhysicalRecords(SqlDatabase database)
     {
         int count = 0;
         using var iterator = database.DataStorage.GetUnitIterator();
@@ -67,7 +67,7 @@ public sealed class SqlVersionPurgeTests
     {
         // Arrange: an update chains a version (old tombstoned + new) and a
         // delete tombstones another row — three physical records, two dead.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "purge-reclaim" });
+        await using var engine = SqlDatabaseEngine.Create("purge-reclaim", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "reclaim-db");
         await using var _ = session;
 
@@ -98,7 +98,7 @@ public sealed class SqlVersionPurgeTests
     public async Task RunVersionPurgePass_PinnedSnapshot_ShouldNotReclaimUntilClosed()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "purge-pinned" });
+        await using var engine = SqlDatabaseEngine.Create("purge-pinned", new SqlDatabaseEngineOptions());
         var (database, readerSession) = await CreateSessionAsync(engine, "pinned-db");
         await using var _ = readerSession;
         await using var writerSession = await database.CreateSessionAsync();
@@ -132,7 +132,7 @@ public sealed class SqlVersionPurgeTests
     public async Task Rollback_AbortedWriter_ShouldReturnStoreToBaseline()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "purge-abort" });
+        await using var engine = SqlDatabaseEngine.Create("purge-abort", new SqlDatabaseEngineOptions());
         var (database, session) = await CreateSessionAsync(engine, "abort-db");
         await using var _ = session;
 
@@ -165,7 +165,7 @@ public sealed class SqlVersionPurgeTests
         // Arrange: dead versions created before a clean restart.
         var strategy = new CrashCaptureSqlStorageStrategy();
 
-        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "purge-restart", StorageStrategy = strategy }))
+        await using (var engine = SqlDatabaseEngine.Create("purge-restart", new SqlDatabaseEngineOptions { StorageStrategy = strategy }))
         {
             var (_, session) = await CreateSessionAsync(engine, "restart-db");
             await using var _ = session;
@@ -177,8 +177,8 @@ public sealed class SqlVersionPurgeTests
 
         // Act: reopen (the open-time scan seeds the prunable set) and purge.
         var reopened = strategy.CaptureDurableImages();
-        await using var restarted = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "purge-restart-2", StorageStrategy = reopened });
-        var database = (SqlDatabaseInstance)await restarted.OpenDatabaseAsync("restart-db");
+        await using var restarted = SqlDatabaseEngine.Create("purge-restart-2", new SqlDatabaseEngineOptions { StorageStrategy = reopened });
+        var database = await restarted.OpenDatabaseAsync("restart-db");
         await using var restartedSession = await database.CreateSessionAsync();
 
         CountPhysicalRecords(database).ShouldBe(2);
@@ -195,9 +195,8 @@ public sealed class SqlVersionPurgeTests
     {
         // Arrange: no host, no application, no server — the engine's own
         // maintenance loop is the only scheduler that exists.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        await using var engine = SqlDatabaseEngine.Create("purge-hostless", new SqlDatabaseEngineOptions
         {
-            EngineName = "purge-hostless",
             MaintenanceInterval = TimeSpan.FromMilliseconds(25),
         });
         var (database, session) = await CreateSessionAsync(engine, "hostless-db");

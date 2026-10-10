@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -21,15 +22,15 @@ public sealed class GraphApplicationBuilderTests
         var builder = new RecordingBuilder();
         var context = new RecordingContext();
         int configured = 0;
-        builder.AddGraph((actualContext, options) =>
+        builder.AddGraph("registered", options =>
         {
-            actualContext.ShouldBeSameAs(context);
             configured++;
-            options.EngineName = "registered";
-            options.Durability = StorageCommitDurability.Grouped;
+            options.Name.ShouldBe("registered");
+            options.Options.Durability = StorageCommitDurability.Grouped;
         }).ShouldBeSameAs(builder);
 
         configured.ShouldBe(0);
+        builder.Name.ShouldBe("registered");
         await using var engine = builder.Factory.ShouldNotBeNull()(context);
         configured.ShouldBe(1);
         engine.Name.ShouldBe("registered");
@@ -45,7 +46,7 @@ public sealed class GraphApplicationBuilderTests
     {
         var builder = new RecordingBuilder(reject: true);
         bool configured = false;
-        Should.Throw<InvalidOperationException>(() => builder.AddGraph((_, _) => configured = true))
+        Should.Throw<InvalidOperationException>(() => builder.AddGraph("refused", _ => configured = true))
             .Message.ShouldBe("Registration refused.");
         configured.ShouldBeFalse();
     }
@@ -53,42 +54,39 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public void Build_ShouldAttachDeferredComponentsAndOwnTheirLifetime()
     {
-        var builder = GraphDatabaseEngine.CreateBuilder();
-        builder.EngineName = "composed";
-        using var started = new ManualResetEventSlim();
+        var builder = GraphDatabaseEngine.CreateBuilder("composed");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
-        builder.AddWorker(engine => worker = new RecordingWorker(engine, started));
+        builder.AddWorker(engine => worker = new RecordingWorker(engine, engine.Name + "/custom"));
         builder.AddServer(engine => server = new RecordingServer(engine));
         worker.ShouldBeNull();
         server.ShouldBeNull();
 
         using (var engine = builder.Build())
         {
-            started.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
-            worker.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
+            worker.ShouldNotBeNull().Started.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            worker.Engine.ShouldBeSameAs(engine);
             engine.Workers.Count.ShouldBe(5);
             engine.Workers.ShouldContain(worker);
             engine.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
             server.ShouldNotBeNull().Starts.ShouldBe(0);
-            Should.Throw<InvalidOperationException>(() => builder.EngineName = "late");
+            Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
             Should.Throw<InvalidOperationException>(() => builder.AddWorker(_ => worker));
             Should.Throw<InvalidOperationException>(() => builder.Build());
         }
 
-        worker.ShouldNotBeNull().Disposed.ShouldBeTrue();
-        server.ShouldNotBeNull().Disposals.ShouldBe(1);
+        worker.ShouldNotBeNull().Disposals.ShouldBe(1);
+        server.ShouldNotBeNull().Stops.ShouldBe(1);
     }
 
     [Fact]
     public void FailedServerFactory_ShouldDisposeEarlierComponentsAndFreezeBuilder()
     {
-        IDatabaseEngineBuilder builder = GraphDatabaseEngine.CreateBuilder();
-        using var started = new ManualResetEventSlim();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         RecordingWorker? worker = null;
         RecordingServer? server = null;
-        IDatabaseEngine? product = null;
-        builder.AddWorker(engine => worker = new RecordingWorker(engine, started));
+        GraphDatabaseEngine? product = null;
+        builder.AddWorker(engine => worker = new RecordingWorker(engine));
         builder.AddServer(engine => server = new RecordingServer(engine));
         builder.AddServer(engine =>
         {
@@ -98,10 +96,10 @@ public sealed class GraphApplicationBuilderTests
 
         Should.Throw<InvalidOperationException>(() => builder.Build()).Message.ShouldBe("Server construction failed.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
-        worker.ShouldNotBeNull().Disposed.ShouldBeTrue();
-        server.ShouldNotBeNull().Disposals.ShouldBe(1);
+        worker.ShouldNotBeNull().Disposals.ShouldBe(1);
+        server.ShouldNotBeNull().Stops.ShouldBe(1);
         Should.Throw<InvalidOperationException>(() => builder.Build());
-        Should.Throw<InvalidOperationException>(() => ((IGraphDatabaseEngineBuilder)builder).RootPath = null);
+        Should.Throw<InvalidOperationException>(() => builder.AddDatabase("late"));
     }
 
     [Theory]
@@ -109,8 +107,8 @@ public sealed class GraphApplicationBuilderTests
     [InlineData(false)]
     public void NullComponentFactoryProduct_ShouldDisposeEngine(bool worker)
     {
-        IDatabaseEngineBuilder builder = GraphDatabaseEngine.CreateBuilder();
-        IDatabaseEngine? product = null;
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
+        GraphDatabaseEngine? product = null;
         if (worker)
         {
             builder.AddWorker(engine => { product = engine; return null!; });
@@ -127,12 +125,12 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public void ServerForAnotherEngine_ShouldBeRejectedAndDisposedWithoutOwningThatEngine()
     {
-        using var other = GraphDatabaseEngine.Create(new());
+        using var other = GraphDatabaseEngine.Create("graph-engine", new());
         var server = new RecordingServer(other);
-        IDatabaseEngineBuilder builder = GraphDatabaseEngine.CreateBuilder();
+        var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
         builder.AddServer(_ => server);
         Should.Throw<InvalidOperationException>(() => builder.Build()).Message.ShouldContain("owning engine");
-        server.Disposals.ShouldBe(1);
+        server.Stops.ShouldBe(1);
         other.State.ShouldBe(EngineState.Running);
     }
 
@@ -146,10 +144,10 @@ public sealed class GraphApplicationBuilderTests
         {
             using var strategy = new RecordingStorageStrategy(directory);
             strategy.CreateStorage(new DatabaseName("existing"), StorageCommitDurability.Synchronous).Dispose();
-            var builder = GraphDatabaseEngine.CreateBuilder();
-            builder.StorageStrategy = strategy;
-            builder.RootPath = FileSystemPath.Parse(ignoredRoot);
-            builder.Durability = StorageCommitDurability.Synchronous;
+            var builder = GraphDatabaseEngine.CreateBuilder("graph-engine");
+            builder.Options.StorageStrategy = strategy;
+            builder.Options.RootPath = FileSystemPath.Parse(ignoredRoot);
+            builder.Options.Durability = StorageCommitDurability.Synchronous;
 
             await using (var engine = builder.Build())
             {
@@ -176,7 +174,7 @@ public sealed class GraphApplicationBuilderTests
     [Fact]
     public async Task EmptyDatabaseName_ShouldBeRejectedAtEveryEngineEntryPoint()
     {
-        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default));
         await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(default));
         await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync(default));
@@ -189,8 +187,8 @@ public sealed class GraphApplicationBuilderTests
     public void ConfigurationThatBuildsPrematurely_ShouldNotLeakItsEngine(bool throwAfterBuild)
     {
         var builder = new RecordingBuilder();
-        IDatabaseEngine? product = null;
-        builder.AddGraph((_, engine) =>
+        GraphDatabaseEngine? product = null;
+        builder.AddGraph("premature", engine =>
         {
             product = engine.Build();
             if (throwAfterBuild) { throw new InvalidOperationException("Configuration failed."); }
@@ -198,6 +196,44 @@ public sealed class GraphApplicationBuilderTests
 
         Should.Throw<InvalidOperationException>(() => builder.Factory.ShouldNotBeNull()(new RecordingContext()));
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - AddGraph: a declared database is open when the verb's factory returns, and the engine refuses to drop it")]
+    public async Task AddGraph_WithDeclaredDatabase_ShouldOpenItInsideBuildAndRefuseItsDrop()
+    {
+        // Arrange
+        var builder = new RecordingBuilder();
+        builder.AddGraph("graph-declared", graph => graph.AddDatabase("social"));
+
+        // Act: the verb's factory is what application Build runs.
+        await using var engine = (GraphDatabaseEngine)builder.Factory.ShouldNotBeNull()(new RecordingContext());
+        var refusal = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await engine.DropDatabaseAsync("SOCIAL"));
+
+        // Assert
+        engine.TryGetDatabase("social", out GraphDatabase? _).ShouldBeTrue();
+        refusal.Operation.ShouldBe("DROP DATABASE");
+        refusal.Message.ShouldStartWith("Graph engine 'graph-declared' declares database 'social'", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - AddGraph: a declared name the model refuses fails the verb's factory before the engine exists")]
+    public void AddGraph_WithInvalidDeclaredName_ShouldFailBeforeTheEngineExists()
+    {
+        // Arrange
+        var builder = new RecordingBuilder();
+        GraphDatabaseEngine? product = null;
+        builder.AddGraph("graph-invalid", graph =>
+        {
+            graph.AddWorker(engine => new RecordingWorker(product = engine));
+            graph.AddDatabase("..");
+        });
+
+        // Act
+        var failure = Should.Throw<ArgumentException>(() => builder.Factory.ShouldNotBeNull()(new RecordingContext()));
+
+        // Assert: refused at the declaration, where the engine's own open used to refuse it after
+        // the engine, its workers and its servers were created.
+        failure.ParamName.ShouldBe("name");
+        product.ShouldBeNull();
     }
 
     private sealed class RecordingBuilder : IDatabaseApplicationBuilder
@@ -213,12 +249,14 @@ public sealed class GraphApplicationBuilderTests
             _reject = reject;
         }
 
-        internal Func<IDatabaseApplicationContext, IDatabaseEngine>? Factory { get; private set; }
-        public IDatabaseApplicationBuilder AddEngine(IDatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
-        public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine> configure)
+        internal Func<IDatabaseApplicationContext, DatabaseEngine>? Factory { get; private set; }
+        internal string? Name { get; private set; }
+        public IDatabaseApplicationBuilder AddEngine(DatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
+        public IDatabaseApplicationBuilder AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine> factory)
         {
             if (_reject) { throw new InvalidOperationException("Registration refused."); }
-            Factory = configure;
+            Name = name;
+            Factory = factory;
             return this;
         }
         public IDatabaseApplication Build() => throw new NotSupportedException();
@@ -226,77 +264,12 @@ public sealed class GraphApplicationBuilderTests
 
     private sealed class RecordingContext : IDatabaseApplicationContext
     {
-        public IReadOnlyList<IDatabaseEngine> Engines => [];
-        public IReadOnlyList<IDatabaseServer> Servers => [];
-        public IDatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);
+        public IReadOnlyList<DatabaseEngine> Engines => [];
+        public IReadOnlyList<DatabaseServer> Servers => [];
+        public DatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);
     }
 
-    private sealed class RecordingWorker : IDatabaseEngineWorker, IDisposable
-    {
-        private readonly IDatabaseEngine _engine;
-        private readonly ManualResetEventSlim _started;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="RecordingWorker"/> class.
-        /// </summary>
-        /// <param name="engine">The engine the worker was created for.</param>
-        /// <param name="started">The event signaled when the worker starts running.</param>
-        public RecordingWorker(IDatabaseEngine engine, ManualResetEventSlim started)
-        {
-            _engine = engine;
-            _started = started;
-        }
-
-        internal IDatabaseEngine Engine => _engine;
-        internal bool Disposed { get; private set; }
-        public string Name => _engine.Name + "/custom";
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
-        public void Run(CancellationToken cancellationToken = default)
-        {
-            _started.Set();
-            cancellationToken.WaitHandle.WaitOne();
-        }
-        public void Dispose() => Disposed = true;
-    }
-
-    private sealed class RecordingServer : IDatabaseServer
-    {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="RecordingServer"/> class.
-        /// </summary>
-        /// <param name="engine">The engine the server's context reports as its owner.</param>
-        public RecordingServer(IDatabaseEngine engine)
-        {
-            Context = new RecordingServerContext(engine);
-        }
-
-        internal int Starts { get; private set; }
-        internal int Disposals { get; private set; }
-        public IDatabaseServerContext Context { get; }
-        public Task StartAsync(CancellationToken cancellationToken = default) { Starts++; return Task.CompletedTask; }
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public ValueTask DisposeAsync() { Disposals++; return default; }
-    }
-
-    private sealed class RecordingServerContext : IDatabaseServerContext
-    {
-        private readonly IDatabaseEngine _engine;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="RecordingServerContext"/> class.
-        /// </summary>
-        /// <param name="engine">The engine the context reports as its owner.</param>
-        public RecordingServerContext(IDatabaseEngine engine)
-        {
-            _engine = engine;
-        }
-
-        public IDatabaseEngine Engine => _engine;
-        public IReadOnlyCollection<IDatabaseServerSession> Sessions => [];
-    }
-
-    private sealed class RecordingStorageStrategy : IGraphStorageStrategy, IDisposable
+    private sealed class RecordingStorageStrategy : GraphStorageStrategy, IDisposable
     {
         private readonly string _directory;
 
@@ -313,26 +286,26 @@ public sealed class GraphApplicationBuilderTests
         internal int Opens { get; private set; }
         internal bool Disposed { get; private set; }
 
-        public GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+        public override GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
         {
             LastDurability = durability;
             return GraphStorage.Create(Open(databaseName, "dat", FileMode.CreateNew), Open(databaseName, "log", FileMode.CreateNew), Open(databaseName, "bak", FileMode.CreateNew), databaseName, durability);
         }
 
-        public GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+        public override GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
         {
             Opens++;
             LastDurability = durability;
             return GraphStorage.Open(Open(databaseName, "dat", FileMode.Open), Open(databaseName, "log", FileMode.Open), Open(databaseName, "bak", FileMode.Open), checkpointOnOpen: false, durability);
         }
 
-        public void DropStorage(DatabaseName databaseName)
+        public override void DropStorage(DatabaseName databaseName)
         {
             foreach (string suffix in new[] { "dat", "log", "bak" }) { File.Delete(Path.Combine(_directory, databaseName + "." + suffix)); }
         }
 
-        public bool StorageExists(DatabaseName databaseName) => File.Exists(Path.Combine(_directory, databaseName + ".dat"));
-        public IEnumerable<DatabaseName> GetDatabaseNames() => Directory.EnumerateFiles(_directory, "*.dat").Select(file => new DatabaseName(Path.GetFileNameWithoutExtension(file)));
+        public override bool StorageExists(DatabaseName databaseName) => File.Exists(Path.Combine(_directory, databaseName + ".dat"));
+        public override IEnumerable<DatabaseName> GetDatabaseNames() => Directory.EnumerateFiles(_directory, "*.dat").Select(file => new DatabaseName(Path.GetFileNameWithoutExtension(file)));
         public void Dispose() => Disposed = true;
         private StorageStream Open(DatabaseName name, string suffix, FileMode mode) => StorageStream.FromFile(Path.Combine(_directory, name + "." + suffix), mode, FileShare.Read);
     }

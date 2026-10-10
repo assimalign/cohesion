@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
 
@@ -29,17 +30,20 @@ internal static class Program
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(8));
             CancellationToken token = timeout.Token;
-            await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions
+            await using var engine = BlobDatabaseEngine.Create("bounded-heap-blob-wire", new BlobDatabaseEngineOptions
             {
                 RootPath = args[0],
-                EngineName = "bounded-heap-blob-wire",
                 CheckpointInterval = TimeSpan.FromHours(1),
                 PageWriteBackInterval = TimeSpan.FromHours(1),
                 MaintenanceInterval = TimeSpan.FromHours(1),
                 PageWriteBackBatchSize = 4096
             });
-            var database = (IBlobDatabase)await engine.CreateDatabaseAsync("large", token);
-            await database.CreateContainerAsync("objects", token);
+            var database = await engine.CreateDatabaseAsync("large", token);
+            await using (var session = await database.CreateSessionAsync(token))
+            {
+                await session.CreateContainerAsync("objects", token);
+            }
+
             await using var listener = new InMemoryConnectionListener();
             await using var server = BlobDatabaseServer.Create(engine, new BlobDatabaseServerOptions { Listener = listener });
             await server.StartAsync(token);

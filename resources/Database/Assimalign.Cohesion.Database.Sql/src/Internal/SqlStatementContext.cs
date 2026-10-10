@@ -15,11 +15,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal readonly struct SqlStatementContext
 {
     internal SqlStatementContext(
-        ITransactionContext transaction,
+        TransactionContext transaction,
         TransactionCoordinator coordinator,
         string? provisioningSchema = null,
         string databaseName = "",
-        ISqlCatalogSnapshot? catalogSnapshot = null)
+        SqlCatalogSnapshot? catalogSnapshot = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
@@ -33,7 +33,7 @@ internal readonly struct SqlStatementContext
     /// <summary>
     /// Gets the MVCC transaction context the statement executes under.
     /// </summary>
-    internal ITransactionContext Transaction { get; }
+    internal TransactionContext Transaction { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -58,5 +58,5 @@ internal readonly struct SqlStatementContext
     internal string DatabaseName { get; }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
-    internal ISqlCatalogSnapshot? CatalogSnapshot { get; }
+    internal SqlCatalogSnapshot? CatalogSnapshot { get; }
 }

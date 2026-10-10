@@ -77,7 +77,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         throw new TimeoutException("The TCP listener did not bind within the budget.");
     }
 
-    private static IKeyValueClient CreateClient(int port)
+    private static KeyValueClient CreateClient(int port)
         => KeyValueClient.Create(new KeyValueClientOptions
         {
             Settings = new DatabaseConnectionSettings
@@ -99,17 +99,16 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
         TcpConnectionListener? listener = null;
-        builder.AddKeyValue((context, options) =>
+        builder.AddKeyValue("kv", options =>
         {
-            options.EngineName = "kv";
-            options.RootPath = _rootPath;
+            options.Options.RootPath = _rootPath;
             options.AddServer(engine =>
             {
                 listener = new TcpConnectionListener(new TcpConnectionListenerOptions
                 {
                     EndPoint = new IPEndPoint(IPAddress.Loopback, 0),
                 });
-                return KeyValueDatabaseServer.Create((KeyValueDatabaseEngine)engine,
+                return KeyValueDatabaseServer.Create(engine,
                     new KeyValueDatabaseServerOptions { Listener = listener });
             });
         });

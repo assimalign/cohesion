@@ -21,7 +21,8 @@ using Assimalign.Cohesion.Database.Types;
 /// MVCC-correct maintenance on the write path (entries mirror row-version stamps),
 /// unique enforcement through the key-lock discipline, logical rollback undoing
 /// index stamps, crash-recovery scrubbing, and registration persistence across
-/// restart including root-page drift.
+/// restart, including after root splits, a failed statement's rolled-back splits, and
+/// a crash between root splits and the next persistence point.
 /// </summary>
 public sealed class SqlSecondaryIndexTests : IDisposable
 {
@@ -47,7 +48,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         }
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -66,9 +67,9 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         return rows;
     }
 
-    private static ulong ObjectIdOf(IDatabase database, string table)
+    private static ulong ObjectIdOf(SqlDatabase database, string table)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetTable("dbo", table, out var catalogTable).ShouldBeTrue();
         return catalogTable.ObjectId;
     }
@@ -76,14 +77,14 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     /// <summary>
     /// Materializes the entries a fresh snapshot sees in the named index.
     /// </summary>
-    private static async Task<List<(byte[] Key, ulong EntryReference)>> VisibleEntriesAsync(IDatabase database, string table, string indexName)
+    private static async Task<List<(byte[] Key, ulong EntryReference)>> VisibleEntriesAsync(SqlDatabase database, string table, string indexName)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         ulong objectId = ObjectIdOf(database, table);
         instance.IndexManager.TryGetIndex(objectId, indexName, out var index).ShouldBeTrue($"index '{indexName}' should be attached");
 
         await using var session = await database.CreateSessionAsync();
-        var transaction = (SqlDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
 
         try
         {
@@ -103,6 +104,13 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The root page the index manager currently registers for the named index.
+    /// </summary>
+    private static long RootPageOf(SqlDatabase database, string indexName)
+        => database.IndexManager.ExportRegistrations()
+            .Single(registration => registration.Definition.Name == indexName).RootPageId;
+
     private static byte[] Int32Key(int value)
     {
         var writer = new DatabaseKeyWriter();
@@ -116,7 +124,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task CreateIndex_OverExistingRows_ShouldBuildAndPersist()
     {
         // Arrange: rows first, index second (the DDL-blocking build path).
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-build", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-build", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("build-db");
 
         await using (var session = await database.CreateSessionAsync())
@@ -127,7 +135,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         }
 
         // Assert: catalog metadata + a live tree with one entry per row.
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out var metadata).ShouldBeTrue();
         metadata.ColumnNames.ShouldBe(new[] { "id" });
         (await VisibleEntriesAsync(database, "t", "ix_t_id")).Count.ShouldBe(3);
@@ -135,7 +143,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
 
         // Act: restart — registrations re-attach the tree.
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-build", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-build", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("build-db");
 
@@ -149,7 +157,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task CreateUniqueIndex_WithDuplicateRows_ShouldFailCompletely()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-dup" });
+        await using var engine = SqlDatabaseEngine.Create("ix-dup", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("dup-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -163,7 +171,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // Assert: precise error; neither the catalog nor the live directory keeps
         // any trace, and a non-unique index over the same data still works.
         exception.Message.ShouldContain("duplicate");
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out _).ShouldBeFalse();
         instance.IndexManager.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out _).ShouldBeFalse();
 
@@ -175,7 +183,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task DropIndex_ShouldRemoveIndex_AndIndexedColumnsAreGuarded()
     {
         // Arrange
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-drop", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-drop", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("drop-db");
 
         await using (var session = await database.CreateSessionAsync())
@@ -192,7 +200,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
             await session.ExecuteAsync("DROP INDEX ix_t_id ON t");
 
             // Assert: gone from both surfaces; maintenance no longer runs.
-            var instance = (SqlDatabaseInstance)database;
+            var instance = database;
             instance.Catalog.GetIndexes(ObjectIdOf(database, "t")).ShouldBeEmpty();
             instance.IndexManager.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out _).ShouldBeFalse();
             await session.ExecuteAsync("INSERT INTO t (id, label) VALUES (1, 'a')");
@@ -205,9 +213,9 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
 
         // Restart: still gone.
-        await using var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-drop", RootPath = _rootPath });
+        await using var reopenedEngine = SqlDatabaseEngine.Create("ix-drop", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var reopened = await reopenedEngine.OpenDatabaseAsync("drop-db");
-        ((SqlDatabaseInstance)reopened).Catalog.GetIndexes(ObjectIdOf(reopened, "t")).ShouldBeEmpty();
+        reopened.Catalog.GetIndexes(ObjectIdOf(reopened, "t")).ShouldBeEmpty();
     }
 
     // ── Write-path maintenance ─────────────────────────────────────────
@@ -216,7 +224,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task Update_IndexedColumn_ShouldMoveEntry()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-update" });
+        await using var engine = SqlDatabaseEngine.Create("ix-update", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("update-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -237,7 +245,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task Delete_IndexedRow_ShouldTombstoneEntryUnderSnapshots()
     {
         // Arrange: a reader pins a snapshot before the delete commits.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-delete" });
+        await using var engine = SqlDatabaseEngine.Create("ix-delete", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("delete-db");
         await using var writerSession = await database.CreateSessionAsync();
         await using var readerSession = await database.CreateSessionAsync();
@@ -246,10 +254,10 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await writerSession.ExecuteAsync("CREATE INDEX ix_t_id ON t (id)");
         await writerSession.ExecuteAsync("INSERT INTO t (id) VALUES (1)");
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.IndexManager.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out var index).ShouldBeTrue();
 
-        var pinned = (SqlDatabaseTransaction)await readerSession.BeginTransactionAsync(IsolationLevel.Snapshot);
+        var pinned = await readerSession.BeginTransactionAsync(IsolationLevel.Snapshot);
         var pinnedSnapshot = pinned.Context.Snapshot;
 
         // Act
@@ -271,7 +279,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task Insert_UniqueViolation_ShouldFailStatementOnly()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-unique" });
+        await using var engine = SqlDatabaseEngine.Create("ix-unique", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("unique-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -295,7 +303,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     public async Task ConcurrentInserts_SameUniqueKey_ShouldSerializeThroughKeyLock()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-race" });
+        await using var engine = SqlDatabaseEngine.Create("ix-race", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("race-db");
         await using var first = await database.CreateSessionAsync();
         await using var second = await database.CreateSessionAsync();
@@ -339,7 +347,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     {
         // Arrange: one committed row; a transaction then inserts one and deletes
         // the other.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-rollback" });
+        await using var engine = SqlDatabaseEngine.Create("ix-rollback", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("rollback-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -367,7 +375,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // records become durable through a later committed statement (journal
         // ordering) — the classic unproven-writer crash window.
         var strategy = new CrashCaptureSqlStorageStrategy();
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-crash", StorageStrategy = strategy });
+        var engine = SqlDatabaseEngine.Create("ix-crash", new SqlDatabaseEngineOptions { StorageStrategy = strategy });
         var database = await engine.CreateDatabaseAsync("crash-db");
 
         var session = await database.CreateSessionAsync();
@@ -385,7 +393,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
 
         // Act: crash (capture durable images without a clean shutdown), reopen.
         var crashed = strategy.CaptureDurableImages();
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-crash-reopen", StorageStrategy = crashed });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-crash-reopen", new SqlDatabaseEngineOptions { StorageStrategy = crashed });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("crash-db");
 
@@ -404,19 +412,61 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: root splits drift the root page id and re-export keeps restart consistent")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: a failed statement that split index roots leaves every index usable, now and after restart")]
+    public async Task FailedStatement_AfterRootSplits_ShouldLeaveIndexesUsable()
+    {
+        // Arrange: two small indexes (single-leaf trees).
+        var engine = SqlDatabaseEngine.Create("ix-failed-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
+        var database = await engine.CreateDatabaseAsync("failed-split-db");
+
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, v INT NOT NULL)");
+            await session.ExecuteAsync("CREATE UNIQUE INDEX ux_t_id ON t (id)");
+            await session.ExecuteAsync("CREATE INDEX ix_t_v ON t (v)");
+            await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", Enumerable.Range(0, 10).Select(i => $"({i}, {i % 3})")));
+
+            // Act: one statement inserts enough rows to split both roots, then hits a
+            // duplicate key — the statement's physical bracket rolls back, splits included.
+            var rows = Enumerable.Range(100, 1_000).Select(i => $"({i}, {i % 3})").Append("(5, 0)");
+            await Should.ThrowAsync<SqlConstraintViolationException>(
+                async () => await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", rows)));
+
+            // Assert: both indexes still serve the committed rows and keep growing.
+            (await Rows(session, "SELECT id FROM t WHERE v = 1")).Select(row => (int)row[0]!).Order().ShouldBe(new[] { 1, 4, 7 });
+            await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", Enumerable.Range(100, 1_000).Select(i => $"({i}, {i % 3})")));
+            (await Rows(session, "SELECT id FROM t WHERE id = 1099")).Count.ShouldBe(1);
+            (await Rows(session, "SELECT id FROM t WHERE v = 2")).Count.ShouldBe(3 + 333);
+            await Should.ThrowAsync<SqlConstraintViolationException>(
+                async () => await session.ExecuteAsync("INSERT INTO t VALUES (500, 0)"));
+        }
+
+        await engine.DisposeAsync();
+
+        // Restart: the registered roots still reach every entry.
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-failed-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
+        await using var _ = reopenedEngine;
+        var reopened = await reopenedEngine.OpenDatabaseAsync("failed-split-db");
+
+        (await VisibleEntriesAsync(reopened, "t", "ux_t_id")).Count.ShouldBe(1_010);
+        (await VisibleEntriesAsync(reopened, "t", "ix_t_v")).Count.ShouldBe(1_010);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: root splits keep the registered root page, and restart stays consistent")]
     public async Task Restart_AfterRootSplits_ShouldReattachConsistently()
     {
         // Arrange: enough entries to split the root at least once (a leaf holds
         // ~250 int keys), inserted AFTER the index exists so the write path — not
         // the build — drives the splits.
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-split", RootPath = _rootPath });
+        var engine = SqlDatabaseEngine.Create("ix-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var database = await engine.CreateDatabaseAsync("split-db");
+        long registeredRoot;
 
         await using (var session = await database.CreateSessionAsync())
         {
             await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
             await session.ExecuteAsync("CREATE INDEX ix_t_id ON t (id)");
+            registeredRoot = RootPageOf(database, "ix_t_id");
 
             for (int start = 0; start < 600; start += 100)
             {
@@ -425,25 +475,81 @@ public sealed class SqlSecondaryIndexTests : IDisposable
             }
         }
 
-        await engine.DisposeAsync(); // re-exports drifted registrations
+        // The splits rewrote the root page in place.
+        RootPageOf(database, "ix_t_id").ShouldBe(registeredRoot);
+
+        await engine.DisposeAsync();
 
         // Act
-        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-split", RootPath = _rootPath });
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-split", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         await using var _ = reopenedEngine;
         var reopened = await reopenedEngine.OpenDatabaseAsync("split-db");
 
-        // Assert: the re-attached tree serves every entry in order.
+        // Assert: the catalog re-attached the root CREATE INDEX registered, and the
+        // tree serves every entry in order.
+        RootPageOf(reopened, "ix_t_id").ShouldBe(registeredRoot);
         var entries = await VisibleEntriesAsync(reopened, "t", "ix_t_id");
         entries.Count.ShouldBe(600);
         entries[0].Key.ShouldBe(Int32Key(0));
         entries[599].Key.ShouldBe(Int32Key(599));
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: a crash after root splits, before any persistence point, recovers through the registered root")]
+    public async Task Recovery_RootSplitsBeforeCheckpoint_ShouldSeekThroughRegisteredRoot()
+    {
+        // Arrange: CREATE INDEX persists the registration while the tree is one leaf.
+        // The checkpoint worker is held off, so no persistence point re-exports it
+        // before the crash.
+        var strategy = new CrashCaptureSqlStorageStrategy();
+        var engine = SqlDatabaseEngine.Create("ix-crash-split", new SqlDatabaseEngineOptions
+        {
+            StorageStrategy = strategy,
+            CheckpointInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("crash-split-db");
+
+        var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, v INT NOT NULL)");
+        await session.ExecuteAsync("CREATE INDEX ix_t_id ON t (id)");
+        long registeredRoot = RootPageOf(database, "ix_t_id");
+
+        // Act: committed inserts split the root more than once (about 245 INT keys
+        // fit on a leaf), then the process crashes.
+        for (int start = 0; start < 1_200; start += 100)
+        {
+            var values = string.Join(", ", Enumerable.Range(start, 100).Select(i => $"({i}, {i % 7})"));
+            await session.ExecuteAsync($"INSERT INTO t (id, v) VALUES {values}");
+        }
+        RootPageOf(database, "ix_t_id").ShouldBe(registeredRoot);
+
+        var crashed = strategy.CaptureDurableImages();
+        var reopenedEngine = SqlDatabaseEngine.Create("ix-crash-split-reopen", new SqlDatabaseEngineOptions { StorageStrategy = crashed });
+        await using var _ = reopenedEngine;
+        var reopened = await reopenedEngine.OpenDatabaseAsync("crash-split-db");
+
+        // Assert: the registered root routes point and range seeks…
+        RootPageOf(reopened, "ix_t_id").ShouldBe(registeredRoot);
+        await using var verifySession = await reopened.CreateSessionAsync();
+        ((int)(await Rows(verifySession, "SELECT v FROM t WHERE id = 1150")).Single()[0]!).ShouldBe(1150 % 7);
+        verifySession.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_t_id");
+        (await Rows(verifySession, "SELECT id FROM t WHERE id >= 600 AND id < 610")).Select(row => (int)row[0]!).Order()
+            .ShouldBe(Enumerable.Range(600, 10));
+
+        // …and new keys at both ends land in order.
+        await verifySession.ExecuteAsync("INSERT INTO t (id, v) VALUES (5000, 0), (-1, 0)");
+        var entries = await VisibleEntriesAsync(reopened, "t", "ix_t_id");
+        entries.Select(entry => Convert.ToHexString(entry.Key)).ShouldBe(
+            Enumerable.Range(-1, 1_201).Append(5_000).Select(value => Convert.ToHexString(Int32Key(value))));
+
+        // The crashed engine's disposal is best-effort (its streams are gated).
+        await engine.DisposeAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: DROP TABLE drops the table's indexes with it")]
     public async Task DropTable_WithIndexes_ShouldDropIndexes()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-droptable" });
+        await using var engine = SqlDatabaseEngine.Create("ix-droptable", new SqlDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("droptable-db");
         await using var session = await database.CreateSessionAsync();
 
@@ -455,7 +561,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await session.ExecuteAsync("DROP TABLE t");
 
         // Assert
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.GetIndexes(objectId).ShouldBeEmpty();
         instance.IndexManager.TryGetIndex(objectId, "ix_t_id", out _).ShouldBeFalse();
         instance.Catalog.GetIndexRegistrations().ShouldBeEmpty();

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
@@ -33,7 +34,7 @@ public class SqlDatabaseServerTests
         await client.HandshakeAsync(principal: "ada");
 
         // Assert
-        var session = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var session = harness.Server.Sessions.ShouldHaveSingleItem();
         session.Principal.ShouldBe("ada");
         session.ProtocolVersion.ShouldBe(ProtocolVersion.Current);
         session.DatabaseSession.ShouldNotBeNull();
@@ -193,7 +194,7 @@ public class SqlDatabaseServerTests
         var errorFrame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(errorFrame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
 
-        harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        harness.Server.Sessions.ShouldHaveSingleItem();
 
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users WHERE id = 1").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);
@@ -228,7 +229,7 @@ public class SqlDatabaseServerTests
 
         // Assert
         frame.ShouldBeNull();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server guardrails: idle sessions are evicted after the idle timeout")]
@@ -245,7 +246,7 @@ public class SqlDatabaseServerTests
         // Assert
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server liveness: ping frames answer with pong")]
@@ -276,7 +277,7 @@ public class SqlDatabaseServerTests
 
         // Assert
         (await client.ReadAsync()).ShouldBeNull();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server lifecycle: StopAsync drains idle sessions within the budget")]
@@ -295,11 +296,101 @@ public class SqlDatabaseServerTests
         // Assert: the drain closed the idle session at the frame boundary — far
         // inside the budget — and told the client why.
         stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
-        harness.Server.Context.Sessions.ShouldBeEmpty();
+        harness.Server.Sessions.ShouldBeEmpty();
 
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A database closed outside the engine (disposed directly, or through a session's
+    /// <see cref="SqlDatabaseSession.Database"/>) closes that database alone. Its workers skip it, so
+    /// the engine stays <see cref="EngineState.Running"/> and its server keeps serving the engine's
+    /// other databases; once the close ends the engine forgets it, and the next open opens it again
+    /// with its rows (owner decision 33, #1289; until then an open handed back the closed instance,
+    /// whose use threw <see cref="ObjectDisposedException"/>). Before the workers skipped a closed
+    /// database, the version-purge worker failed on its disposed transaction manager every pass and
+    /// the checkpointer on its disposed journal once it was due, the engine reported
+    /// <see cref="EngineState.Faulted"/> for good, and its health and its operators saw a fault no
+    /// pass could clear (the closed-database fault the Blob review found, fixed here for SQL).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server: databases closed outside the engine leave it running and its server serving")]
+    public async Task DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing()
+    {
+        // Arrange: workers that pass every 20 ms, a database closed through a session and one
+        // disposed directly, each holding committed rows and dirty pages.
+        var interval = TimeSpan.FromMilliseconds(20);
+        await using var harness = await ServerTestHarness.StartAsync(configureEngine: options =>
+        {
+            options.CheckpointInterval = interval;
+            options.PageWriteBackInterval = interval;
+            options.MaintenanceInterval = interval;
+        });
+        var throughSession = await harness.Engine.CreateDatabaseAsync("closed-through-session", TestTimeout.Token());
+        var direct = await harness.Engine.CreateDatabaseAsync("closed-directly", TestTimeout.Token());
+        await using var session = await throughSession.CreateSessionAsync(TestTimeout.Token());
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)", cancellationToken: TestTimeout.Token());
+        await session.ExecuteAsync("INSERT INTO t (id) VALUES (1), (2)", cancellationToken: TestTimeout.Token());
+        await using (var writer = await direct.CreateSessionAsync(TestTimeout.Token()))
+        {
+            await writer.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)", cancellationToken: TestTimeout.Token());
+            await writer.ExecuteAsync("INSERT INTO t (id) VALUES (1)", cancellationToken: TestTimeout.Token());
+        }
+
+        // Act: close both, let the workers pass over them many times, run one more pass of each,
+        // then serve a statement of the engine's other database over the wire.
+        await session.Database.DisposeAsync();
+        await direct.DisposeAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(500), TestTimeout.Token());
+        var passes = harness.Engine.Workers.Select(worker => worker.RunIteration(TestTimeout.Token())).ToArray();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("INSERT INTO users (id, name) VALUES (3, 'lin')").Encode());
+        await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users ORDER BY id").Encode());
+        await client.ExpectAsync(ProtocolMessageType.ResultHeader);
+        var ids = new List<object?>();
+        for (int row = 0; row < 3; row++)
+        {
+            ids.Add(DecodeRow((await client.ExpectAsync(ProtocolMessageType.ResultRow)).Payload.ToArray()).ShouldHaveSingleItem());
+        }
+
+        await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+
+        // Assert
+        passes.ShouldAllBe(passed => passed);
+        harness.Engine.Workers.ShouldAllBe(worker => worker.FailureCount == 0 && worker.Fault == null);
+        harness.Engine.State.ShouldBe(EngineState.Running);
+        harness.Engine.OfflineDatabases.ShouldBeEmpty();
+        ids.ShouldBe(new object?[] { 1, 2, 3 });
+        harness.Server.Sessions.Single().DatabaseSession!.Database.Name.ToString().ShouldBe(ServerTestHarness.DatabaseName);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await session.Database.CreateSessionAsync(TestTimeout.Token()));
+
+        // Assert: once their closes ended the engine forgot both, and an open opens each again with its rows.
+        harness.Engine.TryGetDatabase("closed-through-session", out _).ShouldBeFalse();
+        var reopenedThroughSession = await harness.Engine.OpenDatabaseAsync("closed-through-session", TestTimeout.Token());
+        var reopenedDirect = await harness.Engine.OpenDatabaseAsync("closed-directly", TestTimeout.Token());
+        reopenedThroughSession.ShouldNotBeSameAs(throughSession);
+        reopenedDirect.ShouldNotBeSameAs(direct);
+        (await CountRowsAsync(reopenedThroughSession)).ShouldBe(2);
+        (await CountRowsAsync(reopenedDirect)).ShouldBe(1);
+    }
+
+    private static async Task<long> CountRowsAsync(SqlDatabase database)
+    {
+        await using var reader = await database.CreateSessionAsync(TestTimeout.Token());
+        var result = await reader.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: TestTimeout.Token());
+        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        await using (set)
+        {
+            await foreach (var row in set.GetRowsAsync())
+            {
+                return Convert.ToInt64(row.GetValue(0));
+            }
+        }
+
+        throw new InvalidOperationException("The count returned no row.");
     }
 
     private static object?[] DecodeRow(byte[] payload)

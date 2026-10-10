@@ -56,6 +56,7 @@ public static class GqlLanguageProfile
         GqlClauses.DetachDelete,
         GqlClauses.Where,
         GqlClauses.Show,
+        GqlClauses.LabelExpression,
     ];
     /// <summary>Gets the ISO GQL language profile used by graph-model query consumers.</summary>
     public static QueryLanguageProfile Instance { get; } = new(

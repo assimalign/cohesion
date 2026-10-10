@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,26 +19,34 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// over a single connection and delegates statement execution to the bound
 /// engine session's text-execute seam.
 /// </summary>
-internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
+/// <remarks>
+/// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
+/// row 11): the base owns the identity, and the negotiated version and authenticated principal,
+/// which the handshake records once each through the base's one-shot setters; the engine session
+/// is re-exposed typed by a covariant override.
+/// </remarks>
+internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 {
     private readonly SqlDatabaseServer _server;
     private readonly IConnection _connection;
     private readonly SqlDatabaseServerOptions _options;
-    private readonly IDatabaseEngine _engine;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly SqlDatabaseEngine _engine;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
+    private readonly long _acceptedTimestamp;
 
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
-    private IDatabaseSession? _databaseSession;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
+    private SqlDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
+    private string _closeReason = SqlDatabaseEventSource.CloseReason.Unknown;
 
     internal SqlDatabaseServerSession(
         SqlDatabaseServer server,
         IConnection connection,
         SqlDatabaseServerOptions options,
-        IDatabaseEngine engine,
-        IDatabaseAuthenticator authenticator)
+        SqlDatabaseEngine engine,
+        DatabaseAuthenticator authenticator)
     {
         _server = server;
         _connection = connection;
@@ -45,25 +54,29 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         _engine = engine;
         _authenticator = authenticator;
         _lifetimeSource = CancellationTokenSource.CreateLinkedTokenSource(connection.ConnectionClosed);
+        _acceptedTimestamp = SqlDatabaseEventSource.Log.SessionTimestamp();
     }
 
     /// <inheritdoc />
-    public Guid Id { get; } = Guid.NewGuid();
-
-    /// <inheritdoc />
-    public ProtocolVersion ProtocolVersion { get; private set; }
-
-    /// <inheritdoc />
-    public string? Principal { get; private set; }
-
-    /// <inheritdoc />
-    public IDatabaseSession? DatabaseSession => _databaseSession;
+    public override SqlDatabaseSession? DatabaseSession => _databaseSession;
 
     /// <summary>
     /// Gets the task that completes when the session pump has fully wound down.
     /// Never faults — the pump owns its errors.
     /// </summary>
     internal Task Completion => _completion;
+
+    /// <summary>
+    /// Gets why the session ended, for its <c>SessionClosed</c> event; the pump sets it on the
+    /// path that ends it.
+    /// </summary>
+    internal string CloseReason => _closeReason;
+
+    /// <summary>
+    /// Gets the timestamp the session's <c>SessionClosed</c> duration starts from; zero when the
+    /// event was disabled at accept.
+    /// </summary>
+    internal long AcceptedTimestamp => _acceptedTimestamp;
 
     internal void Start(CancellationToken softStop, CancellationToken hardAbort)
     {
@@ -88,7 +101,8 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <remarks>Idempotent: aborting a session that already wound down is a no-op.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
     {
         Abort();
         await _completion.ConfigureAwait(false);
@@ -116,21 +130,27 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         catch (ProtocolException exception)
         {
             // Framing or message-order violation: report and terminate.
+            _closeReason = SqlDatabaseEventSource.CloseReason.ProtocolViolation;
+            SqlDatabaseEventSource.Log.SessionProtocolViolation(this, exception.Message);
             await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, exception.Message).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             // Aborted, connection closed, or stop signaled mid-frame.
+            _closeReason = SqlDatabaseEventSource.CloseReason.Cancelled;
         }
-        catch (ConnectionAbortedException)
+        catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
-        }
-        catch (IOException)
-        {
-            // The transport failed under the pump; nothing to report to the peer.
+            // The transport failed under the pump: a peer that hung up or reset the connection, or
+            // the shutdown's abort. An expected outcome (plan D9), which SessionClosed's reason
+            // carries; nothing is reported to the peer.
+            _closeReason = reason;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
+            // The peer gets an internal error frame only; the event carries the failure.
+            _closeReason = SqlDatabaseEventSource.CloseReason.Faulted;
+            SqlDatabaseEventSource.Log.SessionFaulted(this, exception);
             await TryWriteErrorAsync(ProtocolErrorCode.Internal, "An unexpected server error terminated the session.").ConfigureAwait(false);
         }
         finally
@@ -152,85 +172,126 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         using var handshakeSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token, softStop);
         handshakeSource.CancelAfter(_options.AuthenticationTimeout);
 
-        ProtocolFrame? frame;
-
         try
         {
-            frame = await _reader!.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+            ProtocolFrame? frame;
+
+            try
+            {
+                frame = await _reader!.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
+            {
+                // Authentication timeout: drop the unauthenticated connection.
+                ReportHandshakeTimeout();
+                return false;
+            }
+
+            if (frame is null)
+            {
+                _closeReason = SqlDatabaseEventSource.CloseReason.PeerClosed;
+                return false; // The peer closed before starting up.
+            }
+
+            if (frame.Value.Type != ProtocolMessageType.Startup)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                return false;
+            }
+
+            ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
+
+            if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiatedVersion))
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            SetNegotiatedVersion(negotiatedVersion);
+
+            SqlDatabase? database;
+
+            try
+            {
+                database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (SqlDataStorageFormatException exception)
+            {
+                // The database exists but is on a data-storage format this engine
+                // refuses (#1099). The refusal is engine-authored and actionable, so
+                // the client gets it instead of an opaque internal error; any other
+                // open failure still takes the internal-error path.
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            if (database is null)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            // Authenticate exchange. The MVP challenge carries no payload (trust
+            // method); the client's response bytes are handed to the authenticator
+            // as opaque evidence.
+            await WriteFrameAsync(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+
+            try
+            {
+                frame = await _reader.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
+            {
+                ReportHandshakeTimeout();
+                return false;
+            }
+
+            if (frame is null)
+            {
+                _closeReason = SqlDatabaseEventSource.CloseReason.PeerClosed;
+                return false;
+            }
+
+            if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            bool authenticated = await _authenticator.AuthenticateAsync(startup.Database, startup.Principal, frame.Value.Payload, handshakeSource.Token).ConfigureAwait(false);
+
+            if (!authenticated)
+            {
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            try
+            {
+                _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+            }
+            catch (DatabaseOfflineException exception)
+            {
+                // The database went offline after a failed durable flush (#1243): every session is
+                // refused, with the coded reason, until it is reopened.
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                return false;
+            }
+
+            SetAuthenticatedPrincipal(startup.Principal);
+
+            await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
+            return true;
         }
-        catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
+        catch (OperationCanceledException) when (handshakeSource.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
         {
-            // Authentication timeout: drop the unauthenticated connection.
+            // The authentication timeout lapsed outside the two reads: while the database was
+            // resolved or opened, a handshake frame was written, the authenticator ran, or the
+            // session was created. The connection is dropped without an error frame, as at a
+            // read, and the pump ends the session as it did when the cancellation reached it.
+            ReportHandshakeTimeout();
             return false;
         }
-
-        if (frame is null)
-        {
-            return false; // The peer closed before starting up.
-        }
-
-        if (frame.Value.Type != ProtocolMessageType.Startup)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.").ConfigureAwait(false);
-            return false;
-        }
-
-        ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
-
-        if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiatedVersion))
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.").ConfigureAwait(false);
-            return false;
-        }
-
-        ProtocolVersion = negotiatedVersion;
-
-        IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
-
-        if (database is null)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.").ConfigureAwait(false);
-            return false;
-        }
-
-        // Authenticate exchange. The MVP challenge carries no payload (trust
-        // method); the client's response bytes are handed to the authenticator
-        // as opaque evidence.
-        await WriteFrameAsync(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
-
-        try
-        {
-            frame = await _reader.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
-        {
-            return false;
-        }
-
-        if (frame is null)
-        {
-            return false;
-        }
-
-        if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.").ConfigureAwait(false);
-            return false;
-        }
-
-        bool authenticated = await _authenticator.AuthenticateAsync(startup.Database, startup.Principal, frame.Value.Payload, handshakeSource.Token).ConfigureAwait(false);
-
-        if (!authenticated)
-        {
-            await TryWriteErrorAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.").ConfigureAwait(false);
-            return false;
-        }
-
-        _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
-        Principal = startup.Principal;
-
-        await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
-        return true;
     }
 
     private async Task ReadyLoopAsync(CancellationToken softStop)
@@ -252,12 +313,14 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
                 catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested)
                 {
                     // Graceful drain: the session was idle at the frame boundary.
+                    _closeReason = SqlDatabaseEventSource.CloseReason.Shutdown;
                     await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
                     return;
                 }
                 catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested)
                 {
                     // Idle timeout eviction.
+                    _closeReason = SqlDatabaseEventSource.CloseReason.IdleTimeout;
                     await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The session was closed after exceeding the idle timeout.").ConfigureAwait(false);
                     return;
                 }
@@ -265,6 +328,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
 
             if (frame is null)
             {
+                _closeReason = SqlDatabaseEventSource.CloseReason.PeerClosed;
                 return; // The peer closed cleanly between frames.
             }
 
@@ -281,10 +345,11 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
                     break;
 
                 case ProtocolMessageType.Terminate:
+                    _closeReason = SqlDatabaseEventSource.CloseReason.Terminated;
                     return;
 
                 default:
-                    await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Value.Type} frame in the ready state.").ConfigureAwait(false);
+                    await RejectUnexpectedFrameAsync(frame.Value.Type).ConfigureAwait(false);
                     return;
             }
         }
@@ -324,6 +389,13 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         {
             // Statement-level failures keep the session in the ready state.
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        catch (DatabaseOfflineException exception)
+        {
+            // The database is offline (#1243): every statement is refused, with the coded
+            // reason, until it is reopened; the session stays ready to report it.
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseException exception)
@@ -384,16 +456,18 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     /// Resolves the startup-requested database on the server's one engine:
     /// already-open databases first, then an open attempt.
     /// </summary>
-    private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
+    /// <returns>The database, or <see langword="null"/> when the engine has none by that name.</returns>
+    /// <exception cref="SqlDataStorageFormatException">The database is on a data-storage format the engine refuses.</exception>
+    private async ValueTask<SqlDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        if (_engine.TryGetDatabase(name, out IDatabase database))
+        if (_engine.TryGetDatabase(name, out var open))
         {
-            return database;
+            return open;
         }
 
         try
@@ -431,33 +505,95 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         }
     }
 
+    /// <summary>
+    /// Refuses the handshake: records why the session ends, writes the <c>HandshakeRefused</c>
+    /// event, and sends the coded error frame (best effort).
+    /// </summary>
+    private ValueTask RefuseHandshakeAsync(ProtocolErrorCode code, string detail, string database, string principal)
+    {
+        _closeReason = SqlDatabaseEventSource.CloseReason.HandshakeRefused;
+        SqlDatabaseEventSource.Log.HandshakeRefused(this, database, principal, code, detail);
+        return TryWriteErrorAsync(code, detail);
+    }
+
+    /// <summary>
+    /// Records that the handshake outlived the authentication timeout, which drops the connection
+    /// without an error frame.
+    /// </summary>
+    private void ReportHandshakeTimeout()
+    {
+        _closeReason = SqlDatabaseEventSource.CloseReason.HandshakeTimedOut;
+        SqlDatabaseEventSource.Log.HandshakeTimedOut(this, _options.AuthenticationTimeout);
+    }
+
+    /// <summary>
+    /// Terminates the session on a frame the ready state does not accept: records the violation
+    /// and sends the error frame (best effort).
+    /// </summary>
+    private ValueTask RejectUnexpectedFrameAsync(ProtocolMessageType type)
+    {
+        string violation = $"Unexpected {type} frame in the ready state.";
+        _closeReason = SqlDatabaseEventSource.CloseReason.ProtocolViolation;
+        SqlDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
+        return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
+    }
+
+    /// <summary>
+    /// Classifies a failure that reached the pump as the transport's, and names the close reason it
+    /// gives the session; null for anything else, which stays a fault. The four model servers carry
+    /// identical copies (plan D2). A reset reaches the pump as the TCP driver's raw
+    /// <see cref="SocketException"/> or a <see cref="ConnectionException"/>, neither of which is an
+    /// <see cref="IOException"/>; a stream that wraps one in an <see cref="IOException"/> is still
+    /// the transport's. A bare <see cref="IOException"/> is not: it can be the storage device's.
+    /// </summary>
+    /// <param name="exception">What reached the pump.</param>
+    /// <returns><c>ConnectionAborted</c>, <c>TransportFailed</c>, or null.</returns>
+    private static string? TransportCloseReason(Exception exception) => exception switch
+    {
+        ConnectionAbortedException => SqlDatabaseEventSource.CloseReason.ConnectionAborted,
+        ConnectionException => SqlDatabaseEventSource.CloseReason.TransportFailed,
+        SocketException => SqlDatabaseEventSource.CloseReason.TransportFailed,
+        IOException { InnerException: SocketException or ConnectionException } => SqlDatabaseEventSource.CloseReason.TransportFailed,
+        _ => null,
+    };
+
     private async ValueTask CleanupAsync()
     {
-        if (_databaseSession is not null)
+        try
         {
-            try
+            if (_databaseSession is not null)
             {
-                await _databaseSession.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await _databaseSession.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (AggregateException exception)
+                {
+                    // Session teardown must not mask the pump outcome. The root session reports every
+                    // teardown failure in one aggregate ("The session failed to close.").
+                    SqlDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
+                }
             }
-            catch (DatabaseException)
+
+            if (_reader is not null)
             {
-                // Session teardown must not mask the pump outcome.
+                await _reader.DisposeAsync().ConfigureAwait(false);
             }
-        }
 
-        if (_reader is not null)
+            if (_writer is not null)
+            {
+                await _writer.DisposeAsync().ConfigureAwait(false);
+            }
+
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
         {
-            await _reader.DisposeAsync().ConfigureAwait(false);
+            // Whatever a disposal threw, which still propagates, the session leaves the server
+            // once: its slot is freed, current-server-sessions comes down and SessionClosed is
+            // written, as the Graph and Blob sessions do.
+            _lifetimeSource.Dispose();
+            _server.OnSessionCompleted(this);
         }
-
-        if (_writer is not null)
-        {
-            await _writer.DisposeAsync().ConfigureAwait(false);
-        }
-
-        await _connection.DisposeAsync().ConfigureAwait(false);
-
-        _lifetimeSource.Dispose();
-        _server.OnSessionCompleted(this);
     }
 }
