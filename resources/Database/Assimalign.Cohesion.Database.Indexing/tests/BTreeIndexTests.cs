@@ -284,6 +284,39 @@ public class BTreeIndexTests
         (await ScanAsync(index, newReader, IndexKeyRange.All)).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A delete matches the reference's live entry by its stamps, not by the deleter's snapshot.
+    /// The deleter here began while the writer was in flight, so its snapshot never sees the
+    /// entry, yet the writer is decided by the time it deletes, which is what an engine's write
+    /// lock guarantees. A match through the snapshot found nothing and left the entry live: a
+    /// unique index then refused every later insert of the key (#1370).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - MVCC: a delete tombstones the reference's live entry even when its snapshot does not see the writer (#1370)")]
+    public async Task Delete_EntryWrittenAfterTheDeletersSnapshot_ShouldTombstoneTheLiveEntry()
+    {
+        // Arrange: the writer commits after the deleter's snapshot and before its delete.
+        var (harness, index) = await CreateIndexAsync(unique: true);
+        await using var harnessLifetime = harness;
+        var writer = await harness.BeginAsync();
+        await index.InsertAsync(writer, IndexKey.FromInt64(5), 500);
+        var deleter = await harness.BeginAsync();
+        await harness.CommitAsync(writer);
+        var deleterSees = await ScanAsync(index, deleter, IndexKeyRange.All);
+
+        // Act
+        await index.DeleteAsync(deleter, IndexKey.FromInt64(5), 500);
+        await harness.CommitAsync(deleter);
+        var afterDelete = await ScanAsync(index, await harness.BeginAsync(), IndexKeyRange.All);
+        var inserter = await harness.BeginAsync();
+        await index.InsertAsync(inserter, IndexKey.FromInt64(5), 600);
+        await harness.CommitAsync(inserter);
+
+        // Assert: the deleter never saw the entry, but tombstoned it; the key is free again.
+        deleterSees.ShouldBeEmpty();
+        afterDelete.ShouldBeEmpty();
+        (await ScanAsync(index, await harness.BeginAsync(), IndexKeyRange.All)).ShouldBe(new[] { (5L, 600UL) });
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Unique: duplicate visible key is rejected; delete frees it")]
     public async Task InsertUnique_DuplicateKey_ShouldThrowUntilDeleted()
     {

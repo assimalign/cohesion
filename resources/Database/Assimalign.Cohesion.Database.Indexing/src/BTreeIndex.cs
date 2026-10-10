@@ -215,8 +215,22 @@ public sealed class BTreeIndex
     }
 
     /// <summary>
-    /// Deletes a key → entry-reference mapping.
+    /// Deletes a key → entry-reference mapping: tombstones the reference's live entry under the
+    /// key with the transaction's sequence. A reference with no live entry under the key is a
+    /// no-op.
     /// </summary>
+    /// <remarks>
+    /// The caller holds a write lock that excludes every other writer of the record version the
+    /// reference names (Sql's row lock, KeyValuePair's key lock, the Documents and Graph database
+    /// writer lock) and has checked that version's stamps under it, so the version's writer is
+    /// decided, committed or the caller itself, and the reference's live entry is that
+    /// version's. The match therefore reads the entry's stamps, not the transaction's snapshot:
+    /// a write may delete a version its snapshot does not see, and a match through that snapshot
+    /// finds nothing and leaves the deleted version's entry live, which a unique index then
+    /// reports as a duplicate of every later insert of the key. A Sql cascade at
+    /// <c>Snapshot</c> isolation did exactly that until #1370 (it now fails first-updater-wins
+    /// before it deletes such a version).
+    /// </remarks>
     /// <param name="transaction">The transaction the mutation belongs to.</param>
     /// <param name="key">The key to delete.</param>
     /// <param name="entryReference">The entry reference to remove for the key.</param>
@@ -244,15 +258,15 @@ public sealed class BTreeIndex
         _latch.EnterWriteLock();
         try
         {
-            // The live mapping this transaction can see — tombstone it under the
-            // transaction's write scope. No match: nothing to delete. The caller
-            // knows the key and the reference but not the writer; the live version
-            // is the reference's newest (TryFindNewestEntry), so the lookup starts
-            // after the reference's last version and reads backward.
+            // The reference's live mapping — tombstone it under the transaction's
+            // write scope. No match: nothing to delete. The caller knows the key and
+            // the reference but not the writer; the live version is the reference's
+            // newest (TryFindNewestEntry), so the lookup starts after the reference's
+            // last version and reads backward.
             if (TryFindNewestEntry(
                 key.Encoded.Span,
                 entryReference,
-                EntryMatch.LiveVisible(entryReference, transaction.Snapshot),
+                EntryMatch.LiveOf(entryReference),
                 out long leafId,
                 out int index))
             {
@@ -1264,7 +1278,7 @@ public sealed class BTreeIndex
     private enum EntryMatchKind : byte
     {
         Live,
-        LiveVisible,
+        LiveOf,
         WrittenBy,
         DeletedBy,
     }
@@ -1278,48 +1292,45 @@ public sealed class BTreeIndex
         private readonly EntryMatchKind _kind;
         private readonly ulong _entryReference;
         private readonly ulong _stamp;
-        private readonly TransactionSnapshot? _snapshot;
 
-        private EntryMatch(EntryMatchKind kind, ulong entryReference, ulong stamp, TransactionSnapshot? snapshot)
+        private EntryMatch(EntryMatchKind kind, ulong entryReference, ulong stamp)
         {
             _kind = kind;
             _entryReference = entryReference;
             _stamp = stamp;
-            _snapshot = snapshot;
         }
 
         /// <summary>
         /// Any live entry (deleter stamp zero) — the unique check's latest-state test.
         /// </summary>
-        internal static EntryMatch Live => new(EntryMatchKind.Live, 0, 0, null);
+        internal static EntryMatch Live => new(EntryMatchKind.Live, 0, 0);
 
         /// <summary>
-        /// The live mapping to <paramref name="entryReference"/> whose writer
-        /// <paramref name="snapshot"/> sees — the entry a delete tombstones.
+        /// The live mapping to <paramref name="entryReference"/> (deleter stamp zero), whoever
+        /// wrote it — the entry a delete tombstones.
         /// </summary>
-        internal static EntryMatch LiveVisible(ulong entryReference, TransactionSnapshot snapshot)
-            => new(EntryMatchKind.LiveVisible, entryReference, 0, snapshot);
+        internal static EntryMatch LiveOf(ulong entryReference)
+            => new(EntryMatchKind.LiveOf, entryReference, 0);
 
         /// <summary>
         /// The mapping to <paramref name="entryReference"/> stamped by
         /// <paramref name="writer"/> — the entry an erase removes.
         /// </summary>
         internal static EntryMatch WrittenBy(ulong entryReference, ulong writer)
-            => new(EntryMatchKind.WrittenBy, entryReference, writer, null);
+            => new(EntryMatchKind.WrittenBy, entryReference, writer);
 
         /// <summary>
         /// The mapping to <paramref name="entryReference"/> tombstoned by
         /// <paramref name="deleter"/> — the entry a clear-deleter restores.
         /// </summary>
         internal static EntryMatch DeletedBy(ulong entryReference, ulong deleter)
-            => new(EntryMatchKind.DeletedBy, entryReference, deleter, null);
+            => new(EntryMatchKind.DeletedBy, entryReference, deleter);
 
         internal bool Accepts(in BTreeNode node, int index) => _kind switch
         {
             EntryMatchKind.Live => node.GetDeleter(index) == 0,
-            EntryMatchKind.LiveVisible => node.GetEntryReference(index) == _entryReference
-                && node.GetDeleter(index) == 0
-                && _snapshot!.IsVisible(new TransactionSequence(node.GetWriter(index))),
+            EntryMatchKind.LiveOf => node.GetEntryReference(index) == _entryReference
+                && node.GetDeleter(index) == 0,
             EntryMatchKind.WrittenBy => node.GetEntryReference(index) == _entryReference
                 && node.GetWriter(index) == _stamp,
             EntryMatchKind.DeletedBy => node.GetEntryReference(index) == _entryReference

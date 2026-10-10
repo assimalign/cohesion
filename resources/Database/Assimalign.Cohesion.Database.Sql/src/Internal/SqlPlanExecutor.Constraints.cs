@@ -309,6 +309,9 @@ internal sealed partial class SqlPlanExecutor
     //     table, which is the same guarantee at table grain.
     //
     // Ordinary parent visibility still uses the original statement snapshot below.
+    // A latest-state read can return a version newer than a snapshot fixed at the
+    // transaction's begin; a cascade that would delete one fails first-updater-wins
+    // instead (EnsureSnapshotSeesCascadeRow, #1370).
     private static TransactionSnapshot ConstraintCurrentSnapshot(SqlStatementContext statement)
         => new(statement.Transaction.Sequence, new TransactionSequence(ulong.MaxValue), new TransactionSequence(ulong.MaxValue), Array.Empty<TransactionSequence>());
 
@@ -547,10 +550,12 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Visits one row of a cascade: adds it to the deletion set, takes its
-    /// exclusive lock (and, the first time the walk reaches its table, the intent
-    /// locks on the tables around it), and collects the references deleting it
-    /// releases. Returns the frame that descends from it, or null when the row is
-    /// already in the deletion set.
+    /// exclusive lock, checks a child row against a snapshot fixed at the
+    /// transaction's begin (<see cref="EnsureSnapshotSeesCascadeRow"/>), takes
+    /// the intent locks on the tables around it the first time the walk reaches
+    /// its table, and collects the references deleting it releases. Returns the
+    /// frame that descends from it, or null when the row is already in the
+    /// deletion set.
     /// </summary>
     private async ValueTask<SqlCascadeFrame?> EnterCascadeRowAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location,
         object?[] values, SqlCatalogConstraint? arrivedBy, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
@@ -562,6 +567,14 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
+
+        // A child row was found in latest state, which can be newer than a snapshot fixed at the
+        // transaction's begin; a target of the statement itself was found through that snapshot.
+        if (arrivedBy is not null)
+        {
+            EnsureSnapshotSeesCascadeRow(table, location, statement);
+        }
+
         if (scannedTables.Add(table.ObjectId))
         {
             await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
@@ -583,6 +596,57 @@ internal sealed partial class SqlPlanExecutor
         }
 
         return new SqlCascadeFrame(table, values, incoming, lastCascade);
+    }
+
+    /// <summary>
+    /// The transaction-snapshot crosscheck of a cascade (#1370). Under a snapshot fixed at the
+    /// transaction's begin (<see cref="IsolationLevel.Snapshot"/> and
+    /// <see cref="IsolationLevel.Serializable"/>), a child row the walk reached in latest state
+    /// must be a version that snapshot sees. A version it does not see was written by a
+    /// transaction that committed after the snapshot: the parent row's exclusive lock waited for
+    /// every writer of a row referencing it, and an aborted writer's versions are undone before
+    /// its locks release. Deleting that version would overwrite an update the transaction never
+    /// saw, so the statement fails with the retryable write-write conflict, first-updater-wins,
+    /// before it writes anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// PostgreSQL makes the same decision. Its cascade runs with the latest snapshot and, in a
+    /// REPEATABLE READ or SERIALIZABLE transaction, the transaction snapshot as a crosscheck
+    /// (<c>src/backend/utils/adt/ri_triggers.c:1206-1211</c>, <c>:2810-2815</c>);
+    /// <c>heap_delete</c> reports a row the crosscheck does not see as updated
+    /// (<c>src/backend/access/heap/heapam.c:2970-2975</c>), and <c>ExecDelete</c> raises that as
+    /// a serialization failure, "could not serialize access due to concurrent update"
+    /// (<c>src/backend/executor/nodeModifyTable.c:1735-1738</c>). A child inserted after the
+    /// snapshot fails the same way. Under <see cref="IsolationLevel.ReadCommitted"/> the
+    /// statement reads through a snapshot of its own and the walk deletes the latest version, as
+    /// PostgreSQL's read-committed cascade does.
+    /// </para>
+    /// <para>
+    /// Until #1370 the walk deleted the newer version anyway and removed its index entries
+    /// through the transaction's snapshot, which does not see it: the index delete matched
+    /// nothing, and the deleted child's unique entry stayed live, so its key could never be
+    /// inserted again.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The child row's table.</param>
+    /// <param name="location">The child row's location, exclusively locked by the statement.</param>
+    /// <param name="statement">The executing statement.</param>
+    /// <exception cref="TransactionAbortedException">The child version is newer than the transaction's snapshot.</exception>
+    private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement)
+    {
+        if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
+        {
+            return;
+        }
+
+        var (writer, _) = ReadVersionStamps(table, location.PageId, location.SlotIndex);
+        if (!statement.Snapshot.IsVisible(writer))
+        {
+            throw new TransactionAbortedException(
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version written by transaction {writer}, " +
+                "which committed after this transaction's snapshot (first-updater-wins). Retry the transaction.");
+        }
     }
 
     /// <summary>

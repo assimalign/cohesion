@@ -199,7 +199,7 @@ knows:
 |---|---|---|
 | Insert, build path (`InsertVersionAsync`) | `(key, reference, writer)` | one descent |
 | Erase (logical undo of an insert) | `(key, reference, writer)` | one descent |
-| Delete — the live version the snapshot sees | `(key, reference, +inf)`, read backward | one descent: the reference's newest version |
+| Delete — the reference's live version | `(key, reference, +inf)`, read backward | one descent: the reference's newest version |
 | Clear-deleter (logical undo of a tombstone) | `(key, reference, +inf)`, read backward | one descent: the reference's newest version |
 | Equality and inclusive range seek | `(key, -inf)` | one descent, then the range's entries |
 | Exclusive range start | `(key, +inf)` | one descent, then the range's entries |
@@ -232,6 +232,25 @@ the older versions too, so the result never depends on the invariant, only the c
 does. Splits and root growth always maintained the previous-leaf links, but no
 lookup followed them before; the randomized and recovery suites now check, page by
 page, that they mirror the next-leaf links.
+
+**Delete matches by stamps, not by the caller's snapshot (#1370).** Delete tombstones
+the reference's live entry (deleter stamp zero), whoever wrote it. The caller holds a
+write lock that excludes every other writer of the record version the reference
+names (Sql's row lock, KeyValuePair's key lock, the Documents and Graph database
+writer lock) and has checked that version's stamps under it, so the live entry's
+writer is decided, committed or the caller itself, and the entry is that version's.
+Until #1370 the match also required the caller's snapshot to see the entry's writer.
+That added nothing a lock did not already give, and it failed silently: a write that
+deletes a version newer than its snapshot (a Sql cascade at `Snapshot` isolation,
+which reads child rows in latest state) matched nothing, the record was tombstoned
+with its entry still live, and a unique index then refused every later insert of the
+key. The cascade now fails first-updater-wins before it reaches such a version
+(`Database.Sql` DESIGN.md, "Cascades under a fixed snapshot"), and the match no longer
+depends on a snapshot, which also spares a read-committed caller the snapshot capture
+its context made on every access. PostgreSQL's B-tree has no delete that a snapshot
+decides either: a row's delete is decided on the heap tuple under its lock, and its
+index tuples leave the tree later, through VACUUM or simple deletion of tuples known
+dead (`src/backend/access/nbtree/README:166`, `:510`).
 
 The unique check is the one lookup still linear in a key's history. It must prove
 no live version exists among the key's versions, and a live version can sit

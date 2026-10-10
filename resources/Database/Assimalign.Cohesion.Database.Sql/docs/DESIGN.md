@@ -1695,7 +1695,11 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   tombstoned by a concurrently *committed* transaction fails the statement
   with the retryable conflict — **first-updater-wins**; under `ReadCommitted`
   this is deliberately stricter than PostgreSQL's re-evaluation (the statement
-  aborts rather than re-targeting the new version — retry is the policy).
+  aborts rather than re-targeting the new version — retry is the policy). A
+  cascade finds its child rows in latest state, not through the snapshot, so
+  under `Snapshot` (and `Serializable`) a cascade that reaches a child version
+  newer than the transaction's snapshot fails the same way
+  ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)).
   **Why the apply gate and not concurrent appliers with page-conflict retry
   (the recorded page-conflict fallback decision):** page locks release at
   statement end either way, so the gate costs only intra-database physical
@@ -2494,7 +2498,10 @@ false result; SQL unknown/null passes. Foreign keys with null components are
 not checked (MATCH SIMPLE). A non-null child key needs a parent visible through
 the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` collects the
 transitive closure of child deletions into the same statement apply bracket (see
-[The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion) below). Parent key
+[The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion) below); under a
+snapshot fixed at the transaction's begin, every child version in that closure must
+be one the snapshot sees
+([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)). Parent key
 updates are restricted while referenced. `ON UPDATE` is unsupported and returns
 `COHDBL001`.
 
@@ -2651,6 +2658,67 @@ back completely inside `BEGIN`, closes into a ring that deletes once, and still
 fails whole on a `RESTRICT` reference at its far end; and a cascading reference
 that follows a chain's self-reference is still walked for every row whose key is
 not null (`Delete_ChainWithTrailingReferences_ShouldWalkEveryCascadingReference`).
+
+### Cascades under a fixed snapshot (#1370)
+
+A cascade reads a parent row's children in latest state once it holds the parent row's
+exclusive lock (the referential-locking rule above), so it can reach a child version a
+writer committed while the statement waited for that lock: a writer that updated the child
+row, or inserted another child, held `Shared` on the parent row until it committed. Under
+`ReadCommitted` that version is the statement's to delete, because the statement reads through
+a snapshot of its own, and PostgreSQL's read-committed cascade deletes the latest version
+too. Under `Snapshot` and `Serializable` the transaction's snapshot is fixed at begin and does
+not see that version. Deleting it would remove a row version the transaction never read and
+overwrite a concurrent update, which is the write-write conflict first-updater-wins refuses.
+
+**The rule.** The walk takes each child row's exclusive lock and then, when the transaction's
+snapshot is fixed, reads the version's writer stamp (`EnsureSnapshotSeesCascadeRow`). A writer
+the snapshot does not see fails the statement with the retryable `TransactionAbortedException`
+("Write-write conflict on 'dbo.c': ON DELETE CASCADE reached a row version written by
+transaction N, which committed after this transaction's snapshot (first-updater-wins). Retry
+the transaction."), which the session surfaces as `DatabaseTransactionAbortedException`. The
+walk runs in phase one, before the apply bracket opens, so the failed statement wrote nothing:
+an explicit transaction stays active, and an auto-commit statement rolls back. The writer is
+always decided by then: the parent row's lock waited for it, and an aborted writer's versions
+are undone before its locks release. A version the transaction wrote itself is visible to its
+own snapshot, so a transaction that inserts children and then deletes their parent still
+cascades. The rows a statement targets directly were found through its snapshot and need no
+check.
+
+**Why a conflict, not a re-read.** PostgreSQL decides the same way. Its cascade asks
+`ri_PerformCheck` to detect new rows, which in a REPEATABLE READ or SERIALIZABLE transaction
+runs the delete with the latest snapshot and the transaction snapshot as a crosscheck
+(`src/backend/utils/adt/ri_triggers.c:1206-1211`, `:2810-2815`). `heap_delete` reports a row
+the crosscheck does not see as updated (`src/backend/access/heap/heapam.c:2970-2975`), and
+`ExecDelete` raises that as `ERRCODE_T_R_SERIALIZATION_FAILURE`, "could not serialize access
+due to concurrent update" (`src/backend/executor/nodeModifyTable.c:1735-1738`). A child
+inserted after the snapshot fails that crosscheck too, and fails here. The engine's policy is
+already first-updater-wins with retry, so the cascade reuses that conflict rather than adding
+a serialization-failure kind. Auto-commit runs at `Snapshot`, the session default, so an
+auto-commit `DELETE` whose cascade waited for a child writer that began before it fails with
+the conflict as well, where PostgreSQL's auto-commit default, READ COMMITTED, would delete the
+new version.
+
+**The defect it closes.** Until #1370 the cascade deleted the newer version anyway. The apply
+removed its index entries through `BTreeIndex.DeleteAsync`, which matched each entry through
+the transaction's snapshot. That snapshot does not see the version's writer, so the delete
+matched nothing: the row was tombstoned with its primary-key entry still live, and every later
+insert of the child's key failed as a `UNIQUE` violation. The read-committed form of the same
+defect was the first cut of #1363
+([Read-committed statement pins](#read-committed-statement-pins-1363)). The index side is
+closed too: `DeleteAsync` tombstones the reference's live entry by its stamps, whoever wrote
+it, because the caller's write lock decides which version it deletes, not its snapshot
+(`Database.Indexing` DESIGN.md, "Lookups descend to their entry"). With the conflict in place
+the Sql model no longer deletes a version its snapshot does not see, so the index rule is the
+backstop for any write path that deletes a version it found in latest state.
+
+`SqlCascadeSnapshotConflictTests` is the regression guard. At `Snapshot`, the #1363 repro and a
+concurrent child insert, in an explicit transaction and in auto-commit, fail first-updater-wins,
+leave the parent, every child and the child's primary-key entry live, and succeed on retry,
+after which the deleted keys can be inserted again. The read-committed form deletes the new
+versions; a `Serializable` context the coordinator begins fails like `Snapshot` (the session
+refuses a `Serializable` BEGIN); and a cascade with no concurrent writer deletes a two-level
+closure, children the transaction inserted itself included, at all three levels.
 
 ## Persisted definitions: canonical text, parsed once
 
@@ -3065,16 +3133,18 @@ context, never a `TransactionContext.PinStatementSnapshot` view. Phase two reads
 that context's snapshot afresh where a write waited for a lock. A cascade that
 waited for a child row's writer reaches the child version that writer committed
 (the latest-state constraint read) and removes its index entries through
-`BTreeIndex.DeleteAsync`, which matches the entry by the context's snapshot. The
-first cut of #1363 handed the statement a pinned view as its transaction, so that
-match ran through the statement's older snapshot, found nothing, and left the
-deleted child's primary-key entry live: the child's key could never be inserted
-again. `SqlReadCommittedSnapshotPinTests` pins that case
+`BTreeIndex.DeleteAsync`, which matched the entry through the context's snapshot
+until #1370. The first cut of #1363 handed the statement a pinned view as its
+transaction, so that match ran through the statement's older snapshot, found
+nothing, and left the deleted child's primary-key entry live: the child's key could
+never be inserted again. `SqlReadCommittedSnapshotPinTests` pins that case
 (`Cascade_WaitsForAChildWriter_ShouldRemoveTheChildsIndexEntries`). The same
-cascade at `Snapshot` isolation still leaves the entry live, because the
-transaction's snapshot is fixed there too; that is older than #1363 and tracked
-separately (a first-updater-wins conflict, or an index delete that matches by key,
-reference and liveness once the row's exclusive lock is held).
+cascade at `Snapshot` isolation left the entry live too, because the transaction's
+snapshot is fixed there; that was older than #1363. #1370 closed it on both sides:
+the cascade fails first-updater-wins before it deletes a version newer than a fixed
+snapshot, and the index delete matches the reference's live entry by its stamps, so
+no snapshot decides it
+([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)).
 
 The probe that found it ran one statement per read-committed transaction from four
 readers (a scan, an index seek, an index join and a nested-loop join over 120 rows
