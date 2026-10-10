@@ -16,8 +16,10 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// HTTP-version</c> (RFC 9112 §3), so every octet in it is a VCHAR or SP. The line used to be decoded
 /// as ASCII, which turned an octet above 0x7F into <c>?</c>: <c>GET /admin\xFFx</c> was routed as the
 /// path <c>/admin</c> with the query <c>x</c>, while an intermediary that forwards the raw octets saw
-/// another path. Any other octet is now answered with 400 and the connection closes. Each request
-/// below has a second one pipelined behind it, which must never be served.
+/// another path. Any other octet is now answered with 400 and the connection closes. So is a method that
+/// is not a token, and a method longer than the 32 characters <see cref="HttpMethod"/> holds is answered
+/// with 501 (RFC 9112 §3). Each refused request below has a second one pipelined behind it, which must
+/// never be served.
 /// </summary>
 public class Http1RequestLineTests
 {
@@ -45,6 +47,61 @@ public class Http1RequestLineTests
         result.Paths.ShouldBeEmpty();
         result.Output.ShouldStartWith("HTTP/1.1 400");
         result.Output.ShouldContain("Connection: close");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Request Line: A method that is not a token should be answered with 400 and close the connection")]
+    [InlineData("G@T")]
+    [InlineData("GE\"T")]
+    [InlineData("G(T)")]
+    [InlineData("GET,POST")]
+    public async Task ReceiveAsync_OnMethodThatIsNotAToken_ShouldAnswerBadRequestAndClose(string method)
+    {
+        // Arrange — RFC 9112 §3 / RFC 9110 §9.1: a method is a token. Each of these is VCHAR, so the octet
+        // check lets it through, and HttpMethod.GetCanonicalizedValue used to throw ArgumentException out of
+        // the receive enumeration instead of answering.
+        byte[] payload = Encoding.Latin1.GetBytes(
+            $"{method} / HTTP/1.1\r\nHost: api.test\r\n\r\n"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert
+        result.Paths.ShouldBeEmpty();
+        result.Output.ShouldStartWith("HTTP/1.1 400");
+        result.Output.ShouldContain("Connection: close");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Request Line: A method longer than 32 characters should be answered with 501 and close the connection")]
+    public async Task ReceiveAsync_OnMethodLongerThan32Characters_ShouldAnswerNotImplementedAndClose()
+    {
+        // Arrange — RFC 9112 §3: a server that receives a method longer than any it implements SHOULD answer
+        // 501. HttpMethod holds at most 32 characters.
+        byte[] payload = Encoding.Latin1.GetBytes(
+            $"{new string('M', 33)} / HTTP/1.1\r\nHost: api.test\r\n\r\n"
+            + "GET /next HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert
+        result.Paths.ShouldBeEmpty();
+        result.Output.ShouldStartWith("HTTP/1.1 501");
+        result.Output.ShouldContain("Connection: close");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Request Line: An extension method of 32 characters should be served")]
+    public async Task ReceiveAsync_OnExtensionMethodOf32Characters_ShouldServeIt()
+    {
+        // Arrange — the longest method HttpMethod carries.
+        byte[] payload = Encoding.Latin1.GetBytes($"{new string('M', 32)} /extension HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        // Act
+        Served result = await ServeAsync(payload);
+
+        // Assert
+        result.Paths.ShouldBe(["/extension"]);
+        result.Output.ShouldStartWith("HTTP/1.1 200");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Request Line: A request line of VCHAR and SP should be served with its path and query intact")]

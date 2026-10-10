@@ -322,9 +322,10 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         catch (Http1LimitExceededException rejection)
         {
             // RFC 9110 §15.5 — a request whose head violates a configured limit gets the matching
-            // status response (414 / 431) before the connection is closed, rather than a silent
-            // drop, so a conformant client learns why. Body-size (413) and data-rate (408)
-            // violations surface after dispatch on the streamed body read, not here.
+            // status response (414 / 431, or 501 for a method longer than any the server implements,
+            // RFC 9112 §3) before the connection is closed, rather than a silent drop, so a conformant
+            // client learns why. Body-size (413) and data-rate (408) violations surface after dispatch on
+            // the streamed body read, not here.
             await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
             return null;
         }

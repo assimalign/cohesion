@@ -325,11 +325,21 @@ public static class HttpFieldNormalization
     /// host and port to connect to in <c>:authority</c> and neither
     /// <c>:scheme</c> nor <c>:path</c> (RFC 9113 §8.5, RFC 9114 §4.4), a
     /// <c>:path</c> of <c>*</c> is valid only for <c>OPTIONS</c> (RFC 9110 §7.1,
-    /// RFC 9113 §8.3.1, RFC 9114 §4.3.1), and the target and host hold only
-    /// visible US-ASCII. Returns a description of the violation, or
-    /// <see langword="null"/> when the target is well-formed.
+    /// RFC 9113 §8.3.1, RFC 9114 §4.3.1), the target and host hold only
+    /// visible US-ASCII, and the <c>:method</c> is a token that
+    /// <see cref="HttpMethod"/> can hold. Returns a description of the
+    /// violation, or <see langword="null"/> when the request is well-formed.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The <c>:method</c> is a token (RFC 9110 §9.1) of at most 32 characters,
+    /// the longest <see cref="HttpMethod"/> holds. A request whose method passes
+    /// this rule can always be built with
+    /// <see cref="HttpMethod.GetCanonicalizedValue(string)"/>, which throws
+    /// for any other value. HTTP/1.1 applies the same two limits to its request
+    /// line, answering a method that is not a token with <c>400</c> and one
+    /// longer than 32 characters with <c>501</c> (RFC 9112 §3).
+    /// </para>
     /// <para>
     /// The rule matches what HTTP/1.1 enforces through
     /// <see cref="HttpRequestTarget.TryParse(ReadOnlySpan{char}, HttpMethod, out HttpRequestTarget, out string?)"/>,
@@ -371,12 +381,31 @@ public static class HttpFieldNormalization
     /// </param>
     /// <returns>
     /// A human-readable violation message, or <see langword="null"/> when valid.
-    /// Callers raise their own protocol-appropriate error from the message.
+    /// Callers raise their own protocol-appropriate error from the message. The
+    /// message names the rule and never quotes a value the peer sent.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="headers"/> is <see langword="null"/>.</exception>
     public static string? ValidateRequestTarget(string? method, string? scheme, string? path, string? authority, string? protocol, IHttpHeaderCollection headers)
     {
         ArgumentNullException.ThrowIfNull(headers);
+
+        // RFC 9110 §9.1 — a method is a token, and HttpMethod holds at most 32 characters of one. Either
+        // failure used to throw ArgumentException from HttpMethod.GetCanonicalizedValue past the transports'
+        // stream errors: HTTP/2 dropped the whole connection without a GOAWAY, and HTTP/3 faulted its receive
+        // enumeration. A request the server cannot represent is refused here, on its own stream. The value is
+        // not echoed: it came from the peer.
+        if (method is not null)
+        {
+            if (!IsValidFieldName(method))
+            {
+                return "The ':method' pseudo-header is not a method token (RFC 9110 §9.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).";
+            }
+
+            if (method.Length > HttpMethod.MaximumLength)
+            {
+                return $"The ':method' pseudo-header is longer than the {HttpMethod.MaximumLength} characters of any method this server implements (RFC 9112 §3).";
+            }
+        }
 
         // RFC 3986 §3.2 / RFC 9110 §7.2 — an authority is uri-host [":" port], every octet a VCHAR. obs-text
         // is a field-value octet (RFC 9110 §5.5), which HPACK and QPACK keep (#1387), but HTTP/1.1 refuses
@@ -450,9 +479,11 @@ public static class HttpFieldNormalization
         }
 
         // RFC 9113 §8.5 — :authority is the authority-form of HTTP/1.1's CONNECT target (RFC 9112 §3.2.3).
-        if (!HttpRequestTarget.TryParse(authority, HttpMethod.Connect, out _, out string? error))
+        // The parser's own message quotes the port it rejected, so it is not appended: the violation names
+        // the rule and never the peer's text, as every other violation here does.
+        if (!HttpRequestTarget.TryParse(authority, HttpMethod.Connect, out _, out _))
         {
-            return $"The ':authority' of a CONNECT request MUST be the host and port to connect to (RFC 9113 §8.5, RFC 9114 §4.4): {error}";
+            return "The ':authority' of a CONNECT request MUST be the host and port to connect to, host:port (RFC 9113 §8.5, RFC 9114 §4.4).";
         }
 
         return null;

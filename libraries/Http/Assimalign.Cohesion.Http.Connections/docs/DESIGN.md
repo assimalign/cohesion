@@ -2291,6 +2291,7 @@ Whether the pseudo-header fields make a complete request is judged afterwards, b
 | A `:path` that is present is not empty (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:method` is present (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:scheme` and `:path` are present (§8.3.1) | every request but a classic CONNECT (§8.5) | stream `PROTOCOL_ERROR` |
+| `:method` is a token (RFC 9110 §9.1) of at most the 32 characters `HttpMethod` holds (#1334) | every request | stream `PROTOCOL_ERROR` |
 | `:path`, `:authority`, and every `host` value hold only VCHAR (RFC 3986 §2, RFC 9110 §7.2, #1387) | every request | stream `PROTOCOL_ERROR` |
 | `:authority` is `host:port` and `:scheme` and `:path` are absent (§8.5, #1334) | a classic CONNECT | stream `PROTOCOL_ERROR` |
 | A `:path` that starts with `*` is exactly `*`, and the method is `OPTIONS` (§8.3.1, RFC 9110 §7.1, #1334) | every request | stream `PROTOCOL_ERROR` |
@@ -2315,7 +2316,37 @@ checks. It holds a classic CONNECT's `:authority` to the authority-form HTTP/1.1
 accept the same targets. Until #1334 a CONNECT without `:authority` reached the application with
 a host taken from `Host`, or none; a CONNECT with `:scheme` or `:path` reached it as an ordinary
 request; and `GET *`, or a `:path` such as `*foo` on any method, reached routing, because
-`HttpPath` accepts any value that starts with `*`. HTTP/1.1 had refused all of them.
+`HttpPath` accepts any value that starts with `*`. HTTP/1.1 had refused all of them. A violation
+names the rule and never quotes the peer's text: the CONNECT check no longer appends
+`HttpRequestTarget.TryParse`'s message, which quotes the port it rejected.
+
+The same rule holds `:method` to what `HttpMethod` can represent: a token (RFC 9110 §9.1) of at
+most 32 characters. `HttpMethod.GetCanonicalizedValue` throws `ArgumentException` for anything
+else, and nothing on the request path expected it. On HTTP/2 it reached the frame pump's
+last-resort handler, which dropped the connection without a `GOAWAY` and with it every stream it
+carried. On HTTP/3 it escaped the stream's `H3_MESSAGE_ERROR` mapping, reset the stream with
+`H3_INTERNAL_ERROR`, and faulted the connection's receive enumeration. `G T`, `GET\xE9` (obs-text,
+which HPACK and QPACK keep), an empty `:method`, and a 33-character token are now malformed
+requests, and only their stream is reset. A method longer than 32 characters is no syntax error,
+but the server can neither represent nor implement it, and HTTP/2 has no way to answer a request
+with a status before it becomes an exchange, so both versions refuse it as malformed. HTTP/1.1
+gets the same two limits in `Http1MessageReader`, which used to throw the same exception out of
+`ReceiveAsync`: a method that is not a token (a VCHAR such as `@`, `(` or `,` passes the
+request-line octet check) is answered with `400`, and one longer than 32 characters with `501`,
+the status RFC 9112 §3 gives a method longer than any the server implements.
+
+**Behavior changes (#1334).** Accepted on decision 15's terms:
+
+- *Observable by clients.* HTTP/2 and HTTP/3 now reset requests they used to dispatch: `GET *`,
+  a `:path` such as `*foo` or `*?x` on any method, a classic CONNECT that carries `:scheme` or
+  `:path`, and a classic CONNECT whose `:authority` is absent or is not `host:port`. HTTP/1.1
+  already refused all of them.
+- *Observable by clients.* A `:method` that is not a token or is longer than 32 characters resets
+  its HTTP/2 or HTTP/3 stream instead of ending the connection or faulting the receive
+  enumeration. On HTTP/1.1 it is answered with `400` or `501` instead of throwing out of
+  `ReceiveAsync`.
+- *Public API.* `HttpFieldNormalization.ValidateRequestTarget` is a new public member of the core
+  `Assimalign.Cohesion.Http` package.
 
 ## HTTP/2 abuse limits
 
@@ -4340,7 +4371,9 @@ rules:
   `:path` that starts with `*` is exactly `*` on an OPTIONS request (the shared
   `HttpFieldNormalization.ValidateRequestTarget`; see "HTTP/2 request heads").
   The same rule holds `:path`, `:authority`, and every `Host` value to VCHAR
-  (#1387), since QPACK decodes obs-text faithfully.
+  (#1387), since QPACK decodes obs-text faithfully, and `:method` to a token
+  of at most the 32 characters `HttpMethod` holds; until then such a method
+  escaped as `ArgumentException` and faulted the receive enumeration.
 - **Path.** The `:path` must percent-decode to a legal path (see
   "Request-target percent-decoding (h1/h2/h3 parity)"): a decoded space,
   control character, `?`, `#`, or NUL, an illegal literal character, or a

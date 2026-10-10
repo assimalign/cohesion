@@ -26,7 +26,9 @@ namespace Assimalign.Cohesion.Http;
 [DebuggerDisplay("{Value}")]
 public readonly struct HttpMethod : IEquatable<HttpMethod>
 {
-    private const int MaximumLength = 32;
+    // HttpFieldNormalization.ValidateRequestTarget refuses a :method longer than this before the transports
+    // build the method, so a peer's over-long token is a malformed request rather than a thrown exception.
+    internal const int MaximumLength = 32;
     private static readonly SearchValues<char> _allowedCharacters = SearchValues.Create("!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
 
     /// <summary>

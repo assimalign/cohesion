@@ -107,7 +107,32 @@ internal static class Http1MessageReader
             throw new InvalidDataException($"The HTTP version '{requestLineParts[2]}' is not supported by the HTTP/1.1 transport.");
         }
 
-        HttpMethod method = HttpMethod.GetCanonicalizedValue(requestLineParts[0]);
+        // RFC 9112 §3 / RFC 9110 §9.1 — the method is a token. A VCHAR such as '@', '(' or ',' passes the
+        // octet check above but is no tchar, and HttpMethod.GetCanonicalizedValue used to throw
+        // ArgumentException for it out of the receive enumeration instead of answering. HTTP/2 and HTTP/3
+        // refuse the same :method through HttpFieldNormalization.ValidateRequestTarget. The method is not
+        // echoed: it came from the peer.
+        string methodToken = requestLineParts[0];
+        if (!HttpFieldNormalization.IsValidFieldName(methodToken))
+        {
+            throw new Http1BadRequestException("RFC 9112 §3: the request method is not a token (RFC 9110 §9.1).");
+        }
+
+        HttpMethod method;
+        try
+        {
+            method = HttpMethod.GetCanonicalizedValue(methodToken);
+        }
+        catch (ArgumentException)
+        {
+            // A non-empty token is refused only when it is longer than the 32 characters HttpMethod holds.
+            // RFC 9112 §3 — a server that receives a method longer than any that it implements SHOULD
+            // respond with 501 (Not Implemented).
+            throw new Http1LimitExceededException(
+                HttpStatusCode.NotImplemented,
+                "RFC 9112 §3: the request method is longer than any method this server implements.");
+        }
+
         // RFC 9112 §3.2 — parse the request-target into one of the four canonical forms
         // (origin / absolute / authority / asterisk) with method/form pairing enforcement.
         if (!HttpRequestTarget.TryParse(requestLineParts[1], method, out HttpRequestTarget target, out string? targetError))

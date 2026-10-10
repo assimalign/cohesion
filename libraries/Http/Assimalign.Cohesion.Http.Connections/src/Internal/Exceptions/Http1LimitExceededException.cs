@@ -5,8 +5,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <summary>
 /// Raised by the HTTP/1.1 read path when a request violates a configured
 /// <see cref="Http1ConnectionListenerOptions.Http1Limits"/> bound (request-line size, header count / total size, or body
-/// size). Carries the HTTP status code the transport emits to the peer before closing the
-/// connection (414 / 431 / 413).
+/// size), or the one bound the server fixes itself: a method longer than the 32 characters
+/// <see cref="HttpMethod"/> holds (RFC 9112 §3). Carries the HTTP status code the transport emits to
+/// the peer before closing the connection (414 / 431 / 413, or 501 for the method).
 /// </summary>
 /// <remarks>
 /// Derives from <see cref="IOException"/> (<see cref="InvalidDataException"/> is sealed) so that

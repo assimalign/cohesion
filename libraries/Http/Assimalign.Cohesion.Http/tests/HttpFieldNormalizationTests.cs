@@ -194,6 +194,79 @@ public class HttpFieldNormalizationTests
         violation.ShouldBeNull();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A CONNECT :authority that is not host:port should be refused without quoting the peer's text")]
+    [InlineData("upstream.test:44x3", "44x3")]
+    [InlineData("upstream.test:<script>", "<script>")]
+    [InlineData("[::1]:8x", "8x")]
+    public void ValidateRequestTarget_OnMalformedConnectAuthority_ShouldNotQuoteThePeerText(string authority, string peerText)
+    {
+        // Arrange — the violation reaches a stream error's message and from there the logs, so it names the
+        // rule and never the attacker-chosen value, as the other request-target violations do.
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", null, null, authority, protocol: null, new HttpHeaderCollection());
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain("host and port");
+        violation.ShouldNotContain(peerText);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A :method that is not a token is not a valid request")]
+    [InlineData("G T")]
+    [InlineData("GETé")]
+    [InlineData("G@T")]
+    [InlineData("GET\u0085")]
+    public void ValidateRequestTarget_OnMethodThatIsNotAToken_ShouldReturnViolation(string method)
+    {
+        // Arrange — RFC 9110 §9.1: a method is a token. HttpMethod refuses anything else by throwing, which
+        // the transports did not expect from a request head.
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, "https", "/", "api.test", protocol: null, new HttpHeaderCollection());
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain("':method'");
+        violation.ShouldNotContain(method);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: An empty :method is not a valid request")]
+    public void ValidateRequestTarget_OnEmptyMethod_ShouldReturnViolation()
+    {
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(string.Empty, "https", "/", "api.test", protocol: null, new HttpHeaderCollection());
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain("':method'");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A :method longer than HttpMethod carries is refused, and one of 32 characters is not")]
+    [InlineData(32, false)]
+    [InlineData(33, true)]
+    [InlineData(4096, true)]
+    public void ValidateRequestTarget_OnMethodLength_ShouldRefuseOnlyWhatHttpMethodCannotCarry(int length, bool refused)
+    {
+        // Arrange — HttpMethod holds at most 32 characters; GetCanonicalizedValue throws past that.
+        string method = new('M', length);
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, "https", "/", "api.test", protocol: null, new HttpHeaderCollection());
+
+        // Assert
+        if (refused)
+        {
+            violation.ShouldNotBeNull();
+            violation.ShouldContain("':method'");
+        }
+        else
+        {
+            violation.ShouldBeNull();
+            HttpMethod.GetCanonicalizedValue(method).Value.ShouldBe(method);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Asterisk-form is exactly '*' and only for OPTIONS")]
     [InlineData("GET", "*")]
     [InlineData("CONNECT", "*")]

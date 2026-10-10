@@ -223,8 +223,13 @@ quirks.
   (RFC 9110 §7.1, #1334). `:path`, `:authority`, and every `Host` value hold
   only VCHAR, as HTTP/1.1 holds its request line and `Host` (#1341, #1387):
   HPACK and QPACK decode obs-text as Latin-1, which an ordinary value may
-  carry but no request target or host does. Both return a violation message
-  rather than throw, so HTTP/2 resets the stream with `PROTOCOL_ERROR` and
+  carry but no request target or host does. `ValidateRequestTarget` also
+  holds `:method` to what `HttpMethod` can represent, a token (RFC 9110
+  §9.1) of at most 32 characters (`HttpMethod.MaximumLength`, internal), so
+  a request that passes can always be built with
+  `HttpMethod.GetCanonicalizedValue`, which throws for anything else. Both
+  return a violation message rather than throw, and the message never
+  quotes the peer's text, so HTTP/2 resets the stream with `PROTOCOL_ERROR` and
   HTTP/3 with `H3_MESSAGE_ERROR`. `ValidateRequestTarget` reuses
   `HttpRequestTarget.TryParse` for the authority-form, so HTTP/1.1, which
   parses its request line through the same type, accepts the same CONNECT and

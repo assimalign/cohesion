@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -21,7 +22,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// RFC 8441 §4), and a request that breaks the extended CONNECT rules — an empty <c>:protocol</c>,
 /// a <c>:protocol</c> on another method, an extended CONNECT missing a pseudo-header — is malformed
 /// in the same way. So is a classic CONNECT without a host and port in <c>:authority</c> or with a
-/// <c>:scheme</c> or <c>:path</c>, and an asterisk-form <c>:path</c> outside OPTIONS (#1334).
+/// <c>:scheme</c> or <c>:path</c>, and an asterisk-form <c>:path</c> outside OPTIONS (#1334), and so is a
+/// <c>:method</c> that is not a token or is longer than the 32 characters <see cref="HttpMethod"/> holds.
 /// </summary>
 public class Http2RequestPseudoHeaderTests
 {
@@ -220,6 +222,52 @@ public class Http2RequestPseudoHeaderTests
         await AssertResetBeforeDispatchAsync(peer, next);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A :method that is not a token, or is longer than 32 characters, should reset only its stream")]
+    [InlineData("G T")]
+    [InlineData("GETé")]
+    [InlineData("G@T")]
+    [InlineData("")]
+    [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFG")]
+    public async Task ReceiveAsync_OnMethodThatHttpMethodCannotCarry_ShouldResetStreamWithProtocolError(string method)
+    {
+        // Arrange — RFC 9110 §9.1: a method is a token, and HttpMethod holds at most 32 characters. Such a
+        // :method once threw ArgumentException out of HttpMethod.GetCanonicalizedValue, which the frame
+        // pump's last-resort handler answered by dropping the whole connection without a GOAWAY. The value
+        // is written as Latin-1, as HPACK carries it (#1387).
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        byte[] block = HPackTestEncoder.Block(
+            Latin1Literal(":method", method),
+            HPackTestEncoder.Literal(":scheme", "https"),
+            HPackTestEncoder.Literal(":path", "/malformed"),
+            HPackTestEncoder.Literal(":authority", "api.test"));
+
+        // Act
+        await peer.SendAsync(HPackTestEncoder.HeadersFrame(1, endStream: true, block));
+        await peer.SendHeadersAsync(3, endStream: true, Http2TestPeer.Get("/next"));
+        IHttpContext next = await peer.ReceiveContextAsync();
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: An extension method of 32 characters should be dispatched")]
+    public async Task ReceiveAsync_OnExtensionMethodOf32Characters_ShouldDispatchRequest()
+    {
+        // Arrange — the longest method HttpMethod carries.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        string method = new('M', 32);
+
+        // Act
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Request(method, "/extension"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+
+        // Assert
+        exchange.Request.Method.Value.ShouldBe(method);
+        peer.Output.Frames.ShouldNotContain(frame => frame.IsRstStream || frame.IsGoAway);
+
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A valid extended CONNECT should still be dispatched")]
     public async Task ReceiveAsync_OnExtendedConnect_ShouldDispatchRequest()
     {
@@ -266,5 +314,22 @@ public class Http2RequestPseudoHeaderTests
         peer.Output.Frames.ShouldNotContain(frame => frame.IsGoAway);
 
         await peer.ConnectionContext.SendAsync(next).AsTask().WaitAsync(_timeout);
+    }
+
+    /// <summary>
+    /// An HPACK Literal Header Field without Indexing and with a literal name (RFC 7541 §6.2.2), each
+    /// string's octets its Latin-1 encoding, so a character in <c>0x80</c>–<c>0xFF</c> reaches the wire as
+    /// the octet of the same value.
+    /// </summary>
+    private static byte[] Latin1Literal(string name, string value)
+    {
+        byte[] nameOctets = Encoding.Latin1.GetBytes(name);
+        byte[] valueOctets = Encoding.Latin1.GetBytes(value);
+
+        // One-octet length prefixes: every string here is shorter than 127 octets.
+        nameOctets.Length.ShouldBeLessThan(127);
+        valueOctets.Length.ShouldBeLessThan(127);
+
+        return [0x00, (byte)nameOctets.Length, .. nameOctets, (byte)valueOctets.Length, .. valueOctets];
     }
 }
