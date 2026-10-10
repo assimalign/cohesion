@@ -1,6 +1,9 @@
 using System;
+using System.Runtime.CompilerServices;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -76,9 +79,82 @@ public abstract class SqlAggregateAccumulator
     }
 
     /// <summary>
-    /// Adds a row the strict rule admits: the one <see cref="AddCore"/> call, its failure coded. The
-    /// engine calls it directly for a one-argument aggregate, having skipped a NULL row itself.
+    /// The engine's addition of a row of a one-argument aggregate call, its argument as the row holds
+    /// it, evaluated once and admitted by the strict rule: converted to a <see cref="SqlValue"/> of
+    /// its parameter's type, and the one <see cref="AddCore"/> call, its failure coded, as
+    /// <see cref="Add"/> does.
     /// </summary>
+    /// <remarks>
+    /// The shape of every standard-library aggregate but <c>COUNT(*)</c> and the most common
+    /// application one, so the conversion and the call share one frame, which holds the one value
+    /// and the call's arguments and no buffer of four values for the prologue to clear. A value
+    /// that has its parameter's type already, as a column of that type always does, is not passed
+    /// through the conversion; an integer that does not fit its parameter is coded as the evaluator
+    /// codes one (<c>COHSQLE002</c>), not as a failure of the function.
+    /// </remarks>
+    /// <param name="value">The argument as the row holds it.</param>
+    /// <param name="target">The storage type the argument converts to; <see cref="DatabaseType.Null"/> for a pseudo-type parameter.</param>
+    /// <param name="database">The database whose statement runs the aggregate.</param>
+    /// <param name="collation">The collation the call's input compares under.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), the database exception it threw, or the argument does not fit its parameter.</exception>
+    internal void AddResolved(object? value, DatabaseType target, DatabaseName database, Collation collation,
+        CancellationToken cancellationToken)
+    {
+        var argument = SqlValue.FromObject(value);
+        if (target != DatabaseType.Null && target != argument.Type)
+        {
+            argument = CoerceArgument(argument, target);
+        }
+
+        var arguments = new SqlArguments(new ReadOnlySpan<SqlValue>(in argument), database, collation, cancellationToken);
+        try
+        {
+            AddCore(in arguments);
+        }
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        {
+            throw SqlEvaluationException.FunctionFailed(_function!.Name, exception);
+        }
+    }
+
+    /// <summary>
+    /// The engine's addition of a row of a call without arguments, <c>COUNT(*)</c>: no argument to
+    /// be NULL, so nothing for the strict rule to test, and the one <see cref="AddCore"/> call, its
+    /// failure coded, as <see cref="Add"/> does.
+    /// </summary>
+    /// <param name="database">The database whose statement runs the aggregate.</param>
+    /// <param name="collation">The collation the call's input compares under.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    internal void AddResolved(DatabaseName database, Collation collation, CancellationToken cancellationToken)
+    {
+        var arguments = new SqlArguments([], database, collation, cancellationToken);
+        try
+        {
+            AddCore(in arguments);
+        }
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        {
+            throw SqlEvaluationException.FunctionFailed(_function!.Name, exception);
+        }
+    }
+
+    // A conversion to the parameter's type, an integer that does not fit coded as the evaluator codes one.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SqlValue CoerceArgument(in SqlValue argument, DatabaseType target)
+    {
+        try
+        {
+            return SqlFunctionResolver.Coerce(argument, target, _function!, 0);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception);
+        }
+    }
+
+    /// <summary>Adds a row the strict rule admits: the one <see cref="AddCore"/> call, its failure coded.</summary>
     /// <param name="arguments">The row's arguments, of their parameters' types.</param>
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
     internal void AddCoded(scoped in SqlArguments arguments)

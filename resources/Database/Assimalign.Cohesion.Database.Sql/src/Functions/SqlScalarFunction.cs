@@ -1,6 +1,9 @@
 using System;
+using System.Runtime.CompilerServices;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
@@ -71,18 +74,35 @@ public abstract class SqlScalarFunction : SqlFunction
             return SqlValue.Null;
         }
 
-        return InvokeResolved(in arguments);
+        SqlValue result;
+        try
+        {
+            result = InvokeCore(in arguments);
+        }
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        {
+            throw SqlEvaluationException.FunctionFailed(Name, exception);
+        }
+
+        return HasDeclaredResultType(result.Type, in arguments) ? result : CheckResultSlow(result, in arguments);
     }
 
     /// <summary>
-    /// The engine's call of a resolved function: the planner matched the argument count and the
-    /// evaluator applied the strict short-circuit before converting a value, so this makes the one
-    /// <see cref="InvokeCore"/> call and codes what it throws, as <see cref="Invoke"/> does.
+    /// The engine's call of a resolved function over one row's arguments: the planner matched the
+    /// argument count and the evaluator applied the strict short-circuit before converting a value,
+    /// so this makes the one <see cref="InvokeCore"/> call, codes what it throws and checks the
+    /// result, as <see cref="Invoke"/> does, and returns the result in the row's representation.
     /// </summary>
+    /// <remarks>
+    /// Every call the evaluator makes, of a built-in or an application's function, comes through
+    /// here. The result is checked and converted where the core wrote it, so no copy of the
+    /// 32-byte value is made between the core and the row; a value with a reference (text, or an
+    /// argument handed back) becomes the row's object inline (<see cref="SqlValue.ToObject"/>).
+    /// </remarks>
     /// <param name="arguments">The arguments: as many as the function declares, of their parameters' types.</param>
-    /// <returns>The result.</returns>
+    /// <returns>The result as the row holds it.</returns>
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
-    internal SqlValue InvokeResolved(scoped in SqlArguments arguments)
+    internal object? InvokeResolved(scoped in SqlArguments arguments)
     {
         SqlValue result;
         try
@@ -94,8 +114,59 @@ public abstract class SqlScalarFunction : SqlFunction
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
 
-        return CheckResult(result, in arguments);
+        return HasDeclaredResultType(result.Type, in arguments) ? result.ToObject() : CheckResultToObject(result, in arguments);
     }
+
+    /// <summary>
+    /// The engine's call of a resolved function of one argument over a row value the strict
+    /// short-circuit has admitted: the value converted to a <see cref="SqlValue"/> of its
+    /// parameter's type, the one <see cref="InvokeCore"/> call, its failure coded and its result
+    /// checked, as <see cref="Invoke"/> does, and the result returned in the row's representation.
+    /// </summary>
+    /// <remarks>
+    /// The shape of every standard-library scalar and the most common application one, so the
+    /// conversion, the call and the check share one frame: it holds the one value, the call's
+    /// arguments and the result, and no buffer of four values for the prologue to clear. A value
+    /// that has its parameter's type already, as a column of that type always does, is not passed
+    /// through the conversion. The conversion runs before the coded call, so an integer that does
+    /// not fit its parameter reaches the evaluator as the arithmetic fault it codes, not as a
+    /// failure of the function.
+    /// </remarks>
+    /// <param name="value">The argument as the row holds it.</param>
+    /// <param name="target">The storage type the argument converts to; <see cref="DatabaseType.Null"/> for a pseudo-type parameter.</param>
+    /// <param name="database">The database whose statement makes the call.</param>
+    /// <param name="collation">The collation the call's input compares under.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <returns>The result as the row holds it.</returns>
+    /// <exception cref="OverflowException">An integer does not fit the parameter's type.</exception>
+    /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
+    internal object? InvokeResolved(object? value, DatabaseType target, DatabaseName database, Collation collation,
+        CancellationToken cancellationToken)
+    {
+        var argument = SqlValue.FromObject(value);
+        if (target != DatabaseType.Null && target != argument.Type)
+        {
+            argument = SqlFunctionResolver.Coerce(argument, target, this, 0);
+        }
+
+        var arguments = new SqlArguments(new ReadOnlySpan<SqlValue>(in argument), database, collation, cancellationToken);
+        SqlValue result;
+        try
+        {
+            result = InvokeCore(in arguments);
+        }
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
+        {
+            throw SqlEvaluationException.FunctionFailed(Name, exception);
+        }
+
+        return HasDeclaredResultType(result.Type, in arguments) ? result.ToObject() : CheckResultToObject(result, in arguments);
+    }
+
+    // The slow check's converted result lives in this frame, not in the frame every call makes.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? CheckResultToObject(in SqlValue result, scoped in SqlArguments arguments)
+        => CheckResultSlow(result, in arguments).ToObject();
 
     /// <summary>Computes the function's value; the engine calls it through <see cref="Invoke"/>.</summary>
     /// <param name="arguments">
