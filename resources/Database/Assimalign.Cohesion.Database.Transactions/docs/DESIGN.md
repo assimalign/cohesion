@@ -412,6 +412,91 @@ requests with `TransactionAbortedException` and `TryAcquire` returns false, exce
 resource it already holds in a mode at least as strong, which changes nothing for anyone
 else. No public member was added for it.
 
+**The wait-for graph is read from the table (#1390).** Until #1390 the detector kept a graph
+of its own: a request that queued recorded edges to the owners holding the resource at that
+moment, and the edges stayed until the owner's wait ended. But the holders a waiter waits for
+change while it waits. A release wakes the request queued ahead of it and grants that request
+the resource; a compatible request is granted past it (a grant depends on the modes held, never
+on the queue); the holder it first waited for leaves. The recorded edges then named
+transactions that had left and missed the ones that came, so two transactions could wait for
+each other with neither edge in the graph, and both waited until something canceled one of
+them. A granted or canceled request also dropped every edge of its owner, those of the owner's
+other queued requests with them. The #1370 review's SQL stress runs saw two to five waits per
+run pass 10 s. A probe of that workload that read the lock table every 50 ms, run for 60 s on
+`19b1a495`, saw 40, and every wait over 1 s was one of them: 11 were the members of two- and
+three-transaction cycles whose edges the graph had lost, and the other 29 waited behind those.
+In one such cycle a cascading `DELETE` holds the exclusive lock on a parent row and waits for a
+child row. The child row was granted, at its previous holder's release, to an `UPDATE` that
+re-parents the child and was queued ahead of the delete. That update then waits for the shared
+lock on the parent row, and the delete's only recorded edge named the previous holder. No
+holder of a long wait was waiting for anything but a lock of this table. The committed probe
+(`SqlLockWaitTests` in `Database.Sql`, Release, 60-second runs) saw 40, 40 and 56 waits pass
+10 s on `19b1a495`; with the fix it saw none in five runs, and no wait reach 1 s (about 75,000
+commits, 26,000 lock waits and 1,300 deadlock victims a run).
+
+Now the lock manager keeps only each owner's queued requests, and the search reads the edges from
+the table as it stands. The requester waits for every owner that holds, in a conflicting mode,
+a resource one of its queued requests is for; the search follows those owners' queued requests
+the same way and makes the requester the victim if it comes back to it. PostgreSQL's detector
+also reads its graph from the lock table each time it runs (`CheckDeadLock` takes every partition
+lock, `src/backend/storage/lmgr/proc.c:1880-1891`; hard edges, `deadlock.c:561-583`). Its soft
+edges, to requests queued ahead with a conflicting mode (`deadlock.c:624-768`), have no
+counterpart here: PostgreSQL's grants respect the queue (`LockAcquireExtended` joins it behind a
+conflicting queued request, `lock.c:1135-1143`), and this table's do not, so no request waits for
+another request. A cycle through such an edge would abort a transaction that was never stuck.
+
+A grant adds edges as well, from each request queued on the resource whose mode conflicts with
+the one granted, to the grantee. They can close a cycle only through a request the grantee
+still has queued elsewhere: an owner with no queued request is not waiting, and the search its
+next request runs reads the new edges. An owner may wait for two resources at once (the public
+`AcquireAsync` allows it), so a grant to an owner with a queued request runs the search from
+that request, and a request the search finds on a cycle fails as the victim with
+`TransactionDeadlockException`. Its `LockWaitStop` outcome is `Deadlock`. Together the two
+searches see every cycle: a cycle is made of waiting owners, it exists from the moment its last
+edge appears, and an edge appears only when a request queues or a grant is made.
+
+**Every wait a lock holder makes is a lock of this table, or bounded.** The detector sees the
+lock table only, so a transaction that holds locks must never wait, unbounded, for anything
+else. The kernel's other waits keep to that:
+
+- **The apply gate** of the coordinator (one statement applies at a time) is held while a
+  statement applies its writes, and every writer, undo and prune of the database waits for it.
+  A statement acquires every lock its apply needs before it takes the gate, and the locks its
+  index maintenance requests inside the gate are re-grants that complete at once. The rule was
+  documented and unchecked; the coordinator's lock manager now enforces it. A request that
+  would wait while its flow holds the gate fails at once with `InvalidOperationException`, and
+  the statement's bracket rolls back, instead of stalling every writer of the database behind a
+  wait the detector cannot see. This is PostgreSQL's rule for buffer content locks, which have
+  no deadlock detection (`src/backend/storage/lmgr/README:20-29`): `heap_delete` unlocks the
+  buffer before it waits for the tuple lock (`src/backend/access/heap/heapam.c:2920-2923`).
+- **The B-tree latch** (`StoragePageLatch`, `Database.Storage`) is never held across a lock
+  request. `BTreeIndex` takes a unique key's lock before it enters the latch. A reader holds the
+  latch only while it materializes a range, and a rollback that restores a tree's pages waits
+  only for those readers.
+- **Page write locks** never wait: a page another storage transaction has write-locked fails
+  the write (`StorageTransactionException`).
+- **The database writer lock** of the Graph, Documents and Blob engines is `LockResource.Database()`
+  in this table, so its waits are in the graph.
+- An end's drain of its own statement apply, the journal flush of a commit and a rollback's wait
+  for the apply gate are bounded, because nothing they wait for waits for a lock.
+
+**Grants do not respect the queue.** A compatible request is granted past a request waiting for
+a stronger mode, so a stream of shared grants can keep an exclusive request waiting for as long
+as the stream lasts. PostgreSQL queues a request behind a conflicting one and pays for it with
+soft edges and the queue rearrangement its detector does to resolve them (`deadlock.c`,
+`TopoSort`). A 60-second run of the probe's workload with one parent row, two cascading deleters
+and eight child writers saw no wait reach 1 s (73,277 commits, 2,295 deadlock victims), so the
+grant rule stays as it is. The probe is what would show a starved request: a wait that passes
+10 s while its holders change.
+
+**A wait still queued at the threshold is reported (#1390).** `SlowLockWait` is written as a wait
+ends, so a wait that never ended was never reported. A request that queues while a listener takes
+the source's warnings arms a one-shot timer for the slow-lock-wait threshold. If the request is
+still queued then, it writes `LockWaitBlocked` once (event 19, "Diagnostics" below), naming the
+transactions it waits for and what each of those has queued in turn. That report is
+PostgreSQL's `log_lock_waits` "still waiting for" message (`proc.c:1688-1704`). With no listener
+the request arms nothing.
+
 **Release visits only the owner's resources (#1363 review).** Beside the table, the lock
 manager lists every resource each owner was granted or queued for, and `ReleaseAll` and
 `AbandonPending` walk that list instead of the whole table. Waking waiters only there loses
@@ -928,7 +1013,7 @@ events check `EventKeywords.None`.
 | 3 | `TransactionRolledBack` | Verbose | Transactions | `database`, `transactionSequence` | `TransactionCoordinator.RollbackAsync`, after the manager's rollback, also when its undo was deferred |
 | 4 | `CommitRecordWriteFailed` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager.CommitAsync`: the commit record could not be written, so the kernel rolled the transaction back (the caller's failed commit is the root's Error). It pairs with 13; named apart from the root's event 32 `TransactionAborted`, which is an explicit transaction an operation aborted |
 | 5 | `CommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `exceptionMessage` (the flush failure's: the inner exception's message) | `TransactionCoordinator.CommitAsync`, on `TransactionCommitUnconfirmedException` |
-| 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle |
+| 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle, or when a grant closed one through a request the grantee still had queued, which is then the victim (#1390) |
 | 7 | `LockWaitStart` | Verbose | Locks | `database`, `transactionSequence`, `resource`, `mode` | `LockManager`, when a request is queued |
 | 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow, only for a wait whose `LockWaitStart` was written (`System.Net.Http`'s `RequestStop` shape); `SlowLockWait` is written either way, so a listener that attached during a long wait still learns how long it lasted |
 | 9 | `SlowLockWait` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `thresholdMilliseconds` | with 8, written before it, when the wait lasted at least the threshold |
@@ -941,19 +1026,24 @@ events check `EventKeywords.None`.
 | 16 | `DeferredCheckpointSkipped` | Verbose | Checkpoints | `database`, `reason` (`BracketOpen`: the request stays; `StorageOffline`: it is dropped) | the deferred checkpoint a statement runs as it ends |
 | 17 | `DeferredCheckpointFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the same, when it failed; the next `TryCheckpoint` throws the failure and its worker reports it (root event 1) |
 | 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |
+| 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for as `<sequence>:<mode held>`, followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
 (event-source.md rule 8): the stop is written in the `finally` around the waiter's await, whatever
 ended it, and names how in `outcome`, the one `Stop` of the area whose ending is a domain outcome
 rather than the area's `status` (the area `DESIGN.md`): `Granted`; `Cancelled` by the caller's
-token; `Ended`, because the owner's transaction ended while it waited; or `Abandoned`, because the
-storage went offline (the same decision `WaitAbandonableAsync` makes). The cancellation
+token; `Ended`, because the owner's transaction ended while it waited; `Deadlock`, because a grant
+closed a cycle through it (#1390); or `Abandoned`, because the storage went offline (the same
+decision `WaitAbandonableAsync` makes). The cancellation
 registration is disposed inside that `try`, as soon as the await ends and before the stop is
 written, the order the wait had before it was traced. The wait is timed whether or not anyone
 listens: it already costs a queued waiter, a completion source and a registration, and a listener
 that attaches during a long wait then learns its full length (plan D5 (b)). The deadlock victim's
-event is written after the lock table's lock is released, just before the refusal is thrown.
+event is written after the lock table's lock is released, just before the refusal is thrown; a
+victim a grant chose has its event written after the lock is released, just before its wait is
+failed. `LockWaitBlocked` (19) is written on the timer's thread, after the lock table's lock that
+its description was read under is released.
 
 **Events written under a lock.** `LockWaitsAbandoned` (10) is written from the storage's offline
 hook, which can run under `Storage`'s transaction lock (a checkpoint or shutdown flush that failed),
@@ -1011,13 +1101,14 @@ uncontended `LockManager.AcquireAsync` reaches no instrumentation before its gra
 `TransactionEventSourceTests` delta tests pin it. The engine-mode path every engine uses never
 enters `AcquireCoreAsync`: a re-grant allocates 0 bytes, and a new resource allocates exactly what
 the `TryAcquire` it runs does. The standalone path (`LockManager.Create`) runs `AcquireCoreAsync`,
-the method the lock-wait and deadlock events are written from, on every request: in an optimized
-build it allocates at most the 56-byte closure of its cancellation registration per request, which
-the compiler creates at the method's entry and which predates this source. A Debug build also
-allocates the async state machine, which the compiler emits as a class there, so the test checks
-that bound only in an optimized build; CI tests Release. A Release probe run against this project
-at `96d3caac` and with this source measured the same bytes per uncontended request in both builds:
-56 standalone, 0 in engine mode.
+the method the lock-wait and deadlock events are written from, on every request, and in an
+optimized build allocates nothing for it. Until #1390 it allocated the 56-byte closure of its
+cancellation registration per request, which the compiler created at the method's entry because
+the closure captured a parameter; the callback is static now, and the queued waiter its state
+(Release, `19b1a495` and #1390: 56 and 0 bytes per uncontended standalone request, 0 and 0 in
+engine mode). A Debug build also allocates the async state machine, which the compiler emits as a
+class there, so the test checks the bound only in an optimized build; CI tests Release. A wait
+arms the `LockWaitBlocked` timer only while a listener takes the source's warnings.
 `RunVersionPurgePass` takes its timestamp only while a listener takes event 18.
 
 ## Non-goals

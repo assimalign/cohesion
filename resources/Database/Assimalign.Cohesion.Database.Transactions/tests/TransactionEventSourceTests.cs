@@ -436,6 +436,105 @@ public sealed class TransactionEventSourceTests
         waiter.State.ShouldBe(TransactionState.RolledBack);
     }
 
+    /// <summary>
+    /// A wait still queued at the slow-lock-wait threshold writes <c>LockWaitBlocked</c> once, while
+    /// it waits (#1390): the transactions it waits for, and what each of those waits for in turn.
+    /// <c>SlowLockWait</c> is written only as a wait ends, so before this event a wait that never
+    /// ended was never reported.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report a wait still queued at the threshold once, with what blocks it and what that waits for (#1390)")]
+    public async Task AcquireAsync_WaitStillQueuedAtTheThreshold_ShouldReportItsBlockersOnce()
+    {
+        // Arrange: the middle transaction holds one row and waits for the last one's; the first
+        // waits for the middle one's row.
+        string name = UniqueName();
+        using var storage = EventStorage.Create(name);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var locks = coordinator.LockManager;
+        var first = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var middle = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var last = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var middleRow = LockResource.Entry(4, 1);
+        var lastRow = LockResource.Entry(5, 1);
+        await locks.AcquireAsync(middle.Sequence, middleRow, LockMode.Exclusive);
+        await locks.AcquireAsync(last.Sequence, lastRow, LockMode.Exclusive);
+        using var recorder = new TransactionEventRecorder(
+            EventLevel.Warning,
+            new Dictionary<string, string?> { [TransactionEventSource.SlowLockWaitThresholdArgument] = "0" });
+
+        // Act: both waits pass the 0 ms threshold while queued.
+        var middleWaits = locks.AcquireAsync(middle.Sequence, lastRow, LockMode.Exclusive).AsTask();
+        var firstWaits = locks.AcquireAsync(first.Sequence, middleRow, LockMode.Shared).AsTask();
+        await recorder.WaitForAsync(events => events.Count(e => e.EventName == "LockWaitBlocked" && Equals(e.Payload?[0], name)) == 2, Timeout);
+        await coordinator.CommitAsync(last);
+        await middleWaits.WaitAsync(Timeout);
+        await coordinator.CommitAsync(middle);
+        await firstWaits.WaitAsync(Timeout);
+        await coordinator.CommitAsync(first);
+
+        // Assert: one report per wait, written while it waited.
+        recorder.ShouldHaveNoInstrumentationError();
+        var reports = recorder.For(name).Where(e => e.EventName == "LockWaitBlocked").ToArray();
+        reports.Length.ShouldBe(2);
+        var middleReport = reports.Single(e => (long)e.Payload![1]! == Sequence(middle));
+        middleReport.EventId.ShouldBe(19);
+        middleReport.Level.ShouldBe(EventLevel.Warning);
+        middleReport.PayloadNames.ShouldBe(["database", "transactionSequence", "resource", "mode", "durationMilliseconds", "blockers"]);
+        middleReport.Payload!.Take(4).ShouldBe([name, Sequence(middle), "Entry:5", nameof(LockMode.Exclusive)]);
+        ((double)middleReport.Payload![4]!).ShouldBeGreaterThanOrEqualTo(0);
+        middleReport.Payload![5].ShouldBe($"{Sequence(last)}:Exclusive");
+
+        // The first wait's blocker is itself waiting: the report names what for, and for whom.
+        var firstReport = reports.Single(e => (long)e.Payload![1]! == Sequence(first));
+        firstReport.Payload!.Take(4).ShouldBe([name, Sequence(first), "Entry:4", nameof(LockMode.Shared)]);
+        firstReport.Payload![5].ShouldBe($"{Sequence(middle)}:Exclusive waiting for Exclusive on Entry:5 ({Sequence(last)}:Exclusive)");
+    }
+
+    /// <summary>
+    /// A queued request a grant left on a cycle (#1390) fails as a deadlock victim: the deadlock is
+    /// counted and reported for it, and its wait stops with the <c>Deadlock</c> outcome.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report the victim of a cycle a grant closed once, and end its wait as a deadlock (#1390)")]
+    public async Task AcquireAsync_GrantClosesACycle_ShouldReportTheVictimAndEndItsWaitAsADeadlock()
+    {
+        // Arrange: the waiter waits for the holder's row; the holder waits for a row held shared.
+        string name = UniqueName();
+        var source = TransactionEventSource.Log;
+        using var storage = EventStorage.Create(name);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var locks = coordinator.LockManager;
+        var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var holderRow = LockResource.Entry(6, 1);
+        var sharedRow = LockResource.Entry(6, 2);
+        await locks.AcquireAsync(holder.Sequence, holderRow, LockMode.Exclusive);
+        await locks.AcquireAsync(reader.Sequence, sharedRow, LockMode.Shared);
+        long deadlocks = source.TotalDeadlocks;
+        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+        var waiting = locks.AcquireAsync(waiter.Sequence, holderRow, LockMode.Exclusive).AsTask();
+        var holderWaits = locks.AcquireAsync(holder.Sequence, sharedRow, LockMode.Exclusive).AsTask();
+
+        // Act: the waiter is granted the shared row beside the reader, so the holder now waits for
+        // the waiter while the waiter waits for the holder.
+        await locks.AcquireAsync(waiter.Sequence, sharedRow, LockMode.Shared);
+        await Should.ThrowAsync<TransactionDeadlockException>(async () => await waiting.WaitAsync(Timeout));
+        await coordinator.RollbackAsync(waiter);
+        await coordinator.CommitAsync(reader);
+        await holderWaits.WaitAsync(Timeout);
+        await coordinator.CommitAsync(holder);
+
+        // Assert
+        recorder.ShouldHaveNoInstrumentationError();
+        var events = recorder.For(name);
+        events.Where(e => e.EventName == "DeadlockDetected").ShouldHaveSingleItem().Payload
+            .ShouldBe([name, Sequence(waiter), "Entry:6", nameof(LockMode.Exclusive)]);
+        var stops = events.Where(e => e.EventName == "LockWaitStop").ToArray();
+        stops.Single(e => (long)e.Payload![1]! == Sequence(waiter)).Payload![2].ShouldBe("Deadlock");
+        stops.Single(e => (long)e.Payload![1]! == Sequence(holder)).Payload![2].ShouldBe("Granted");
+        source.TotalDeadlocks.ShouldBe(deadlocks + 1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report a commit whose record could not be made durable once, with the flush failure")]
     public async Task CommitAsync_CommitRecordFlushFails_ShouldReportTheUnconfirmedCommitOnce()
     {
@@ -799,20 +898,17 @@ public sealed class TransactionEventSourceTests
     /// <summary>
     /// The standalone lock path (<see cref="LockManager.Create"/>): an uncontended request runs
     /// <c>AcquireCoreAsync</c>, the method the lock-wait and deadlock events are written from, and is
-    /// granted before it reaches any of them. With no listener it must allocate only what it did
-    /// before the event source existed: the closure of its cancellation registration, which the
-    /// compiler creates at the method's entry because the closure captures a parameter. In an
-    /// optimized build that is the only allocation, and its size is fixed: an object header and
-    /// method table (16 bytes), <c>this</c> and the waiter (8 each), and the 24-byte
-    /// <see cref="LockResource"/>, 56 bytes in a 64-bit process. An unoptimized (Debug) build also
+    /// granted before it reaches any of them. With no listener it allocates nothing in an optimized
+    /// build. Until #1390 it allocated the 56-byte closure of its cancellation registration, which
+    /// the compiler created at the method's entry because the closure captured a parameter; the
+    /// callback is static now, and the queued waiter its state. An unoptimized (Debug) build also
     /// allocates the async state machine, which the compiler emits as a class there; the bound is
     /// checked only where it holds, and CI tests the Release build.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: An uncontended standalone lock request allocates only its registration closure with no listener")]
-    public void AcquireAsync_UncontendedStandaloneWithNoListener_ShouldAllocateOnlyTheRegistrationClosure()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: An uncontended standalone lock request allocates nothing with no listener")]
+    public void AcquireAsync_UncontendedStandaloneWithNoListener_ShouldAllocateNothing()
     {
         // Arrange
-        const long RegistrationClosureBytes = 56;
         var locks = LockManager.Create();
         var owner = new TransactionSequence(1_000_000_011);
         var other = new TransactionSequence(1_000_000_013);
@@ -864,8 +960,7 @@ public sealed class TransactionEventSourceTests
         (acquireNew - tryAcquireNew).ShouldBe(regrant, "An uncontended AcquireAsync on a new resource allocated differently from a re-grant.");
         if (optimized)
         {
-            Environment.Is64BitProcess.ShouldBeTrue("The closure's size is the 64-bit layout.");
-            regrant.ShouldBeLessThanOrEqualTo(RegistrationClosureBytes * Operations, "An uncontended standalone re-grant allocated more than its registration closure.");
+            regrant.ShouldBe(0, "An uncontended standalone re-grant allocated.");
         }
     }
 
@@ -967,6 +1062,19 @@ public sealed class TransactionEventSourceTests
 
         public void ShouldHaveNoInstrumentationError()
             => Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+
+        /// <summary>
+        /// Waits until the events written so far satisfy <paramref name="condition"/>: an event a
+        /// timer writes arrives on a pool thread, after the operation that armed it returned.
+        /// </summary>
+        public async Task WaitForAsync(Func<IReadOnlyList<EventWrittenEventArgs>, bool> condition, TimeSpan timeout)
+        {
+            using var expiry = new CancellationTokenSource(timeout);
+            while (!condition(Events))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(10), expiry.Token);
+            }
+        }
 
         /// <summary>Waits until every named counter has published at least one payload.</summary>
         public async Task WaitForCountersAsync(IReadOnlyCollection<string> counterNames, CancellationToken cancellationToken)

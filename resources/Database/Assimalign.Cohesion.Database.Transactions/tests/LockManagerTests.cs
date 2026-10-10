@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
 /// Tests for the lock manager: the compatibility matrix, blocking waits with FIFO
-/// wake-up, upgrades, cancellation, deadlock victim resolution (#850), and an ended
+/// wake-up, upgrades, cancellation, deadlock victim resolution (#850, #1390), and an ended
 /// owner's queued requests (#1225 review).
 /// </summary>
 public class LockManagerTests
@@ -223,5 +223,145 @@ public class LockManagerTests
         aHeldByTheLateGrant.ShouldBeTrue();
         locks.TryAcquire(_t3, resourceA, LockMode.Exclusive).ShouldBeTrue();
         locks.TryAcquire(_t3, resourceB, LockMode.Exclusive).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A waiter whose holder changed while it waited (#1390): the release of the first holder wakes
+    /// the request queued ahead of it, so the waiter now waits for a transaction that was not a
+    /// holder when it queued. When that transaction then requests a lock the waiter holds, the
+    /// detector must see the edge the release created. With edges recorded at the request, the
+    /// waiter's only edge named the first holder, which had left, and both transactions waited for
+    /// each other until something canceled one of them: the long waits of the #1370 stress runs.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a waiter whose holder a release replaced aborts the requester (#1390)")]
+    public async Task AcquireAsync_CycleThroughAWaiterWhoseHolderAReleaseReplaced_ShouldAbortTheRequester()
+    {
+        // Arrange: T1 holds R; T2 queues for R, then T3, which holds S.
+        var locks = LockManager.Create();
+        var resourceR = LockResource.Entry(8, 1);
+        var resourceS = LockResource.Entry(8, 2);
+        await locks.AcquireAsync(_t1, resourceR, LockMode.Exclusive);
+        await locks.AcquireAsync(_t3, resourceS, LockMode.Exclusive);
+        var secondWaits = locks.AcquireAsync(_t2, resourceR, LockMode.Exclusive).AsTask();
+        var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.Exclusive).AsTask();
+
+        // Act: T1's release grants R to T2, the request queued first; T3 now waits for T2. T2
+        // requesting S, which T3 holds, closes the cycle.
+        locks.ReleaseAll(_t1);
+        await secondWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        bool thirdStillWaiting = !thirdWaits.IsCompleted;
+        var closing = locks.AcquireAsync(_t2, resourceS, LockMode.Exclusive).AsTask();
+        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // The victim aborts and the survivor proceeds.
+        locks.ReleaseAll(_t2);
+        await thirdWaits.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        thirdStillWaiting.ShouldBeTrue();
+        victim.Message.ShouldStartWith($"Transaction {_t2} was chosen as the deadlock victim", Case.Sensitive);
+        locks.TryAcquire(_t1, resourceR, LockMode.Shared).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A waiter a compatible request was granted past (#1390): a grant depends on the modes held,
+    /// never on the queue, so a shared request is granted beside a shared holder while an exclusive
+    /// request waits. Once the first holder leaves, the waiter waits only for the one granted past
+    /// it, an edge that did not exist when it queued.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a waiter a compatible request was granted past aborts the requester (#1390)")]
+    public async Task AcquireAsync_CycleThroughAWaiterACompatibleRequestWasGrantedPast_ShouldAbortTheRequester()
+    {
+        // Arrange: T1 holds R shared; T3, which holds S, waits for R exclusively; T2 is granted R
+        // shared past T3's request.
+        var locks = LockManager.Create();
+        var resourceR = LockResource.Entry(9, 1);
+        var resourceS = LockResource.Entry(9, 2);
+        await locks.AcquireAsync(_t1, resourceR, LockMode.Shared);
+        await locks.AcquireAsync(_t3, resourceS, LockMode.Exclusive);
+        var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.Exclusive).AsTask();
+        await locks.AcquireAsync(_t2, resourceR, LockMode.Shared);
+
+        // Act: T1 leaves, so T3 waits for T2 alone; T2 requesting S closes the cycle.
+        locks.ReleaseAll(_t1);
+        bool thirdStillWaiting = !thirdWaits.IsCompleted;
+        var closing = locks.AcquireAsync(_t2, resourceS, LockMode.Exclusive).AsTask();
+        await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
+        locks.ReleaseAll(_t2);
+        await thirdWaits.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        thirdStillWaiting.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A grant that closes a cycle (#1390): an owner with a request queued is granted another
+    /// resource that a request of the transaction it waits for is queued on. No request queued at
+    /// that moment, so the detector at the request never sees the cycle; the grant must, and the
+    /// owner's queued request on the cycle fails as the victim while the grant stands.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A grant that closes a cycle fails the grantee's queued request on it (#1390)")]
+    public async Task AcquireAsync_GrantClosingACycle_ShouldFailTheGranteesQueuedRequest()
+    {
+        // Arrange: T1 waits for P, which T2 holds; T2 waits for R exclusively, which T3 holds shared.
+        var locks = LockManager.Create();
+        var resourceP = LockResource.Entry(10, 1);
+        var resourceR = LockResource.Entry(10, 2);
+        await locks.AcquireAsync(_t2, resourceP, LockMode.Exclusive);
+        await locks.AcquireAsync(_t3, resourceR, LockMode.Shared);
+        var firstWaits = locks.AcquireAsync(_t1, resourceP, LockMode.Exclusive).AsTask();
+        var secondWaits = locks.AcquireAsync(_t2, resourceR, LockMode.Exclusive).AsTask();
+
+        // Act: T1 is granted R shared beside T3, so T2 now waits for T1 as T1 waits for T2.
+        var granted = locks.AcquireAsync(_t1, resourceR, LockMode.Shared);
+        bool grantedAtOnce = granted.IsCompletedSuccessfully;
+        await granted;
+        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await firstWaits.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // T1 aborts; T2's wait ends once T3 releases too.
+        locks.ReleaseAll(_t1);
+        locks.ReleaseAll(_t3);
+        await secondWaits.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        grantedAtOnce.ShouldBeTrue();
+        victim.Message.ShouldStartWith($"Transaction {_t1} was chosen as the deadlock victim requesting {LockMode.Exclusive} on {resourceP}", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// A canceled wait takes only its own edges with it (#1390). An owner may wait for two resources
+    /// at once; canceling one wait used to drop every edge the owner had, so a cycle through its
+    /// other wait went unseen.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: Canceling one of an owner's waits keeps the other's edges (#1390)")]
+    public async Task AcquireAsync_OneOfTwoWaitsCanceled_ShouldKeepTheOtherWaitsEdges()
+    {
+        // Arrange: T1 holds C and waits for A (T2's) and for B (T3's).
+        var locks = LockManager.Create();
+        var resourceA = LockResource.Entry(11, 1);
+        var resourceB = LockResource.Entry(11, 2);
+        var resourceC = LockResource.Entry(11, 3);
+        await locks.AcquireAsync(_t2, resourceA, LockMode.Exclusive);
+        await locks.AcquireAsync(_t3, resourceB, LockMode.Exclusive);
+        await locks.AcquireAsync(_t1, resourceC, LockMode.Exclusive);
+        var waitsForA = locks.AcquireAsync(_t1, resourceA, LockMode.Exclusive).AsTask();
+        using var cancellation = new CancellationTokenSource();
+        var waitsForB = locks.AcquireAsync(_t1, resourceB, LockMode.Exclusive, cancellation.Token).AsTask();
+
+        // Act: the wait for B is canceled; T2 requesting C, which T1 holds, closes a cycle through
+        // the wait for A.
+        await cancellation.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await waitsForB.WaitAsync(TimeSpan.FromSeconds(5)));
+        var closing = locks.AcquireAsync(_t2, resourceC, LockMode.Exclusive).AsTask();
+        await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
+        locks.ReleaseAll(_t2);
+        await waitsForA.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t1);
+        locks.ReleaseAll(_t3);
+
+        // Assert: nothing is left held or queued.
+        locks.TryAcquire(_t2, resourceA, LockMode.Exclusive).ShouldBeTrue();
+        locks.TryAcquire(_t2, resourceB, LockMode.Exclusive).ShouldBeTrue();
+        locks.TryAcquire(_t2, resourceC, LockMode.Exclusive).ShouldBeTrue();
     }
 }

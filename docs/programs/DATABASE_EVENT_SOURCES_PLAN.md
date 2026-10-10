@@ -244,7 +244,7 @@ Keywords: `Transactions = 0x1`, `Locks = 0x2`, `Checkpoints = 0x4`, `Purge = 0x8
 | 5 | CommitUnconfirmed | Error | — | database, transactionSequence, exceptionMessage | `TransactionCoordinator.cs:389-392` |
 | 6 | DeadlockDetected | Warning | — | database, transactionSequence, resource (kind and object id only), mode | `LockManager.cs:209-213` (the victim), after the lock table's lock is released |
 | 7 | LockWaitStart | Verbose | Locks | database, transactionSequence, resource (kind and object id only: an entry's id is a key's hash for a key lock), mode | `LockManager.cs:216-222` |
-| 8 | LockWaitStop | Verbose | Locks | database, transactionSequence, outcome (`Granted`, `Cancelled`, `Ended`, `Abandoned`), durationMilliseconds | `LockManager.cs:222`, from the `finally` around the waiter's await, after the cancellation registration is disposed |
+| 8 | LockWaitStop | Verbose | Locks | database, transactionSequence, outcome (`Granted`, `Cancelled`, `Ended`, `Abandoned`, `Deadlock` since #1390), durationMilliseconds | `LockManager.cs:222`, from the `finally` around the waiter's await, after the cancellation registration is disposed |
 | 9 | SlowLockWait | Warning | — | database, transactionSequence, resource (kind and object id only), mode, durationMilliseconds, thresholdMilliseconds | with 8, when the wait reached `SlowLockWaitThresholdMs` (D7; any session's disable restores the default); PostgreSQL's `log_lock_waits` (`src/backend/storage/lmgr/proc.c:1700`) |
 | 10 | LockWaitsAbandoned | Warning | — | database, cause | `LockManager.cs:141-151` (storage offline: every wait is refused); written from the storage's offline hook, which can run under its transaction lock |
 | 11 | UndoDeferred | Warning | — | database, transactionSequence, exceptionType, exceptionMessage | `TransactionManager.cs:687-716` (an abort's undo failed; locks stay held until a retry) |
@@ -255,6 +255,7 @@ Keywords: `Transactions = 0x1`, `Locks = 0x2`, `Checkpoints = 0x4`, `Purge = 0x8
 | 16 | DeferredCheckpointSkipped | Verbose | Checkpoints | database, reason | `TransactionCoordinator.cs:754-764` |
 | 17 | DeferredCheckpointFailed | Warning | — | database, exceptionType, exceptionMessage | `TransactionCoordinator.cs:765-768` (held and rethrown by the next `TryCheckpoint`, whose worker then writes root event 1) |
 | 18 | VersionPurgePass | Verbose | Purge | database, versionsPurged, durationMilliseconds | `TransactionCoordinator.cs:807-844` |
+| 19 | LockWaitBlocked | Warning | — | database, transactionSequence, resource (kind and object id only), mode, durationMilliseconds, blockers | Added by #1390: `LockManager`, once per wait still queued when `SlowLockWaitThresholdMs` passes (a one-shot timer, armed only while a listener takes warnings), naming the transactions it waits for and what each has queued in turn; PostgreSQL's `log_lock_waits` "still waiting for" (`src/backend/storage/lmgr/proc.c:1688-1704`) |
 
 Counters: `current-transactions` (gauge; `_openContexts` add `TransactionCoordinator.cs:361`, the
 removing call in `UntrackEnded` `:948`, which `BeginAsync` also runs for a context the manager's

@@ -257,6 +257,29 @@ internal sealed class TransactionEventSource : EventSource
         }
     }
 
+    /// <summary>
+    /// Writes, once, that a lock request has waited the slow-lock-wait threshold and is still
+    /// waiting, with the transactions it waits for and what each of them is waiting for in turn:
+    /// the report PostgreSQL's <c>log_lock_waits</c> writes once while a process still waits
+    /// (<c>src/backend/storage/lmgr/proc.c:1688-1704</c>, "still waiting for"). A wait that never
+    /// ends never writes <c>SlowLockWait</c>, which is written as the wait ends.
+    /// </summary>
+    /// <param name="database">The database whose lock manager the request waits in.</param>
+    /// <param name="owner">The waiting transaction.</param>
+    /// <param name="resource">The resource it waits for.</param>
+    /// <param name="mode">The mode it requested.</param>
+    /// <param name="startTimestamp">The <see cref="Stopwatch.GetTimestamp"/> taken when the wait began.</param>
+    /// <param name="blockers">What blocks the request, which the lock manager describes under its lock.</param>
+    [NonEvent]
+    public void LockWaitBlocked(string database, TransactionSequence owner, LockResource resource, LockMode mode, long startTimestamp, string blockers)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            LockWaitBlocked(database, (long)owner.Value, DescribeResource(resource), mode.ToString(),
+                Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds, blockers);
+        }
+    }
+
     /// <summary>Writes that a lock manager failed every wait because its database's storage went offline.</summary>
     [NonEvent]
     public void LockWaitsAbandoned(string database, StorageOfflineException cause)
@@ -426,6 +449,10 @@ internal sealed class TransactionEventSource : EventSource
     [Event(18, Level = EventLevel.Verbose, Keywords = Keywords.Purge, Message = "Database '{0}' version-purge pass reclaimed or undid {1} versions in {2} ms.")]
     private void VersionPurgePass(string database, long versionsPurged, double durationMilliseconds)
         => WriteEvent(18, database, versionsPurged, durationMilliseconds);
+
+    [Event(19, Level = EventLevel.Warning, Message = "Transaction {1} of database '{0}' has waited {4} ms for {3} on {2} and is still waiting, blocked by {5}.")]
+    private void LockWaitBlocked(string database, long transactionSequence, string resource, string mode, double durationMilliseconds, string blockers)
+        => WriteEvent(19, database, transactionSequence, resource, mode, durationMilliseconds, blockers);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
