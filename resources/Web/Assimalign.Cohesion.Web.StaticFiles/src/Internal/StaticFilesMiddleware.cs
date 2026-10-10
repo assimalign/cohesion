@@ -91,9 +91,10 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        // The traversal gate: under our prefix, a path with dot segments (or NUL/':') is
-        // hostile or nonsensical — answer 404 directly rather than letting it reach any
-        // resolver. See StaticFilePath.HasUnsafeSegments for what the transports decode.
+        // The traversal gate: under our prefix, a path with dot segments (or NUL/':', or an 8.3
+        // short-name alias, whose extension is not the file's) is hostile or nonsensical — answer
+        // 404 directly rather than letting it reach any resolver. See StaticFilePath.HasUnsafeSegments
+        // for what the transports decode.
         if (StaticFilePath.HasUnsafeSegments(remainder))
         {
             context.Response.StatusCode = HttpStatusCode.NotFound;

@@ -528,6 +528,22 @@ public class HttpResponseFileExtensionsTests
         context.ReadResponseBody().ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a path spelled as an 8.3 short-name alias should respond 404")]
+    public async Task SendFileAsync_ShortNameAliasPath_ShouldRespond404()
+    {
+        // Arrange — the in-memory mount holds the alias as a real name, so only the gate can refuse
+        // it. On a volume that generates short names the same path opens upload.htmlx and would be
+        // typed text/html from the alias's ".HTM".
+        using InMemoryFileSystem site = StaticSite.Create(("uploads/UPLOAD~1.HTM", "<script>alert(1)</script>"));
+
+        // Act
+        TestHttpContext context = await RunAsync(HttpMethod.Get, response => response.SendFileAsync(site, "uploads/UPLOAD~1.HTM"));
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        context.ReadResponseBody().ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a path naming a directory or nothing should respond 404")]
     [InlineData("missing.txt")]
     [InlineData("reports")]

@@ -48,6 +48,24 @@ app.UseStaticFiles(contentRoot, options =>
 });
 ```
 
+A `ContentTypeMappings` key maps an extension, never a whole file name, so no key types a file
+without one, such as `apple-app-site-association`. Give such files a mount of their own whose
+fallback type is theirs, or send them from a handler with an explicit type:
+
+```csharp
+app.UseStaticFiles(wellKnownRoot, options =>         // holds only the extensionless files
+{
+    options.RequestPath = new HttpPath("/.well-known");
+    options.ServeUnknownContentTypes = true;
+    options.FallbackContentType = "application/json";
+});
+
+// or: context.Response.SendFileAsync(wellKnownRoot, name, "application/json")
+```
+
+Request paths whose segments look like Windows 8.3 short names (`UPLOAD~1.HTM`) answer `404`: an
+alias would open `upload.htmlx` and type it from the alias's extension.
+
 A single-page application serves its assets first and answers every client-side route with
 `index.html`. The fallback never answers a file-name path, so a missing asset stays a 404:
 
@@ -73,7 +91,8 @@ using Assimalign.Cohesion.Web.StaticFiles;
 var reports = new PhysicalFileSystem(new PhysicalFileSystemOptions { Root = reportsRoot, IsReadOnly = true });
 
 // A path inside a mount. Safe to build from a route value: dot segments, '\' traversal, drive and
-// stream forms, and NUL are answered 404, and nothing outside the mount can be addressed.
+// stream forms, NUL, and 8.3 short-name aliases are answered 404, and nothing outside the mount can
+// be addressed.
 app.MapGet("/reports/{name}", (string name, IHttpContext context)
     => context.Response.SendFileAsync(reports, name, cancellationToken: context.RequestCancelled));
 

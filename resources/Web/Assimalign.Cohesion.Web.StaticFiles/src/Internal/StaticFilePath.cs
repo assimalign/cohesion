@@ -58,12 +58,19 @@ internal static class StaticFilePath
     /// arrives here as literal dot segments — this gate sees the same text a file system would.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Unsafe shapes: any NUL; any <c>:</c> (Windows drive roots and NTFS alternate data
     /// streams); any segment — split on both <c>/</c> and <c>\</c>, since
-    /// <c>FileSystemPath</c> treats backslash as a separator — equal to <c>.</c> or <c>..</c>.
+    /// <c>FileSystemPath</c> treats backslash as a separator — equal to <c>.</c> or <c>..</c>,
+    /// or shaped like an 8.3 short-name alias (see <see cref="IsShortNameAlias"/>).
     /// <c>FileSystemPath.Parse</c> independently throws on interior dot segments and illegal
     /// characters; this check runs first so hostile requests get a deterministic <c>404</c>
     /// instead of exception-driven control flow.
+    /// </para>
+    /// <para>
+    /// The alias check is not OS-gated: an in-memory mount answers the same on every host, and a
+    /// non-Windows host still reaches short names through an SMB share or a FAT volume.
+    /// </para>
     /// </remarks>
     public static bool HasUnsafeSegments(ReadOnlySpan<char> remainder)
     {
@@ -83,6 +90,52 @@ internal static class StaticFilePath
             {
                 return true;
             }
+
+            if (IsShortNameAlias(segment))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Reports whether <paramref name="segment"/> has the shape of a generated 8.3 short name: a stem
+    /// of at most eight characters before the first <c>.</c> that contains <c>~</c> followed by a
+    /// digit, such as <c>UPLOAD~1.HTM</c> or <c>PROGRA~1</c>.
+    /// </summary>
+    /// <remarks>
+    /// A volume that generates short names (NTFS with 8.3 names on, FAT) opens a file through its
+    /// alias, and the alias carries a different extension: <c>upload.htmlx</c> answers to
+    /// <c>UPLOAD~1.HTM</c>. The content type is read from the name the request spells, so serving
+    /// the alias would type an unmapped upload as <c>text/html</c> — the stored XSS the content-type
+    /// gate exists to stop. Generated aliases always have this shape, and the segment is checked
+    /// after the trailing dots and spaces Windows trims (<c>UPLOAD~1.HTM.</c>). A short name an
+    /// administrator sets by hand (<c>fsutil file setshortname</c>) need not contain <c>~</c> and is
+    /// not detected. A real file whose name has this shape, such as <c>report~1.txt</c>, is
+    /// unservable; a longer stem, such as <c>photo~2023.png</c>, is not affected.
+    /// </remarks>
+    /// <param name="segment">One path segment, without separators.</param>
+    /// <returns><see langword="true"/> when the segment could be a generated short-name alias.</returns>
+    private static bool IsShortNameAlias(ReadOnlySpan<char> segment)
+    {
+        // Windows trims trailing dots and spaces before the lookup, so "UPLOAD~1.HTM." and
+        // "UPLOAD~1 " open the same file as the alias itself.
+        segment = segment.TrimEnd(". ");
+        int dot = segment.IndexOf('.');
+        ReadOnlySpan<char> stem = dot < 0 ? segment : segment[..dot];
+        if (stem.Length > 8)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < stem.Length - 1; i++)
+        {
+            if (stem[i] == '~' && char.IsAsciiDigit(stem[i + 1]))
+            {
+                return true;
+            }
         }
 
         return false;
@@ -94,7 +147,8 @@ internal static class StaticFilePath
     /// <see cref="HasUnsafeSegments"/> gate, then <see cref="FileSystemPath.Parse(string)"/> — before
     /// the mount is consulted, so no input can address anything outside the mount: dot segments,
     /// backslash traversal, drive and stream forms, and NUL are refused, and a leading <c>/</c> means
-    /// the mount root rather than the host's.
+    /// the mount root rather than the host's. An 8.3 short-name alias is refused too, so the name the
+    /// caller spells is the name the file has, and the extension its type is read from is the file's.
     /// </summary>
     /// <param name="fileSystem">The mount to resolve in.</param>
     /// <param name="path">The mount-relative path, with or without a leading <c>/</c>.</param>

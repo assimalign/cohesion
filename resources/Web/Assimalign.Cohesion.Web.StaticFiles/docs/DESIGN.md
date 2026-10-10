@@ -53,8 +53,9 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
 - **Two-layer traversal defense.** Layer 1 is an explicit gate (`StaticFilePath.
   HasUnsafeSegments`) over the decoded path: any `.`/`..` segment — split on both `/` and
   `\`, since `FileSystemPath` treats backslash as a separator — plus `:` (Windows drive/ADS
-  shapes) and NUL. Layer 2 is `FileSystemPath.Parse` itself, which throws on interior dot
-  segments and illegal characters; the gate runs first so hostile requests get a
+  shapes), NUL, and any segment shaped like an 8.3 short-name alias (below). Layer 2 is
+  `FileSystemPath.Parse` itself, which throws on interior dot segments and illegal
+  characters; the gate runs first so hostile requests get a
   deterministic `404` instead of exception-driven flow. Non-canonical-but-safe forms
   (`/./x`) are also rejected rather than normalized — Cohesion transports do not collapse
   dot segments, and a static server has no business inventing URL equivalences.
@@ -97,7 +98,28 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   replaced read a dotless name as a bare extension token, so a user upload named `html` under
   the static root was served as `text/html` — stored XSS from a file name alone. A
   `ContentTypeMappings` key maps an extension only: the key `gltf` maps `model.gltf`, never a
-  file named `gltf`.
+  file named `gltf`. That is a silent runtime change for a key that used to type an
+  extensionless file, such as `apple-app-site-association` (which Apple requires to have no
+  extension): the key is still accepted and never matches, so the request passes through. Type
+  such files with a dedicated mount that holds only them and whose fallback is the type,
+  `UseStaticFiles(wellKnownRoot, o => { o.RequestPath = new HttpPath("/.well-known");
+  o.ServeUnknownContentTypes = true; o.FallbackContentType = "application/json"; })`, or from a
+  handler with `SendFileAsync(fileSystem, path, "application/json")`.
+- **8.3 short-name aliases are refused with `404`.** A volume that generates short names (NTFS
+  with 8.3 generation on, and FAT) opens `upload.htmlx` through its alias `UPLOAD~1.HTM`. The
+  content-type gate reads the name the request spells, so the alias served an unmapped upload as
+  `text/html`, the same stored XSS the rule above closes, and `SendFileAsync(fileSystem, path)`
+  had the same hole (`.svgz` reached `.SVG` and `.xmlx` reached `.XML` the same way). The gate
+  therefore refuses any segment shaped like a generated alias: a stem of at most eight characters
+  before the first dot that contains `~` followed by a digit, checked after the trailing dots and
+  spaces Windows trims (`UPLOAD~1.HTM.`). The check runs on every OS: an in-memory mount answers
+  the same on every host, and a non-Windows host still reaches short names through an SMB share
+  or a FAT volume. The cost is that a real file named like an alias (`report~1.txt`) cannot be
+  served, and `MapFallbackToFile` rejects one when it is mapped, through the same gate; a longer
+  stem (`photo~2023.png`) is unaffected. A short name an administrator sets by
+  hand (`fsutil file setshortname`) need not contain `~` and is not detected. Comparing the
+  resolved file's real name with the request was rejected: the physical mount reports the name as
+  requested, so finding the real one would cost a directory read per request.
 - **Open the stream only after all no-body outcomes are resolved.** `304`/`412`/`416` never
   touch the file; a file that vanishes between resolution and open yields a clean `404`
   because nothing has been committed to the response yet. "Vanishes" covers how each mount says
@@ -125,7 +147,7 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
 ```
 GET/HEAD?  ──no──▶ next
 prefix match (segment-aligned, ordinal)? ──no──▶ next
-unsafe segments (../.\:/NUL)? ──yes──▶ 404 (terminal)
+unsafe segments (../.\:/NUL/8.3 alias)? ──yes──▶ 404 (terminal)
 FileSystemPath.Parse  ──throws──▶ 404
 resolve: file | directory(+default doc | 301 append-slash) | miss ──▶ next
 content type (overlay map, file-name lookup; unmapped or no extension → next unless opted in)
@@ -227,7 +249,8 @@ flowchart TD
   through the `IHttpResponse.HttpContext` back-reference.
 - **The path overload resolves inside a mount; it does not trust the path.** A handler that builds the
   path from a route value is the normal case, so the path runs the same two layers as a request path:
-  the `HasUnsafeSegments` gate (any `.`/`..` segment split on `/` and `\`, any `:`, any NUL) and then
+  the `HasUnsafeSegments` gate (any `.`/`..` segment split on `/` and `\`, any `:`, any NUL, any 8.3
+  short-name alias) and then
   `FileSystemPath.Parse`, before the mount's own lookup, and a leading `/` means the mount root. An
   unsafe, missing, or directory path is answered `404`, not thrown: request input must not turn into a
   `500`, and one answer for "outside" and "missing" gives an attacker no oracle. A physical-mount test
@@ -313,9 +336,13 @@ or `416`. Cancellation surfaces as `OperationCanceledException` from the copy.
 - **On-the-fly compression** — that is `Web.Compression`'s job (#779); this package only
   selects pre-existing sibling files.
 - **`multipart/byteranges`** — multi-range sets serve the full representation.
-- **Windows short-name (8.3) / trailing-dot equivalence defense** — the mount confines every
-  lookup, so such OS-level aliasing cannot escape the root; serve dedicated mounts rather
-  than pointing a physical mount at a directory whose *siblings* are sensitive.
+- **Trailing-dot and trailing-space equivalence** — Windows trims them, so `app.js.` opens
+  `app.js`. The mount still confines the lookup, and this aliasing can only remove a type, never
+  add one: the request's name ends in a dot or a space, which the content-type lookup reads as no
+  extension or an unmapped one, so the request passes through, or gets the fallback type when
+  `ServeUnknownContentTypes` is on. 8.3 short names, which can add a type, are refused (above).
+  Serve dedicated mounts rather than pointing a physical mount at a directory whose *siblings* are
+  sensitive.
 - **`Content-Disposition` from the helpers** — a handler that wants a download name sets the field
   before calling `SendFileAsync`/`WriteStreamAsync`, which leave it in place. `Http` has no RFC 6266
   formatter yet, and a hand-rolled `filename*=` encoder in this package is not where one belongs.

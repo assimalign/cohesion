@@ -43,6 +43,13 @@ public sealed class StaticFilesOptions
     /// a default extension replaces the default value. A key maps an extension only: the key
     /// <c>gltf</c> maps <c>model.gltf</c>, never a file named <c>gltf</c>.
     /// </summary>
+    /// <remarks>
+    /// No key can type a file without an extension, such as
+    /// <c>.well-known/apple-app-site-association</c>. Serve such files from a dedicated mount that
+    /// holds only them, with <see cref="ServeUnknownContentTypes"/> on and
+    /// <see cref="FallbackContentType"/> set to their type, or from a handler that passes the type to
+    /// <c>SendFileAsync</c>, for example <c>SendFileAsync(fileSystem, path, "application/json")</c>.
+    /// </remarks>
     public IDictionary<string, string> ContentTypeMappings { get; }
         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 

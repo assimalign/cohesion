@@ -94,10 +94,13 @@ public static class HttpResponseFileExtensions
         /// <paramref name="path"/> is resolved inside <paramref name="fileSystem"/> and can never address
         /// anything outside it, so it may be built from request input such as a route value. A path that
         /// contains a <c>.</c> or <c>..</c> segment (separated by <c>/</c> or <c>\</c>), a <c>:</c> (drive
-        /// letters and alternate data streams), or a NUL is answered with <c>404</c> without consulting
-        /// the mount, and a leading <c>/</c> refers to the mount root rather than the host's: the checks
-        /// <c>UseStaticFiles</c> applies to request paths. A path that names a directory, or nothing, is
-        /// also answered with <c>404</c>.
+        /// letters and alternate data streams), a NUL, or a segment shaped like an 8.3 short-name alias
+        /// (a stem of at most eight characters with <c>~</c> and a digit, such as <c>UPLOAD~1.HTM</c>) is
+        /// answered with <c>404</c> without consulting the mount, and a leading <c>/</c> refers to the
+        /// mount root rather than the host's: the checks <c>UseStaticFiles</c> applies to request paths.
+        /// The alias check keeps <c>upload.htmlx</c> from being reached, and typed, as <c>text/html</c>
+        /// through its alias. A path that names a directory, or nothing, is also answered with
+        /// <c>404</c>.
         /// </para>
         /// <para>
         /// A resolved file is sent exactly as the <see cref="IFileSystemFile"/> overload sends it. The

@@ -239,6 +239,31 @@ public class StaticFilesMiddlewareTests
         context.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: an 8.3 short-name alias should be rejected with 404")]
+    [InlineData("/static/uploads/UPLOAD~1.HTM")]
+    [InlineData("/static/UPLOAD~1/page.html")]
+    public async Task Invoke_ShortNameAlias_ShouldRespond404(string path)
+    {
+        // Arrange — on a volume that generates short names, UPLOAD~1.HTM opens upload.htmlx, and
+        // the type would be read from the alias's ".HTM". The in-memory mount holds the alias as a
+        // real name, so the 404 here can only come from the gate, on any host.
+        using InMemoryFileSystem site = StaticSite.Create(
+            ("uploads/UPLOAD~1.HTM", "<script>alert(1)</script>"),
+            ("UPLOAD~1/page.html", "<script>alert(1)</script>"));
+        bool[] passedThrough = [false];
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site, path, HttpMethod.Get,
+            options => options.RequestPath = new HttpPath("/static"),
+            passedThrough: passedThrough);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        context.ReadResponseBody().ShouldBeEmpty();
+        passedThrough[0].ShouldBeFalse();
+    }
+
     // ---------------------------------------------------------------- default documents
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the mount root should serve the first default document")]
