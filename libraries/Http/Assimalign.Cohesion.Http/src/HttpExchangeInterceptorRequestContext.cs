@@ -24,13 +24,15 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// All required members are set by the transport at construction; every one is init-only except
 /// <see cref="MaxRequestBodySize"/>, whose continued mutability is the point of the knob.
-/// Members added in future versions will be optional with sensible defaults so existing
-/// construction sites (including test fakes) keep compiling.
+/// Members added in future versions are optional with sensible defaults so existing
+/// construction sites (including test fakes) keep compiling; the per-request rate knob
+/// (<see cref="MinRequestBodyDataRate"/>) is one, settable until the transport freezes it.
 /// </para>
 /// </remarks>
 public sealed class HttpExchangeInterceptorRequestContext
 {
     private long? _maxRequestBodySize;
+    private HttpMinDataRate? _minRequestBodyDataRate;
     private List<IHttpExchangeInterceptor>? _responseInterceptors;
 
     /// <summary>
@@ -144,6 +146,61 @@ public sealed class HttpExchangeInterceptorRequestContext
     public void FreezeMaxRequestBodySize()
     {
         IsMaxRequestBodySizeReadOnly = true;
+    }
+
+    /// <summary>
+    /// Gets or sets the minimum rate at which the request body must arrive for this exchange, or
+    /// <see langword="null"/> to hold the body to no rate. Seeded by the transport from the listener's
+    /// configured rate; interceptors, middleware and endpoints may lower, raise, or disable it until the
+    /// transport freezes it at the first read of the request body (see
+    /// <see cref="IsMinRequestBodyDataRateReadOnly"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Disabling the rate is for a body that legitimately idles: a client-streaming or duplex call, or
+    /// a long-lived upload that sends a message now and then. It removes the slow-body defence for this
+    /// request only, so decide it from the endpoint, never from request-supplied values. A
+    /// <c>CONNECT</c> tunnel's octets are not a request body, and no rate applies to them whatever this
+    /// holds.
+    /// </para>
+    /// <para>
+    /// The property is optional: a context constructed outside a transport (a test fake) starts with
+    /// <see langword="null"/>, and every server transport seeds it.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when set after the transport has frozen the value
+    /// (<see cref="IsMinRequestBodyDataRateReadOnly"/> is <see langword="true"/>).
+    /// </exception>
+    public HttpMinDataRate? MinRequestBodyDataRate
+    {
+        get => _minRequestBodyDataRate;
+        set
+        {
+            if (IsMinRequestBodyDataRateReadOnly)
+            {
+                throw new InvalidOperationException(
+                    "The minimum request body data rate cannot be modified after the transport has started reading the request body.");
+            }
+
+            _minRequestBodyDataRate = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="MinRequestBodyDataRate"/> has been frozen by the
+    /// transport. The value freezes at the first read of the request body on every protocol, after which
+    /// the rate that applies is fixed for the remainder of the exchange.
+    /// </summary>
+    public bool IsMinRequestBodyDataRateReadOnly { get; private set; }
+
+    /// <summary>
+    /// Freezes <see cref="MinRequestBodyDataRate"/> for the remainder of the exchange. Called by the
+    /// transport when it starts reading the request body; idempotent.
+    /// </summary>
+    public void FreezeMinRequestBodyDataRate()
+    {
+        IsMinRequestBodyDataRateReadOnly = true;
     }
 
     /// <summary>

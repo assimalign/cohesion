@@ -39,9 +39,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// section before it completes the pipe, and this stream publishes it at the end.
 /// </para>
 /// <para>
-/// <b>Minimum data rate (#1085).</b> When the connection carries an
-/// <see cref="Http2RequestBodyDataRate"/>, the body is held to it as HTTP/1.1 holds its own:
-/// a <see cref="MinDataRateGate"/> started at the first read charges only the time this
+/// <b>Minimum data rate (#1085).</b> Unless the stream is a CONNECT tunnel, the body is held to the
+/// listener's rate, or to the rate its request set for itself before the first read (#1383; the parse
+/// context's knob freezes then), as HTTP/1.1 holds its own: a <see cref="MinDataRateGate"/> started at
+/// the first read charges only the time this
 /// reader waits for DATA the pipe does not yet hold, and every octet delivered extends the
 /// allowance. The part of a wait during which the connection-level receive window was too low
 /// to carry a full frame is excused, since the peer may then be unable to send because other
@@ -51,7 +52,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// otherwise — and the read fails with an <see cref="IOException"/>.
 /// </para>
 /// </remarks>
-internal sealed class Http2RequestBodyStream : Stream
+internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
 {
     // While the connection's receive window is low, a wait may run past the reader's allowance on its
     // exemption, but no longer than this at a time, so a window that recovers mid-wait is noticed and the
@@ -70,9 +71,18 @@ internal sealed class Http2RequestBodyStream : Stream
     private readonly Action _onEndOfBody;
     private readonly int _streamId;
     private readonly CancellationToken _requestAborted;
-    // The connection's minimum request-body data rate, or null when none is configured or the stream is
-    // a CONNECT tunnel. The gate that enforces it starts at the first read.
+    // The connection's minimum request-body data rate policy, or null when the stream is a CONNECT tunnel.
+    // The rate the body is held to is resolved, and the gate that enforces it started, at the first read:
+    // the request's own (#1383) when a parse context is attached, else the listener's.
     private readonly Http2RequestBodyDataRate? _dataRate;
+    // The request-parse context whose rate knob freezes at the first read, or null on the fast path.
+    private HttpExchangeInterceptorRequestContext? _interception;
+    // Whether the first read resolved the rate (and froze the knob).
+    private bool _rateResolved;
+    // The rate the body is held to, resolved at the first read; null when it is held to none.
+    private HttpMinDataRate? _rate;
+    // The wait time the connection's low receive window may excuse for this body: the grace period of _rate.
+    private long _maxExemptionTicks;
 
     private ReadOnlyMemory<byte> _current;
     private int _currentFlowControlDebt;
@@ -80,7 +90,7 @@ internal sealed class Http2RequestBodyStream : Stream
     private MinDataRateGate? _gate;
     private IOException? _rateFailure;
     // The wait time the connection's low receive window has excused so far, in clock ticks; never more
-    // than the rate's MaxBackpressureExemptionTicks.
+    // than _maxExemptionTicks.
     private long _excusedTicks;
 
     /// <summary>
@@ -92,8 +102,9 @@ internal sealed class Http2RequestBodyStream : Stream
     /// <param name="requestAborted">The stream's abort token, fired when it is reset.</param>
     /// <param name="onEndOfBody">Publishes the trailer section at the clean end of the body.</param>
     /// <param name="dataRate">
-    /// The connection's minimum request-body data rate, or <see langword="null"/> to leave the body
-    /// unbounded in time (no rate configured, or a CONNECT tunnel).
+    /// The connection's minimum request-body data rate policy, or <see langword="null"/> to leave the body
+    /// unbounded in time (a CONNECT tunnel). With a policy, the body is held to the listener's rate unless
+    /// its request changed its own before the first read (<see cref="AttachInterception"/>).
     /// </param>
     public Http2RequestBodyStream(
         ChannelReader<Http2DataChunk> reader,
@@ -109,6 +120,16 @@ internal sealed class Http2RequestBodyStream : Stream
         _requestAborted = requestAborted;
         _onEndOfBody = onEndOfBody;
         _dataRate = dataRate;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Called by the request-parse pipeline after the head hooks, before the body is exposed. The knob
+    /// stays adjustable until the first read freezes it (<see cref="ResolveRate"/>).
+    /// </remarks>
+    public void AttachInterception(HttpExchangeInterceptorRequestContext interception)
+    {
+        _interception = interception;
     }
 
     /// <inheritdoc />
@@ -138,11 +159,11 @@ internal sealed class Http2RequestBodyStream : Stream
             return 0;
         }
 
-        // The transport consumes the body from here on: the rate is enforced from the first read, as on
-        // HTTP/1.1, so a peer that holds its body back gets the grace period and no more.
-        if (_dataRate is not null)
+        // The transport consumes the body from here on: the rate is resolved and enforced from the first
+        // read, as on HTTP/1.1, so a peer that holds its body back gets the grace period and no more.
+        if (!_rateResolved)
         {
-            _gate ??= new MinDataRateGate(_dataRate.Rate, _dataRate.TimeProvider);
+            ResolveRate();
         }
 
         while (true)
@@ -215,6 +236,31 @@ internal sealed class Http2RequestBodyStream : Stream
 
     /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The HTTP/2 request body stream is read-only.");
+
+    /// <summary>
+    /// Resolves, at the first read, the rate the body is held to and starts its gate: the request's own
+    /// (<see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>, which is frozen here)
+    /// when a parse context is attached, else the listener's. A tunnel, and a request whose rate is
+    /// <see langword="null"/>, read ungated.
+    /// </summary>
+    private void ResolveRate()
+    {
+        _rateResolved = true;
+        _interception?.FreezeMinRequestBodyDataRate();
+
+        if (_dataRate is null)
+        {
+            return;
+        }
+
+        _rate = _interception is not null ? _interception.MinRequestBodyDataRate : _dataRate.Rate;
+
+        if (_rate is not null)
+        {
+            _gate = new MinDataRateGate(_rate, _dataRate.TimeProvider);
+            _maxExemptionTicks = _dataRate.GetMaxBackpressureExemptionTicks(_rate);
+        }
+    }
 
     /// <summary>
     /// Loads the next chunk from the channel, crediting any padding-only chunk
@@ -301,7 +347,7 @@ internal sealed class Http2RequestBodyStream : Stream
         while (true)
         {
             long allowance = gate.GetRemainingTicks();
-            long exemption = dataRate.MaxBackpressureExemptionTicks - _excusedTicks;
+            long exemption = _maxExemptionTicks - _excusedTicks;
             bool backpressured = exemption > 0 && dataRate.IsConnectionReceiveBackpressured;
 
             if (allowance <= 0 && !backpressured)
@@ -356,7 +402,7 @@ internal sealed class Http2RequestBodyStream : Stream
     {
         long waited = gate.TimeProvider.GetTimestamp() - start;
         long backpressured = Math.Clamp(dataRate.ConnectionReceiveBackpressuredTicks - backpressuredAtStart, 0, Math.Max(waited, 0));
-        long excused = Math.Min(backpressured, Math.Max(dataRate.MaxBackpressureExemptionTicks - _excusedTicks, 0));
+        long excused = Math.Min(backpressured, Math.Max(_maxExemptionTicks - _excusedTicks, 0));
 
         _excusedTicks += excused;
         gate.Record(waited - excused, bytesTransferred: 0);
@@ -370,7 +416,7 @@ internal sealed class Http2RequestBodyStream : Stream
     private async ValueTask<IOException> RejectTooSlowAsync(Http2RequestBodyDataRate dataRate)
     {
         _rateFailure = new IOException(
-            $"The HTTP/2 request body on stream {_streamId} was received below the configured minimum data rate of {dataRate.Rate.BytesPerSecond} octets per second (408 Request Timeout).");
+            $"The HTTP/2 request body on stream {_streamId} was received below the configured minimum data rate of {_rate!.BytesPerSecond} octets per second (408 Request Timeout).");
 
         await dataRate.RejectTooSlowAsync(_streamId).ConfigureAwait(false);
         return _rateFailure;

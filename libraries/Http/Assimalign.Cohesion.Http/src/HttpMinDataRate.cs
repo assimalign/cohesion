@@ -1,25 +1,29 @@
 using System;
 
-namespace Assimalign.Cohesion.Http.Connections;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// A minimum data-rate policy: the lowest sustained throughput, in octets per second, a peer must
-/// maintain once a <see cref="GracePeriod"/> has elapsed, or the transport reclaims the exchange.
-/// Used for the request-body read on HTTP/1.1, HTTP/2 and HTTP/3 (slow-body / trickle defence) and
-/// the HTTP/1.1 streaming response write (slow-reader defence), mirroring Kestrel's
+/// maintain once a <see cref="GracePeriod"/> has elapsed, or the server transport reclaims the exchange.
+/// A transport holds a request body to one (a slow sender trickling its body) and a response body to
+/// another (a slow reader that withholds flow-control credit or stops reading), mirroring Kestrel's
 /// <c>MinDataRate</c> semantics.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The rate is enforced as an <em>average</em> over the transfer, not instantaneously: a peer may
-/// stall or burst freely inside the grace period, and the grace period restarts the allowance so a
-/// peer that has already delivered a lot of data earns proportional slack. Only time actually spent
-/// waiting for the peer counts against the rate — a slow application consuming an otherwise healthy
-/// stream is never mistaken for a slow peer.
+/// stall or burst freely inside the grace period, and every octet it moves extends its allowance, so a
+/// peer that has already moved a lot of data earns proportional slack. Only time the transport actually
+/// spends waiting for the peer counts against the rate: a slow application consuming or producing an
+/// otherwise healthy stream is never mistaken for a slow peer.
 /// </para>
 /// <para>
-/// The policy is immutable; construct a new instance to change either dimension. A <c>null</c>
-/// data-rate limit on <see cref="HttpConnectionListenerLimits"/> disables the check entirely.
+/// The policy is an immutable value object; construct a new instance to change either dimension. Where
+/// a policy is optional, <see langword="null"/> disables the check. The server transport's listener
+/// limits carry the defaults, and each request's parse context carries the values that apply to it
+/// (<see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>), which a request-parse
+/// interceptor or a feature package can change for one request before the transport starts the
+/// transfer.
 /// </para>
 /// </remarks>
 public sealed class HttpMinDataRate
@@ -38,7 +42,8 @@ public sealed class HttpMinDataRate
     /// </exception>
     public HttpMinDataRate(double bytesPerSecond, TimeSpan gracePeriod)
     {
-        if (bytesPerSecond <= 0)
+        // Written as a negated comparison so NaN, which compares false either way, is refused too.
+        if (!(bytesPerSecond > 0))
         {
             throw new ArgumentOutOfRangeException(nameof(bytesPerSecond), bytesPerSecond, "The minimum data rate must be greater than zero octets per second.");
         }

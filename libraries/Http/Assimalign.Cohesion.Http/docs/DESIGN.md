@@ -983,6 +983,16 @@ out in #1367 (TLS) and #1368 (extended CONNECT).
   The transport keeps the context alive until the body is consumed — the
   documented lifetime is "until the request body is consumed or the exchange
   completes", not "until dispatch".
+- **The context is also the request-body rate cell (#1383).** `MinRequestBodyDataRate` (an
+  `HttpMinDataRate`, `null` = no rate) is seeded by every transport from its listener limits and
+  frozen at the first read of the request body on every protocol
+  (`FreezeMinRequestBodyDataRate()` / `IsMinRequestBodyDataRateReadOnly`), so a hook, middleware or
+  endpoint can lower, raise or disable it for one request until then. HTTP/2 freezes the body-size
+  knob at dispatch but this one only at its reader's first read, so the two freeze independently.
+  `HttpMinDataRate` is a core value object for this reason: the context, the transport's listener
+  limits and the typed feature in `Http.RequestLimits` all name it, and core can name nothing in
+  `Http.Connections`. Moving it from there was a source and binary break (the transport's DESIGN,
+  "Per-request data rates (#1383)", records it).
 - **Interceptor instances are shared across all connections/requests** and must
   be stateless; per-request state goes in `Features`. Hooks are CPU-only.
 - **Rejection is typed.** `HttpRequestRejectedException` carries a 4xx/5xx
@@ -993,7 +1003,8 @@ out in #1367 (TLS) and #1368 (extended CONNECT).
 - **Evolution rules:** v1 context members are `required` (init-only, except the
   deliberately-mutable body-size knob); all future members must be optional
   with defaults so existing construction sites (including test fakes — the
-  context is deliberately constructible in tests) keep compiling.
+  context is deliberately constructible in tests) keep compiling. `Protocol` and
+  `MinRequestBodyDataRate` are such members: a context built without them reads `null`.
 
 ### AOT posture
 

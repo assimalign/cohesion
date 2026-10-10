@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
@@ -49,6 +50,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 ///     "MaxRequestBodySize":        30000000,
 ///     "KeepAliveTimeout":          "00:02:10",
 ///     "RequestHeadersTimeout":     "00:00:30",
+///     "MinRequestBodyDataRate":    { "BytesPerSecond": 240, "GracePeriod": "00:00:05" },
 ///     "Http2": { "MaxStreamsPerConnection": 100, "MaxRequestHeaderListSize": 16384 }
 ///   }
 /// }
@@ -74,7 +76,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// <see cref="HttpConnectionListenerLimits"/>), so the single <c>Limits</c> section is applied to
 /// every endpoint this binder registers: HTTP/1.1 endpoints receive the HTTP/1.1 keys; HTTP/2
 /// endpoints receive the shared keys (<c>MaxRequestBodySize</c>, <c>KeepAliveTimeout</c>,
-/// <c>RequestHeadersTimeout</c>) and the <c>Limits:Http2</c> keys; HTTP/3 endpoints receive the
+/// <c>RequestHeadersTimeout</c>, <c>MinRequestBodyDataRate</c>) and the <c>Limits:Http2</c> keys; HTTP/3 endpoints receive the
 /// shared keys. An <c>Https</c> endpoint applies the HTTP/1.1 keys to the connections it serves
 /// HTTP/1.1 and the HTTP/2 keys to those it serves HTTP/2. <c>MaxConcurrentConnections</c> caps the
 /// default server rather than an endpoint. The section is parsed eagerly — before any endpoint is
@@ -233,6 +235,11 @@ internal static class HttpServerConfiguration
         if (TryGetTimeout(configuration, $"{sectionKey}:Limits:RequestHeadersTimeout", out TimeSpan requestHeadersTimeout))
         {
             limits.RequestHeadersTimeout = requestHeadersTimeout;
+        }
+
+        if (TryGetDataRate(configuration, $"{sectionKey}:Limits:MinRequestBodyDataRate", limits.MinRequestBodyDataRate, out HttpMinDataRate? minRequestBodyDataRate))
+        {
+            limits.MinRequestBodyDataRate = minRequestBodyDataRate;
         }
     }
 
@@ -690,11 +697,17 @@ internal static class HttpServerConfiguration
         target.FloodDetectionWindow = source.Http2.FloodDetectionWindow;
     }
 
-    private static void CopySharedLimits(HttpConnectionListenerLimits source, HttpConnectionListenerLimits target)
+    /// <summary>
+    /// Copies the limits every HTTP version shares from the bound template onto an endpoint's limits.
+    /// </summary>
+    /// <param name="source">The template the <c>Limits</c> section was bound onto.</param>
+    /// <param name="target">The endpoint's limits.</param>
+    internal static void CopySharedLimits(HttpConnectionListenerLimits source, HttpConnectionListenerLimits target)
     {
         target.MaxRequestBodySize = source.MaxRequestBodySize;
         target.KeepAliveTimeout = source.KeepAliveTimeout;
         target.RequestHeadersTimeout = source.RequestHeadersTimeout;
+        target.MinRequestBodyDataRate = source.MinRequestBodyDataRate;
     }
 
     private static EndpointProtocol ParseProtocol(string endpointName, string? protocol)
@@ -848,6 +861,75 @@ internal static class HttpServerConfiguration
 
         throw new InvalidOperationException(
             $"The configured timeout at '{path}' ('{raw}') is not a valid TimeSpan, a whole number of seconds, or 'infinite'.");
+    }
+
+    /// <summary>
+    /// Reads a minimum data rate at <paramref name="path"/>: the scalar <c>none</c> (or <c>disabled</c>)
+    /// disables the check, and a section sets <c>BytesPerSecond</c> (a positive number) and
+    /// <c>GracePeriod</c> (a positive <see cref="TimeSpan"/>, read as the other timeouts are). A dimension the
+    /// section leaves out keeps <paramref name="current"/>'s, or the built-in 240 octets per second over 5
+    /// seconds when the rate is currently disabled.
+    /// </summary>
+    /// <param name="configuration">The configuration to read from.</param>
+    /// <param name="path">The rate's path, for example <c>Http:Limits:MinRequestBodyDataRate</c>.</param>
+    /// <param name="current">The rate in place before binding, whose dimensions an incomplete section keeps.</param>
+    /// <param name="value">The bound rate, <see langword="null"/> when disabled.</param>
+    /// <returns><see langword="false"/> when nothing is configured at <paramref name="path"/>.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when a configured value cannot be parsed.</exception>
+    private static bool TryGetDataRate(IConfiguration configuration, string path, HttpMinDataRate? current, out HttpMinDataRate? value)
+    {
+        string? scalar = GetString(configuration, path);
+        if (scalar is not null)
+        {
+            if (scalar.Equals("none", StringComparison.OrdinalIgnoreCase)
+                || scalar.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                value = null;
+                return true;
+            }
+
+            throw new InvalidOperationException(
+                $"The configured data rate at '{path}' ('{scalar}') is not 'none' or a section with BytesPerSecond and GracePeriod.");
+        }
+
+        string bytesPerSecondPath = $"{path}:BytesPerSecond";
+        string gracePeriodPath = $"{path}:GracePeriod";
+        string? rawBytesPerSecond = GetString(configuration, bytesPerSecondPath);
+        string? rawGracePeriod = GetString(configuration, gracePeriodPath);
+
+        if (rawBytesPerSecond is null && rawGracePeriod is null)
+        {
+            value = default;
+            return false;
+        }
+
+        double bytesPerSecond = current?.BytesPerSecond ?? 240;
+        TimeSpan gracePeriod = current?.GracePeriod ?? TimeSpan.FromSeconds(5);
+
+        if (rawBytesPerSecond is not null)
+        {
+            // Finite and positive: a NaN or infinite rate would switch the check off or reject every wait.
+            if (!double.TryParse(rawBytesPerSecond, NumberStyles.Float, CultureInfo.InvariantCulture, out bytesPerSecond)
+                || !double.IsFinite(bytesPerSecond)
+                || bytesPerSecond <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"The configured value at '{bytesPerSecondPath}' ('{rawBytesPerSecond}') is not a positive number of octets per second.");
+            }
+        }
+
+        if (rawGracePeriod is not null)
+        {
+            if (!TryGetTimeout(configuration, gracePeriodPath, out gracePeriod)
+                || gracePeriod <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"The configured grace period at '{gracePeriodPath}' ('{rawGracePeriod}') is not a positive TimeSpan.");
+            }
+        }
+
+        value = new HttpMinDataRate(bytesPerSecond, gracePeriod);
+        return true;
     }
 
     private static string? GetString(IConfiguration configuration, Path path)

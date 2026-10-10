@@ -865,7 +865,7 @@ server carries:
 
 | Feature | Installed by |
 | --- | --- |
-| `IHttpMaxRequestBodySizeFeature` | the first default interceptor, while the request is parsed |
+| `IHttpMaxRequestBodySizeFeature` and `IHttpMinRequestBodyDataRateFeature`, one object (#1383) | the first default interceptor, while the request is parsed |
 | `IWebRequestIdFeature` | the server's exchange telemetry, before the pipeline runs |
 | `IWebResponseCompletionFeature` | the server, before the pipeline runs |
 | `IWebServerDrainFeature` | the server, before the pipeline runs |
@@ -1212,6 +1212,7 @@ command-line configuration providers; it adds no reflection binder or
     "MaxRequestBodySize": 30000000,
     "KeepAliveTimeout": "00:02:10",
     "RequestHeadersTimeout": "00:00:30",
+    "MinRequestBodyDataRate": { "BytesPerSecond": 240, "GracePeriod": "00:00:05" },
     "Http2": { "MaxStreamsPerConnection": 100, "MaxRequestHeaderListSize": 16384 }
   }
 }
@@ -1230,7 +1231,7 @@ through the registration verbs' configure overloads:
 | Endpoint protocol | Limits it receives |
 |---|---|
 | HTTP/1.1 (`Http1`, `Http1s`, and the HTTP/1.1 connections of `Https`) | every top-level key |
-| HTTP/2 (`Http2`, `Http2s`, and the HTTP/2 connections of `Https`) | the shared `HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout`) and the `Limits:Http2` keys (`MaxStreamsPerConnection`, `MaxRequestHeaderListSize`, `MaxResetStreamsPerWindow`, `MaxSettingsFramesPerWindow`, `MaxPingFramesPerWindow`, `FloodDetectionWindow`) |
+| HTTP/2 (`Http2`, `Http2s`, and the HTTP/2 connections of `Https`) | the shared `HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout`, `MinRequestBodyDataRate`) and the `Limits:Http2` keys (`MaxStreamsPerConnection`, `MaxRequestHeaderListSize`, `MaxResetStreamsPerWindow`, `MaxSettingsFramesPerWindow`, `MaxPingFramesPerWindow`, `FloodDetectionWindow`) |
 | HTTP/3 (`Http3`) | the shared keys |
 
 The HTTP/1.1 wire-format keys have no HTTP/2 or HTTP/3 meaning. HTTP/3's stream
@@ -1242,16 +1243,24 @@ transport's DESIGN, "HTTP/2 and HTTP/3 connection timeouts and data rates").
 
 The same change puts the default minimum request-body data rate on every HTTP/2
 and HTTP/3 endpoint, as HTTP/1.1 already had it: 240 octets per second after a
-5-second grace period, from the first body read. No `Limits` key binds
-`MinRequestBodyDataRate` (or `MinResponseDataRate`) on any version, so an
-endpoint bound from configuration keeps the default. An endpoint registered in
-code can change it through the HTTP options callback of `UseHttp1s`, `UseHttp2s`,
-`UseHttps` or `UseHttp3`, for example
-`http2 => http2.Limits.MinRequestBodyDataRate = null`. There is no per-request
-override: a request body that legitimately idles, such as a client-streaming
-call, fails with `408` (or a stream reset once the response has started) when
-an idle gap outlasts its allowance, about 5 seconds plus 1 second per 240 octets
-already received. Before #1085 such a body was served on HTTP/2 and HTTP/3.
+5-second grace period, from the first body read. `Limits:MinRequestBodyDataRate`
+binds the listener-wide value on every version (#1383): a section sets
+`BytesPerSecond` (a positive, finite number) and `GracePeriod` (a positive
+`TimeSpan`), keeping the built-in value of a dimension it leaves out, and the
+scalar `none` (or `disabled`) turns the rate off. A JSON `null` reads as an
+absent key and keeps the default, so it never switches the defence off by
+accident, and a value that does not parse fails the bind. An endpoint registered
+in code can still set it through the HTTP options callback of `UseHttp1s`,
+`UseHttp2s`, `UseHttps` or `UseHttp3`, for example
+`http2 => http2.Limits.MinRequestBodyDataRate = null`.
+
+A request body that legitimately idles, such as a client-streaming call, needs
+neither: its endpoint sets `context.MinRequestBodyDataRate!.MinDataRate = null`
+before it reads the body, through the feature the default request-limits
+interceptor attaches (#1383), and every other request keeps the listener's rate.
+Without that, such a body fails with `408` (or a stream reset once the response
+has started) when an idle gap outlasts its allowance, about 5 seconds plus 1
+second per 240 octets already received.
 
 `Limits:MaxConcurrentConnections` is not an endpoint limit: it caps the default
 server (see "Concurrency cap (`MaxConcurrentConnections`)"). The binder hands it to the
@@ -1375,8 +1384,8 @@ default interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
 There are four, in this order:
 
-1. `Http.RequestLimits`' max-request-body-size interceptor (request scope), in slot 0, described
-   below.
+1. `Http.RequestLimits`' request-limits interceptor (`HttpRequestLimits.CreateInterceptor()`, request
+   scope), in slot 0, described below.
 2. `Http.ProtocolUpgrade`'s interceptor (decision 16,
    [Http ADR 1](../../../../docs/libraries/Http/DECISIONS.md#adr-1-server-websockets)). It surfaces an
    HTTP/1.1 upgrade or `CONNECT` as `context.Upgrade`, so a WebSocket handshake
@@ -1443,9 +1452,13 @@ A host that clears the list and still serves WebSockets adds the two interceptor
 also removes the client-fault interceptor: a malformed or over-limit body is then logged at `Error`
 and observed by `OnException` again, while the transport still answers it with its own status.
 
-The max-request-body-size interceptor occupies slot 0 of the interceptor
-order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
-user-registered interceptors' `AfterRequestHead` hooks can observe it. As of #819 the seam is
+The request-limits interceptor occupies slot 0 of the interceptor order so every
+request carries the typed `IHttpMaxRequestBodySizeFeature` and
+`IHttpMinRequestBodyDataRateFeature` and user-registered interceptors'
+`AfterRequestHead` hooks can observe them. Both contracts sit on one feature
+object (#1383), so the rate added no slot and `HostFeatureCount` is unchanged.
+The rate's knob freezes at the first body read on every protocol, so an endpoint
+can disable it for its own request before it reads. As of #819 the seam is
 invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
 feature is attached uniformly regardless of protocol. The cap is *enforced*
 with 413 on all three: HTTP/1.1 inline in its parser, HTTP/2 against the value

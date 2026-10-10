@@ -2,8 +2,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// A transport request body that is read lazily after the request is dispatched and enforces the
-/// per-request body-size cap itself, freezing the parse context's knob at its first read — the
-/// HTTP/1.1 model (<see cref="Http1RequestBodyStream"/>), which HTTP/3's
+/// per-request body-size cap and minimum data rate itself, freezing the parse context's knobs at its
+/// first read — the HTTP/1.1 model (<see cref="Http1RequestBodyStream"/>), which HTTP/3's
 /// <see cref="Http3RequestBodyStream"/> shares.
 /// </summary>
 /// <remarks>
@@ -18,8 +18,9 @@ internal interface IHttpLazyRequestBody
 {
     /// <summary>
     /// Hands the body the request's parse context. The body freezes
-    /// <see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/> at its first read and
-    /// enforces the frozen value from then on.
+    /// <see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/> and
+    /// <see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/> at its first read and
+    /// enforces the frozen values from then on.
     /// </summary>
     /// <param name="interception">The request's parse context.</param>
     void AttachInterception(HttpExchangeInterceptorRequestContext interception);

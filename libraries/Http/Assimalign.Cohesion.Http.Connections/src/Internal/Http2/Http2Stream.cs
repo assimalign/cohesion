@@ -992,8 +992,9 @@ internal sealed class Http2Stream
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
     /// <param name="featureCapacity">The number of features the exchange is expected to carry; its feature collection is sized for it.</param>
     /// <param name="requestBodyDataRate">
-    /// The connection's minimum request-body data rate, or <see langword="null"/> when none is configured.
-    /// A CONNECT, whose DATA is tunnel traffic rather than a request body, is never held to it.
+    /// The connection's minimum request-body data rate policy. Its listener rate seeds the parse context,
+    /// and the body holds the peer to the rate the request ends up with at its first read (#1383). A
+    /// CONNECT, whose DATA is tunnel traffic rather than a request body, is never held to it.
     /// </param>
     /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
     /// <exception cref="HttpRequestRejectedException">
@@ -1200,6 +1201,7 @@ internal sealed class Http2Stream
             requestHead,
             connectionInfo,
             maxRequestBodySize,
+            requestBodyDataRate?.Rate,
             isConnect,
             featureCapacity).ConfigureAwait(false);
 

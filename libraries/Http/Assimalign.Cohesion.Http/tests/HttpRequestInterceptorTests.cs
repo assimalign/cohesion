@@ -46,6 +46,54 @@ public class HttpRequestInterceptorTests
         Should.Throw<InvalidOperationException>(() => context.MaxRequestBodySize = 5);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: The minimum request-body data rate is optional and defaults to null")]
+    public void Context_MinRequestBodyDataRate_OnUnseededContext_ShouldDefaultToNull()
+    {
+        // Arrange / Act — a construction site that predates the member still compiles (#1383).
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+
+        // Assert
+        context.MinRequestBodyDataRate.ShouldBeNull();
+        context.IsMinRequestBodyDataRateReadOnly.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Should lower, raise and disable the minimum request-body data rate before the freeze")]
+    public void Context_MinRequestBodyDataRate_BeforeFreeze_ShouldRoundTrip()
+    {
+        // Arrange
+        HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
+        HttpMinDataRate raised = new(4096, TimeSpan.FromSeconds(1));
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        context.MinRequestBodyDataRate = seeded;
+
+        // Act and assert
+        context.MinRequestBodyDataRate.ShouldBeSameAs(seeded);
+        context.MinRequestBodyDataRate = raised;
+        context.MinRequestBodyDataRate.ShouldBeSameAs(raised);
+        context.MinRequestBodyDataRate = null;
+        context.MinRequestBodyDataRate.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Should freeze the minimum request-body data rate idempotently and reject later writes")]
+    public void Context_FreezeMinRequestBodyDataRate_ShouldRejectLaterWrites()
+    {
+        // Arrange
+        HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
+        context.MinRequestBodyDataRate = seeded;
+
+        // Act
+        context.FreezeMinRequestBodyDataRate();
+        context.FreezeMinRequestBodyDataRate();
+
+        // Assert — the rate freezes on its own: the body-size knob is still writable, and reads still work.
+        context.IsMinRequestBodyDataRateReadOnly.ShouldBeTrue();
+        context.MinRequestBodyDataRate.ShouldBeSameAs(seeded);
+        Should.Throw<InvalidOperationException>(() => context.MinRequestBodyDataRate = null);
+        context.IsMaxRequestBodySizeReadOnly.ShouldBeFalse();
+        context.MaxRequestBodySize = 2048;
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: No response interceptor is added to an exchange by default")]
     public void Context_ResponseInterceptors_ShouldStartEmpty()
     {

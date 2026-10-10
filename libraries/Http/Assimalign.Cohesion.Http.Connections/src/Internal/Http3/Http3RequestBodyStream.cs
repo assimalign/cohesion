@@ -41,6 +41,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </para>
 /// <para>
 /// <b>Minimum data rate (#1085).</b> With a <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/>,
+/// or the rate the request set for itself before the first read (#1383, frozen then like the cap),
 /// a <see cref="MinDataRateGate"/> started at the first read bounds every read by what is left of the
 /// peer's allowance and charges the time the read waited; DATA octets delivered extend it, as on
 /// HTTP/1.1. A read the allowance runs out on stops the request stream with
@@ -82,7 +83,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private readonly bool _isTunnel;
     private readonly long? _fallbackCap;
     private readonly int _maxHeadersFrameSize;
-    private readonly HttpMinDataRate? _minDataRate;
+    private readonly HttpMinDataRate? _fallbackRate;
     private readonly TimeProvider _timeProvider;
     private readonly Lock _gate = new();
 
@@ -97,6 +98,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     // #1085 — the minimum data-rate gate, started at the first read of a body (never a tunnel's) when a
     // rate is configured. Read-path only, like the frame progress below.
     private MinDataRateGate? _rateGate;
+    // The rate the gate enforces: the request's own (#1383) when a parse context is attached, else the
+    // listener's; resolved, and the context's knob frozen, at the first read.
+    private HttpMinDataRate? _rate;
 
     // Frame progress lives in fields, not locals, so a read cancelled mid-frame resumes exactly where it
     // stopped: _dataRemaining counts the current DATA frame's undelivered octets, _skipRemaining an
@@ -142,8 +146,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// head); replaced by the exchange's <see cref="HttpContext.RequestCancelled"/> once attached.
     /// </param>
     /// <param name="minDataRate">
-    /// The minimum rate the body must arrive at once read (#1085), or <see langword="null"/> for none.
-    /// Not applied to a tunnel.
+    /// The listener's minimum rate the body must arrive at once read (#1085), or <see langword="null"/> for
+    /// none, used when no parse context is attached; with one, the context's knob, frozen at the first
+    /// read, applies instead (#1383). Not applied to a tunnel.
     /// </param>
     /// <param name="timeProvider">The monotonic clock the rate is measured on; the system clock when <see langword="null"/>.</param>
     public Http3RequestBodyStream(
@@ -170,7 +175,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         _fallbackCap = fallbackCap;
         _maxHeadersFrameSize = maxHeadersFrameSize;
         _requestAborted = requestAborted;
-        _minDataRate = minDataRate;
+        _fallbackRate = minDataRate;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -707,6 +712,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         // The transport is now consuming the body: freeze the per-request cap (idempotent) and resolve the
         // value enforced for the rest of the exchange — the HTTP/1.1 freeze-at-first-read contract.
         _interception?.FreezeMaxRequestBodySize();
+        _interception?.FreezeMinRequestBodyDataRate();
 
         if (_isTunnel)
         {
@@ -714,10 +720,12 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             return;
         }
 
-        // #1085 — the peer's allowance starts with the first read, as on HTTP/1.1.
-        if (_minDataRate is not null)
+        // #1085 — the peer's allowance starts with the first read, as on HTTP/1.1, under the rate the request
+        // ended up with (#1383): an endpoint may have lowered, raised, or disabled the listener's.
+        _rate = _interception is not null ? _interception.MinRequestBodyDataRate : _fallbackRate;
+        if (_rate is not null)
         {
-            _rateGate = new MinDataRateGate(_minDataRate, _timeProvider);
+            _rateGate = new MinDataRateGate(_rate, _timeProvider);
         }
 
         _cap = _interception is not null ? _interception.MaxRequestBodySize : _fallbackCap;
@@ -748,7 +756,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         // RFC 9110 §15.5.9 — a body received below the minimum data rate is answered 408 Request Timeout.
         return Reject(new Http3LimitExceededException(
             HttpStatusCode.RequestTimeout,
-            $"The request body was received below the configured minimum data rate of {_minDataRate!.BytesPerSecond} octets per second."));
+            $"The request body was received below the configured minimum data rate of {_rate!.BytesPerSecond} octets per second."));
     }
 
     private Http3LimitExceededException Reject(Http3LimitExceededException rejection)

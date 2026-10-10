@@ -1722,6 +1722,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 requestHead,
                 connectionInfo,
                 _limits.MaxRequestBodySize,
+                _limits.MinRequestBodyDataRate,
                 isConnect,
                 _featureCapacity).ConfigureAwait(false);
         }

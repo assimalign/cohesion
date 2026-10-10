@@ -190,9 +190,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // with the frame pump (its token links the pump's) and disposed when the pump stops; the stream table
     // and the retired exchange slots tell it, under _syncRoot, whether the connection is idle.
     private Http2ConnectionTimeout? _timeout;
-    // #1085 — the minimum request-body data rate shared by the streams' body readers, or null when the
-    // limit is disabled.
-    private readonly Http2RequestBodyDataRate? _requestBodyDataRate;
+    // #1085 — the minimum request-body data rate shared by the streams' body readers: the listener's rate
+    // (null when it holds bodies to none) and the connection's window clock, which a request that sets its
+    // own rate (#1383) needs as much as one held to the listener's.
+    private readonly Http2RequestBodyDataRate _requestBodyDataRate;
     // #1085 — the clock of the connection receive window's low periods, which excuse the body readers'
     // waits: whether the window is now too low to carry a full frame, since when, and the ticks of the low
     // periods already over. Guarded by _syncRoot, and updated wherever the window changes
@@ -207,9 +208,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         _http2Limits = limits;
         _floodGuard = new Http2FloodGuard(limits);
         _altSvcHeaderValue = altSvcHeaderValue;
-        _requestBodyDataRate = limits.MinRequestBodyDataRate is { } minRequestBodyDataRate
-            ? new Http2RequestBodyDataRate(minRequestBodyDataRate, _timeProvider, IsReceiveWindowLow, GetReceiveWindowLowTicks, RejectSlowRequestBodyAsync)
-            : null;
+        // Created whether or not the listener configures a rate: a request may set one for itself (#1383).
+        _requestBodyDataRate = new Http2RequestBodyDataRate(limits.MinRequestBodyDataRate, _timeProvider, IsReceiveWindowLow, GetReceiveWindowLowTicks, RejectSlowRequestBodyAsync);
         // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
         // decoded field list; the stream's header-block accumulator enforces the raw-byte cap.
         _headerDecoder = new HPackDecoder(maxHeaderListSize: limits.MaxRequestHeaderListSize);

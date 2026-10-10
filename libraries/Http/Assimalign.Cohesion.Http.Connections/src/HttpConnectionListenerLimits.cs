@@ -25,9 +25,9 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// connection loop, HTTP/2 in its frame pump and request-body pipe, and HTTP/3 in its accept loop,
 /// request-head read and lazily read request body. The minimum response data rate is enforced by the
 /// HTTP/1.1 streaming response sink only; HTTP/2 and HTTP/3 responses are paced by flow control. On
-/// every version <see cref="MaxRequestBodySize"/> additionally seeds each request's parse context, so
-/// request-parse interceptors observe and adjust the same knob no matter which protocol served the
-/// request. Each property documents where, and with what signal, it is enforced so an operator never
+/// every version <see cref="MaxRequestBodySize"/> and <see cref="MinRequestBodyDataRate"/> additionally seed
+/// each request's parse context, so request-parse interceptors observe and adjust the same knobs no matter
+/// which protocol served the request. Each property documents where, and with what signal, it is enforced so an operator never
 /// has to guess.
 /// </para>
 /// </remarks>
@@ -176,14 +176,18 @@ public abstract class HttpConnectionListenerLimits
     /// streamed response head is already on the wire.</description></item>
     /// </list>
     /// <para>
-    /// The limit is listener-wide, with no per-request override. On HTTP/2 and HTTP/3 it applies from
-    /// this release on; earlier releases did not enforce it there. A request body that legitimately
-    /// idles — a client-streaming or duplex call, a long-lived upload that sends a message every few
-    /// seconds — fails once an idle gap outlasts what is left of its allowance, about the grace period
-    /// plus the octets received so far over the rate (5 seconds plus 1 second per 240 octets by
-    /// default). An endpoint that serves such bodies needs a longer grace period or a lower rate, or
-    /// <see langword="null"/>, each of which also weakens or removes the slow-body defence for every
-    /// other request on the endpoint.
+    /// This is the listener-wide default, seeded into each request's parse context
+    /// (<see cref="Assimalign.Cohesion.Http.HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>),
+    /// where a registered <see cref="Assimalign.Cohesion.Http.IHttpExchangeInterceptor"/>, middleware or an
+    /// endpoint may lower, raise or disable it for one request until the first read of its body freezes it
+    /// on every protocol (the <c>Assimalign.Cohesion.Http.RequestLimits</c> package surfaces it as a typed
+    /// <c>IHttpMinRequestBodyDataRateFeature</c>, #1383). A request body that legitimately idles — a
+    /// client-streaming or duplex call, a long-lived upload that sends a message every few seconds —
+    /// otherwise fails once an idle gap outlasts what is left of its allowance, about the grace period plus
+    /// the octets received so far over the rate (5 seconds plus 1 second per 240 octets by default), so the
+    /// endpoint that serves it disables the rate for its own requests, and every other request on the
+    /// listener keeps the slow-body defence. On HTTP/2 and HTTP/3 the rate applies from this release on;
+    /// earlier releases did not enforce it there.
     /// </para>
     /// </remarks>
     public HttpMinDataRate? MinRequestBodyDataRate

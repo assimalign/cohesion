@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -139,6 +140,105 @@ public class HttpServerConfigurationTests
         HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
 
         limits.KeepAliveTimeout.ShouldBe(Timeout.InfiniteTimeSpan);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind the minimum request-body data rate from configuration")]
+    public void BindLimits_OnMinRequestBodyDataRateSection_ShouldBindRate()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinRequestBodyDataRate:BytesPerSecond"] = "1000.5",
+            ["Http:Limits:MinRequestBodyDataRate:GracePeriod"] = "00:00:02",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MinRequestBodyDataRate.ShouldNotBeNull();
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(1000.5);
+        limits.MinRequestBodyDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: A data-rate section with one dimension should keep the other")]
+    public void BindLimits_OnPartialMinRequestBodyDataRate_ShouldKeepOtherDimension()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinRequestBodyDataRate:GracePeriod"] = "00:00:10",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert — the rate keeps the built-in 240 octets per second.
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(240);
+        limits.MinRequestBodyDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(10));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should treat 'none' as a disabled minimum request-body data rate")]
+    [InlineData("none")]
+    [InlineData("Disabled")]
+    public void BindLimits_OnDisabledMinRequestBodyDataRate_ShouldSetNull(string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinRequestBodyDataRate"] = value,
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MinRequestBodyDataRate.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should throw on an unusable minimum request-body data rate")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate", "fast")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "0")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "-1")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "NaN")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "Infinity")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:BytesPerSecond", "lots")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:GracePeriod", "0")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:GracePeriod", "infinite")]
+    [InlineData("Http:Limits:MinRequestBodyDataRate:GracePeriod", "soon")]
+    public void BindLimits_OnUnusableMinRequestBodyDataRate_ShouldThrow(string path, string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [path] = value,
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act and assert — a mistyped security limit fails loudly rather than leaving the default.
+        Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Every endpoint should receive the bound minimum request-body data rate")]
+    public void CopySharedLimits_OnBoundRate_ShouldCopyRateToEndpointLimits()
+    {
+        // Arrange — the template is what the Limits section is bound onto; each endpoint copies from it.
+        HttpMinDataRate rate = new(1000, TimeSpan.FromSeconds(2));
+        Http1ConnectionListenerOptions.Http1Limits template = new() { MinRequestBodyDataRate = rate };
+        Http2ConnectionListenerOptions.Http2Limits http2 = new();
+        Http3ConnectionListenerOptions.Http3Limits http3 = new();
+
+        // Act
+        HttpServerConfiguration.CopySharedLimits(template, http2);
+        HttpServerConfiguration.CopySharedLimits(template, http3);
+
+        // Assert
+        http2.MinRequestBodyDataRate.ShouldBeSameAs(rate);
+        http3.MinRequestBodyDataRate.ShouldBeSameAs(rate);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should register HTTP/1.1 and HTTP/2 endpoints from configuration")]

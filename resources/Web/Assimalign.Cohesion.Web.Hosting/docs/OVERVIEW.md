@@ -27,8 +27,11 @@ short — through `builder.Logging`, never with request content. Disposing the a
 disposes the service provider and every factory-created service.
 
 Every listener the default server composes gets four interceptors before any of the application's
-own: the request-size limit, the HTTP/1.1 protocol upgrade, the HTTP/2 and HTTP/3 extended
-CONNECT, and the client fault. The first three make `context.Upgrade`, `context.ExtendedConnect` and a
+own: the request limits, the HTTP/1.1 protocol upgrade, the HTTP/2 and HTTP/3 extended
+CONNECT, and the client fault. The first surfaces the body-size cap and the minimum request-body data
+rate per request (`context.MaxRequestBodySize`, `context.MinRequestBodyDataRate`), so an endpoint
+whose body legitimately idles can disable the rate for its own requests before it reads (#1383). The
+next two make `context.Upgrade`, `context.ExtendedConnect` and a
 WebSocket handshake (`context.WebSockets`) work on every protocol without listener configuration. A
 request no handler accepts is served as before. The last publishes `IWebClientFaultFeature` on an
 HTTP/1.1 request with a body: when the body breaks its framing or a limit while it is read, the

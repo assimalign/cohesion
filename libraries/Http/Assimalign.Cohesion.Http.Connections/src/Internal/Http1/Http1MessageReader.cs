@@ -213,6 +213,7 @@ internal static class Http1MessageReader
                 Features = features,
                 ConnectionInfo = connectionInfo,
                 MaxRequestBodySize = limits.MaxRequestBodySize,
+                MinRequestBodyDataRate = limits.MinRequestBodyDataRate,
             };
         }
 

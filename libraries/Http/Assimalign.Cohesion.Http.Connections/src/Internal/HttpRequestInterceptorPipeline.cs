@@ -27,7 +27,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// enforces the cap itself (<see cref="IHttpLazyRequestBody"/> — HTTP/3) receives the parse context
 /// and freezes the knob at its first read, exactly like HTTP/1.1; any other body (HTTP/2) has the
 /// knob frozen here, after the head hooks, and its transport enforces the value
-/// <see cref="InterceptAsync"/> returns.
+/// <see cref="InterceptAsync"/> returns. The minimum request-body data rate freezes at the first read on
+/// every protocol (#1383): HTTP/2's body is paced (<see cref="IHttpPacedRequestBody"/>) and receives the
+/// context for the rate alone.
 /// </para>
 /// <para>
 /// Zero registered interceptors is the fast path: no interception context, no feature collection,
@@ -53,6 +55,10 @@ internal static class HttpRequestInterceptorPipeline
     /// </param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
+    /// <param name="minRequestBodyDataRate">
+    /// The registration's minimum request-body data rate seeded into the parse context, which a hook,
+    /// middleware or endpoint may change until the transport's body freezes it at its first read (#1383).
+    /// </param>
     /// <param name="isConnect">
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
     /// message body; body hooks are skipped when <see langword="true"/>.
@@ -78,6 +84,7 @@ internal static class HttpRequestInterceptorPipeline
         TransportHttpRequestHead head,
         HttpConnectionInfo connectionInfo,
         long? maxRequestBodySize,
+        HttpMinDataRate? minRequestBodyDataRate,
         bool isConnect,
         int featureCapacity)
     {
@@ -105,6 +112,7 @@ internal static class HttpRequestInterceptorPipeline
             Features = features,
             ConnectionInfo = connectionInfo,
             MaxRequestBodySize = maxRequestBodySize,
+            MinRequestBodyDataRate = minRequestBodyDataRate,
         };
 
         // Tracks the outermost body stream produced so far so the failure path can tear down the
@@ -126,13 +134,26 @@ internal static class HttpRequestInterceptorPipeline
             // than at the reader's pace) has the knob frozen here, so the effective value is fixed
             // for the remainder of the exchange (write-through features observe the freeze
             // immediately) and returned to the transport below.
-            if (head.Body is IHttpLazyRequestBody lazyBody)
+            //
+            // The minimum request-body data rate freezes at the first body read on every protocol (#1383): a
+            // lazy body resolves it with the cap, and a paced body (HTTP/2, which holds its reader to the rate
+            // but enforces the cap on receipt) is handed the context for it alone. A body that is neither has
+            // nothing to enforce a later change, so its rate knob freezes here with the cap.
+            switch (head.Body)
             {
-                lazyBody.AttachInterception(context);
-            }
-            else
-            {
-                context.FreezeMaxRequestBodySize();
+                case IHttpLazyRequestBody lazyBody:
+                    lazyBody.AttachInterception(context);
+                    break;
+
+                case IHttpPacedRequestBody pacedBody:
+                    context.FreezeMaxRequestBodySize();
+                    pacedBody.AttachInterception(context);
+                    break;
+
+                default:
+                    context.FreezeMaxRequestBodySize();
+                    context.FreezeMinRequestBodyDataRate();
+                    break;
             }
 
             // Body hooks chain in registration order — each receives the previous result, so the

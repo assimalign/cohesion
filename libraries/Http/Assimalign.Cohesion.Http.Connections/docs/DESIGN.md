@@ -1471,6 +1471,8 @@ window spans the parse-time hooks *and* every middleware / endpoint that runs
 before the body is read. That is the point of the override: an endpoint that
 legitimately accepts large uploads (or must not) can raise or lower its own cap
 before consuming the body. See the next section for the freeze mechanics.
+The minimum request-body data rate is overridden the same way and frozen at the same read (#1383;
+see "Per-request data rates (#1383)").
 
 ### Scope boundary
 
@@ -1807,7 +1809,7 @@ its HTTP/2 and HTTP/3 endpoints, so configuration needs no change.
 |---|---|---|
 | `KeepAliveTimeout` | Idle while the stream table is empty and no exchange keeps a retired slot, measured from acceptance (the preface and the client's SETTINGS arrive under it) or the end of the last exchange, whichever is later. A stream that never became an exchange does not restart it. `GOAWAY(NO_ERROR)`, or no frame at all before the preface | Idle while no request stream is in flight, measured from the start of the receive loop or the end of the last exchange, whichever is later. Graceful close: `GOAWAY`, the receive enumeration ends, and the host closes the QUIC connection with `H3_NO_ERROR` |
 | `RequestHeadersTimeout` | From a HEADERS frame's header to END_HEADERS: request heads, trailer sections, and blocks on refused or reset streams. `GOAWAY(ENHANCE_YOUR_CALM)` | From the request stream's acceptance until its field section has decoded. That stream alone is reset with `H3_REQUEST_REJECTED` |
-| `MinRequestBodyDataRate` | The stream's body reader, from its first read; a low connection receive window excuses at most the grace period of its waits. `408` and `RST_STREAM(NO_ERROR)` before the response starts; `RST_STREAM(CANCEL)` after | The lazy body, from its first read. `STOP_SENDING(H3_NO_ERROR)` at the deadline, then `408` from the send path while the head is uncommitted |
+| `MinRequestBodyDataRate` | The stream's body reader, from its first read, under the rate the request ended up with (#1383); a low connection receive window excuses at most the grace period of its waits. `408` and `RST_STREAM(NO_ERROR)` before the response starts; `RST_STREAM(CANCEL)` after | The lazy body, from its first read, under the rate the request ended up with (#1383). `STOP_SENDING(H3_NO_ERROR)` at the deadline, then `408` from the send path while the head is uncommitted |
 | `MinResponseDataRate` | Not enforced; flow control paces the writer | Not enforced; QUIC flow control paces the writer |
 
 Whichever deadline fires, the connection's receive enumeration ends or the stream is answered,
@@ -1960,24 +1962,9 @@ octets delivered extend the allowance. When the allowance runs out:
   the response of a single GET to any endpoint with a non-empty body. The exchange never ends,
   so the connection stays busy: the keep-alive deadline never arms, and the request-headers and
   body-rate deadlines have nothing left to bound.
-- **A per-request opt-out from `MinRequestBodyDataRate` on HTTP/2 and HTTP/3.** The rate now
-  applies to every non-tunnel request body on all three versions, with no seam for one request
-  to lower or lift it: `MaxRequestBodySize` is the only body limit seeded into
-  `HttpExchangeInterceptorRequestContext`. A body that idles for a legitimate reason —
-  client-streaming or duplex calls, a long-lived telemetry upload, one message every ten seconds —
-  fails once an idle gap outlasts what is left of its allowance, about the grace period plus the
-  octets already received over the rate (5 s plus 1 s per 240 octets by default). It fails with
-  `408` and `RST_STREAM(NO_ERROR)` on HTTP/2, or `408` and `STOP_SENDING(H3_NO_ERROR)` on HTTP/3,
-  or with a reset (`CANCEL`, `H3_REQUEST_CANCELLED`) once the response has started.
-  Before #1085 such a body was served on HTTP/2 and HTTP/3. The only remedy is listener-wide: a
-  longer grace period or a lower rate, which weakens the defence for every other request, or
-  `null`, which removes it. The
-  shape the remedy should take follows decision 20: the transport seeds the rate into the parse
-  context as it seeds `MaxRequestBodySize`, freezes it at the first body read, and the
-  `Http.RequestLimits` package exposes a typed feature over it (Kestrel's
-  `IHttpMinRequestBodyDataRateFeature`). It is not done here because the context lives in core
-  `Assimalign.Cohesion.Http` and `HttpMinDataRate` in this package, so the seam needs a decision
-  on where the value type lives.
+- **A per-request opt-out from `MinRequestBodyDataRate`.** Closed by #1383: a request can lower,
+  raise or disable its own rate until the first read of its body, on all three versions (see
+  "Per-request data rates (#1383)").
 - **Automatic `Expect: 100-continue` on HTTP/2 and HTTP/3.** The body rate starts at the first
   read, as on HTTP/1.1, so a client that waits for `100 Continue` gets the grace period and then
   a `408`. `curl` and `HttpClient` stop waiting after about a second.
@@ -1992,6 +1979,93 @@ octets delivered extend the allowance. When the allowance runs out:
 No reflection or code generation. The deadlines are `CancellationTokenSource.CancelAfter`
 and `TimeProvider.CreateTimer`, and the rate gates are `MinDataRateGate`'s arithmetic over
 `TimeProvider` ticks.
+
+## Per-request data rates (#1383)
+
+### What it is
+
+`MinRequestBodyDataRate` is a listener-wide default, and each request can change it for itself. Every
+transport seeds the listener's rate into the request's parse context
+(`HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate`), the way it seeds
+`MaxRequestBodySize`. A request-parse hook, middleware or an endpoint may then lower it, raise it, or
+set it to `null` until the first read of the request body freezes it
+(`FreezeMinRequestBodyDataRate`); a later write throws `InvalidOperationException`. The body is held
+to the frozen value from that read on, with the same gate, signals and statuses as the listener's rate.
+`Http.RequestLimits` surfaces the knob as the typed `IHttpMinRequestBodyDataRateFeature`, whose
+`MinDataRate` writes through to the context; Kestrel's `IHttpMinRequestBodyDataRateFeature` is the model,
+and gRPC's streaming calls are the case it exists for. Web.Hosting binds the listener-wide value from
+`Limits:MinRequestBodyDataRate`.
+
+A body that legitimately idles — a client-streaming or duplex call, a long-lived telemetry upload, one
+message every ten seconds — used to fail with `408` (or a stream reset once the response had started)
+whenever an idle gap outlasted its allowance. The only remedy was listener-wide, and `null` there
+removed the slow-body defence for every other request. The endpoint that serves such a body now
+disables the rate for its own requests, and every other request keeps the default.
+
+### Where it freezes, per protocol
+
+| Protocol | The body that resolves the rate | When |
+|---|---|---|
+| HTTP/1.1 | `Http1RequestBodyStream`, handed the context by the parser | its first read, with the body-size cap |
+| HTTP/2 | `Http2RequestBodyStream`, a paced body (`IHttpPacedRequestBody`) | its first read; the body-size cap froze at dispatch |
+| HTTP/3 | `Http3RequestBodyStream`, a lazy body (`IHttpLazyRequestBody`) | its first read, with the body-size cap |
+
+The shared `HttpRequestInterceptorPipeline` hands the context to the HTTP/2 and HTTP/3 bodies after the
+head hooks. HTTP/2 enforces the body-size cap on receipt, so the pipeline still freezes that knob after
+the head hooks, but its reader holds the peer to the rate at the reader's pace, so the rate stays
+adjustable until that reader's first read. A body that is neither lazy nor paced has both knobs frozen by
+the pipeline, since nothing would enforce a later change. With no interceptor registered there is no
+context, and the body is held to the listener's rate exactly as before.
+
+On HTTP/2 the connection's `Http2RequestBodyDataRate` (its receive-window clock and its `408`/reset
+answer) is now created whether or not the listener configures a rate: a request may set a rate on a
+listener that has none, and its reader needs the window clock as much as one held to the listener's.
+The backpressure exemption is computed per reader from the grace period of the rate the reader resolved.
+A CONNECT tunnel's octets are not a request body: its knob freezes like any other, and no rate applies.
+
+### Where the value type lives (decision 20)
+
+The knob needed a type core Http could name. `HttpMinDataRate` was a public type of this package, which
+core cannot reference, so there were two options:
+
+- **The context carries primitives** (`double` octets per second and a `TimeSpan` grace period). Core
+  stays free of the type, but the knob becomes two members whose "disabled" state needs a third
+  convention, every consumer (the transports, the typed feature, Web.Hosting's binder) re-validates the
+  pair, and the typed feature in `Http.RequestLimits` would need either its own value type or the same
+  primitive pair.
+- **The value type moves to core as a base value object.** One immutable, validated type serves the
+  listener limits, the parse context and the typed feature, and `null` keeps meaning "no rate"
+  everywhere.
+
+The type moved: `Assimalign.Cohesion.Http.HttpMinDataRate`, in `Assimalign.Cohesion.Http`. It is a value
+object of the protocol, like `HttpMethod` or `HttpPriority`, not a feature contract, so decision 20's
+rule ("core holds base contracts and generic seams only") admits it. Its constructor now also refuses a
+`NaN` rate, which compared false against zero and slipped through, and would have made every allowance
+`NaN`.
+
+**The break, accepted on decision 15's terms during the previews.** The type changed namespace and
+assembly, so:
+
+- **Source:** code that names `HttpMinDataRate` with only `using Assimalign.Cohesion.Http.Connections;`
+  adds `using Assimalign.Cohesion.Http;`. Code in a namespace under `Assimalign.Cohesion.Http` (this
+  package's own, for instance) resolves it unchanged.
+- **Binary:** an assembly compiled against 10.0.0-preview.1 that references
+  `Assimalign.Cohesion.Http.Connections.HttpMinDataRate` fails to load the type. A type forward cannot
+  bridge it, because the namespace changed with the assembly.
+- The shape is unchanged: the same constructor, `BytesPerSecond` and `GracePeriod`.
+
+### Cost
+
+An exchange with interceptors pays one more reference field on its parse context (8 B) and nothing
+else: `Http.RequestLimits` puts the rate contract on the same feature object as the body-size contract
+(`HttpRequestLimits.CreateInterceptor()`), so the web host's exchanges carry no extra feature and its
+presized collection (#1381) keeps its size. An HTTP/2 connection allocates its rate policy and three
+delegates once, configured or not. The zero-interceptor fast path is unchanged.
+
+### AOT posture
+
+No reflection or code generation: a nullable reference on the context, a freeze flag, and the existing
+`MinDataRateGate` arithmetic.
 
 ## HTTP/2 request heads (RFC 9113 §8.3)
 

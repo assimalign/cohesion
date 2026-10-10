@@ -118,7 +118,7 @@ public class WebApplicationServerDefaultsTests
         customServer.StopCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the max-request-body-size interceptor first")]
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the request-limits interceptor first")]
     public void ApplyDefaultInterceptors_ShouldInstallRequestLimitsFirst()
     {
         // The web host composes the listener options with the default interceptors ahead of any
@@ -132,6 +132,7 @@ public class WebApplicationServerDefaultsTests
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
+        HttpMinDataRate rate = new(240, TimeSpan.FromSeconds(5));
         HttpExchangeInterceptorRequestContext context = new()
         {
             Version = HttpVersion.Http11,
@@ -143,6 +144,7 @@ public class WebApplicationServerDefaultsTests
             Features = new HttpFeatureCollection(),
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = 2048,
+            MinRequestBodyDataRate = rate,
         };
 
         options.Interceptors[0].AfterRequestHead(context);
@@ -150,6 +152,12 @@ public class WebApplicationServerDefaultsTests
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
         feature!.MaxRequestBodySize.ShouldBe(2048);
+
+        // The same interceptor surfaces the per-request data rate (#1383), on the same feature object, so the
+        // host's feature count does not grow.
+        IHttpMinRequestBodyDataRateFeature? rateFeature = context.Features.Get<IHttpMinRequestBodyDataRateFeature>();
+        rateFeature.ShouldBeSameAs(feature);
+        rateFeature!.MinDataRate.ShouldBeSameAs(rate);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the HTTP/1.1 protocol-upgrade interceptor after request limits")]

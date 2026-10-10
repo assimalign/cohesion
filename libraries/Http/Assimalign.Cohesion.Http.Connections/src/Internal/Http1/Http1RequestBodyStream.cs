@@ -39,10 +39,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// the next request by calling <see cref="DrainAsync"/>, which continues to work after disposal.
 /// </para>
 /// <para>
-/// The body-size cap is frozen at the first read (the moment the transport starts consuming the
-/// body), mirroring <see cref="HttpExchangeInterceptorRequestContext.FreezeMaxRequestBodySize"/>; up to
-/// that point an endpoint or middleware may still raise or lower it through the typed
-/// <c>IHttpMaxRequestBodySizeFeature</c>.
+/// The body-size cap and the minimum data rate are frozen at the first read (the moment the transport
+/// starts consuming the body), mirroring <see cref="HttpExchangeInterceptorRequestContext.FreezeMaxRequestBodySize"/>
+/// and <see cref="HttpExchangeInterceptorRequestContext.FreezeMinRequestBodyDataRate"/>; up to that point an
+/// endpoint or middleware may still raise or lower either through the typed
+/// <c>IHttpMaxRequestBodySizeFeature</c> and <c>IHttpMinRequestBodyDataRateFeature</c> (#1383), or disable
+/// the rate for a body that legitimately idles.
 /// </para>
 /// <para>
 /// The <c>Expect: 100-continue</c> handshake (RFC 9110 §10.1.1) is solicited lazily here too: when
@@ -61,7 +63,7 @@ internal sealed class Http1RequestBodyStream : Stream
     private readonly bool _solicitContinue;
     private readonly HttpExchangeInterceptorRequestContext? _interception;
     private readonly long? _fallbackCap;
-    private readonly HttpMinDataRate? _rate;
+    private readonly HttpMinDataRate? _fallbackRate;
     private readonly int _maxFramingLineSize;
     private readonly long _maxFramingExcess;
     private readonly int _maxTrailerFieldCount;
@@ -113,13 +115,14 @@ internal sealed class Http1RequestBodyStream : Stream
     /// read must solicit the body with <c>100 Continue</c> before touching the wire.
     /// </param>
     /// <param name="interception">
-    /// The request-parse context whose body-size knob is frozen on first read, or
-    /// <see langword="null"/> on the zero-interceptor fast path (the cap is fixed at the listener's
-    /// <see cref="HttpConnectionListenerLimits.MaxRequestBodySize"/>).
+    /// The request-parse context whose body-size and data-rate knobs are frozen on first read, or
+    /// <see langword="null"/> on the zero-interceptor fast path (the cap and the rate are fixed at the
+    /// listener's <see cref="HttpConnectionListenerLimits.MaxRequestBodySize"/> and
+    /// <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/>).
     /// </param>
     /// <param name="limits">
     /// The listener's HTTP/1.1 limits: the body-size cap used when <paramref name="interception"/> is
-    /// <see langword="null"/>, the minimum request-body data rate, the chunk framing-line cap, and the
+    /// <see langword="null"/>, the minimum request-body data rate used likewise, the chunk framing-line cap, and the
     /// header-section bounds the trailer section is held to.
     /// </param>
     /// <param name="timeProvider">The monotonic clock used for data-rate measurement and deadlines.</param>
@@ -146,7 +149,7 @@ internal sealed class Http1RequestBodyStream : Stream
         _solicitContinue = solicitContinue;
         _interception = interception;
         _fallbackCap = limits.MaxRequestBodySize;
-        _rate = limits.MinRequestBodyDataRate;
+        _fallbackRate = limits.MinRequestBodyDataRate;
         _maxFramingLineSize = limits.MaxChunkFramingLineSize;
         _maxFramingExcess = 2L * limits.MaxChunkFramingLineSize;
         _maxTrailerFieldCount = limits.MaxRequestHeaderCount;
@@ -316,14 +319,17 @@ internal sealed class Http1RequestBodyStream : Stream
 
         _started = true;
 
-        // The transport is now consuming the body: freeze the per-request cap (idempotent) and
-        // resolve the value that will be enforced for the rest of the exchange.
+        // The transport is now consuming the body: freeze the per-request cap and minimum data rate
+        // (idempotent) and resolve the values that will be enforced for the rest of the exchange. A
+        // request whose rate an endpoint disabled (null) reads ungated, as a listener without a rate does.
         _interception?.FreezeMaxRequestBodySize();
+        _interception?.FreezeMinRequestBodyDataRate();
         _cap = _interception is not null ? _interception.MaxRequestBodySize : _fallbackCap;
 
-        if (_rate is not null)
+        HttpMinDataRate? rate = _interception is not null ? _interception.MinRequestBodyDataRate : _fallbackRate;
+        if (rate is not null)
         {
-            _gate = new MinDataRateGate(_rate, _timeProvider);
+            _gate = new MinDataRateGate(rate, _timeProvider);
         }
 
         // A Content-Length declaration over the (now frozen) cap is rejected before reading a byte
