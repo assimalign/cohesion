@@ -169,9 +169,12 @@ it as sent and matches the standard methods byte for byte (RFC 9110 §9.1, #1301
 `get`, `head` and `connect` are unknown extension methods, so HTTP/1.1 sends a
 body for `head`, and HTTP/2 and HTTP/3 treat a `connect` that carries `:scheme`
 and `:path` as the ordinary request their pseudo-header checks, which already
-compared `CONNECT` ordinally, took it for. Before #1301 the token was
-upper-cased here, and the transport applied semantics an intermediary in front
-of it did not.
+compared `CONNECT` ordinally, took it for. On HTTP/1.1, `connect host:port`
+used to become a `CONNECT` tunnel and is now rejected as a malformed
+request-target (authority-form on a method that is not `CONNECT`), and
+`options *` is rejected the same way, because asterisk-form belongs to
+`OPTIONS` alone. Before #1301 the token was upper-cased here, and the transport
+applied semantics an intermediary in front of it did not.
 
 The request and response are the same sealed types on every version. The
 former per-version subclasses (`Http1Request` … `Http3Response`) added no

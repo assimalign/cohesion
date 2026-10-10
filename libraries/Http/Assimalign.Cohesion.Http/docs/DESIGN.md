@@ -1447,7 +1447,11 @@ applied the standard semantics a proxy, WAF or cache in front of it did not:
   upstream connection;
 - `connect` with `:scheme` and `:path` passed the HTTP/2 and HTTP/3 pseudo-header
   checks as an ordinary request (they already compared `CONNECT` ordinally), then
-  became `CONNECT` and skipped the request-body hooks.
+  became `CONNECT` and skipped the request-body hooks;
+- `connect host:port` on HTTP/1.1 became a `CONNECT` request and opened a
+  tunnel. It is now rejected as a malformed request-target (authority-form on a
+  method that is not `CONNECT`), and `options *` is rejected the same way,
+  because asterisk-form belongs to `OPTIONS` alone.
 
 Every transport parses the method through `GetCanonicalizedValue`, so the rule
 holds on HTTP/1.1, HTTP/2 and HTTP/3 alike, and so does every consumer that

@@ -184,6 +184,8 @@ public class Http1TransportTests
     [InlineData("GET example.com:80 HTTP/1.1\r\nHost: api.test\r\n\r\n")]     // authority-form on non-CONNECT
     [InlineData("GET  HTTP/1.1\r\nHost: api.test\r\n\r\n")]                   // empty target (collapses to 2 parts after Split)
     [InlineData("GET ftp://example.com/p HTTP/1.1\r\nHost: api.test\r\n\r\n")] // unsupported scheme
+    [InlineData("connect api.test:443 HTTP/1.1\r\nHost: api.test\r\n\r\n")]  // RFC 9110 §9.1: 'connect' is not CONNECT, so no tunnel
+    [InlineData("options * HTTP/1.1\r\nHost: api.test\r\n\r\n")]              // asterisk-form is for OPTIONS only, matched exactly
     public async Task Http1_OnMalformedRequestTarget_ShouldDropConnection(string payloadText)
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(payloadText);
