@@ -191,7 +191,7 @@ never misread.
 - **Engines name the database.** Every model engine catches the refusal around its storage
   open and rethrows it with the database's name, as it already does for an index-format
   refusal: "Database 'x' cannot be opened. COHDBS001: …". The SQL and key-value engines open
-  two file sets per database and name the one refused ("its catalog file set 'x.catalog' was
+  two file sets per database and name the one refused ("its catalog file set 'x/catalog' was
   refused"); SQL carries it in its format exception, which its server forwards to the client.
 - **Journal frames are fenced too.** A frame whose length, magic and CRC-32C verify but whose
   version byte is not 3 was written whole by another engine; the read refuses it with

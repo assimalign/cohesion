@@ -19,7 +19,8 @@ keys order by unsigned lexicographic byte comparison.
 
 - `KeyValueDatabaseEngine` + `KeyValueDatabaseEngineOptions` — the data machine:
   create → use → dispose, engine-owned background workers, two file sets per
-  database (`<name>` + `<name>.catalog`). `KeyValueDatabaseEngineBuilder` (from
+  database (`keyvalue.*` + `catalog.*`, in a directory named for the lower case of the
+  database's name, so every spelling of a name is one database; #1392). `KeyValueDatabaseEngineBuilder` (from
   `CreateBuilder(name)` or the `AddKeyValue(name, ...)` verb) carries the engine's `Options`
   (copied at build), the databases it declares (`AddDatabase(name)`: opened or created by the
   build, never dropped while declared), and its servers (`AddServer(options => ...)` or a

@@ -91,7 +91,7 @@ dropped list.
 - **A dedicated catalog storage file set** — not catalog rows mixed into the data
   file. The current row facade exposes one record space per storage instance;
   sharing it would put metadata records inside user table scans. A second
-  `SqlStorage` (by convention `<database>.catalog`) buys complete isolation while
+  `SqlStorage` (the `catalog` file set in the database's directory) buys complete isolation while
   reusing the exact same durability machinery — no bespoke metadata persistence.
   When the data file gains per-object record spaces, folding the catalog back in
   becomes an option, not a requirement.

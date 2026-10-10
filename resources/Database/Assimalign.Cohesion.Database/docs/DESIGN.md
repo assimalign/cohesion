@@ -216,6 +216,33 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   root suite pins the base's part with a test leaf (`TestEngine`) whose close a gate holds: an
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
   of a leaf that never forgets, and a second disposal that waits.
+- **A database's name maps to its files through one shared function** (#1392):
+  `shared/DatabaseFileNames`, compiled into each model assembly beside `DatabaseMemoryFiles`.
+  `DatabaseName` compares ordinally ignoring case, so the mapping has to give every spelling the
+  same files on a case-sensitive file system too. Each model used to build the directory from the
+  caller's spelling, and on Linux an open or declaration of `SALES` after a create of `sales` made
+  a second, empty database. The function holds four things:
+  - **The rule.** 1 to 128 ASCII letters, digits, `_`, `-` and `.`; no leading, trailing or
+    doubled dot; no Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`,
+    `LPT0`–`LPT9`) before the first dot. It is a fixed set, not `Path.GetInvalidFileNameChars`,
+    which holds only NUL and `/` on Linux, so a name valid on one OS is valid on every one.
+    `GetRefusal` returns the reason; `ThrowIfInvalid` throws an `ArgumentException` whose message
+    starts with `Rule`. Every engine's create, open and drop core and every builder's
+    `AddDatabase` call it.
+  - **The directory.** `GetStorageName` is the invariant lower case of the name, and
+    `GetDirectory(root, name)` is that under the engine's root. The rule admits ASCII only, so
+    lower-case equality is `DatabaseName` equality, with no culture or Unicode folding in play.
+    Nothing scans the root to find a database; `IsStorageName` is what a listing accepts as one.
+  - **The file sets.** `GetFiles(directory, set)` gives `{set}.dat`, `{set}.log` and `{set}.bak`
+    inside the directory: the model's data set and, for SQL and key-value, `CatalogFileSet`. A
+    file set is never named from a database name, so a catalog is never another database's
+    directory (before #1392 the catalog of `sales` was the directory `sales.catalog`).
+    `DatabaseMemoryFiles` keys its in-memory sets the same way, by storage name and set.
+  - **The reported name.** `GetOpenedName` returns the spelling the data set's storage header
+    kept from the create, whatever spelling opened the database, so the name a database reports
+    never depends on its caller. The header holds 128 bytes of name, which every valid name fits.
+
+  The area design (`docs/resources/Database/DESIGN.md`, §3.3) records the rejected alternatives.
 - **The server lifecycle Sql, KeyValuePair and Graph carried** lives in `DatabaseServer`: a server
   is created inert, starts once, and a failed start or any stop is terminal (a start after it
   throws `ObjectDisposedException`); stop is idempotent and runs for a server that never started,

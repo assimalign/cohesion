@@ -155,9 +155,22 @@ byte for byte and not the uncommitted one, takes uploads, and a second close and
 The server test that closes a database outside the engine asserts that the reopen serves it
 again over the wire and in process.
 
-File-backed databases use `<RootPath>/<database>/blob.dat`, `blob.log`, and `blob.bak`.
-Database names are single file-name components, compared ignoring case; invalid path components
-are rejected. Database enumeration includes persisted databases and opens them through recovery.
+File-backed databases use `<RootPath>/<storage name>/blob.dat`, `blob.log`, and `blob.bak`,
+where the storage name is the invariant lower case of the database's name (#1392). Database names
+compare ignoring case, so every spelling of a name reaches that one directory on every OS: on Linux
+an open of `SALES` finds `sales`, a create of `SALES` after `sales` is refused as existing, and a
+drop of `SALES` drops `sales`. Before #1392 the engine scanned the root for a directory whose name
+matched ignoring case, which cost a scan per open and was ambiguous when `sales` and `Sales` both
+existed on a case-sensitive file system; now the directory is a pure function of the name
+(`DatabaseFileNames`, shared with every model; the area design, §3.3, has the reasoning). A name
+follows the area's one rule, with the same verdict on every OS: 1 to 128 ASCII letters, digits,
+`_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name before the first
+dot. Database enumeration includes persisted databases and opens them through recovery: it takes
+each directory that is a lower-case valid name holding `blob.dat`, so a case-variant directory made
+outside the engine is not a database. A database reports the spelling its storage header kept from
+its create, whatever spelling opened or listed it. In memory the engine's `DatabaseMemoryFiles`
+keys the file set by the same storage name. `BlobDatabaseNameTests` pins each case in memory and on
+disk, asserting the exact directory names it leaves with ordinal comparison.
 `TryGetDatabase` addresses the open instance set. Container and blob names are ordinal and
 case-sensitive; a slash in a blob name is ordinary name content, never a database selector.
 A file set in another storage format (#1251) is refused by the storage before its journal is
