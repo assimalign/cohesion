@@ -37,7 +37,8 @@ public class HttpExchangeFeatureCapacityTests
         options.Interceptors.Add(new HostFeatureAttachingInterceptor());
         IHttpFeature[] stamped = CreateFeatures(featureCount - 1);
         WarmUp(stamped);
-        IHttpContext exchange = await ReceiveExchangeAsync(protocol, options);
+        await using ReceivedExchange received = await ReceiveExchangeAsync(protocol, options);
+        IHttpContext exchange = received.Exchange;
 
         // Act
         long allocated = Stamp(exchange.Features, stamped);
@@ -63,7 +64,8 @@ public class HttpExchangeFeatureCapacityTests
         IHttpFeature[] features = CreateFeatures(featureCount);
         IHttpFeature[] stamped = features[1..];
         WarmUp(features);
-        IHttpContext exchange = await ReceiveExchangeAsync(protocol, options);
+        await using ReceivedExchange received = await ReceiveExchangeAsync(protocol, options);
+        IHttpContext exchange = received.Exchange;
         exchange.Features.Set(features[0]);
 
         // Act
@@ -86,7 +88,8 @@ public class HttpExchangeFeatureCapacityTests
         IHttpFeature[] features = CreateFeatures(8);
         IHttpFeature[] stamped = features[1..];
         WarmUp(features);
-        IHttpContext exchange = await ReceiveExchangeAsync(protocol, options);
+        await using ReceivedExchange received = await ReceiveExchangeAsync(protocol, options);
+        IHttpContext exchange = received.Exchange;
         exchange.Features.Set(features[0]);
 
         // Act
@@ -107,7 +110,8 @@ public class HttpExchangeFeatureCapacityTests
         HttpConnectionListenerOptions options = new() { ExchangeFeatureCapacity = 2 };
         options.Interceptors.Add(new HostFeatureAttachingInterceptor());
         IHttpFeature[] stamped = CreateFeatures(16);
-        IHttpContext exchange = await ReceiveExchangeAsync(protocol, options);
+        await using ReceivedExchange received = await ReceiveExchangeAsync(protocol, options);
+        IHttpContext exchange = received.Exchange;
 
         // Act
         Stamp(exchange.Features, stamped);
@@ -163,7 +167,11 @@ public class HttpExchangeFeatureCapacityTests
         }
     }
 
-    private static async Task<IHttpContext> ReceiveExchangeAsync(HttpProtocol protocol, HttpConnectionListenerOptions options)
+    /// <summary>
+    /// Serves one request on <paramref name="protocol"/> and returns its exchange together with the
+    /// listener, connection and enumeration it came from, so the test disposes all of them.
+    /// </summary>
+    private static async Task<ReceivedExchange> ReceiveExchangeAsync(HttpProtocol protocol, HttpConnectionListenerOptions options)
     {
         switch (protocol)
         {
@@ -181,11 +189,79 @@ public class HttpExchangeFeatureCapacityTests
                 break;
         }
 
-        HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
-        await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
-        (await enumerator.MoveNextAsync()).ShouldBeTrue();
-        return enumerator.Current;
+        ReceivedExchange received = new(new HttpConnectionListener(options));
+
+        try
+        {
+            received.Connection = await received.Listener.AcceptOrListenAsync();
+            received.Context = await received.Connection.OpenAsync();
+            received.Exchanges = received.Context.ReceiveAsync().GetAsyncEnumerator();
+            (await received.Exchanges.MoveNextAsync()).ShouldBeTrue();
+            received.Exchange = received.Exchanges.Current;
+            return received;
+        }
+        catch
+        {
+            await received.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// One received exchange and everything that produced it. Disposal finalizes the exchange by sending
+    /// its (empty) response, so the connection's graceful close has nothing in flight to wait for, then
+    /// ends the enumeration, closes the connection (and with it the HTTP/2 or HTTP/3 connection context
+    /// and its frame pump), and disposes the listener.
+    /// </summary>
+    private sealed class ReceivedExchange : IAsyncDisposable
+    {
+        private IHttpContext? _exchange;
+
+        public ReceivedExchange(HttpConnectionListener listener)
+        {
+            Listener = listener;
+        }
+
+        public HttpConnectionListener Listener { get; }
+
+        public IHttpConnection? Connection { get; set; }
+
+        public IHttpConnectionContext? Context { get; set; }
+
+        public IAsyncEnumerator<IHttpContext>? Exchanges { get; set; }
+
+        public IHttpContext Exchange
+        {
+            get => _exchange ?? throw new InvalidOperationException("No exchange was received.");
+            set => _exchange = value;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_exchange is not null)
+            {
+                try
+                {
+                    await Context!.SendAsync(_exchange);
+                }
+                finally
+                {
+                    await _exchange.DisposeAsync();
+                }
+            }
+
+            if (Exchanges is not null)
+            {
+                await Exchanges.DisposeAsync();
+            }
+
+            if (Connection is not null)
+            {
+                await Connection.DisposeAsync();
+            }
+
+            await Listener.DisposeAsync();
+        }
     }
 
     private sealed class StampedFeature : IHttpFeature
