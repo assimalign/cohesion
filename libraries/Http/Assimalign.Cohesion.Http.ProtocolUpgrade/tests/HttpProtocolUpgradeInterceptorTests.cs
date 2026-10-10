@@ -280,6 +280,64 @@ public class HttpProtocolUpgradeInterceptorTests
         wire.Length.ShouldBe(lengthAfterFirstAccept);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: A response field the 101 cannot carry is refused before the connection is claimed")]
+    [InlineData("x-echo", "a\r\nSet-Cookie: injected=1")]
+    [InlineData("x-echo", "a\nb")]
+    [InlineData("x-echo", "a\0b")]
+    [InlineData("x-echo", "a\u0001b")]
+    [InlineData("x-echo\r\nSet-Cookie", "injected=1")]
+    [InlineData("x echo", "value")]
+    public async Task AcceptAsync_OnInvalidResponseField_ShouldRefuseBeforeClaimingTheConnection(string name, string value)
+    {
+        // Arrange — the handler reflected request text into a response field before accepting (#1183).
+        MemoryStream wire = new();
+        FakeExchangeControl takeover = new(wire);
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, takeover, out HttpHeaderCollection responseHeaders);
+        responseHeaders[HttpHeaderKey.ContentLength] = "0";
+        responseHeaders[new HttpHeaderKey(name)] = value;
+        IHttpProtocolUpgrade upgrade = context.Upgrade!;
+
+        // Act
+        HttpException refusal = await Should.ThrowAsync<HttpException>(async () => await upgrade.AcceptAsync());
+
+        // Assert — nothing written, the connection still the transport's, and the staged fields untouched,
+        // so the exchange can be answered with an ordinary response. The accept is spent.
+        refusal.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+        refusal.Message.ShouldNotContain("injected");
+        wire.Length.ShouldBe(0);
+        takeover.TakenOver.ShouldBeFalse();
+        responseHeaders.ContainsKey(HttpHeaderKey.ContentLength).ShouldBeTrue();
+        responseHeaders.ContainsKey(HttpHeaderKey.Connection).ShouldBeFalse();
+        responseHeaders.ContainsKey(HttpHeaderKey.Upgrade).ShouldBeFalse();
+        await Should.ThrowAsync<InvalidOperationException>(async () => await upgrade.AcceptAsync());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Accept: A response field with HTAB inside its value rides the 101")]
+    public async Task AcceptAsync_OnValueWithInnerTab_ShouldEmitIt()
+    {
+        // Arrange — HTAB is the one control character a field value may hold (RFC 9110 §5.5).
+        MemoryStream wire = new();
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(wire), out HttpHeaderCollection responseHeaders);
+        responseHeaders[new HttpHeaderKey("x-echo")] = "a\tb";
+
+        // Act
+        await context.Upgrade!.AcceptAsync();
+
+        // Assert
+        string response = Encoding.ASCII.GetString(wire.ToArray());
+        response.ShouldContain("x-echo: a\tb\r\n");
+        response.ShouldContain("Connection: Upgrade\r\n");
+        response.ShouldContain("Upgrade: websocket\r\n");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Upgrade: Repeated accessor reads return the same single-shot instance")]
     public void Upgrade_OnRepeatedAccess_ShouldReturnSameInstance()
     {

@@ -825,6 +825,67 @@ public class WebApplicationServerTests
         Should.Throw<ArgumentOutOfRangeException>(() => new WebApplicationServer(options));
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web Hosting] - Server: A response the transport refuses for a field it cannot carry is answered with 500 and the connection keeps serving")]
+    [InlineData(HttpVersion.Http11)]
+    [InlineData(HttpVersion.Http20)]
+    public async Task ServeConnection_WhenTransportRefusesResponseField_AnswersWith500(HttpVersion version)
+    {
+        // Arrange — the application reflected request text with a CRLF into a header and returned. The
+        // transport refuses that head before writing it (#1183), which leaves the response unstarted.
+        FakeHttpResponse refusedResponse = new();
+        FakeHttpContext refused = new(version, refusedResponse);
+        FakeHttpContext next = new(version);
+        bool completionInvoked = false;
+        int refusedSends = 0;
+        FakeHttpConnectionContext connectionContext = new(new[] { refused, next })
+        {
+            SendHandler = (exchange, _) =>
+            {
+                if (ReferenceEquals(exchange, refused) && refusedResponse.Headers.ContainsKey(new HttpHeaderKey("x-echo")))
+                {
+                    refusedSends++;
+                    return ValueTask.FromException(new RefusedResponseFieldException());
+                }
+
+                return ValueTask.CompletedTask;
+            },
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new((context, _) =>
+        {
+            if (ReferenceEquals(context, refused))
+            {
+                context.Features.Get<ResponseCompletionFeature>().ShouldNotBeNull().Register(() =>
+                {
+                    completionInvoked = true;
+                    return ValueTask.CompletedTask;
+                });
+                context.Response.Headers[new HttpHeaderKey("x-echo")] = "a\r\nSet-Cookie: injected=1";
+                context.Response.StatusCode = HttpStatusCode.Found;
+            }
+
+            return Task.CompletedTask;
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert — the refused response is replaced with a bare 500, as a pipeline fault would be: its
+        // completion callbacks do not run, nothing is reset, and the connection serves the next exchange.
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        refusedSends.ShouldBe(1);
+        refusedResponse.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        refusedResponse.Headers.Count.ShouldBe(0);
+        refused.CancelCount.ShouldBe(0);
+        completionInvoked.ShouldBeFalse();
+        pipeline.Executed.ShouldContain(next);
+        connectionContext.SendCount.ShouldBe(3);
+        connection.AbortCount.ShouldBe(0);
+
+        await server.StopAsync();
+    }
+
     private static WebApplicationServer CreateServer(
         IWebApplicationPipeline pipeline,
         FakeHttpConnectionListener listener,
@@ -846,6 +907,16 @@ public class WebApplicationServerTests
         {
             cancellation.Token.ThrowIfCancellationRequested();
             await Task.Delay(10, cancellation.Token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>What a transport throws when it refuses a response field before writing the head.</summary>
+    private sealed class RefusedResponseFieldException : HttpException
+    {
+        public RefusedResponseFieldException()
+            : base("A response field cannot be sent.")
+        {
+            Code = HttpErrorCode.InvalidResponseField;
         }
     }
 }

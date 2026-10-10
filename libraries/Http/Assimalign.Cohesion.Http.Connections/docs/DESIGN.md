@@ -2651,6 +2651,81 @@ head (#1328):
   only fields the transport chose, and HTTP/1.1, where these fields have meaning,
   does not use the rule.
 
+## Response field syntax: refused before a byte is written (#1183)
+
+Until #1183 a response field went to the wire as the application wrote it. The
+HTTP/1.1 writer formatted `{name}: {value}\r\n`, so a value with CR or LF that an
+application reflected from the request — a redirect `Location` built from the query, a
+`Content-Disposition` file name — ended its line early and started a header, or a whole
+second response, of its own (CWE-113: cache poisoning, session fixation, XSS). HTTP/2 and
+HTTP/3 encoded the same value into a field section that RFC 9113 §8.2.1 and RFC 9114 §4.2
+make malformed, and that a downgrading intermediary may split. The `Http.ProtocolUpgrade`
+101 writer did the same outside the transport.
+
+**The rule (decision 27).** Every head writer applies the core field rule
+(`HttpFieldNormalization`, #1341) to each field line as it encodes it, through
+`HttpResponseFieldRules.EnsureValidName` and `EnsureValidValue`:
+
+- **A name is a token** (RFC 9110 §5.1). That refuses SP, HTAB, `:`, CR, LF, every other
+  control character, and non-ASCII, and with them a name that starts with `:`, which an
+  application could otherwise use to append a pseudo-header after the regular fields.
+- **A value holds no control character but HTAB** (`IndexOfInvalidControlCharacter`):
+  CR, LF, and NUL, and also `%x01-08`, `%x0B-1F`, and DEL. A sender may not generate a
+  value outside `field-content` (RFC 9110 §2.2, §5.5); the latitude §5.5 gives is a
+  recipient's, and the HTTP/1.1 reader rejects the same characters (#1341), so a
+  Cohesion-to-Cohesion hop would answer the value with `400` anyway.
+- **Not judged:** SP or HTAB at a value's ends, which split nothing and which an HTTP/1.1
+  recipient strips; obs-text (`%x80-FF`); and a character above `U+00FF`, which every
+  encoder already writes as `?`. HTTP/2 and HTTP/3 field names are lowercased by the
+  encoders, so uppercase is not refused.
+
+**Where.** At encode time, in each writer, never only in the header collection:
+`IHttpHeaderCollection` is an interface anyone can implement, and an `HttpHeaderValue`
+built over an array shares that array with its caller. The writers are
+`Http1MessageWriter` (final and interim heads, buffered and streamed),
+`HPackEncoder.EncodeResponseHeaders` / `EncodeInterimResponseHeaders` / `EncodeTrailers`,
+`Http3HeaderCodec.EncodeResponseHeaders` / `EncodeInterimResponseHeaders` /
+`EncodeTrailers` (so every buffered, streamed, interim, tunnel and trailer section), and
+`Http.ProtocolUpgrade`'s `Http1ProtocolUpgrade`. A connection-specific field the HTTP/2
+and HTTP/3 encoders drop (#1328) is still checked, so a value that would split an HTTP/1.1
+head is refused on every version alike. HTTP/1.1 sends no response trailers (decision
+18), so its writer checks heads only.
+
+**The failure mode.** A refused field throws `HttpInvalidResponseFieldException`, an
+`HttpException` whose `Code` is `HttpErrorCode.InvalidResponseField`. Its message names the
+offending character in hex and never quotes the name or the value, either of which may hold
+CR, LF, or NUL and forge a log line. Each writer encodes the whole head in memory first, and
+each path encodes before it commits any exchange state:
+
+| Path | Refused where | State it leaves |
+|---|---|---|
+| Buffered `SendAsync`, every version | `SendAsync` throws | nothing written; the response neither claimed (HTTP/2) nor marked started, so `HasResponseStarted` stays `false`; HTTP/2 keeps the exchange running, slot included, until it is finalized again or disposed |
+| Streamed head (the raw body sink's first write or flush) | the write throws | nothing written; the sink returns to unstarted, and HTTP/1.1 withdraws the `Transfer-Encoding: chunked` it added, so a buffered response sent in its place is framed by `Content-Length` alone |
+| Interim (`103`, `100`) | `WriteInterimResponseAsync` throws | nothing written; the final response is unaffected |
+| Extended CONNECT tunnel accept (HTTP/2, HTTP/3) | `AcceptTunnelAsync` throws | nothing written; unclaimed, unstarted, the staged status restored; the accept is spent |
+| `Http.ProtocolUpgrade` accept | `AcceptAsync` throws | nothing written; the connection not taken over and the response headers untouched; the accept is spent |
+| Buffered trailer section | `SendAsync` throws | as for the buffered head: the head and the trailers are encoded together before the commit |
+| Streamed trailer section | `SendAsync` throws | the head and body are already out, so the response can be neither completed nor replaced: the transport resets the stream (HTTP/2 `RST_STREAM(INTERNAL_ERROR)`, HTTP/3 `H3_INTERNAL_ERROR`, RFC 9113 §7, RFC 9114 §8.1) before the refusal propagates, and the peer never sees `END_STREAM` or a FIN on a response that lost its trailers |
+
+A head refused before the commit is therefore a replaceable response: the host replaces it
+and sends again, exactly as it answers a pipeline fault before the response started (see
+"The host contract"). `Web.Hosting` does so with a bodyless `500`, clearing the staged
+trailers as well. The trailer store also checks the field syntax when a trailer is staged
+(`HttpTrailerFieldRules.EnsureSendable`, an `ArgumentException` where the mistake is made);
+the encode-time check is what holds when an array-backed value changes after staging.
+
+**Alternatives rejected.**
+- **Validate in `HttpHeaderCollection` at set time**, as Kestrel's response header
+  dictionary does. It catches the mistake earliest, but any other `IHttpHeaderCollection`,
+  an interim collection the application builds, and array-backed values bypass it, and
+  decision 27 asks for the writer to hold the line.
+- **Replace CR, LF, and NUL with SP**, which RFC 9110 §5.5 allows a recipient. A sender
+  that rewrites a value silently changes what the application meant, and the application
+  never learns it reflected unvalidated input.
+- **Answer `500` inside the transport.** The transport would hide the fault from the host,
+  which owns the response policy and its diagnostics; it throws instead, before anything is
+  on the wire, and leaves the choice to the host.
+
 ## Trailers on HTTP/2 and HTTP/3
 
 Trailers (RFC 9110 §6.5) are HTTP semantics, decided apart from gRPC (decision 18,
@@ -2783,10 +2858,11 @@ buffered and the streaming path alike:
   field (`StagedTrailers`). A response that never staged one, or staged one and removed
   it, goes out byte for byte as before.
 - **Refused when added.** The collection's store, `TransportHttpTrailerFields`, applies
-  `HttpTrailerFieldRules.EnsureSendable`. A pseudo-header, a connection-specific field,
-  or a field RFC 9110 §6.5.1 prohibits in trailers throws `ArgumentException` from `Add`
-  or the indexer, where the mistake is made, instead of producing a malformed section on
-  the wire.
+  `HttpTrailerFieldRules.EnsureSendable`. A pseudo-header, a name that is not a token, a
+  connection-specific field, a field RFC 9110 §6.5.1 prohibits in trailers, or a value
+  with a control character but HTAB (#1183) throws `ArgumentException` from `Add` or the
+  indexer, where the mistake is made, instead of producing a malformed section on the
+  wire. The encoders check the field syntax again (see "Response field syntax").
 - **Encoding.** The section is encoded like a response head without `:status`: HPACK
   literals on HTTP/2 (`HPackEncoder.EncodeTrailers`) and the static-only QPACK encoder on
   HTTP/3 (`Http3HeaderCodec.EncodeTrailers`), with lowercased names. HEADERS frames are

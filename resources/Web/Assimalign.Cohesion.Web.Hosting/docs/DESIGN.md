@@ -288,7 +288,8 @@ once, in one of three ways, chosen by how its pipeline ended:
 | Pipeline outcome | Finalization | On the wire |
 | --- | --- | --- |
 | Returned | `SendAsync` | the application's response |
-| Threw, response not started | the staged status, headers, and body are replaced by a bodyless `500`, then `SendAsync` | `500 Internal Server Error` |
+| Returned, but the transport refused a field of its response (#1183) | as for a throw before the response started | `500 Internal Server Error` |
+| Threw, response not started | the staged status, headers, trailers, and body are replaced by a bodyless `500`, then `SendAsync` | `500 Internal Server Error` |
 | Threw after the response started, or the exchange was cancelled | `IHttpContext.CancelAsync`, then `SendAsync` | a reset: HTTP/2 `RST_STREAM(CANCEL)`, HTTP/3 stream abort, HTTP/1.1 no further bytes and a connection that ends after the exchange |
 
 - **Cancelled, not faulted.** An `OperationCanceledException` counts as a cancellation
@@ -304,6 +305,16 @@ once, in one of three ways, chosen by how its pipeline ended:
   probe `Http.Connections` exposes for exactly this decision; the runtime module takes
   no dependency on `Http.Streaming`, which would also have to enter every area
   framework that privately carries this module.
+- **A refused response is a fault (#1183).** Every transport refuses a response field
+  whose name is not a token or whose value holds CR, LF, NUL, or another control
+  character, before it writes any of the head: a value reflected from the request would
+  otherwise split an HTTP/1.1 response (CWE-113). `SendAsync` then throws an
+  `HttpException` with `HttpErrorCode.InvalidResponseField` and the response has not
+  started, so the server treats the exchange as faulted: the bodyless `500` replaces the
+  refused response, its completion callbacks do not run, and an HTTP/1.1 connection stays
+  usable. The same refusal from a streamed write, an early hint, or a protocol upgrade's
+  accept surfaces inside the pipeline and is a fault there. A refused trailer section on a
+  response already streamed cannot be replaced; the transport resets that stream itself.
 - **The replacement `500` swaps the body rather than truncating it.** A seekable body
   the application supplied may be a file it owns, so the staged body is replaced with a
   fresh empty one and disposed, never `SetLength(0)`-ed. If the response object itself

@@ -28,9 +28,17 @@ internal static partial class HPackEncoder
     /// <c>END_STREAM</c> — so injecting a length here would be wrong. A
     /// connection-specific field is skipped (<see cref="HttpResponseFieldRules"/>).
     /// </summary>
+    /// <remarks>
+    /// Every field is checked against the field syntax before the section is returned
+    /// (<see cref="HttpResponseFieldRules.EnsureValidName"/>, <see cref="HttpResponseFieldRules.EnsureValidValue"/>),
+    /// the connection-specific ones included, so a field that would split an HTTP/1.1 head is refused
+    /// on every version alike. The section is built in memory and the encoder never indexes, so a refusal
+    /// leaves nothing on the wire and no HPACK state behind.
+    /// </remarks>
     /// <param name="statusCode">The response status code.</param>
     /// <param name="headers">The response headers to emit.</param>
     /// <returns>The HPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers)
     {
         using MemoryStream buffer = new();
@@ -38,11 +46,7 @@ internal static partial class HPackEncoder
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            // RFC 9113 §8.2.2 — a connection-specific field would make the response malformed.
-            if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
-            {
-                continue;
-            }
+            HttpResponseFieldRules.EnsureValidName(header.Key);
 
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
@@ -53,13 +57,21 @@ internal static partial class HPackEncoder
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
+                        HttpResponseFieldRules.EnsureValidValue(header.Key, value);
                         WriteHeader(buffer, "set-cookie", value);
                     }
                 }
+
+                continue;
             }
-            else
+
+            string fieldValue = header.Value.Value;
+            HttpResponseFieldRules.EnsureValidValue(header.Key, fieldValue);
+
+            // RFC 9113 §8.2.2 — a connection-specific field would make the response malformed.
+            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value))
             {
-                WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
+                WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), fieldValue);
             }
         }
 
@@ -70,15 +82,22 @@ internal static partial class HPackEncoder
     /// Encodes a response's trailer section (RFC 9113 §8.1): the staged fields, lowercased, with no
     /// pseudo-header field — a trailer section carries none.
     /// </summary>
-    /// <param name="trailers">The staged trailer fields, already checked when they were added.</param>
+    /// <param name="trailers">
+    /// The staged trailer fields, already checked when they were added. Each is checked again against the
+    /// field syntax here, because a value built over an array can change after it was staged.
+    /// </param>
     /// <returns>The HPACK-encoded field block.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeTrailers(IHttpHeaderCollection trailers)
     {
         using MemoryStream buffer = new();
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in trailers)
         {
-            WriteHeader(buffer, field.Key.Value.ToLowerInvariant(), field.Value.Value);
+            string fieldValue = field.Value.Value;
+            HttpResponseFieldRules.EnsureValidName(field.Key);
+            HttpResponseFieldRules.EnsureValidValue(field.Key, fieldValue);
+            WriteHeader(buffer, field.Key.Value.ToLowerInvariant(), fieldValue);
         }
 
         return buffer.ToArray();
@@ -95,6 +114,7 @@ internal static partial class HPackEncoder
     /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
     /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
     /// <returns>The HPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeInterimResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection? headers)
     {
         using MemoryStream buffer = new();
@@ -104,17 +124,21 @@ internal static partial class HPackEncoder
         {
             foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
             {
+                HttpResponseFieldRules.EnsureValidName(header.Key);
+
                 // RFC 9113 §8.2.2 — an interim response is a field section like any other.
-                if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
-                {
-                    continue;
-                }
+                bool sendable = HttpResponseFieldRules.IsSendable(header.Key, header.Value);
 
                 foreach (string? value in header.Value)
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
-                        WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), value);
+                        HttpResponseFieldRules.EnsureValidValue(header.Key, value);
+
+                        if (sendable)
+                        {
+                            WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), value);
+                        }
                     }
                 }
             }

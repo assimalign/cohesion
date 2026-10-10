@@ -34,12 +34,15 @@ internal sealed partial class Http2ConnectionContext
     /// (RFC 9113 §4.1).
     /// </summary>
     /// <param name="context">The exchange whose tunnel was accepted; its stream's response is already claimed.</param>
+    /// <param name="headerBlock">
+    /// The encoded <c>200</c> head. The accept encodes it before claiming the response, so a field the head
+    /// cannot carry (#1183) is refused while the exchange can still answer otherwise.
+    /// </param>
     /// <param name="cancellationToken">A token that cancels waiting for the write gate.</param>
     /// <exception cref="IOException">The stream was reset, or the connection closed, before the head was written.</exception>
-    internal async Task WriteTunnelHeadAsync(Http2Context context, CancellationToken cancellationToken)
+    internal async Task WriteTunnelHeadAsync(Http2Context context, byte[] headerBlock, CancellationToken cancellationToken)
     {
         Http2Stream stream = context.Stream;
-        byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
 
         await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
         try

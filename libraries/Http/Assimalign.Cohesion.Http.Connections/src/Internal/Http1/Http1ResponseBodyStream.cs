@@ -57,12 +57,15 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 
         // Chunked transfer coding is selected when the caller did not commit to a Content-Length,
         // which is the streaming case (length not known up front).
+        bool addedTransferEncoding = false;
+
         if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
             _chunked = true;
             if (!headers.ContainsKey(HttpHeaderKey.TransferEncoding))
             {
                 headers[HttpHeaderKey.TransferEncoding] = "chunked";
+                addedTransferEncoding = true;
             }
         }
 
@@ -71,7 +74,27 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
             headers[HttpHeaderKey.Connection] = "close";
         }
 
-        await Http1MessageWriter.WriteHeadAsync(_stream, _context.Response.StatusCode, headers, cancellationToken).ConfigureAwait(false);
+        ReadOnlyMemory<byte> head;
+
+        try
+        {
+            head = Http1MessageWriter.EncodeHead(_context.Response.StatusCode, headers);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // A field the head cannot carry (#1183): nothing was written, and the base stream leaves the
+            // response unstarted. The chunked coding chosen for it is withdrawn, or a buffered response
+            // sent in its place would carry both Transfer-Encoding and the Content-Length it synthesizes.
+            _chunked = false;
+            if (addedTransferEncoding)
+            {
+                headers.Remove(HttpHeaderKey.TransferEncoding);
+            }
+
+            throw;
+        }
+
+        await _stream.WriteAsync(head, cancellationToken).ConfigureAwait(false);
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 

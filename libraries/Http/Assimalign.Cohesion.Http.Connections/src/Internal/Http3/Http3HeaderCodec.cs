@@ -256,6 +256,7 @@ internal static class Http3HeaderCodec
     /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
     /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
     /// <returns>The QPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeInterimResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection? headers)
     {
         List<(string Name, string Value)> fields =
@@ -267,17 +268,21 @@ internal static class Http3HeaderCodec
         {
             foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
             {
+                HttpResponseFieldRules.EnsureValidName(header.Key);
+
                 // RFC 9114 §4.2 — an interim response is a field section like any other.
-                if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
-                {
-                    continue;
-                }
+                bool sendable = HttpResponseFieldRules.IsSendable(header.Key, header.Value);
 
                 foreach (string? value in header.Value)
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
-                        fields.Add((header.Key.Value.ToLowerInvariant(), value));
+                        HttpResponseFieldRules.EnsureValidValue(header.Key, value);
+
+                        if (sendable)
+                        {
+                            fields.Add((header.Key.Value.ToLowerInvariant(), value));
+                        }
                     }
                 }
             }
@@ -290,15 +295,22 @@ internal static class Http3HeaderCodec
     /// Encodes a response's trailer section (RFC 9114 §4.1): the staged fields with no pseudo-header
     /// field (RFC 9114 §4.3), written as a HEADERS frame after the last DATA frame.
     /// </summary>
-    /// <param name="trailers">The staged trailer fields, already checked when they were added.</param>
+    /// <param name="trailers">
+    /// The staged trailer fields, already checked when they were added. Each is checked again against the
+    /// field syntax here, because a value built over an array can change after it was staged.
+    /// </param>
     /// <returns>The QPACK-encoded field section.</returns>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeTrailers(IHttpHeaderCollection trailers)
     {
         List<(string Name, string Value)> fields = new();
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in trailers)
         {
-            fields.Add((field.Key.Value, field.Value.Value));
+            string fieldValue = field.Value.Value;
+            HttpResponseFieldRules.EnsureValidName(field.Key);
+            HttpResponseFieldRules.EnsureValidValue(field.Key, fieldValue);
+            fields.Add((field.Key.Value, fieldValue));
         }
 
         return QPackFieldSectionEncoder.Encode(fields);
@@ -326,6 +338,13 @@ internal static class Http3HeaderCodec
     /// </summary>
     /// <param name="context">The exchange whose response head is encoded.</param>
     /// <returns>The QPACK-encoded field section.</returns>
+    /// <remarks>
+    /// Every field is checked against the field syntax before the section is returned
+    /// (<see cref="HttpResponseFieldRules.EnsureValidName"/>, <see cref="HttpResponseFieldRules.EnsureValidValue"/>),
+    /// the connection-specific ones included, so a field that would split an HTTP/1.1 head is refused on
+    /// every version alike. The encoder is static-only, so a refusal leaves no QPACK state behind.
+    /// </remarks>
+    /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeResponseHeaders(Http3Context context)
     {
         HttpHeaderCollection headers = context.Response.Headers;
@@ -337,11 +356,7 @@ internal static class Http3HeaderCodec
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            // RFC 9114 §4.2 — a connection-specific field would make the response malformed.
-            if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
-            {
-                continue;
-            }
+            HttpResponseFieldRules.EnsureValidName(header.Key);
 
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
@@ -352,13 +367,21 @@ internal static class Http3HeaderCodec
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
+                        HttpResponseFieldRules.EnsureValidValue(header.Key, value);
                         fields.Add(("set-cookie", value));
                     }
                 }
+
+                continue;
             }
-            else
+
+            string fieldValue = header.Value.Value;
+            HttpResponseFieldRules.EnsureValidValue(header.Key, fieldValue);
+
+            // RFC 9114 §4.2 — a connection-specific field would make the response malformed.
+            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value))
             {
-                fields.Add((header.Key.Value, header.Value.Value));
+                fields.Add((header.Key.Value, fieldValue));
             }
         }
 

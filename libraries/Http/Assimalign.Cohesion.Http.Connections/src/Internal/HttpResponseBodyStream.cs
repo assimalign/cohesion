@@ -178,7 +178,20 @@ internal abstract class HttpResponseBodyStream : Stream
         }
 
         _started = true;
-        await CommitHeadersAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await CommitHeadersAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            // The head was refused before any of it was written (#1183): the response has not started,
+            // so the write that tried to start it fails and the exchange can still be answered with
+            // another response. Any other failure may have left part of the head on the wire, so the
+            // response stays started.
+            _started = false;
+            throw;
+        }
     }
 
     private void ThrowIfCompleted()

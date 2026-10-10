@@ -159,6 +159,65 @@ public class WebApplicationServerIntegrationTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server: A response header that would split the response should be answered with 500 and the connection should keep serving")]
+    public async Task Server_ResponseHeaderWithLineBreak_ShouldAnswer500AndKeepServing()
+    {
+        // Arrange — /inject reflects request text with a CRLF into a header, the response-splitting shape
+        // (#1183, CWE-113). Two requests are pipelined on one raw connection, so the second shows the
+        // connection was left aligned.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using InMemoryConnectionListener transport = new();
+        IHttpConnectionListener listener = HttpConnectionListener.Create(options => options.UseHttp1(transport));
+        FakePipeline pipeline = new(async (context, _) =>
+        {
+            string path = context.Request.Path.ToString();
+
+            if (path == "/inject")
+            {
+                context.Response.Headers[new Assimalign.Cohesion.Http.HttpHeaderKey("Location")] = "/home\r\nSet-Cookie: session=attacker";
+                context.Response.StatusCode = CohesionHttpStatusCode.Found;
+            }
+
+            await context.Response.Body.WriteAsync(Encoding.ASCII.GetBytes(path), cancellationToken);
+        });
+
+        WebApplicationServer server = new(new WebApplicationServerOptions
+        {
+            Pipeline = pipeline,
+            Listener = listener,
+        });
+
+        await server.StartAsync(cancellationToken);
+
+        try
+        {
+            await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+            Stream stream = client.AsStream();
+
+            // Act
+            await stream.WriteAsync(
+                Encoding.ASCII.GetBytes(
+                    "GET /inject HTTP/1.1\r\nHost: localhost\r\n\r\n" +
+                    "GET /next HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+                cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+
+            string responses = await ReadUntilAsync(stream, text => text.EndsWith("/next", StringComparison.Ordinal), cancellationToken);
+
+            // Assert — no injected field, a bare 500 in place of the refused 302, then the next response.
+            responses.ShouldStartWith("HTTP/1.1 500");
+            responses.ShouldNotContain("Set-Cookie");
+            responses.ShouldNotContain("/home");
+            responses.ShouldContain("HTTP/1.1 200");
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server: StopAsync should wait for an in-flight request to unwind (graceful drain)")]
     public async Task StopAsync_WithInFlightRequest_ShouldWaitForItToUnwind()
     {

@@ -669,7 +669,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// <remarks>
     /// The exchange ends when this call returns or throws, whatever it wrote: from then on the stream
     /// no longer holds a concurrency slot it kept only because its exchange was still running
-    /// (<see cref="EndExchange"/>).
+    /// (<see cref="EndExchange"/>). The one exception is a head the encoder refused (#1183): nothing
+    /// reached the wire, so the exchange stays running, slot included, until the caller finalizes it
+    /// again or disposes it.
     /// </remarks>
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
@@ -679,6 +681,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
 
         Http2Stream stream = http2Context.Stream;
+        bool headRefused = false;
 
         try
         {
@@ -764,21 +767,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // was removed, RFC 9113 §8.6), so the rejection is unconditional.
             HttpInterimResponseRules.EnsureFinalStatusCode(http2Context.Response.StatusCode);
 
-            // Claim the stream's final response. The claim fails only when the transport has already
-            // answered the stream itself — the request body crossed its cap and the frame pump wrote the
-            // 413 (RFC 9110 §15.5.14). That answer stands; the application's response is discarded.
-            if (!stream.TryClaimResponse())
-            {
-                return;
-            }
-
-            // Commit point: from here the final response is on the wire, so the exchange control's
-            // probes must report the response as started (no more interim writes).
-            http2Context.MarkFinalResponseStarted();
-
-            // The claimed response is the only one the stream can carry, so a send cancelled from here on
-            // resets the stream (#1075) rather than leaving it open, holding its slot, with no response —
-            // unless its END_STREAM already reached the transport.
+            // A send cancelled from here on resets the stream (#1075) rather than leaving it open, holding
+            // its slot, with no response — unless its END_STREAM already reached the transport.
             bool written;
             try
             {
@@ -793,6 +783,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // set is preserved; one is synthesized only from a body the handler actually produced (the
                 // GET representation's length). An empty HEAD body gets none, because RFC 9110 §8.6 forbids
                 // a content-length that differs from what GET would send, and the transport cannot know it.
+                //
+                // The head and the trailer section are encoded before the response is claimed. A field that
+                // either section cannot carry (#1183, RFC 9113 §8.2.1) throws here, with nothing on the wire
+                // and the response unclaimed and unstarted, so the caller can still send another response.
                 bool isHead = http2Context.Request.Method == HttpMethod.Head;
                 byte[] headerBlock = isHead && bodyBytes.Length == 0
                     ? HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers)
@@ -805,6 +799,18 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 byte[]? trailerBlock = !isHead && http2Context.Response.StagedTrailers is { } trailers
                     ? HPackEncoder.EncodeTrailers(trailers)
                     : null;
+
+                // Claim the stream's final response. The claim fails only when the transport has already
+                // answered the stream itself — the request body crossed its cap and the frame pump wrote
+                // the 413 (RFC 9110 §15.5.14). That answer stands; the application's response is discarded.
+                if (!stream.TryClaimResponse())
+                {
+                    return;
+                }
+
+                // Commit point: from here the final response is on the wire, so the exchange control's
+                // probes must report the response as started (no more interim writes).
+                http2Context.MarkFinalResponseStarted();
 
                 written = await WriteBufferedResponseAsync(http2Context, headerBlock, content, trailerBlock, cancellationToken).ConfigureAwait(false);
             }
@@ -836,9 +842,20 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // The final response is fully on the wire and the stream reaped — observe completion.
             await http2Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (HttpInvalidResponseFieldException) when (!http2Context.HasFinalResponseStarted)
+        {
+            // #1183 — the encoder refused a field before the response was claimed, so nothing of it is on
+            // the wire and the stream can still carry a response. The exchange stays running until the
+            // caller finalizes it again: a replacement response, or Cancel and a send that resets it.
+            headRefused = true;
+            throw;
+        }
         finally
         {
-            EndExchange(stream);
+            if (!headRefused)
+            {
+                EndExchange(stream);
+            }
         }
     }
 
@@ -2754,16 +2771,19 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         HttpInterimResponseRules.EnsureFinalStatusCode(context.Response.StatusCode);
 
         Http2Stream stream = context.Stream;
-        if (!stream.TryClaimResponse())
-        {
-            return;
-        }
 
         // Advertise the HTTP/3 endpoint on this streamed response unless the application set its own
         // Alt-Svc (RFC 7838 — the server never overwrites an application value).
         HttpAltServiceInjector.Inject(context.Response.Headers, _altSvcHeaderValue);
 
+        // Encoded before the response is claimed: a field the head cannot carry (#1183, RFC 9113 §8.2.1)
+        // throws with the stream unclaimed and nothing on the wire, so another response can still follow.
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
+
+        if (!stream.TryClaimResponse())
+        {
+            return;
+        }
 
         await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
         try
@@ -2924,9 +2944,27 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         if (!stream.IsResponseCompleted)
         {
-            byte[]? trailerBlock = context.Response.StagedTrailers is { } trailers
-                ? HPackEncoder.EncodeTrailers(trailers)
-                : null;
+            byte[]? trailerBlock;
+
+            try
+            {
+                trailerBlock = context.Response.StagedTrailers is { } trailers
+                    ? HPackEncoder.EncodeTrailers(trailers)
+                    : null;
+            }
+            catch (HttpInvalidResponseFieldException)
+            {
+                // #1183 — a trailer field the section cannot carry, past the staging check (a value built
+                // over an array that changed after it was added). The head and body are already out, so
+                // the response cannot be completed or replaced: the stream is reset with INTERNAL_ERROR
+                // (RFC 9113 §7), and the peer never sees END_STREAM on a response that lost its trailers.
+                if (stream.CanWriteResponse)
+                {
+                    await EmitRstStreamAsync(context.StreamId, Http2ErrorCode.InternalError, cancellationToken).ConfigureAwait(false);
+                }
+
+                throw;
+            }
 
             await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
             try

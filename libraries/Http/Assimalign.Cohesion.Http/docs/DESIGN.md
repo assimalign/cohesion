@@ -240,13 +240,19 @@ quirks.
   - The rules judge characters, not octets. A character above U+00FF is never
     produced by a Latin-1 decode and is left to the encoder that writes it.
 
-  Callers: today, HTTP/1.1's `Http1FieldLine`, for headers and chunked
-  trailers, and `Http1ChunkExtensions`, for the tokens and quoted strings of
-  chunk extensions. #1183 brings the response writers on all three
-  versions, the `Http.ProtocolUpgrade` 101 writer included. #1376 brings the
-  HTTP/2 and HTTP/3 decoders and `HttpTrailerFieldRules`. A check in the
-  header collection alone would not be enough: any `IHttpHeaderCollection`
-  implementation could bypass it.
+  Callers: HTTP/1.1's `Http1FieldLine`, for headers and chunked trailers, and
+  `Http1ChunkExtensions`, for the tokens and quoted strings of chunk
+  extensions. Since #1183 every response head writer applies `IsValidFieldName`
+  and `IndexOfInvalidControlCharacter` to each field line as it encodes it, on
+  all three versions and in the `Http.ProtocolUpgrade` 101 writer, and refuses
+  the head before writing a byte with an `HttpException` whose code is
+  `HttpErrorCode.InvalidResponseField`. A sender may not generate a value
+  outside `field-content`, so the writers refuse every control character but
+  HTAB, not only NUL, CR, and LF; they leave SP and HTAB at a value's ends
+  alone, since those split nothing. #1376 brings the HTTP/2 and HTTP/3 decoders
+  and `HttpTrailerFieldRules`. A check in the header collection alone would not
+  be enough: any `IHttpHeaderCollection` implementation could bypass it, and a
+  value built over an array shares that array with its caller.
 
 ### Version-specific boundaries that must NOT cross
 

@@ -66,10 +66,12 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
     protected override async ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
     {
         // RFC 9114 §4.1 — staged trailers ride a HEADERS frame after the last DATA frame, before the
-        // FIN. A response to HEAD carries none, as on HTTP/2.
+        // FIN. A response to HEAD carries none, as on HTTP/2. The section is encoded before its frame
+        // starts, so a refused field (#1183) leaves no partial frame for the send path's reset to follow.
         if (!_suppressBody && _context.Response.StagedTrailers is { } trailers)
         {
-            await WriteFrameAsync(Http3FrameType.Headers, Http3HeaderCodec.EncodeTrailers(trailers), cancellationToken).ConfigureAwait(false);
+            byte[] trailerBlock = Http3HeaderCodec.EncodeTrailers(trailers);
+            await WriteFrameAsync(Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
         }
 
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);

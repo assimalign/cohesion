@@ -34,6 +34,11 @@ accepts is served as before. A `UseServer` callback that clears `options.Interce
 them, and with them WebSockets on every protocol: the HTTP/2 and HTTP/3 transports keep advertising
 extended CONNECT, but nothing surfaces it.
 
+A handler that throws before its response starts is answered with a bare `500`. So is a response
+the transport refuses to send because a header or trailer name is not a token or a value holds CR,
+LF, NUL, or another control character but HTAB — typically request text copied into a header
+unvalidated, which would otherwise split the response.
+
 ## Telemetry
 
 The default server traces and measures every request (#1064). Subscribe by name:

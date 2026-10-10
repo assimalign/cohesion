@@ -94,4 +94,12 @@ public enum HttpErrorCode
     /// <c>X-Forwarded-*</c> list could not be parsed.
     /// </summary>
     InvalidForwarded,
+
+    /// <summary>
+    /// A response field cannot be sent: its name is not a token (RFC 9110 &#167; 5.1), or its value
+    /// holds a control character other than HTAB, CR, LF and NUL among them (RFC 9110 &#167; 5.5).
+    /// A server transport refuses such a head before it writes any of it, so the response has not
+    /// started and can still be replaced.
+    /// </summary>
+    InvalidResponseField,
 }

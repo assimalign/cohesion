@@ -233,10 +233,20 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         // never overwrites an application value).
         HttpAltServiceInjector.Inject(http1Context.Response.Headers, _altSvcHeaderValue);
 
+        // The head is encoded before the commit point, and a field it cannot carry (#1183, RFC 9110
+        // §5.5) throws here: nothing is on the wire and the response has not started, so the caller can
+        // still replace it, and the connection stays aligned for the next request.
+        (ReadOnlyMemory<byte> head, byte[] body) = await Http1MessageWriter.EncodeResponseAsync(http1Context, cancellationToken).ConfigureAwait(false);
+
         // Commit point: from here the final response is on the wire, so the exchange control's
         // probes must report the response as started (no more interim writes or takeover).
         http1Context.MarkFinalResponseStarted();
-        await Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken).ConfigureAwait(false);
+        await Http1MessageWriter.WriteResponseAsync(
+            Stream,
+            head,
+            body,
+            writeBody: http1Context.Request.Method != HttpMethod.Head,
+            cancellationToken).ConfigureAwait(false);
         await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 

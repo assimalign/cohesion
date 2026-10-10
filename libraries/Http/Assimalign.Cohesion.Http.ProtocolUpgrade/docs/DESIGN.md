@@ -116,19 +116,28 @@ recorded as a deliberate deviation in the csproj, matching `Http.ExtendedConnect
 second call **before any byte is written**, so a second response can never reach the wire). It:
 
 1. Resolves the status line (101 for Upgrade, 200 for CONNECT) before side effects.
-2. **Claims the connection first** — `IHttpExchangeControl.TakeOver()`. From that instant the
+2. **Encodes the head before anything else changes (#1183)**: the status line, the response
+   headers and cookies the application set before accepting (e.g. `Sec-WebSocket-Accept`), less
+   `Content-Length` and `Transfer-Encoding` — RFC 9112 §9.9 (a 101 carries no body framing) and
+   RFC 9110 §9.3.6 (a successful CONNECT response must not include them) — then
+   `Connection: Upgrade` + `Upgrade: <protocol>` for an upgrade, or no `Connection` header for a
+   CONNECT (the tunnel persists — `close` applies to HTTP framing, not the tunnel). The status is
+   always the RFC-standard one (the interceptor materials do not expose the application's status
+   code, and 101/200 are what §7.8 / §9.3.6 prescribe). Each field line is checked against the core
+   field rule as it is encoded (`HttpFieldNormalization`): a name that is not a token, or a value
+   holding CR, LF, NUL, or another control character but HTAB, throws an `HttpException` with
+   `HttpErrorCode.InvalidResponseField` — the rule the transport's head writers apply, so a value
+   reflected from the request cannot split the response (CWE-113). The refusal comes before the
+   takeover: nothing is written, the connection is still the transport's, and the response headers
+   are as the application staged them, so the exchange can still be answered with an ordinary
+   response (`Web.Hosting` answers the resulting fault with a `500`). The accept is spent either way.
+3. **Claims the connection** — `IHttpExchangeControl.TakeOver()`. From that instant the
    transport suppresses its own response for the exchange and ends keep-alive, so even a
    cancelled or failed head write cannot be followed by a second HTTP response on a
    desynchronized stream. The takeover is itself one-shot, so two features can never both claim
    a connection.
-3. Scrubs `Content-Length` / `Transfer-Encoding` unconditionally — RFC 9112 §9.9 (a 101 carries
-   no body framing) and RFC 9110 §9.3.6 (a successful CONNECT response must not include them).
-4. Writes the head to the surrendered raw stream: `Connection: Upgrade` +
-   `Upgrade: <protocol>` for an upgrade; the `Connection` header removed for a CONNECT (the
-   tunnel persists — `close` applies to HTTP framing, not the tunnel). Response headers and
-   cookies the application set before accepting ride along (e.g. `Sec-WebSocket-Accept`); the
-   status is always the RFC-standard one (the interceptor materials do not expose the
-   application's status code, and 101/200 are what §7.8 / §9.3.6 prescribe).
+4. Applies the same field rules to the live response headers, so the exchange records the head
+   that was sent, then writes the encoded head to the surrendered raw stream.
 5. Returns the raw stream. The caller owns I/O on it; the transport still owns the underlying
    connection's disposal when the server's connection scope ends.
 

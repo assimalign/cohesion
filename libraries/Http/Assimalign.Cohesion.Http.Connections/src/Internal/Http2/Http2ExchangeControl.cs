@@ -117,7 +117,23 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
             throw new IOException($"The HTTP/2 stream {_context.StreamId} was reset before the extended CONNECT tunnel was accepted.");
         }
 
+        HttpStatusCode stagedStatus = _context.Response.StatusCode;
         HttpExtendedConnectRules.PrepareResponseHead(_context.Response);
+
+        // Encoded before the response is claimed: a field the head cannot carry (#1183) throws with
+        // nothing on the wire and the exchange unstarted, its staged status restored. The accept is
+        // spent, and the exchange is answered like any other.
+        byte[] headerBlock;
+
+        try
+        {
+            headerBlock = HPackEncoder.EncodeResponseHeaders(_context.Response.StatusCode, _context.Response.Headers);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            _context.Response.StatusCode = stagedStatus;
+            throw;
+        }
 
         // RFC 9113 §8.1 — the stream carries one final response, and from here it is the tunnel's.
         if (!_context.Stream.TryClaimResponse())
@@ -130,7 +146,7 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
         Http2ExtendedConnectStream tunnel = new(_connection, _context, requestBody);
         _context.Tunnel = tunnel;
 
-        await _connection.WriteTunnelHeadAsync(_context, cancellationToken).ConfigureAwait(false);
+        await _connection.WriteTunnelHeadAsync(_context, headerBlock, cancellationToken).ConfigureAwait(false);
         tunnel.MarkHeadCommitted();
 
         return tunnel;

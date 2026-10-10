@@ -2057,10 +2057,6 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // rejection is unconditional.
         HttpInterimResponseRules.EnsureFinalStatusCode(http3Context.Response.StatusCode);
 
-        // Commit point: from here the final response is on the wire, so the exchange control's
-        // probes must report the response as started (no more interim writes).
-        http3Context.MarkFinalResponseStarted();
-
         Stream stream = http3Context.StreamConnection.AsStream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
 
@@ -2069,10 +2065,24 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // only from a body the handler actually produced (the GET representation's length). An empty
         // HEAD body gets none, because RFC 9110 §8.6 forbids a Content-Length that differs from what GET
         // would send, and the transport cannot know it — the choice the HTTP/2 path makes too.
+        //
+        // The head and the trailer section are encoded before the commit point. A field that either
+        // section cannot carry (#1183, RFC 9114 §4.2) throws here, with nothing on the wire and the
+        // response unstarted, so the caller can still send another response.
         bool isHead = http3Context.Request.Method == HttpMethod.Head;
         byte[] headerBlock = isHead && bodyBytes.Length == 0
             ? Http3HeaderCodec.EncodeResponseHeaders(http3Context)
             : Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
+
+        // RFC 9114 §4.1 — staged trailers follow the content as a HEADERS frame, before the FIN that
+        // ends the response. A response to HEAD carries none, as on HTTP/2.
+        byte[]? trailerBlock = !isHead && http3Context.Response.StagedTrailers is { } trailers
+            ? Http3HeaderCodec.EncodeTrailers(trailers)
+            : null;
+
+        // Commit point: from here the final response is on the wire, so the exchange control's
+        // probes must report the response as started (no more interim writes).
+        http3Context.MarkFinalResponseStarted();
 
         await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
 
@@ -2081,11 +2091,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             await WriteFrameAsync(stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
         }
 
-        // RFC 9114 §4.1 — staged trailers follow the content as a HEADERS frame, before the FIN that
-        // ends the response. A response to HEAD carries none, as on HTTP/2.
-        if (!isHead && http3Context.Response.StagedTrailers is { } trailers)
+        if (trailerBlock is not null)
         {
-            await WriteFrameAsync(stream, Http3FrameType.Headers, Http3HeaderCodec.EncodeTrailers(trailers), cancellationToken).ConfigureAwait(false);
+            await WriteFrameAsync(stream, Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
         }
 
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -2132,7 +2140,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
 
         requestBody.RefuseRemainder();
-        await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        await CompleteStreamedResponseAsync(http3Context, sink, cancellationToken).ConfigureAwait(false);
         StopReadingRequestStream(requestBody, http3Context.StreamId);
         await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -2153,6 +2161,35 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             http3Context.StreamId,
             new Http3StreamException(Http3ErrorCode.RequestCancelled, "The exchange was cancelled."),
             abandonsReading);
+    }
+
+    /// <summary>
+    /// Completes a streamed response through its sink: the staged trailer section, if any, then the FIN.
+    /// A trailer field the section cannot carry (#1183) is refused before its HEADERS frame is written,
+    /// but the head and the body are already out, so the response can be neither completed nor replaced:
+    /// the request stream is reset with <c>H3_INTERNAL_ERROR</c> (RFC 9114 §8.1), and the peer never sees
+    /// a FIN on a response that lost its trailers. The refusal then propagates.
+    /// </summary>
+    private async Task CompleteStreamedResponseAsync(Http3Context http3Context, HttpResponseBodyStream sink, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            Http3RequestBodyStream requestBody = http3Context.RequestBody;
+            bool abandonsReading = !requestBody.IsCompleted;
+            requestBody.MarkReset();
+
+            ResetRequestStream(
+                http3Context.StreamConnection,
+                http3Context.StreamId,
+                new Http3StreamException(Http3ErrorCode.InternalError, "The response's trailer section could not be sent."),
+                abandonsReading);
+
+            throw;
+        }
     }
 
     /// <summary>

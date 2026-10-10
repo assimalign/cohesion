@@ -30,12 +30,19 @@ internal static class HttpTrailerFieldRules
     /// Rejects a field an application stages in a response's trailer section when HTTP/2 and HTTP/3
     /// cannot send it there, so the mistake surfaces where it is made rather than on the wire.
     /// </summary>
+    /// <remarks>
+    /// The field syntax (#1183) is checked here too, for the same reason. The encoders check it again
+    /// when they write the section (<see cref="HttpResponseFieldRules"/>), because a value built over an
+    /// array can change after it was staged.
+    /// </remarks>
     /// <param name="key">The field name being added.</param>
+    /// <param name="value">The field value being added.</param>
     /// <exception cref="ArgumentException">
-    /// <paramref name="key"/> is empty, a pseudo-header field, a connection-specific field, or a field
-    /// prohibited in trailers.
+    /// <paramref name="key"/> is empty, a pseudo-header field, not a token, a connection-specific field,
+    /// or a field prohibited in trailers; or <paramref name="value"/> holds a control character other than
+    /// HTAB (RFC 9110 §5.5).
     /// </exception>
-    public static void EnsureSendable(HttpHeaderKey key)
+    public static void EnsureSendable(HttpHeaderKey key, HttpHeaderValue value)
     {
         if (key.IsEmpty)
         {
@@ -49,11 +56,29 @@ internal static class HttpTrailerFieldRules
                 nameof(key));
         }
 
+        if (!HttpFieldNormalization.IsValidFieldName(key.Value))
+        {
+            // Not quoted: whatever makes the name invalid may be CR, LF, or NUL.
+            throw new ArgumentException("A trailer field name must be a token (RFC 9110 §5.1).", nameof(key));
+        }
+
         if (IsExcluded(key))
         {
             throw new ArgumentException(
                 $"The field '{key.Value}' cannot be sent in a trailer section (RFC 9110 §6.5.1, RFC 9113 §8.2.2, RFC 9114 §4.2).",
                 nameof(key));
+        }
+
+        foreach (string? element in value)
+        {
+            int invalid = HttpFieldNormalization.IndexOfInvalidControlCharacter(element);
+
+            if (invalid >= 0)
+            {
+                throw new ArgumentException(
+                    $"The value of the trailer field '{key.Value}' holds the control character 0x{(int)element![invalid]:X2}; a field value holds no control character but HTAB (RFC 9110 §5.5).",
+                    nameof(value));
+            }
         }
     }
 

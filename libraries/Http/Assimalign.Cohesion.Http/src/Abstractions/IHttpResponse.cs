@@ -35,9 +35,10 @@ public interface IHttpResponse
     /// <para>
     /// The <c>Assimalign.Cohesion.Http.Connections</c> transports support response
     /// trailers on HTTP/2 and HTTP/3: fields added before the response completes
-    /// go out as a HEADERS frame after the body, and adding a pseudo-header, a
-    /// connection-specific field, or a field RFC 9110 §6.5.1 prohibits in trailers
-    /// (<see cref="HttpFieldRules.IsProhibitedInTrailers"/>) throws
+    /// go out as a HEADERS frame after the body, and adding a pseudo-header, a name
+    /// that is not a token, a connection-specific field, a field RFC 9110 §6.5.1
+    /// prohibits in trailers (<see cref="HttpFieldRules.IsProhibitedInTrailers"/>), or
+    /// a value holding a control character other than HTAB throws
     /// <see cref="System.ArgumentException"/>. A response to
     /// <c>HEAD</c> sends no trailers. On HTTP/1.1, and for a <c>CONNECT</c>
     /// exchange, the collection is unsupported.

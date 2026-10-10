@@ -524,7 +524,9 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     /// </summary>
     /// <remarks>
     /// This is the application-exception isolation boundary. Whatever the pipeline, its completion
-    /// callbacks, or the exchange's own disposal throw costs this exchange and nothing else. The one
+    /// callbacks, or the exchange's own disposal throw costs this exchange and nothing else. A response
+    /// the transport refuses to send because a field cannot be carried (#1183) counts as a pipeline
+    /// fault: nothing of it was written, so a <c>500</c> replaces it. The one
     /// failure that escapes is a sequential (HTTP/1.1) connection's failed send: its response
     /// framing on the wire is then unknown, so the caller must stop reading from the connection. A
     /// multiplexed exchange never throws; a failed send resets its own stream.
@@ -555,7 +557,19 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 
             try
             {
-                responded = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    responded = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                }
+                catch (HttpException exception) when (outcome == ExchangeOutcome.Completed && IsRefusedResponseHead(exception, exchange))
+                {
+                    // The transport refused a field of the application's response before writing any of
+                    // it (#1183): a name that is not a token, or a value with CR, LF, NUL, or another
+                    // control character. That is an application fault like any other, so the exchange is
+                    // finalized as one: a 500 in place of the refused response.
+                    outcome = ExchangeOutcome.Faulted;
+                    responded = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                }
             }
             // Deviates from the repo "catch specific exceptions" rule per design decision: on a
             // multiplexed connection a failed send belongs to this stream alone (a response body
@@ -645,10 +659,24 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     }
 
     /// <summary>
+    /// Whether <paramref name="exception"/>, thrown by <see cref="IHttpConnectionContext.SendAsync"/>,
+    /// is the transport refusing a response field before it wrote any of the head (#1183). The
+    /// response has then not started, so it can still be replaced.
+    /// </summary>
+    private static bool IsRefusedResponseHead(HttpException exception, IHttpContext exchange)
+    {
+        return exception.Code == HttpErrorCode.InvalidResponseField && !exchange.HasResponseStarted;
+    }
+
+    /// <summary>
     /// Replaces whatever response a faulted application staged with a bodyless
     /// <c>500 Internal Server Error</c>. Returns <see langword="false"/> when the response itself
     /// cannot be reshaped; the caller then resets the exchange instead.
     /// </summary>
+    /// <remarks>
+    /// The staged headers and trailers are both dropped: they belong to the response the
+    /// application failed to finish, and a field among them may be the one the transport refused.
+    /// </remarks>
     private static bool TryPrepareServerErrorResponse(IHttpContext exchange)
     {
         Stream staged;
@@ -658,6 +686,11 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             IHttpResponse response = exchange.Response;
 
             response.Headers.Clear();
+
+            if (response.Trailers.IsSupported)
+            {
+                response.Trailers.Clear();
+            }
 
             // Swap in a fresh body rather than truncating the staged one: a seekable body the
             // application supplied may be a file it owns, and truncating it would destroy data.

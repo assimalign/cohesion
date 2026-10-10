@@ -114,14 +114,30 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
             throw new IOException("The HTTP/3 connection closed before the extended CONNECT tunnel was accepted.");
         }
 
+        HttpStatusCode stagedStatus = _context.Response.StatusCode;
         HttpExtendedConnectRules.PrepareResponseHead(_context.Response);
+
+        // Encoded before the response starts: a field the head cannot carry (#1183) throws with nothing
+        // on the wire and the exchange unstarted, its staged status restored. The accept is spent, and
+        // the exchange is answered like any other.
+        byte[] headerBlock;
+
+        try
+        {
+            headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
+        }
+        catch (HttpInvalidResponseFieldException)
+        {
+            _context.Response.StatusCode = stagedStatus;
+            throw;
+        }
 
         _context.MarkFinalResponseStarted();
 
         Http3ExtendedConnectStream tunnel = new(_connection, _context);
         _context.Tunnel = tunnel;
 
-        await tunnel.WriteHeadAsync(Http3HeaderCodec.EncodeResponseHeaders(_context), cancellationToken).ConfigureAwait(false);
+        await tunnel.WriteHeadAsync(headerBlock, cancellationToken).ConfigureAwait(false);
         tunnel.MarkHeadCommitted();
 
         return tunnel;

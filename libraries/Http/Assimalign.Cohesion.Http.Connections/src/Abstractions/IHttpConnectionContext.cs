@@ -43,6 +43,7 @@ public interface IHttpConnectionContext
     /// <param name="cancellationToken">The cancellation token for the write operation.</param>
     /// <returns>A task that completes when the response has been written.</returns>
     /// <remarks>
+    /// <para>
     /// Cancelling <paramref name="cancellationToken"/> once the final response is claimed abandons it,
     /// and the exchange can carry no other response. On HTTP/2 the transport then resets the stream
     /// with <c>RST_STREAM(CANCEL)</c> before the <see cref="System.OperationCanceledException"/>
@@ -51,8 +52,29 @@ public interface IHttpConnectionContext
     /// CONNECT tunnel's end alike. A response whose <c>END_STREAM</c> already reached the transport is
     /// complete, so its stream is ended without a reset and only the exception reports the
     /// cancellation. The call still ends the exchange (see <see cref="ReceiveAsync"/>), whether it
-    /// returns or throws.
+    /// returns or throws, except as described next.
+    /// </para>
+    /// <para>
+    /// Every version refuses a response field whose name is not a token or whose value holds a control
+    /// character other than HTAB — CR, LF, and NUL among them (RFC 9110 §5.1, §5.5) — before it writes
+    /// any of the head: a value carrying CR or LF would otherwise split an HTTP/1.1 response
+    /// (CWE-113). The refusal is an <see cref="HttpException"/> whose
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>. When it
+    /// comes from this call for the final head or the trailer section of a buffered response, nothing
+    /// was written and the response has not started (the <c>HasResponseStarted</c> property of
+    /// <see cref="HttpContextTransportExtensions"/> stays <see langword="false"/>), so the exchange is
+    /// not finalized: the caller replaces the response
+    /// (for example with a bodyless <c>500</c>) and sends again, or calls <see cref="IHttpContext.Cancel"/>
+    /// and sends to reset it. When a streamed response's trailer section is refused, its head and body
+    /// are already on the wire, so the transport resets the HTTP/2 stream with
+    /// <c>INTERNAL_ERROR</c> or the HTTP/3 request stream with <c>H3_INTERNAL_ERROR</c> before the
+    /// refusal propagates, and the exchange is finalized.
+    /// </para>
     /// </remarks>
+    /// <exception cref="HttpException">
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: a response
+    /// field cannot be sent.
+    /// </exception>
     ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
 
     /// <summary>

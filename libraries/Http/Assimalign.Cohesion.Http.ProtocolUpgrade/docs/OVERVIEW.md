@@ -35,6 +35,12 @@ if (context.Upgrade is { Kind: HttpProtocolUpgradeKind.Upgrade, Protocol: "examp
 // interceptors are not registered.
 ```
 
+`AcceptAsync` checks every response field before it claims the connection: a name that is not a
+token, or a value holding CR, LF, NUL, or another control character but HTAB, throws an
+`HttpException` with `HttpErrorCode.InvalidResponseField`. Nothing has been written then, so the
+exchange can still be answered with an ordinary response; validate any request text a handler
+copies into a response header.
+
 For a WebSocket, use `context.WebSockets` (`Assimalign.Cohesion.Http.WebSockets`) instead: it
 validates the RFC 6455 handshake, answers with `Sec-WebSocket-Accept`, and accepts through this
 upgrade.

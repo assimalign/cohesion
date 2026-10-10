@@ -29,7 +29,7 @@ internal sealed class TransportHttpTrailerFields : IHttpHeaderCollection
         get => _fields[key];
         set
         {
-            HttpTrailerFieldRules.EnsureSendable(key);
+            HttpTrailerFieldRules.EnsureSendable(key, value);
             _fields[key] = value;
         }
     }
@@ -43,7 +43,7 @@ internal sealed class TransportHttpTrailerFields : IHttpHeaderCollection
     /// <inheritdoc />
     public void Add(HttpHeaderKey key, HttpHeaderValue value)
     {
-        HttpTrailerFieldRules.EnsureSendable(key);
+        HttpTrailerFieldRules.EnsureSendable(key, value);
         _fields.Add(key, value);
     }
 
