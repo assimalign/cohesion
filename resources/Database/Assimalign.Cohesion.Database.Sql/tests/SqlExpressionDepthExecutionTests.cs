@@ -709,11 +709,17 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>Both LIKE matchers check the stack, the index-backed one and the compatibility collation's.</summary>
+    /// <remarks>
+    /// Each step must recurse through a call that is not a tail call: <c>%</c> backtracks, so each
+    /// level waits for the one below it. A <c>_</c> step is a tail call in the compatibility matcher,
+    /// which optimized code (NativeAOT, or a JIT without tiering) turns into a loop that needs no
+    /// stack, so it cannot show that the matcher checks the stack.
+    /// </remarks>
     /// <param name="collation">The effective collation.</param>
     /// <param name="step">One step of a pattern that recurses once per step.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: both LIKE matchers check the stack before they recurse")]
     [InlineData("binary", "%a")]
-    [InlineData("invariant", "_")]
+    [InlineData("invariant", "%a")]
     public void LikeMatches_DeeperThanStack_ShouldThrowInsufficientStack(string collation, string step)
     {
         // Arrange: with a few KB of stack left the check fails long before the value is exhausted.

@@ -4,6 +4,12 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Sql.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
+		<!-- Every method is compiled optimized at its first call, as NativeAOT compiles it, instead of
+		     starting unoptimized and tiering up. The stack-depth tests (SqlExpressionDepthExecutionTests)
+		     compare how deep the parser and each later walk can nest on one thread; with tiering, a walk
+		     still in its large unoptimized frames beside an already optimized parser made the CASE row
+		     fail on whichever CI runner tiered last (macOS, then Ubuntu). -->
+		<TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 
 	<ItemGroup>
