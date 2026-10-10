@@ -27,10 +27,19 @@ using Assimalign.Cohesion.Database.Storage;
 /// the engine spawned — and disposal is its one lifecycle transition: quiesce the
 /// workers, flush each database according to its backing's durability policy and
 /// close it. Each database is backed by a storage strategy managing two file sets
-/// (data and <c>.catalog</c>); the strategy is file-based when
+/// (data and catalog); the strategy is file-based when
 /// <see cref="KeyValueDatabaseEngineOptions.RootPath"/> is set and in-memory otherwise.
 /// The journal is owned per-database through the storage layer, so there is no
 /// engine-level write-ahead log.
+/// </para>
+/// <para>
+/// <b>Names and files (#1392).</b> Database names compare ignoring case, and every spelling of a
+/// name reaches the same files on every operating system: a database is one directory under
+/// <see cref="KeyValueDatabaseEngineOptions.RootPath"/>, named for the lower case of its name,
+/// holding <c>keyvalue.*</c> and <c>catalog.*</c>. A name follows one rule everywhere (1 to 128
+/// ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no
+/// Windows device name). A database reports the spelling it was created with, which its data file
+/// set's storage header keeps, whatever spelling opens it.
 /// </para>
 /// <para>
 /// <b>A database its holder closed.</b> A database disposed outside the engine (directly, or
@@ -80,11 +89,6 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
     // The databases the builder declared (owner decision 56): set once, before they are opened.
     private DatabaseName[] _declaredDatabases = [];
-
-    /// <summary>
-    /// The storage-name suffix of the dedicated catalog file set each database owns.
-    /// </summary>
-    internal const string CatalogSuffix = ".catalog";
 
     /// <summary>
     /// The buffer pool of a catalog file set, in pages (1 MiB): a catalog holds index
@@ -362,7 +366,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <param name="name">The name of the database to create.</param>
     /// <param name="cancellationToken">Observed before the database is created.</param>
     /// <returns>The newly created database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
@@ -377,7 +381,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <param name="name">The name of the database to open.</param>
     /// <param name="cancellationToken">Observed before the database is opened, and while the open waits for a holder's close of it.</param>
     /// <returns>The opened database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
@@ -443,7 +447,9 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 throw new DatabaseException($"A database with name '{name}' already exists.");
             }
 
-            var storage = _strategy.CreateStorage(name);
+            // The data set claims the database: the strategy refuses it when the database exists in
+            // any spelling, open or not (#1392).
+            var storage = _strategy.CreateStorage(name, catalog: false);
             KeyValueStorage? catalogStorage = null;
 
             // Publish the storages to the worker snapshot BEFORE constructing the
@@ -454,8 +460,8 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             try
             {
                 ConfigureStorage(storage, name, catalog: false);
-                catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
-                ConfigureStorage(catalogStorage, name + CatalogSuffix, catalog: true);
+                catalogStorage = _strategy.CreateStorage(name, catalog: true);
+                ConfigureStorage(catalogStorage, KeyValueStorageStrategy.GetLabel(name, catalog: true), catalog: true);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new KeyValueDatabase(name, this, storage, catalogStorage);
                 _databases[name] = database;
@@ -508,7 +514,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 existing.Dispose();
             }
 
-            if (!_strategy.StorageExists(name))
+            if (!_strategy.StorageExists(name, catalog: false))
             {
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
@@ -516,7 +522,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             KeyValueStorage storage;
             try
             {
-                storage = _strategy.OpenStorage(name);
+                storage = _strategy.OpenStorage(name, catalog: false);
             }
             catch (StorageFormatException exception)
             {
@@ -524,6 +530,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             }
 
             KeyValueStorage? catalogStorage = null;
+            string catalogLabel = KeyValueStorageStrategy.GetLabel(name, catalog: true);
 
             // See CreateDatabaseCoreAsync: instance construction commits (recovery
             // checkpoint, primary-index re-attachment), so the flush worker must
@@ -533,18 +540,21 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 ConfigureStorage(storage, name, catalog: false);
                 try
                 {
-                    catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
-                        ? _strategy.OpenStorage(name + CatalogSuffix)
-                        : _strategy.CreateStorage(name + CatalogSuffix);
+                    catalogStorage = _strategy.StorageExists(name, catalog: true)
+                        ? _strategy.OpenStorage(name, catalog: true)
+                        : _strategy.CreateStorage(name, catalog: true);
                 }
                 catch (StorageFormatException exception)
                 {
-                    throw RefuseStorageFormat(name, "catalog", name + CatalogSuffix, exception);
+                    throw RefuseStorageFormat(name, "catalog", catalogLabel, exception);
                 }
 
-                ConfigureStorage(catalogStorage, name + CatalogSuffix, catalog: true);
+                ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
-                var database = new KeyValueDatabase(name, this, storage, catalogStorage, recover: true);
+
+                // The spelling the database was created with, which its data set's header kept,
+                // whatever spelling opened it (#1392).
+                var database = new KeyValueDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, recover: true);
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }
@@ -578,11 +588,12 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     private static DatabaseException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
         => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
-    // The model's name rule, in the create, open and drop cores, after the base's checks of an
+    // The area's one name rule, in the create, open and drop cores, after the base's checks of an
     // empty name, disposal and the token: a database's files live in a directory named for it under
-    // the root path, so a name such as "../other" would reach files outside it. Shared with every
-    // model (DatabaseFileNames); the builder checks it when a database is declared.
-    private static void ValidateName(string name) => DatabaseFileNames.ThrowIfNotSingleComponent(name);
+    // the root path, so a name such as "../other" would reach files outside it, and a name one
+    // operating system accepts must be one every other accepts. Shared with every model
+    // (DatabaseFileNames, #1392); the builder checks it when a database is declared.
+    private static void ValidateName(string name) => DatabaseFileNames.ThrowIfInvalid(name);
 
     /// <inheritdoc />
     /// <exception cref="DatabaseObjectLockedException">
@@ -612,12 +623,8 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 database.Dispose();
             }
 
+            // Both file sets, whatever spelling the drop used: on disk, the database's directory.
             _strategy.DropStorage(name);
-
-            if (_strategy.StorageExists(name + CatalogSuffix))
-            {
-                _strategy.DropStorage(name + CatalogSuffix);
-            }
         }
 
         return default;

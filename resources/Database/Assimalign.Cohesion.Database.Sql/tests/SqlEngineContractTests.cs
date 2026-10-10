@@ -322,7 +322,7 @@ public sealed class SqlEngineContractTests
         bool stalled = await Eventually(() => faults.StalledDataFlushes == 1);
         var drop = Task.Run(async () => await engine.DropDatabaseAsync("held", TestTimeout.Token(30)));
         bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
-        bool filesWhileClosing = strategy.StorageExists("held");
+        bool filesWhileClosing = strategy.StorageExists("held", catalog: false);
         faults.ReleaseDataFlushes();
         await close.WaitAsync(TestTimeout.Token(30));
         await drop.WaitAsync(TestTimeout.Token(30));
@@ -331,7 +331,8 @@ public sealed class SqlEngineContractTests
         stalled.ShouldBeTrue();
         dropWaited.ShouldBeTrue();
         filesWhileClosing.ShouldBeTrue();
-        strategy.StorageExists("held").ShouldBeFalse();
+        strategy.StorageExists("held", catalog: false).ShouldBeFalse();
+        strategy.StorageExists("held", catalog: true).ShouldBeFalse();
         await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("held", TestTimeout.Token()));
         var recreated = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
         engine.IsOpen(recreated).ShouldBeTrue();

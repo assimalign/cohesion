@@ -253,7 +253,7 @@ public sealed class DatabaseCompositionTests
         var failure = Should.Throw<ArgumentException>(() => builder.Build());
 
         failure.ParamName.ShouldBe("name");
-        failure.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        failure.Message.ShouldStartWith("A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots,", Case.Sensitive);
         documents.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

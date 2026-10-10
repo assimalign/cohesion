@@ -604,12 +604,12 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             .Length.ShouldBe(16);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that is not a single file-name component is refused at the declaration")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that breaks the database-name rule is refused at the declaration")]
     [InlineData("..")]
     [InlineData("../escaped")]
     [InlineData("nested/escaped")]
     [InlineData("nested\\escaped")]
-    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    public async Task AddDatabase_NameBreakingTheRule_ShouldBeRefusedAtTheCall(string name)
     {
         // Arrange
         var builder = CreateBuilder("names");
@@ -622,7 +622,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         // Assert: refused before its callback ran and before anything exists, so the build that
         // follows declares nothing and nothing is written outside the root.
         refusal.ParamName.ShouldBe("name");
-        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        refusal.Message.ShouldStartWith("A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots,", Case.Sensitive);
         configured.ShouldBe(0);
         engine.DeclaredDatabases.ShouldBeEmpty();
         Directory.Exists(Path.Combine(Path.GetDirectoryName(_rootPath)!, "escaped")).ShouldBeFalse();
@@ -650,7 +650,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         collated.ParamName.ShouldBe("name");
         open.ParamName.ShouldBe("name");
         drop.ParamName.ShouldBe("name");
-        drop.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        drop.Message.ShouldStartWith("A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots,", Case.Sensitive);
         Directory.Exists(Path.Combine(_rootPath, "escaped")).ShouldBeFalse();
         Directory.Exists(victim).ShouldBeTrue();
     }

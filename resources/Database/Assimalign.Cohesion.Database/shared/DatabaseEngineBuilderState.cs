@@ -109,14 +109,14 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="name"/> is empty or white space, or not a single file-name component
+    /// <paramref name="name"/> is empty or white space, or breaks the database-name rule
     /// (<see cref="DatabaseFileNames"/>): refused here, before anything is created, rather than by
     /// the engine's open at the build.
     /// </exception>
     public void AddDatabase(string name)
     {
         EnsureMutable();
-        DatabaseFileNames.ThrowIfNotSingleComponent(name);
+        DatabaseFileNames.ThrowIfInvalid(name);
         var databaseName = new DatabaseName(name);
         foreach (var declared in _databases)
         {

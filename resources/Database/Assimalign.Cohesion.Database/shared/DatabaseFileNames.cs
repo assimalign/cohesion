@@ -6,43 +6,270 @@ using System.IO;
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The name rule every model applies to a database it stores: a database's files live in a
-/// directory named for it under the engine's root path, so its name must be a single file-name
-/// component. Without the rule, a name such as <c>../other</c> or an absolute path would create,
-/// open or drop files outside the root.
+/// The one database-name rule and the one mapping from a database's name to its files, shared by
+/// every model (#1392): which names a model stores, the directory each name maps to under an
+/// engine's root path, the file sets inside that directory, and the name an opened database reports.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>The rule.</b> A name is 1 to <see cref="MaximumLength"/> characters, each an ASCII letter,
+/// digit, underscore, hyphen or dot. It neither starts nor ends with a dot and holds no two dots in
+/// a row, and the part before its first dot is not a Windows device name (CON, PRN, AUX, NUL, COM0
+/// to COM9, LPT0 to LPT9; Windows resolves <c>NUL.txt</c> to <c>NUL</c> too). The allowed
+/// characters are a fixed set, not the platform's invalid file-name characters: on Linux and macOS
+/// <see cref="Path.GetInvalidFileNameChars"/> holds only NUL and <c>/</c>, so a name such as
+/// <c>a:b</c> was accepted there and refused on Windows. Now a name valid on one operating system is
+/// valid on every one, and every valid name is a legal directory name on each. The character set
+/// and the length follow RavenDB (<c>src/Raven.Client/Util/ResourceNameValidator.cs:12-14</c> and
+/// <c>:55</c>, <c>MaxDatabaseNameLength</c> at <c>src/Raven.Client/Constants.cs:443</c>), and so do
+/// the dot placement (<c>ResourceNameValidator.cs:25</c>) and the device names
+/// (<c>Constants.cs:278-302</c>). The 128 limit is also the name capacity of a storage header, so
+/// the header keeps every valid name whole (<see cref="GetOpenedName"/>).
+/// </para>
+/// <para>
+/// <b>The mapping.</b> <see cref="DatabaseName"/> compares ordinally, ignoring case. A database's
+/// directory is its storage name (<see cref="GetStorageName"/>), the invariant lower case of its
+/// name, under the engine's root path. For ASCII, lower-case equality and ordinal ignore-case
+/// equality are the same relation, so two names <see cref="DatabaseName"/> calls equal map to one
+/// directory and two unequal names never share one, on case-sensitive file systems (Linux, the
+/// container target) as on case-insensitive ones. The mapping is a pure function of the name.
+/// Nothing enumerates the root to find a directory, so a case-variant directory made outside the
+/// engine is never taken for a database. Neo4j folds database names the same way
+/// (<c>community/common/src/main/java/org/neo4j/kernel/database/NormalizedDatabaseName.java:27-29</c>);
+/// PostgreSQL keeps names out of the file system altogether (a database's directory is its OID,
+/// <c>src/common/relpath.c:110-121</c>).
+/// </para>
+/// <para>
+/// <b>File sets.</b> A database's file sets live in its directory, each as <c>{set}.dat</c>,
+/// <c>{set}.log</c> and <c>{set}.bak</c> (<see cref="GetFiles"/>): the model's data set, named for
+/// the model, and for SQL and key-value the <see cref="CatalogFileSet"/> set. No file set is named
+/// from the database name, so a file set of one database is never the directory of another. Until
+/// #1392 the SQL and key-value catalog of <c>sales</c> was the directory <c>sales.catalog</c>, the
+/// directory of a database by that name. In memory, an engine keys each file set by storage name and
+/// set name (<see cref="DatabaseMemoryFiles"/>).
+/// </para>
+/// <para>
+/// <b>The reported name.</b> A created database reports the name it was created with. An opened one
+/// reports the spelling its data file set's storage header kept from its creation
+/// (<see cref="GetOpenedName"/>), so <c>sales</c> opened as <c>SALES</c> still reports
+/// <c>sales</c>, in every engine and after every restart. The name a database reports never depends
+/// on the spelling a caller opened it with.
+/// </para>
+/// <para>
 /// Compiled into each model assembly from the root's <c>shared</c> folder, as
-/// <see cref="DatabaseDeclarations"/> is. Each engine checks it in its create, open and drop cores,
-/// after the root base's checks of an empty name, disposal and the token, so the guard order of the
-/// public members is unchanged; each engine builder also checks it when a database is declared, so a
-/// declaration the engine would refuse fails at the call, before anything is created. The rule is the
-/// one the Graph, Documents and Blob engines always applied, now shared with SQL and key-value.
+/// <see cref="DatabaseDeclarations"/> is. Each engine checks the rule in its create, open and drop
+/// cores, after the root base's checks of an empty name, disposal and the token, so the guard order
+/// of the public members is unchanged; each engine builder also checks it when a database is
+/// declared, so a declaration the engine would refuse fails at the call, before anything is created.
+/// </para>
 /// </remarks>
 internal static class DatabaseFileNames
 {
     /// <summary>
-    /// The refusal's message, the same on every model.
+    /// The longest database name, in characters: RavenDB's limit, and the name capacity of a storage
+    /// header, in bytes, which an ASCII name fills one byte per character.
     /// </summary>
-    internal const string NotSingleComponent = "A database name must be a single file-name component.";
+    internal const int MaximumLength = 128;
 
     /// <summary>
-    /// Refuses a database name that is blank, or that is not a single file-name component: <c>.</c>,
-    /// <c>..</c>, a name holding a directory separator, or a name holding a character the platform
-    /// does not allow in a file name.
+    /// The rule, as every refusal of a name starts, the same on every model and operating system.
+    /// </summary>
+    internal const string Rule =
+        "A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots, must not start " +
+        "or end with a dot or hold two dots in a row, and must not be a Windows device name (CON, PRN, AUX, NUL, " +
+        "COM0 to COM9, LPT0 to LPT9) on its own or before a dot.";
+
+    /// <summary>
+    /// The file set that holds a SQL or key-value database's catalog, in the database's directory.
+    /// </summary>
+    internal const string CatalogFileSet = "catalog";
+
+    /// <summary>
+    /// Says why a name breaks the rule.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <returns>The reason, or null when the name follows the rule.</returns>
+    internal static string? GetRefusal(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return "The name is empty.";
+        }
+
+        if (name.Length > MaximumLength)
+        {
+            return $"The name is {name.Length} characters long.";
+        }
+
+        for (int index = 0; index < name.Length; index++)
+        {
+            char character = name[index];
+            if (!char.IsAsciiLetterOrDigit(character) && character is not ('_' or '-' or '.'))
+            {
+                return $"The name holds {Describe(character)} at position {index}.";
+            }
+        }
+
+        if (name[0] == '.')
+        {
+            return "The name starts with a dot.";
+        }
+
+        if (name[^1] == '.')
+        {
+            return "The name ends with a dot.";
+        }
+
+        if (name.Contains("..", StringComparison.Ordinal))
+        {
+            return "The name holds two dots in a row.";
+        }
+
+        int dot = name.IndexOf('.');
+        var stem = dot < 0 ? name.AsSpan() : name.AsSpan(0, dot);
+        if (IsDeviceName(stem))
+        {
+            return $"'{stem}' is a Windows device name.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Refuses a database name that is null, blank, or breaks the rule.
     /// </summary>
     /// <param name="name">The database name.</param>
     /// <param name="paramName">The parameter the name was passed as.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="name"/> is empty or white space, or not a single file-name component.
+    /// <paramref name="name"/> is empty or white space, or breaks the rule; the message starts with
+    /// <see cref="Rule"/> and ends with the reason.
     /// </exception>
-    internal static void ThrowIfNotSingleComponent(string name, string paramName = "name")
+    internal static void ThrowIfInvalid(string name, string paramName = "name")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name, paramName);
-        if (name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\\'))
+        if (GetRefusal(name) is { } reason)
         {
-            throw new ArgumentException(NotSingleComponent, paramName);
+            throw new ArgumentException($"{Rule} {reason}", paramName);
         }
     }
+
+    /// <summary>
+    /// Gets a database's storage name: the invariant lower case of its name, which names its
+    /// directory under an engine's root path and keys its in-memory file sets.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <returns>The storage name; equal for two names exactly when <see cref="DatabaseName"/> calls them equal.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> breaks the rule.</exception>
+    internal static string GetStorageName(string name)
+    {
+        ThrowIfInvalid(name);
+
+        // ASCII alone: the invariant lower case lowers A to Z and nothing else.
+        return name.ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Reports whether a directory name under an engine's root path is the storage name of a
+    /// database: a name that follows the rule and is already lower case. Any other directory, a
+    /// case-variant one made outside the engine included, is not one of the engine's databases.
+    /// </summary>
+    /// <param name="directoryName">The directory's name, without its path.</param>
+    /// <returns>True when a database's name maps to that directory.</returns>
+    internal static bool IsStorageName(string directoryName)
+    {
+        if (GetRefusal(directoryName) is not null)
+        {
+            return false;
+        }
+
+        foreach (char character in directoryName)
+        {
+            if (char.IsAsciiLetterUpper(character))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the directory of a database under an engine's root path: the root path and the
+    /// database's storage name.
+    /// </summary>
+    /// <param name="rootPath">The engine's root path.</param>
+    /// <param name="name">The database name.</param>
+    /// <returns>The directory's path; the same for every spelling of the name.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> breaks the rule.</exception>
+    internal static string GetDirectory(string rootPath, string name) => Path.Combine(rootPath, GetStorageName(name));
+
+    /// <summary>
+    /// Gets the files of one file set in a database's directory.
+    /// </summary>
+    /// <param name="directory">The database's directory (<see cref="GetDirectory"/>).</param>
+    /// <param name="fileSet">The file set: the model's data set, or <see cref="CatalogFileSet"/>.</param>
+    /// <returns>The data, journal and backup files' paths.</returns>
+    internal static FileSetPaths GetFiles(string directory, string fileSet)
+        => new(Path.Combine(directory, fileSet + ".dat"), Path.Combine(directory, fileSet + ".log"), Path.Combine(directory, fileSet + ".bak"));
+
+    /// <summary>
+    /// Gets how a SQL or key-value database's catalog file set is named in messages and in its
+    /// storage header: <c>{name}/catalog</c>. No database name holds a slash, so the label never
+    /// reads as a database's name.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <returns>The label.</returns>
+    internal static string GetCatalogLabel(string name) => name + "/" + CatalogFileSet;
+
+    /// <summary>
+    /// Gets the name a database an engine opened reports: the spelling its data file set's storage
+    /// header kept from its creation, when that is a spelling of the name the caller opened;
+    /// otherwise the storage name. Either way, every caller's spelling reports the same name.
+    /// </summary>
+    /// <param name="requested">The name the caller opened the database by.</param>
+    /// <param name="stored">The name the data file set's storage header holds.</param>
+    /// <returns>The name the opened database reports.</returns>
+    /// <exception cref="ArgumentException"><paramref name="requested"/> breaks the rule.</exception>
+    /// <remarks>
+    /// The header keeps a different name only when the files were moved by hand, from the directory
+    /// of another name: the directory, not the header, identifies the database, so it opens, under
+    /// the storage name of the directory it was opened from.
+    /// </remarks>
+    internal static string GetOpenedName(string requested, string stored)
+    {
+        string storageName = GetStorageName(requested);
+        return GetRefusal(stored) is null && string.Equals(stored.ToLowerInvariant(), storageName, StringComparison.Ordinal)
+            ? stored
+            : storageName;
+    }
+
+    // A Windows device name: CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9, in any case. The
+    // superscript COM¹ and LPT¹ forms are not ASCII, so the rule refuses them already.
+    private static bool IsDeviceName(ReadOnlySpan<char> stem)
+    {
+        if (stem.Length == 3)
+        {
+            return stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return stem.Length == 4
+            && char.IsAsciiDigit(stem[3])
+            && (stem[..3].Equals("COM", StringComparison.OrdinalIgnoreCase) || stem[..3].Equals("LPT", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // A refused character as a message shows it: itself when it is printable ASCII, else its code point.
+    private static string Describe(char character)
+        => character is >= '!' and <= '~' ? $"'{character}'" : $"U+{(int)character:X4}";
+
+    /// <summary>
+    /// The files of one file set: its data, journal and backup files.
+    /// </summary>
+    /// <param name="Data">The data file (<c>.dat</c>).</param>
+    /// <param name="Journal">The journal file (<c>.log</c>).</param>
+    /// <param name="Backup">The backup file (<c>.bak</c>).</param>
+    internal readonly record struct FileSetPaths(string Data, string Journal, string Backup);
 }

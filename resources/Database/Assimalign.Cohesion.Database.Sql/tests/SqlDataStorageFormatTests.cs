@@ -193,8 +193,9 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     {
         // Arrange: a closed database whose page 0 in one file set names storage format 2, the format before #1253.
         await CreateDatabaseAsync(formatVersion: null);
-        string storageName = role == "catalog" ? TestDatabase + ".catalog" : TestDatabase;
-        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 2);
+        bool catalog = role == "catalog";
+        string storageName = catalog ? TestDatabase + "/catalog" : TestDatabase;
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, TestDatabase, catalog ? "catalog.dat" : "sql.dat"), version: 2);
         var before = Snapshot();
 
         // Act
@@ -217,7 +218,11 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     {
         // Arrange: a database whose creation stopped before its catalog existed.
         await CreateDatabaseAsync(formatVersion: null);
-        Directory.Delete(Path.Combine(_rootPath, TestDatabase + ".catalog"), recursive: true);
+        foreach (string extension in new[] { ".dat", ".log", ".bak" })
+        {
+            File.Delete(Path.Combine(_rootPath, TestDatabase, "catalog" + extension));
+        }
+
         var before = Snapshot();
 
         // Act
@@ -236,8 +241,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Arrange: both file sets exist, but the creation stopped before the
         // format marker was committed.
         var strategy = new FileSystemSqlStorageStrategy(_rootPath);
-        strategy.CreateStorage(TestDatabase).Dispose();
-        strategy.CreateStorage(TestDatabase + SqlDatabaseEngine.CatalogSuffix).Dispose();
+        strategy.CreateStorage(TestDatabase, catalog: false).Dispose();
+        strategy.CreateStorage(TestDatabase, catalog: true).Dispose();
 
         // Act
         await using var engine = CreateEngine();
@@ -276,7 +281,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         var crashed = strategy.CaptureDurableImages();
         var dataImage = crashed.GetDurableImage(TestDatabase);
-        var catalogImage = crashed.GetDurableImage(TestDatabase + SqlDatabaseEngine.CatalogSuffix);
+        var catalogImage = crashed.GetDurableImage(TestDatabase, catalog: true);
 
         // Act: open twice with an engine that refuses format 3.
         string message;
@@ -294,14 +299,14 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertSameBytes(crashed.GetDurableImage(TestDatabase).Data, dataImage.Data, "data file");
         AssertSameBytes(crashed.GetDurableImage(TestDatabase).Journal, dataImage.Journal, "data journal");
         AssertSameBytes(crashed.GetDurableImage(TestDatabase).Backup, dataImage.Backup, "data backup");
-        AssertSameBytes(crashed.GetDurableImage(TestDatabase + SqlDatabaseEngine.CatalogSuffix).Journal, catalogImage.Journal, "catalog journal");
+        AssertSameBytes(crashed.GetDurableImage(TestDatabase, catalog: true).Journal, catalogImage.Journal, "catalog journal");
 
         // The engine that wrote the database can still recover it. Stand in for
         // it by re-forging the marker to this engine's format over the post-refusal
         // images (its index pages are this engine's): the open then classifies the
         // journal and scrubs the uncommitted writer.
         var refused = crashed.CaptureDurableImages();
-        var catalogStorage = refused.OpenStorage(TestDatabase + SqlDatabaseEngine.CatalogSuffix);
+        var catalogStorage = refused.OpenStorage(TestDatabase, catalog: true);
         try
         {
             await SqlCatalog.Open(catalogStorage).SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion);
@@ -444,14 +449,14 @@ public sealed class SqlDataStorageFormatTests : IDisposable
             _inner = inner;
         }
 
-        public override SqlStorage CreateStorage(string databaseName)
-            => _inner.StorageExists(databaseName) ? _inner.OpenStorage(databaseName) : _inner.CreateStorage(databaseName);
+        public override SqlStorage CreateStorage(string databaseName, bool catalog)
+            => _inner.StorageExists(databaseName, catalog) ? _inner.OpenStorage(databaseName, catalog) : _inner.CreateStorage(databaseName, catalog);
 
-        public override SqlStorage OpenStorage(string databaseName) => _inner.OpenStorage(databaseName);
+        public override SqlStorage OpenStorage(string databaseName, bool catalog) => _inner.OpenStorage(databaseName, catalog);
 
         public override void DropStorage(string databaseName) => _inner.DropStorage(databaseName);
 
-        public override bool StorageExists(string databaseName) => _inner.StorageExists(databaseName);
+        public override bool StorageExists(string databaseName, bool catalog) => _inner.StorageExists(databaseName, catalog);
     }
 
     private static async Task<int[]> IdsAsync(SqlDatabaseSession session, string sql, object parameter)

@@ -380,7 +380,7 @@ public sealed class KeyValueWorkerResilienceTests
         bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
         long journalAtTheFault = failing.DataStorage.JournalLength;
         var dataAtTheFault = strategy.Capture(Failing);
-        var catalogAtTheFault = strategy.Capture(Failing + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogAtTheFault = strategy.Capture(Failing, catalog: true);
 
         var refusals = new List<DatabaseOfflineException>
         {
@@ -394,7 +394,7 @@ public sealed class KeyValueWorkerResilienceTests
         long healthyWritten = healthy.DataStorage.JournalLength;
         bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
         var dataAfter = strategy.Capture(Failing);
-        var catalogAfter = strategy.Capture(Failing + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogAfter = strategy.Capture(Failing, catalog: true);
 
         faults.Clear();
         var reopened = await engine.OpenDatabaseAsync(Failing);

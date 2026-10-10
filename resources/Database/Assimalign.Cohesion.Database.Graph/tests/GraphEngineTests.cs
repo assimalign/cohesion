@@ -251,7 +251,7 @@ public sealed class GraphEngineTests
     /// <summary>
     /// The root engine base's guards (concrete-types plan §6.4, the engine's guards): every member
     /// checks an empty name, then disposal, then the token, and the enumeration checks disposal
-    /// when it is called. The graph engine's own name rule (a single file-name component) runs in
+    /// when it is called. The graph engine's name rule (the area's one rule, #1392) runs in
     /// its cores, after those checks. Before the base, the engine checked the whole name, then the
     /// token, then disposal, and the enumeration checked disposal at its first <c>MoveNextAsync</c>.
     /// </summary>
@@ -278,7 +278,7 @@ public sealed class GraphEngineTests
         // Assert
         canceledOpen.CancellationToken.ShouldBe(canceled.Token);
         canceledComponent.CancellationToken.ShouldBe(canceled.Token);
-        component.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        component.Message.ShouldStartWith("A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots,", Case.Sensitive);
         unnamedLookup.Message.ShouldStartWith("A database name is required.", Case.Sensitive);
         unnamedCreate.ParamName.ShouldBe("name");
         disposedCreate.ShouldNotBeNull();

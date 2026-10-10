@@ -26,6 +26,14 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// reopens with its data (#1272).
 /// </para>
 /// <para>
+/// <b>Names and files (#1392).</b> Database names compare ignoring case, and every spelling of a
+/// name reaches the same files on every operating system: a database's directory is named for the
+/// lower case of its name and holds <c>graph.*</c>. A name follows one rule everywhere (1 to 128
+/// ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no
+/// Windows device name). A database reports the spelling it was created with, which its storage
+/// header keeps, whatever spelling opens or lists it.
+/// </para>
+/// <para>
 /// <b>A database its holder closed.</b> A database disposed outside the engine (directly, or
 /// through a session's <see cref="GraphDatabaseSession.Database"/>) is forgotten once its close
 /// ends (owner decision 33 of 2026-10-06, #1289), so a later
@@ -50,7 +58,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// re-exposed typed with <c>new</c> members over the base's public members, and
 /// <see cref="TryGetDatabase(DatabaseName, out GraphDatabase)"/> is a typed overload of the base's
 /// lookup (the parameter types differ, so it hides nothing). The model's own name check, that a
-/// database name is a single file-name component, runs in the cores, after the base's checks.
+/// database name follows the area's one name rule (#1392), runs in the cores, after the base's checks.
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
@@ -58,6 +66,12 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
 {
     // How the model's messages start: "Graph engine '{name}' …".
     internal const string ModelName = "Graph";
+
+    /// <summary>
+    /// The name of a database's file set in its directory: <c>graph.dat</c>, <c>graph.log</c> and
+    /// <c>graph.bak</c> (<see cref="DatabaseFileNames.GetFiles"/>).
+    /// </summary>
+    internal const string DataFileSet = "graph";
 
     private readonly GraphDatabaseEngineOptions _options;
     private readonly Dictionary<string, GraphDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
@@ -300,10 +314,10 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// <summary>
     /// Creates a new logical graph database with the specified name.
     /// </summary>
-    /// <param name="name">The name of the database to create: a single file-name component.</param>
+    /// <param name="name">The name of the database to create; every spelling of it, ignoring case, names one database.</param>
     /// <param name="cancellationToken">Observed before the database is created.</param>
     /// <returns>The newly created database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
@@ -315,10 +329,10 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// holder closed outside the engine, is reopened: the returned instance is a new one, opened
     /// again from its files.
     /// </summary>
-    /// <param name="name">The name of the database to open: a single file-name component.</param>
+    /// <param name="name">The name of the database to open; every spelling of it, ignoring case, names one database.</param>
     /// <param name="cancellationToken">Observed before the database is opened, and while the open waits for a holder's close of it.</param>
     /// <returns>The opened database.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
@@ -355,7 +369,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// <param name="name">The name of the database.</param>
     /// <param name="database">When this method returns true, the database.</param>
     /// <returns>True when the database is open in the engine; otherwise false.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <remarks>
     /// An overload of the base's <see cref="DatabaseEngine.TryGetDatabase"/>, not a <c>new</c>
@@ -400,7 +414,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
         lock (_sync)
         {
             ThrowIfDisposed();
-            var directory = FindDirectory(name);
+            var directory = GetDirectory(name);
             bool open = _databases.Remove(name, out var database);
             if (!open && !StorageExists(name, directory))
             {
@@ -417,7 +431,10 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             }
             else if (directory is not null)
             {
-                Directory.Delete(directory, recursive: true);
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
             }
             else
             {
@@ -561,7 +578,9 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 RebuildSnapshot();
                 existing.Dispose();
             }
-            var directory = FindDirectory(name);
+            // Every spelling of the name maps to the one directory, so a case-variant of an existing
+            // database is that database on a case-sensitive file system too (#1392).
+            var directory = GetDirectory(name);
             bool exists = StorageExists(name, directory);
             if (create && exists)
             {
@@ -573,9 +592,8 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
-            if (_rootPath is not null && create)
+            if (directory is not null && create)
             {
-                directory = Path.Combine(_rootPath, name);
                 Directory.CreateDirectory(directory);
             }
             GraphStorage? storage = null;
@@ -596,7 +614,10 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 storage.BufferPoolCapacity = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(_options.BufferPoolCapacity, nameof(_options.BufferPoolCapacity));
                 storage.CheckpointJournalSize = _options.CheckpointJournalSize;
                 storage.OnCheckpointNeeded = _checkpointNeeded.Set;
-                var database = new GraphDatabase(name, this, storage, recover: !create);
+
+                // A created database reports the name it was created with; an opened one the
+                // spelling its storage header kept from its creation, whatever spelling opened it.
+                var database = new GraphDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
             }
@@ -626,8 +647,8 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             if (directory is null)
             {
                 bool found = memory is not null && (create
-                    ? memory.TryCreate(name, out data, out journal, out backup)
-                    : memory.TryOpen(name, out data, out journal, out backup));
+                    ? memory.TryCreate(name, DataFileSet, out data, out journal, out backup)
+                    : memory.TryOpen(name, DataFileSet, out data, out journal, out backup));
                 if (!found)
                 {
                     throw create
@@ -638,9 +659,10 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             else
             {
                 var mode = create ? FileMode.CreateNew : FileMode.Open;
-                data = StorageStream.FromFile(Path.Combine(directory, "graph.dat"), mode, FileShare.Read);
-                journal = StorageStream.FromFile(Path.Combine(directory, "graph.log"), mode, FileShare.Read);
-                backup = StorageStream.FromFile(Path.Combine(directory, "graph.bak"), mode, FileShare.Read);
+                var files = DatabaseFileNames.GetFiles(directory, DataFileSet);
+                data = StorageStream.FromFile(files.Data, mode, FileShare.Read);
+                journal = StorageStream.FromFile(files.Journal, mode, FileShare.Read);
+                backup = StorageStream.FromFile(files.Backup, mode, FileShare.Read);
             }
 
             return create ? GraphStorage.Create(data!, journal!, backup!, name, durability) : GraphStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, durability);
@@ -651,19 +673,20 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     // Whether a database's storage exists: the strategy's answer, its directory under the root,
     // or the engine's in-memory files.
     private bool StorageExists(string name, string? directory)
-        => _options.StorageStrategy?.StorageExists(name) ?? (directory is not null || (_memory?.Exists(name) ?? false));
+        => _options.StorageStrategy?.StorageExists(name)
+            ?? (directory is not null ? Directory.Exists(directory) : _memory?.Exists(name, DataFileSet) ?? false);
 
     // The databases as one typed sequence, which GetDatabasesAsync hands out without a per-item
     // cast: the sequence is covariant, so it is the base's sequence too. Each name found in
-    // storage is opened through the engine's public member, so its checks run per database.
+    // storage is opened through the engine's public member, so its checks run per database, and
+    // each reports the spelling it was created with, not the lower-case directory it was found in.
     private async IAsyncEnumerable<GraphDatabase> EnumerateDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         string[] names;
         lock (_sync)
         {
             ThrowIfDisposed();
-            names = _databases.Keys.Concat(_options.StorageStrategy is { } strategy ? strategy.GetDatabaseNames().Select(name => name.ToString()) : _rootPath is null ? _memory?.Names ?? [] : Directory.EnumerateDirectories(_rootPath)
-                .Where(path => File.Exists(Path.Combine(path, "graph.dat"))).Select(path => Path.GetFileName(path)))
+            names = _databases.Keys.Concat(_options.StorageStrategy is { } strategy ? strategy.GetDatabaseNames().Select(name => name.ToString()) : _rootPath is null ? _memory?.Names ?? [] : FindStoredNames(_rootPath))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         }
         foreach (string name in names)
@@ -672,13 +695,22 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
         }
     }
 
-    private string? FindDirectory(string name) => _rootPath is null ? null : Directory.EnumerateDirectories(_rootPath)
-        .FirstOrDefault(path => string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase));
+    // The storage names of the databases under the root: each directory a database's name maps to
+    // (lower case, following the name rule) that holds a data file. Any other directory, a
+    // case-variant one made outside the engine included, is not one of its databases (#1392).
+    private static IEnumerable<string> FindStoredNames(string rootPath) => Directory.EnumerateDirectories(rootPath)
+        .Select(path => Path.GetFileName(path))
+        .Where(name => DatabaseFileNames.IsStorageName(name) && File.Exists(DatabaseFileNames.GetFiles(Path.Combine(rootPath, name), DataFileSet).Data));
 
-    // The model's own name rule, in the cores, after the base's checks of an empty name, disposal
-    // and the token: a database's files live in a directory named for it. The rule is shared with
-    // every model (DatabaseFileNames), and the builder checks it when a database is declared.
-    private static void ValidateName(string name) => DatabaseFileNames.ThrowIfNotSingleComponent(name);
+    // A database's directory under the root, named for the lower case of its name, whatever
+    // spelling the caller used (#1392); null for an engine whose databases are not in a directory.
+    private string? GetDirectory(string name) => _rootPath is null ? null : DatabaseFileNames.GetDirectory(_rootPath, name);
+
+    // The area's one name rule, in the cores, after the base's checks of an empty name, disposal
+    // and the token: a database's files live in a directory named for it, and a name one operating
+    // system accepts must be one every other accepts. The rule is shared with every model
+    // (DatabaseFileNames, #1392), and the builder checks it when a database is declared.
+    private static void ValidateName(string name) => DatabaseFileNames.ThrowIfInvalid(name);
 
     // Under the engine lock: removes a database whose close ended, when the registry still holds
     // that instance (a reopen may have registered a new one of the same name).
