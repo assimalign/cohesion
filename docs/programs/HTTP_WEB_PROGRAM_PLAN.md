@@ -287,7 +287,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 11 — Close the remote-triggerable holes
 
-**Status:** in progress (2026-10-09). Sessions in the same row edit the same files, so they run serially as one session with one commit per issue. The rows run in parallel. Wave 2 starts once wave 1 is integrated.
+**Status:** delivered 2026-10-10 on the Phase 2 branch and in owner review (§5). Sessions in the same row edit the same files, so they run serially as one session with one commit per issue. The rows run in parallel. Wave 2 starts once wave 1 is integrated.
 
 | Session | Issues (in order) | Lane | Blocked by | Why |
 |---|---|---|---|---|
@@ -340,6 +340,9 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 | #1185, #1204 | B | — | Exact `If-Range` date match. RFC 9110 reason phrases |
 | #1298 → #1299 | D | — | A redacted `url.query` on server spans. Traces continue from a future-version `traceparent` |
 | #1324 | E | — | Redirect `Location` paths are percent-encoded in HttpsPolicy and StaticFiles |
+| #1383 | A/B | — | A request can change or disable its minimum request-body data rate on every protocol (P002; HTTP/2 and HTTP/3 began enforcing the rate in #1085) |
+| #1384 | A | — | A minimum response data rate so a client that withholds flow-control credit or stops reading cannot hold a response writer (P002, advisory triage) |
+| #1385, #1387 | A | — | `100-continue` on HTTP/2 and HTTP/3; HPACK and QPACK decode values as Latin-1 like HTTP/1.1 |
 
 ### Stage 13 — Web correctness
 
@@ -349,6 +352,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1335 → #1211: repeated query and form values; a single read returns the first value (decision 31).
 - #1208 → #1209: validation errors kept and keyed by JSON name and index.
 - #1297 → #1325: HTTP logging trace ids, and body capture behind a request view.
+- #1388: a streamed response is reported as unstarted when the transport refuses its head.
 
 ### Stage 14 — Performance, operations and DX
 
@@ -358,6 +362,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1311: the QUIC handshake timeout option.
 - #1092: the `cohesion-spa` fallback route.
 - #1303 → #1305: the missing OVERVIEW files; certificate authentication in a new `Web.Authentication.Certificate` (decision 31).
+- #1389: resolve a single per-exchange response interceptor without intermediate lists.
 - #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
 
 **Other programs**, not scheduled here:
@@ -721,6 +726,77 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - The guard, published NativeAOT for win-arm64 from a clean worktree at `d244311a`, has no trim or AOT warnings. The native binary passes 36/36 smoke checks, including a WebSocket over HTTP/2 extended CONNECT through the new interceptor.
   - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)): `0dac06b` adds the Http.Tls pages. `1deb713`, `42d29fc` and `86e7148` sync the Http, Web and Connections pages, the server and WebSockets guides, and the 17 area framework tables. Those tables now list Http.ExtendedConnect and cite the Runtime producers' member lists instead of a `frameworks/` folder that no longer exists.
   - **Source corrections** (`35ad42f0`): the Http.WebSockets bare-listener sample now registers the extended CONNECT interceptor on a listener that serves HTTP/2. The docs-site check found the problem.
+- **Stage 11 delivered (2026-10-10), awaiting owner review.** Stage 11 closed the remote-triggerable holes in the Phase 2 follow-up backlog (decisions 22–31), and the owner's Web restructure landed between its two waves (decisions 32–36). Agent sessions built each session in an isolated worktree. Every session was reviewed, its serious findings were challenged by two skeptics, and confirmed ones were fixed. An integrator then cherry-picked each wave and an auditor three-way-checked every session-touched file. Every new regression test was shown to fail before its fix.
+  - **Wave 1** (15 issues):
+    - #1072 `99323261`, `85cabef1`: an HTTP/2 reset no longer frees a stream slot while its exchange runs. Server-provoked resets count toward the flood budget (Rapid Reset / MadeYouReset shape).
+    - #1075 `7fb8f62e`, `79718e8b`: a cancelled send resets the stream.
+    - #1074 `3e4afd2f`: WINDOW_UPDATE on any closed stream is ignored, and every server reset is remembered.
+    - #1080 `83dd297e`, `948bd43b`: QUIC stream and connection aborts carry their HTTP/3 codes, and the 64 KiB / 5 s request-body drain is gone.
+    - #1082 `c1a8de87`, `376483d9`, `2be5d72e`: HTTP/3 advertises and enforces `SETTINGS_MAX_FIELD_SECTION_SIZE`, and repeated fields combine in linear time.
+    - #1339 `a8419185`, `64eac3fc`: HTTP/1.1 body limits found after dispatch answer 413 or 408.
+    - #1375 `da158661`, `2dc6850e`, `17f4425b`: chunk framing lines, the framing total and trailer sections are capped. A bare CR or LF in a framing line is rejected.
+    - #1341 `bd60d7b4`, `e4965ae3`, `bff5a3dd`: HTTP/1.1 fields reject control characters and trim only SP and HTAB. Lines decode as Latin-1, and a request line with an octet outside VCHAR/SP gets 400.
+    - #1301 `77a0bef2`, `c83ebf50`: HTTP methods are case-sensitive (decision 26).
+    - #1186 `29a462cf`, `5ca7194d`: a name without an extension maps to no content type, and 8.3 short names are refused at the static-files gate (decision 29).
+    - #1155 `40990cb5`, `6b89c58d`: key-ring reloads for unknown key ids are throttled and single-flight.
+    - #1077 `41b75933`, `1c7e9996`: `RequireHost` matches the effective host. It selects routes and does not gate access.
+    - #1377 `01cd174b`, `ecc5cbd2`: the Email rule runs in linear time, and the `Matches` rule is bounded.
+    - #1312 `53aac246`, `7dcbda10`: a TCP accept that fails for want of descriptors or buffers backs off and retries.
+    - #1210 `9c01ece1`, `4cf6e27b`: `UseForms` answers an oversized or malformed form with 413 or 400.
+  - **Web restructure** (decisions 32–36), recorded in §4:
+    - #1382 (`f71ab0af`, `57e1f049`);
+    - #1379;
+    - #1380;
+    - #1381.
+  - **Wave 2** (5 issues):
+    - #1085 `c1c9cfed`, `dd355e15`, `6cb5e8aa`, `4bf517f2`: HTTP/2 and HTTP/3 enforce keep-alive, request-headers timeouts and the minimum request-body data rate. The HTTP/2 window exemption is bounded, and the transport's 408 or 413 is the exchange's status.
+    - #1084 `40f37e76`: an HTTP/3 streamed response whose body was rejected resets with `H3_REQUEST_CANCELLED`.
+    - #1183 `feb42aad` … `5f4f7b2d`, `d8cd2482`: every head writer refuses CR, LF and NUL in response fields before writing a byte, the 101 writer included. HTTP/2 and HTTP/3 send values without edge whitespace (which also resolves #1386).
+    - #1376 `e2581ee2`, `c4115459`, `5d95b0be`: HTTP/2 and HTTP/3 validate received field names and values.
+    - #1340 `4b7ed27d`, `17b74df4`: on HTTP/1.1, a malformed or limit-breaking body reports as a client fault through `IWebClientFaultFeature`. HTTP logging, the exception boundary and telemetry report the status the client got. HTTP/2 and HTTP/3 come with #1378.
+  - **Integration fixes:**
+    - `bff5a3dd` runs the bare-CR/LF framing check once.
+    - `5f4f7b2d` keeps an HTTP/3 exchange with a refused head running until it is replaced.
+    - `e0c65931` is an XML doc fix.
+  - **Advisories** (decision 24): eleven private drafts for holes in 10.0.0-preview.1.
+    - Wave 1: GHSA-chg6-g87v-34gw (#1072), GHSA-w482-4pxj-5xrr (#1082), GHSA-chxw-jff3-f567 (#1375), GHSA-89wj-3jhm-r79h (#1377), GHSA-4f5r-vpqq-ww6g (#1312), GHSA-f98r-9r57-cmm3 (#1341), GHSA-2jv5-8mqr-x6x3 (#1301), GHSA-4m82-rch3-cgf5 (#1155).
+    - Wave 2: GHSA-7mfj-qc8j-85hf (#1085), GHSA-r5v5-r9xj-cwgv (#1183), GHSA-p4ph-jm8r-hh36 (#1376).
+    - Each draft was fact-checked against the tag. They publish with the first preview that ships the fixes.
+  - **Verification at `d8cd2482`:** 80 suites and 6,423 tests, 0 failures (Http 1,377, Http.Connections 1,126, Web.Routing 386, Web.Hosting 284, ObjectValidation 283, the whole Http, Connections and Web families, App.Runtime and the 17 area Hosting suites). The guard passes 36/36 under JIT. The release inventory (221) and the dependency graph checks pass. The guard, published NativeAOT for win-arm64 from a clean worktree, has no trim or AOT warnings and passes every native smoke check.
+  - **Follow-ups filed:**
+    - Stage 12: #1383 (per-request body-rate opt-out on every protocol, P002) and #1384 (a minimum response data rate against slow readers, P002, triage for an advisory).
+    - Conformance: #1385 (`100-continue` on HTTP/2 and HTTP/3) and #1387 (HPACK and QPACK decode Latin-1).
+    - Stage 13: #1388 (a streamed response reported as started after a refused head).
+    - Stage 14: #1389 (single response-interceptor allocations).
+    - #1378 gained the 408 case and its design question. #1324 gained HttpsPolicy's raw-host fallback.
+
+  Behavior changes for the review:
+  - **Methods:** `get` and `post` are unknown methods on every protocol. `HttpMethod` keeps the token as received and compares ordinally (#1301).
+  - **HTTP/1.1:**
+    - A field value with a control character (other than HTAB) is answered 400, and so is a request line with an octet above 0x7E.
+    - Values are trimmed of SP and HTAB only (#1341).
+    - Chunk framing lines over `MaxChunkFramingLineSize` (8 KB) are malformed (#1375).
+  - **HTTP/2 and HTTP/3:**
+    - A connection idle for `KeepAliveTimeout` (130 s by default) closes, a head slower than `RequestHeadersTimeout` (30 s) is rejected, and a body below 240 B/s after a 5 s grace is answered 408 (#1085). There is no per-request opt-out until #1383.
+    - Received fields with CR, LF, NUL or other invalid characters are malformed requests (#1376).
+  - **Responses:** a header or trailer with CR, LF or NUL throws `InvalidResponseField` before any byte is written. On HTTP/2 and HTTP/3, edge whitespace is trimmed (#1183).
+  - **Web restructure:** see #1379–#1381 in §4.
+    - `using Assimalign.Cohesion.Web.Routing;` is needed for `Map`, `MapWhen`, the endpoint and path-base features.
+    - Registration verbs are `builder.Services.AddX(...)`.
+    - Feature registrations must be singleton and not disposable.
+  - **Static files:** a file without an extension gets no content type, so it is not served unless `ServeUnknownContentTypes` is on (#1186).
+  - **Validation:** an email address over the RFC 5321 size limits fails. An invalid `Matches` pattern throws when the rule is declared (#1377).
+  - **Data protection:** `UnknownKeyReloadInterval` (30 s) bounds reloads for unknown key ids (#1155).
+
+  Questions for the review:
+  - **#1380's shape:**
+    - Six verbs use static factories, through hidden `*Components` types, because the builder template always requires a callback. Making the callback optional is a generator change. Should it be made?
+    - The Authentication reshape (`auth.UseDataProtection(...)`) and the snapshot semantics of the error-handling and serialization builders: confirm them.
+  - **Rate policy:** HTTP/2 and HTTP/3 now apply the listener-wide minimum body rate, as HTTP/1.1 always has, so streaming request bodies that pause get 408 until #1383. Is that acceptable for the previews, or should #1383 move into Stage 12's first wave?
+  - **A possibly missing advisory:**
+    - In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. That is an unauthenticated memory exhaustion on any `UseHttp3` endpoint.
+    - Stage 5 fixed it (#1066), before decision 8 began the advisory practice, so no advisory was drafted.
+    - Draft one now, on decision 24's terms?
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -848,7 +924,7 @@ What works end to end:
 | Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Delivered in Stage 9: a server span and the HTTP server metrics from `Assimalign.Cohesion.Web.Hosting`, W3C trace context, a request id (`IWebRequestIdFeature`) and `http.route` | #1064 |
 | Hosting diagnostics; lame-duck drain | Delivered in Stage 9: bind failures, accept-loop faults, connection faults and cut-short drains are logged through `builder.Logging`, and a stop drains lame-duck style, cancelling only what outlives its budget | #147; #146 |
 | mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Delivered in Stage 9: client certificates and the session's TLS details reach handlers (`context.TlsConnection`, in Http.Tls since decision 20), `UseHttps` serves HTTP/2 and HTTP/1.1 per connection, and configuration binds HTTP/3, certificate files, the connection cap and the HTTP/2 limits. Authenticating a user from a client certificate is #1305 | #1065; #1063 |
-| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). Trailers delivered in Stage 10: HTTP/2 decodes and exposes request trailers like HTTP/1.1 and HTTP/3, and HTTP/2 and HTTP/3 send response trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; #1314, #1315; gRPC hosting stays outside the program |
+| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). Trailers delivered in Stage 10: HTTP/2 decodes and exposes request trailers like HTTP/1.1 and HTTP/3, and HTTP/2 and HTTP/3 send response trailers. HTTP/2 and HTTP/3 timeouts and request-body data rates delivered in Stage 11 (#1085); a minimum response data rate is #1384. | #1085, #1384; #1314, #1315; gRPC hosting stays outside the program |
 | Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
 | A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
 | OIDC handler; JWT Bearer authority/JWKS discovery | Absent | blocked on IdentityModel #829/#830 |
