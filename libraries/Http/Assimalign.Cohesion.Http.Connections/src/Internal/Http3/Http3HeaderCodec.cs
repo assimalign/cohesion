@@ -375,7 +375,8 @@ internal static class Http3HeaderCodec
     /// with <b>no</b> synthesized <c>Content-Length</c>. HTTP/3 delimits
     /// the body with the stream end, so a length is neither known up front nor
     /// required. A connection-specific field is skipped
-    /// (<see cref="HttpResponseFieldRules"/>).
+    /// (<see cref="HttpResponseFieldRules"/>), and so is a <c>content-length</c> on a <c>204</c>
+    /// (<see cref="HttpResponseContentRules"/>).
     /// </summary>
     /// <param name="context">The exchange whose response head is encoded.</param>
     /// <returns>The QPACK-encoded field section.</returns>
@@ -397,6 +398,8 @@ internal static class Http3HeaderCodec
         [
             (":status", ((int)context.Response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)),
         ];
+
+        bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(context.Response.StatusCode);
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
@@ -422,8 +425,10 @@ internal static class Http3HeaderCodec
             string fieldValue = header.Value.Value;
             HttpResponseFieldRules.EnsureValidValue(header.Key, fieldValue);
 
-            // RFC 9114 §4.2 — a connection-specific field would make the response malformed.
-            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value))
+            // RFC 9114 §4.2 — a connection-specific field would make the response malformed. RFC 9110
+            // §8.6 — a 204 carries no content-length, not even one the application set (#1073).
+            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value)
+                && (permitsContentLength || header.Key != HttpHeaderKey.ContentLength))
             {
                 fields.Add((header.Key.Value, HttpResponseFieldRules.TrimEdgeWhitespace(fieldValue)));
             }

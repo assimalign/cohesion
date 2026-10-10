@@ -94,7 +94,10 @@ internal static class Http1MessageWriter
         HttpHeaderCollection headers = context.Response.Headers;
         bool addedContentLength = false;
 
-        if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
+        // RFC 9110 §8.6 — a length is synthesized only where the staged body states the one the response
+        // needs: never on a 204 or 304, and on HEAD only from a body the handler produced (#1073).
+        if (!headers.ContainsKey(HttpHeaderKey.ContentLength)
+            && HttpResponseContentRules.SynthesizesContentLength(context.Response.StatusCode, context.Request.Method, bodyBytes.Length))
         {
             headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
             addedContentLength = true;
@@ -131,8 +134,9 @@ internal static class Http1MessageWriter
     /// <param name="head">The encoded head.</param>
     /// <param name="body">The body octets.</param>
     /// <param name="writeBody">
-    /// <see langword="false"/> for a response to <c>HEAD</c>, which carries the head a <c>GET</c> would
-    /// but never a body (RFC 9110 §9.3.2).
+    /// <see langword="false"/> for a response without content (<see cref="HttpResponseContentRules.CarriesContent"/>):
+    /// a response to <c>HEAD</c>, which carries the head a <c>GET</c> would but never a body
+    /// (RFC 9110 §9.3.2), and a <c>204</c> or <c>304</c>, which ends with its head (RFC 9112 §6.3).
     /// </param>
     /// <param name="gate">
     /// The gate holding the response to its minimum data rate (#1384), or <see langword="null"/> when it is
@@ -230,10 +234,17 @@ internal static class Http1MessageWriter
 
         ArrayBufferWriter<byte> head = new(InitialHeadCapacity);
         WriteStatusLine(head, statusCode);
+        bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
             HttpResponseFieldRules.EnsureValidName(header.Key);
+
+            // RFC 9110 §8.6 — a 204 carries no Content-Length, not even one the application set (#1073).
+            if (!permitsContentLength && header.Key == HttpHeaderKey.ContentLength)
+            {
+                continue;
+            }
 
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-separated value is

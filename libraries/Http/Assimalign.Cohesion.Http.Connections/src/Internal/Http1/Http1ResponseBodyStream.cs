@@ -12,7 +12,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <summary>
 /// HTTP/1.1 raw response body sink. Commits the response head on first write/flush and frames
 /// incremental writes with chunked transfer coding (RFC 9112 §7.1) when the caller left
-/// <c>Content-Length</c> unset; otherwise the body streams with identity framing.
+/// <c>Content-Length</c> unset; otherwise the body streams with identity framing. A response without
+/// content (a response to <c>HEAD</c>, a <c>204</c>, or a <c>304</c>; <see cref="HttpResponseContentRules"/>)
+/// commits its head and discards every body write.
 /// </summary>
 /// <remarks>
 /// Chunked framing is self-delimiting, so the connection can stay keep-alive after a streamed
@@ -70,14 +72,17 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         HttpAltServiceInjector.Inject(headers, _altSvcHeaderValue);
 
         // RFC 9110 §9.3.2 — a HEAD response carries the same header section a GET would but never a
-        // body, so suppress every body write and the terminator.
-        _suppressBody = _context.Request.Method == HttpMethod.Head;
+        // body, so suppress every body write and the terminator. A 204 or 304 ends with its head as well
+        // (RFC 9112 §6.3, #1073): a chunk written after it would be read as the next response.
+        _suppressBody = !HttpResponseContentRules.CarriesContent(_context.Response.StatusCode, _context.Request.Method);
 
         // Chunked transfer coding is selected when the caller did not commit to a Content-Length,
-        // which is the streaming case (length not known up front).
+        // which is the streaming case (length not known up front). A 204 or 304 has no body to code, and
+        // a 204 MUST NOT carry Transfer-Encoding (RFC 9112 §6.1). HEAD keeps the coding a GET would get.
         bool addedTransferEncoding = false;
 
-        if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
+        if (!headers.ContainsKey(HttpHeaderKey.ContentLength)
+            && !HttpResponseContentRules.IsContentlessStatus(_context.Response.StatusCode))
         {
             _chunked = true;
             if (!headers.ContainsKey(HttpHeaderKey.TransferEncoding))

@@ -2084,7 +2084,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // content: no DATA frame. A Content-Length the application set is preserved; one is synthesized
         // only from a body the handler actually produced (the GET representation's length). An empty
         // HEAD body gets none, because RFC 9110 §8.6 forbids a Content-Length that differs from what GET
-        // would send, and the transport cannot know it — the choice the HTTP/2 path makes too.
+        // would send, and the transport cannot know it — the choice the HTTP/2 path makes too. A 204 or 304
+        // ends with its HEADERS frame as well (§15.3.5, §15.4.5): no length is synthesized for either,
+        // and the encoder sends none on a 204 (#1073, HttpResponseContentRules).
         //
         // The trailer section and the head are encoded before the commit point. A field that either
         // section cannot carry (#1183, RFC 9114 §4.2) throws here, with nothing on the wire and the
@@ -2092,17 +2094,19 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // encoder is static-only, so the order changes no octet, and the head's encode, which adds a
         // synthesized content-length and withdraws it when the head is refused, is then the last thing
         // that can fail, so a refused trailer section never leaves that length behind for a replacement.
-        bool isHead = http3Context.Request.Method == HttpMethod.Head;
+        HttpStatusCode statusCode = http3Context.Response.StatusCode;
+        HttpMethod method = http3Context.Request.Method;
+        bool carriesContent = HttpResponseContentRules.CarriesContent(statusCode, method);
 
         // RFC 9114 §4.1 — staged trailers follow the content as a HEADERS frame, before the FIN that
-        // ends the response. A response to HEAD carries none, as on HTTP/2.
-        byte[]? trailerBlock = !isHead && http3Context.Response.StagedTrailers is { } trailers
+        // ends the response. A response without content carries none, as on HTTP/2.
+        byte[]? trailerBlock = carriesContent && http3Context.Response.StagedTrailers is { } trailers
             ? Http3HeaderCodec.EncodeTrailers(trailers)
             : null;
 
-        byte[] headerBlock = isHead && bodyBytes.Length == 0
-            ? Http3HeaderCodec.EncodeResponseHeaders(http3Context)
-            : Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
+        byte[] headerBlock = HttpResponseContentRules.SynthesizesContentLength(statusCode, method, bodyBytes.Length)
+            ? Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes)
+            : Http3HeaderCodec.EncodeResponseHeaders(http3Context);
 
         // Commit point: from here the final response is on the wire, so the exchange control's
         // probes must report the response as started (no more interim writes). Every write from here is
@@ -2112,7 +2116,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         await WriteResponseFrameAsync(http3Context, stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
 
-        if (bodyBytes.Length > 0 && !isHead)
+        if (bodyBytes.Length > 0 && carriesContent)
         {
             await WriteResponseFrameAsync(http3Context, stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
         }

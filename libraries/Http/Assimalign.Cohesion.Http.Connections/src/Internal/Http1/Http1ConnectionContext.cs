@@ -252,7 +252,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             Stream,
             head,
             body,
-            writeBody: http1Context.Request.Method != HttpMethod.Head,
+            writeBody: HttpResponseContentRules.CarriesContent(http1Context.Response.StatusCode, http1Context.Request.Method),
             gate,
             cancellationToken).ConfigureAwait(false))
         {

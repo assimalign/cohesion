@@ -845,7 +845,9 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   `Content-Length` unset (the streaming case), `Http1ResponseBodyStream` adds
   `Transfer-Encoding: chunked` and wraps every write in a chunk; the finalize emits
   the terminating zero-length chunk. Chunked framing is self-delimiting, so the
-  connection stays keep-alive. A HEAD response commits the head but writes no body.
+  connection stays keep-alive. A HEAD response commits the head but writes no body,
+  and a `204` or `304` commits its head with no coding and no body on any version
+  (see "Responses without content: HEAD, 204, and 304").
   `Http1MessageWriter.WriteHeadAsync` is shared by the buffered and streaming paths.
 - **HTTP/2 — incremental DATA frames (RFC 9113).** The HEADERS block is written
   **without** a synthesized `Content-Length` (the body is delimited by
@@ -2882,9 +2884,9 @@ content. The buffered path sends HEADERS only, with `END_STREAM` on the HEADERS
 frame. A `content-length` the application set is preserved. One is synthesized only
 from a body the handler actually produced, which is the GET representation's length.
 An empty HEAD body gets none, because RFC 9110 §8.6 forbids a `content-length` that
-differs from what GET would send, and the transport cannot know that value. (The
-HTTP/1.1 writer still synthesizes `Content-Length: 0` in that case; aligning it is
-outside this change.) The streaming sink ends the stream on its HEADERS frame and
+differs from what GET would send, and the transport cannot know that value. The
+HTTP/1.1 writer applies the same rule since #1073 (see "Responses without content:
+HEAD, 204, and 304"). The streaming sink ends the stream on its HEADERS frame and
 discards body writes. Neither path sends staged trailers for HEAD (see "Response
 trailers").
 
@@ -2940,6 +2942,55 @@ volatile flags, and the cap is a running `long` counter maintained by the pump.
 - **`content-length` versus DATA-total validation.** RFC 9113 §8.1.1 makes a
   mismatch a malformed request. The declaration is used here only for the early
   rejection; the cap bounds the rest.
+
+## Responses without content: HEAD, 204, and 304 (#1073)
+
+### The defects this closes
+
+- **HTTP/1.1 stated a length for an empty HEAD.** The writer synthesized
+  `Content-Length: 0` when the handler produced no body, a length the GET would not
+  send (RFC 9110 §8.6), so a cache could treat its stored GET as stale (RFC 9111
+  §4.3.5). HTTP/2 and HTTP/3 had stopped doing so in #1048. Web.StaticFiles answers
+  HEAD for a stream of unknown length with headers only, which hit this.
+- **Every version sent `Content-Length` on a `204`,** which RFC 9110 §8.6 forbids,
+  and on every `304`, from the empty body, where §15.4.5 makes the length the
+  selected representation's. Web.StaticFiles' `304`s therefore stated a length of `0`
+  for non-empty files.
+- **A body written for a `204` or `304` reached the wire.** HTTP/1.1 ends either
+  response at its blank line, whatever its fields say (RFC 9112 §6.3), so on a
+  kept-alive connection the client read the octets as the start of the next
+  response. A streamed `204` or `304` also took `Transfer-Encoding: chunked`, which
+  RFC 9112 §6.1 forbids on a `204`, and its terminating chunk was read the same way.
+  On HTTP/2 and HTTP/3, DATA on either response is content in a response that
+  cannot have any, and a strict client resets the stream.
+
+### One rule, every writer
+
+`HttpResponseContentRules` holds the rule, and all three versions apply it on the
+buffered path and through the raw body sink:
+
+| Response | Content and trailers | `Content-Length` synthesized from the staged body | `Content-Length` the application set |
+|---|---|---|---|
+| To HEAD (status other than `204`/`304`) | Discarded | Only from a non-empty body | Sent |
+| `204 No Content` | Discarded | Never | Not sent |
+| `304 Not Modified` | Discarded | Never | Sent |
+| Any other | Sent | Always (buffered path) | Sent |
+
+- **Discarded, not refused.** A staged or streamed body for a response that cannot
+  carry one is dropped, as a HEAD body always was. The status can change until the
+  head is committed, so the transport is the first place that knows the body has
+  nowhere to go, and an error there would fail a response that is otherwise sound.
+- **The wire, not the collection.** The head encoders
+  (`Http1MessageWriter.EncodeHead`, `HPackEncoder.EncodeResponseHeaders`,
+  `Http3HeaderCodec.EncodeResponseHeaders`) skip `Content-Length` on a `204`, an
+  application-set one included, and leave `Response.Headers` as it was, as they do
+  for the connection-specific fields.
+- **No transfer coding on a `204` or `304`.** The HTTP/1.1 sink selects chunked
+  coding only for a response that can carry content, or for HEAD, whose head is the
+  one a GET would get. A `204` or `304` head goes out with neither
+  `Transfer-Encoding` nor a terminating chunk.
+- **Interim heads are out of scope.** RFC 9110 §8.6 also forbids `Content-Length` on
+  a `1xx`; the interim writers send the fields the caller passes.
 
 ## Connection-specific fields in HTTP/2 and HTTP/3 response heads
 

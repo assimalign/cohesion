@@ -53,7 +53,8 @@ internal static partial class HPackEncoder
     /// with <b>no</b> <c>Content-Length</c> synthesized. A streaming
     /// response has no known body length up front — HTTP/2 delimits the body with
     /// <c>END_STREAM</c> — so injecting a length here would be wrong. A
-    /// connection-specific field is skipped (<see cref="HttpResponseFieldRules"/>).
+    /// connection-specific field is skipped (<see cref="HttpResponseFieldRules"/>), and so is a
+    /// <c>content-length</c> on a <c>204</c> (<see cref="HttpResponseContentRules"/>).
     /// </summary>
     /// <remarks>
     /// Every field is checked against the field syntax before the section is returned
@@ -72,6 +73,7 @@ internal static partial class HPackEncoder
     {
         using MemoryStream buffer = new();
         WriteStatusHeader(buffer, (int)statusCode);
+        bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
@@ -97,8 +99,10 @@ internal static partial class HPackEncoder
             string fieldValue = header.Value.Value;
             HttpResponseFieldRules.EnsureValidValue(header.Key, fieldValue);
 
-            // RFC 9113 §8.2.2 — a connection-specific field would make the response malformed.
-            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value))
+            // RFC 9113 §8.2.2 — a connection-specific field would make the response malformed. RFC 9110
+            // §8.6 — a 204 carries no content-length, not even one the application set (#1073).
+            if (HttpResponseFieldRules.IsSendable(header.Key, header.Value)
+                && (permitsContentLength || header.Key != HttpHeaderKey.ContentLength))
             {
                 WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), fieldValue);
             }

@@ -20,8 +20,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// stream's write side (a graceful FIN via the <see cref="IConnection"/> half-close contract), so a
 /// real HTTP/3 client observes the streamed body terminate rather than waiting on connection
 /// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>). Staged trailers go out as a
-/// HEADERS frame just before that end (RFC 9114 §4.1). A response to <c>HEAD</c> commits its HEADERS
-/// frame but no DATA frame and no trailers (RFC 9110 §9.3.2).
+/// HEADERS frame just before that end (RFC 9114 §4.1). A response without content — to <c>HEAD</c>
+/// (RFC 9110 §9.3.2), or a <c>204</c> or <c>304</c> (<see cref="HttpResponseContentRules"/>) — commits its
+/// HEADERS frame but no DATA frame and no trailers.
 /// </para>
 /// <para>
 /// Every write and flush is held to the response's minimum data rate (#1384), through the connection's
@@ -52,8 +53,9 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
         HttpInterimResponseRules.EnsureFinalStatusCode(_context.Response.StatusCode);
 
         // RFC 9110 §9.3.2 — a HEAD response carries the header section a GET would but never content,
-        // so every body write after the head is dropped: no DATA frame reaches the wire.
-        _suppressBody = _context.Request.Method == HttpMethod.Head;
+        // so every body write after the head is dropped: no DATA frame reaches the wire. A 204 or 304
+        // ends with its head the same way (§15.3.5, §15.4.5; #1073).
+        _suppressBody = !HttpResponseContentRules.CarriesContent(_context.Response.StatusCode, _context.Request.Method);
 
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
         await _connection.WriteResponseFrameAsync(_context, _stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);

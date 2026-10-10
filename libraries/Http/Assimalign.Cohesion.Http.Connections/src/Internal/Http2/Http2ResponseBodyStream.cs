@@ -15,8 +15,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// send-window accounting. Each body write already flushes the underlying transport, so the flush
 /// hook is a no-op. Completion ends the stream with the trailer section's HEADERS frame when the
 /// application staged trailers (RFC 9113 §8.1), and with an empty DATA frame otherwise. A response
-/// to HEAD (RFC 9110 §9.3.2) commits a HEADERS frame carrying <c>END_STREAM</c> and discards every
-/// body write and its trailers, matching the HTTP/1.1 sink.
+/// without content — to HEAD (RFC 9110 §9.3.2), or a 204 or 304 (<see cref="HttpResponseContentRules"/>) —
+/// commits a HEADERS frame carrying <c>END_STREAM</c> and discards every body write and its trailers,
+/// matching the HTTP/1.1 sink.
 /// </remarks>
 internal sealed class Http2ResponseBodyStream : HttpResponseBodyStream
 {
@@ -34,8 +35,9 @@ internal sealed class Http2ResponseBodyStream : HttpResponseBodyStream
     protected override ValueTask CommitHeadersAsync(CancellationToken cancellationToken)
     {
         // RFC 9110 §9.3.2 — a HEAD response carries the header section a GET would but never content,
-        // so its HEADERS frame ends the stream and every later body write is discarded.
-        _suppressBody = _context.Request.Method == HttpMethod.Head;
+        // so its HEADERS frame ends the stream and every later body write is discarded. A 204 or 304
+        // ends with its head the same way (§15.3.5, §15.4.5; #1073).
+        _suppressBody = !HttpResponseContentRules.CarriesContent(_context.Response.StatusCode, _context.Request.Method);
         return new(_connection.WriteStreamingHeadersAsync(_context, endStream: _suppressBody, cancellationToken));
     }
 

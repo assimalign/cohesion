@@ -792,6 +792,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // set is preserved; one is synthesized only from a body the handler actually produced (the
                 // GET representation's length). An empty HEAD body gets none, because RFC 9110 §8.6 forbids
                 // a content-length that differs from what GET would send, and the transport cannot know it.
+                // A 204 or 304 ends with its HEADERS too (§15.3.5, §15.4.5): no length is synthesized for
+                // either, and the encoder sends none on a 204 (#1073, HttpResponseContentRules).
                 //
                 // The trailer section and the head are encoded before the response is claimed. A field that
                 // either section cannot carry (#1183, RFC 9113 §8.2.1) throws here, with nothing on the wire
@@ -800,19 +802,22 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // head's encode, which adds a synthesized content-length and withdraws it when the head is
                 // refused, is then the last thing that can fail, so a refused trailer section never leaves
                 // that length behind for a replacement with another body.
-                bool isHead = http2Context.Request.Method == HttpMethod.Head;
+                HttpStatusCode statusCode = http2Context.Response.StatusCode;
+                HttpMethod method = http2Context.Request.Method;
+                bool carriesContent = HttpResponseContentRules.CarriesContent(statusCode, method);
 
                 // RFC 9113 §8.1 — staged trailers follow the content as a HEADERS frame that ends the
-                // stream. A response to HEAD carries none: it has no content for them to follow, and
-                // RFC 9110 §9.3.2 lets a server omit the fields it determines while generating content.
-                byte[]? trailerBlock = !isHead && http2Context.Response.StagedTrailers is { } trailers
+                // stream. A response without content carries none: a 204 or 304 cannot (RFC 9110 §15.3.5,
+                // §15.4.5), and RFC 9110 §9.3.2 lets a HEAD response omit the fields a server determines
+                // while generating content.
+                byte[]? trailerBlock = carriesContent && http2Context.Response.StagedTrailers is { } trailers
                     ? HPackEncoder.EncodeTrailers(trailers)
                     : null;
 
-                byte[] headerBlock = isHead && bodyBytes.Length == 0
-                    ? HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers)
-                    : HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
-                ReadOnlyMemory<byte> content = isHead ? ReadOnlyMemory<byte>.Empty : bodyBytes;
+                byte[] headerBlock = HttpResponseContentRules.SynthesizesContentLength(statusCode, method, bodyBytes.Length)
+                    ? HPackEncoder.EncodeResponseHeaders(statusCode, http2Context.Response.Headers, bodyBytes.Length)
+                    : HPackEncoder.EncodeResponseHeaders(statusCode, http2Context.Response.Headers);
+                ReadOnlyMemory<byte> content = carriesContent ? bodyBytes : ReadOnlyMemory<byte>.Empty;
 
                 // Claim the stream's final response. The claim fails only when the transport has already
                 // answered the stream itself — the request body crossed its cap and the frame pump wrote
