@@ -1091,8 +1091,8 @@ internal sealed class Http2Stream
 
         // RFC 9113 §8.3.1 — every request carries :method, and every request but a CONNECT carries
         // :scheme and :path, with a :path that is never empty (OPTIONS for the server as a whole uses
-        // "*"). A classic CONNECT carries only :method and :authority (RFC 9113 §8.5); an extended
-        // CONNECT was held to RFC 8441 §4 above. Nothing is defaulted: a request without its
+        // "*"). A classic CONNECT carries only :method and :authority (RFC 9113 §8.5), checked after
+        // these; an extended CONNECT was held to RFC 8441 §4 above. Nothing is defaulted: a request without its
         // pseudo-header fields is malformed, not a GET of "/". The stream is reset before the request
         // reaches the application, and the connection keeps serving its other streams.
         if (decodedHeaders.Path is { Length: 0 })
@@ -1116,6 +1116,23 @@ internal sealed class Http2Stream
             {
                 throw CreateMalformedRequestError("is missing the ':path' pseudo-header field (RFC 9113 §8.3.1)");
             }
+        }
+
+        // RFC 9113 §8.5 and §8.3.1 — a classic CONNECT carries the host and port in :authority and neither
+        // :scheme nor :path, and a :path of '*' belongs to OPTIONS alone (#1334). The rule is shared with
+        // HTTP/3 and matches HTTP/1.1's authority-form and asterisk-form.
+        string? requestTargetViolation = HttpFieldNormalization.ValidateRequestTarget(
+            methodValue,
+            decodedHeaders.Scheme,
+            decodedHeaders.Path,
+            decodedHeaders.Authority,
+            decodedHeaders.Protocol);
+        if (requestTargetViolation is not null)
+        {
+            throw new Http2StreamException(
+                StreamId,
+                Http2ErrorCode.ProtocolError,
+                $"The HTTP/2 request on stream {StreamId} is malformed: {requestTargetViolation}");
         }
 
         // RFC 3986 §2.4 — the :path is percent-decoded through the same HttpPath.FromUriComponent

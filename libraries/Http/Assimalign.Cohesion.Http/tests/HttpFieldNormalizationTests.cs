@@ -161,6 +161,70 @@ public class HttpFieldNormalizationTests
         violation.ShouldNotBeNull();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A classic CONNECT must carry a host and port in :authority and neither :scheme nor :path")]
+    [InlineData(null, null, null, "':authority'")]
+    [InlineData(null, null, "", "':authority'")]
+    [InlineData(null, null, "upstream.test", "host and port")]
+    [InlineData(null, null, "upstream.test:", "host and port")]
+    [InlineData(null, null, "[::1]", "host and port")]
+    [InlineData("https", null, "upstream.test:443", "':scheme'")]
+    [InlineData(null, "/", "upstream.test:443", "':path'")]
+    public void ValidateRequestTarget_OnMalformedClassicConnect_ShouldReturnViolation(string? scheme, string? path, string? authority, string expected)
+    {
+        // Arrange — RFC 9113 §8.5 / RFC 9114 §4.4 (#1334).
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", scheme, path, authority, protocol: null);
+
+        // Assert
+        violation.ShouldNotBeNull();
+        violation.ShouldContain(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: A classic CONNECT with a host and port is a valid request target")]
+    [InlineData("upstream.test:443")]
+    [InlineData("10.0.0.1:8080")]
+    [InlineData("[::1]:8443")]
+    public void ValidateRequestTarget_OnClassicConnectWithHostAndPort_ShouldReturnNull(string authority)
+    {
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget("CONNECT", null, null, authority, protocol: null);
+
+        // Assert
+        violation.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Asterisk-form is exactly '*' and only for OPTIONS")]
+    [InlineData("GET", "*")]
+    [InlineData("CONNECT", "*")]
+    [InlineData("GET", "*foo")]
+    [InlineData("OPTIONS", "*foo")]
+    [InlineData("OPTIONS", "*?x=1")]
+    public void ValidateRequestTarget_OnAsteriskFormOutsideOptions_ShouldReturnViolation(string method, string path)
+    {
+        // Arrange — RFC 9110 §7.1, RFC 9112 §3.2.4. CONNECT here is an extended CONNECT, which carries a :path.
+
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, "https", path, "api.test", method == "CONNECT" ? "websocket" : null);
+
+        // Assert
+        violation.ShouldNotBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Ordinary targets, OPTIONS '*' and an extended CONNECT are valid request targets")]
+    [InlineData("OPTIONS", "https", "*", "api.test", null)]
+    [InlineData("OPTIONS", "https", "/", "api.test", null)]
+    [InlineData("GET", "https", "/a*b", "api.test", null)]
+    [InlineData("CONNECT", "https", "/chat", "api.test", "websocket")]
+    public void ValidateRequestTarget_OnWellFormedTarget_ShouldReturnNull(string method, string scheme, string path, string authority, string? protocol)
+    {
+        // Act
+        string? violation = HttpFieldNormalization.ValidateRequestTarget(method, scheme, path, authority, protocol);
+
+        // Assert
+        violation.ShouldBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - HttpFieldNormalization: Only a CONNECT with a non-empty :protocol is an extended CONNECT")]
     [InlineData("CONNECT", "websocket", true)]
     [InlineData("CONNECT", "", false)]

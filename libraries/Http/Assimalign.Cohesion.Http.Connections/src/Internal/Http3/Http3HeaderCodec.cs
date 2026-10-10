@@ -186,6 +186,17 @@ internal static class Http3HeaderCodec
             throw new InvalidDataException(extendedConnectViolation);
         }
 
+        // RFC 9114 §4.4 and §4.3.1 — a classic CONNECT carries the host and port in :authority and neither
+        // :scheme nor :path, and a :path of '*' belongs to OPTIONS alone (#1334). The rule is shared with
+        // HTTP/2 and matches HTTP/1.1's authority-form and asterisk-form; a violation is malformed, so the
+        // stream alone is reset with H3_MESSAGE_ERROR.
+        string? requestTargetViolation = HttpFieldNormalization.ValidateRequestTarget(
+            method, schemeValue, pathValue, authority, protocol);
+        if (requestTargetViolation is not null)
+        {
+            throw new InvalidDataException(requestTargetViolation);
+        }
+
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
         // RFC 9114 §4.3.1 — :authority supersedes Host, resolved identically to
         // HTTP/2 via HttpFieldNormalization.

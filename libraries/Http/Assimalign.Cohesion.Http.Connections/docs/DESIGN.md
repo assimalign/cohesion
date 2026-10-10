@@ -2291,6 +2291,8 @@ Whether the pseudo-header fields make a complete request is judged afterwards, b
 | A `:path` that is present is not empty (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:method` is present (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
 | `:scheme` and `:path` are present (§8.3.1) | every request but a classic CONNECT (§8.5) | stream `PROTOCOL_ERROR` |
+| `:authority` is `host:port` and `:scheme` and `:path` are absent (§8.5, #1334) | a classic CONNECT | stream `PROTOCOL_ERROR` |
+| A `:path` that starts with `*` is exactly `*`, and the method is `OPTIONS` (§8.3.1, RFC 9110 §7.1, #1334) | every request | stream `PROTOCOL_ERROR` |
 | `:path` decodes to a legal path (#937) | every request | stream `PROTOCOL_ERROR` |
 
 Nothing is defaulted. Before #1321 a missing `:method` became `GET` and a missing `:path`
@@ -2304,6 +2306,15 @@ serving its other streams (RFC 9113 §8.1.1). `OPTIONS` for the server as a whol
 CONNECT carries only `:method` and `:authority`; its path is the root, as for HTTP/1.1's
 authority-form. HTTP/3 applies the equivalent rules in `Http3HeaderCodec` (see
 "Field-section rules" under QPACK).
+
+The two target-form rules (#1334) are one core rule,
+`HttpFieldNormalization.ValidateRequestTarget`, which both versions call after their presence
+checks. It holds a classic CONNECT's `:authority` to the authority-form HTTP/1.1 parses
+(RFC 9112 §3.2.3) and asterisk-form to the single character `*` (§3.2.4), so the three versions
+accept the same targets. Until #1334 a CONNECT without `:authority` reached the application with
+a host taken from `Host`, or none; a CONNECT with `:scheme` or `:path` reached it as an ordinary
+request; and `GET *`, or a `:path` such as `*foo` on any method, reached routing, because
+`HttpPath` accepts any value that starts with `*`. HTTP/1.1 had refused all of them.
 
 ## HTTP/2 abuse limits
 
@@ -4307,6 +4318,10 @@ rules:
   only on a CONNECT, and that CONNECT carries `:scheme`, `:path`, and
   `:authority` (the shared `HttpFieldNormalization.ValidateExtendedConnect`;
   see "Extended CONNECT (`:protocol`)").
+- **Target forms** (#1334). A classic CONNECT carries `host:port` in
+  `:authority` and neither `:scheme` nor `:path` (RFC 9114 §4.4), and a
+  `:path` that starts with `*` is exactly `*` on an OPTIONS request (the shared
+  `HttpFieldNormalization.ValidateRequestTarget`; see "HTTP/2 request heads").
 - **Path.** The `:path` must percent-decode to a legal path (see
   "Request-target percent-decoding (h1/h2/h3 parity)"): a decoded space,
   control character, `?`, `#`, or NUL, an illegal literal character, or a

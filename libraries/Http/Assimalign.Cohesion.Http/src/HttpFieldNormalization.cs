@@ -316,4 +316,100 @@ public static class HttpFieldNormalization
 
         return null;
     }
+
+    /// <summary>
+    /// Validates the request target that an HTTP/2 or HTTP/3 request carries in
+    /// its pseudo-header fields against the two target forms those versions
+    /// share with HTTP/1.1's authority-form and asterisk-form: a classic
+    /// <c>CONNECT</c> (no <c>:protocol</c>) carries the host and port to connect
+    /// to in <c>:authority</c> and neither <c>:scheme</c> nor <c>:path</c>
+    /// (RFC 9113 §8.5, RFC 9114 §4.4), and a <c>:path</c> of <c>*</c> is valid
+    /// only for <c>OPTIONS</c> (RFC 9110 §7.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).
+    /// Returns a description of the violation, or <see langword="null"/> when the
+    /// target is well-formed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rule matches what HTTP/1.1 enforces through
+    /// <see cref="HttpRequestTarget.TryParse(ReadOnlySpan{char}, HttpMethod, out HttpRequestTarget, out string?)"/>,
+    /// so all three versions accept the same targets. A classic <c>CONNECT</c>'s
+    /// <c>:authority</c> is held to the same authority-form, <c>host:port</c>
+    /// (RFC 9112 §3.2.3), and asterisk-form is the single character <c>*</c>
+    /// (RFC 9112 §3.2.4): a <c>:path</c> such as <c>*foo</c> or <c>*?x</c> is no
+    /// request target at all, whatever the method.
+    /// </para>
+    /// <para>
+    /// The caller has already applied <see cref="ValidateExtendedConnect"/>, which
+    /// holds an extended <c>CONNECT</c> (a present <c>:protocol</c>) to RFC 8441
+    /// §4, and its own presence checks: <c>:method</c> on every request, and
+    /// <c>:scheme</c> and a non-empty <c>:path</c> on every request but a
+    /// <c>CONNECT</c>. A violation makes the request malformed, which each
+    /// transport answers with its own stream error: <c>PROTOCOL_ERROR</c> on
+    /// HTTP/2 (RFC 9113 §8.1.1), <c>H3_MESSAGE_ERROR</c> on HTTP/3
+    /// (RFC 9114 §4.1.2).
+    /// </para>
+    /// </remarks>
+    /// <param name="method">The decoded <c>:method</c> value, or <see langword="null"/>.</param>
+    /// <param name="scheme">The decoded <c>:scheme</c> value, or <see langword="null"/>.</param>
+    /// <param name="path">The decoded <c>:path</c> value, or <see langword="null"/>.</param>
+    /// <param name="authority">The decoded <c>:authority</c> value, or <see langword="null"/>.</param>
+    /// <param name="protocol">
+    /// The decoded <c>:protocol</c> value, or <see langword="null"/> when the field is absent.
+    /// </param>
+    /// <returns>
+    /// A human-readable violation message, or <see langword="null"/> when valid.
+    /// Callers raise their own protocol-appropriate error from the message.
+    /// </returns>
+    public static string? ValidateRequestTarget(string? method, string? scheme, string? path, string? authority, string? protocol)
+    {
+        if (protocol is null && string.Equals(method, HttpMethod.Connect.Value, StringComparison.Ordinal))
+        {
+            return ValidateClassicConnect(scheme, path, authority);
+        }
+
+        // RFC 9112 §3.2.4 — asterisk-form is exactly '*', and RFC 9110 §7.1 reserves it for OPTIONS.
+        // Neither the value nor the method is echoed: both came from the peer.
+        if (path is { Length: > 0 } && path[0] == '*')
+        {
+            if (path.Length > 1)
+            {
+                return "A ':path' that starts with '*' is not a request target; asterisk-form is the single character '*' (RFC 9112 §3.2.4, RFC 9113 §8.3.1).";
+            }
+
+            if (!string.Equals(method, HttpMethod.Options.Value, StringComparison.Ordinal))
+            {
+                return "The asterisk-form ':path' '*' is valid only for an OPTIONS request (RFC 9110 §7.1, RFC 9113 §8.3.1, RFC 9114 §4.3.1).";
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ValidateClassicConnect(string? scheme, string? path, string? authority)
+    {
+        // RFC 9113 §8.5 / RFC 9114 §4.4 — a CONNECT names the host and port to connect to, and nothing
+        // else: the :scheme and :path pseudo-header fields MUST be omitted.
+        if (scheme is not null)
+        {
+            return "A CONNECT request MUST NOT include the ':scheme' pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).";
+        }
+
+        if (path is not null)
+        {
+            return "A CONNECT request MUST NOT include the ':path' pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).";
+        }
+
+        if (string.IsNullOrEmpty(authority))
+        {
+            return "A CONNECT request MUST include the ':authority' pseudo-header (RFC 9113 §8.5, RFC 9114 §4.4).";
+        }
+
+        // RFC 9113 §8.5 — :authority is the authority-form of HTTP/1.1's CONNECT target (RFC 9112 §3.2.3).
+        if (!HttpRequestTarget.TryParse(authority, HttpMethod.Connect, out _, out string? error))
+        {
+            return $"The ':authority' of a CONNECT request MUST be the host and port to connect to (RFC 9113 §8.5, RFC 9114 §4.4): {error}";
+        }
+
+        return null;
+    }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -19,7 +20,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// the connection keeps serving its other streams. CONNECT keeps its own rules (RFC 9113 §8.5,
 /// RFC 8441 §4), and a request that breaks the extended CONNECT rules — an empty <c>:protocol</c>,
 /// a <c>:protocol</c> on another method, an extended CONNECT missing a pseudo-header — is malformed
-/// in the same way.
+/// in the same way. So is a classic CONNECT without a host and port in <c>:authority</c> or with a
+/// <c>:scheme</c> or <c>:path</c>, and an asterisk-form <c>:path</c> outside OPTIONS (#1334).
 /// </summary>
 public class Http2RequestPseudoHeaderTests
 {
@@ -157,6 +159,81 @@ public class Http2RequestPseudoHeaderTests
 
         // Assert
         tunnel.Request.Method.ShouldBe(HttpMethod.Connect);
+        peer.Output.Frames.ShouldNotContain(frame => frame.IsRstStream || frame.IsGoAway);
+
+        await peer.SendDataAsync(1, Array.Empty<byte>(), endStream: true);
+        await peer.ConnectionContext.SendAsync(tunnel).AsTask().WaitAsync(_timeout);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A classic CONNECT without a host and port, or with :scheme or :path, should reset only its stream")]
+    [InlineData(null, null, null)]
+    [InlineData(null, null, "")]
+    [InlineData(null, null, "upstream.test")]
+    [InlineData("https", null, "upstream.test:443")]
+    [InlineData(null, "/", "upstream.test:443")]
+    [InlineData("https", "/tunnel", "upstream.test:443")]
+    public async Task ReceiveAsync_OnMalformedClassicConnect_ShouldResetStreamWithProtocolError(string? scheme, string? path, string? authority)
+    {
+        // Arrange — RFC 9113 §8.5: a CONNECT without :protocol carries the host and port to connect to in
+        // :authority, and its :scheme and :path MUST be omitted (#1334).
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+        List<(string Name, string Value)> fields = [(":method", "CONNECT")];
+
+        if (scheme is not null)
+        {
+            fields.Add((":scheme", scheme));
+        }
+
+        if (path is not null)
+        {
+            fields.Add((":path", path));
+        }
+
+        if (authority is not null)
+        {
+            fields.Add((":authority", authority));
+        }
+
+        // Act
+        IHttpContext next = await SendMalformedThenValidAsync(peer, fields.ToArray());
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: An asterisk-form :path outside OPTIONS, or one that is not exactly '*', should reset only its stream")]
+    [InlineData("GET", "*")]
+    [InlineData("POST", "*")]
+    [InlineData("GET", "*foo")]
+    [InlineData("OPTIONS", "*foo")]
+    [InlineData("OPTIONS", "*?x=1")]
+    public async Task ReceiveAsync_OnAsteriskFormOutsideOptions_ShouldResetStreamWithProtocolError(string method, string path)
+    {
+        // Arrange — RFC 9110 §7.1 and RFC 9113 §8.3.1: asterisk-form is the single character '*', and only
+        // OPTIONS may use it, as HTTP/1.1 already enforces (#1334).
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+
+        // Act
+        IHttpContext next = await SendMalformedThenValidAsync(peer, Http2TestPeer.Request(method, path));
+
+        // Assert
+        await AssertResetBeforeDispatchAsync(peer, next);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Pseudo-Headers: A valid extended CONNECT should still be dispatched")]
+    public async Task ReceiveAsync_OnExtendedConnect_ShouldDispatchRequest()
+    {
+        // Arrange — RFC 8441 §4: an extended CONNECT carries :scheme and :path, which the classic-CONNECT rule
+        // forbids only when :protocol is absent.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
+
+        // Act
+        await peer.SendHeadersAsync(1, endStream: false, Http2TestPeer.Request("CONNECT", "/chat", (":protocol", "websocket")));
+        IHttpContext tunnel = await peer.ReceiveContextAsync();
+
+        // Assert
+        tunnel.Request.Method.ShouldBe(HttpMethod.Connect);
+        tunnel.Request.Path.Value.ShouldBe("/chat");
         peer.Output.Frames.ShouldNotContain(frame => frame.IsRstStream || frame.IsGoAway);
 
         await peer.SendDataAsync(1, Array.Empty<byte>(), endStream: true);

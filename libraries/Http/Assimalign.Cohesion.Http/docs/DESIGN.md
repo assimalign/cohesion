@@ -214,6 +214,18 @@ quirks.
   field coalesces with `"; "` (RFC 9113 §8.2.3, RFC 9114 §4.2.1); `Set-Cookie`
   is never folded; other list fields combine as distinct values. Previously the
   HTTP/3 path combined cookies with a comma; now it matches HTTP/2.
+- **Request-target forms** (`ValidateExtendedConnect`, `ValidateRequestTarget`)
+  — the pseudo-header shapes HTTP/2 and HTTP/3 share. An extended CONNECT
+  carries a non-empty `:protocol` with `:scheme`, `:path`, and `:authority`
+  (RFC 8441 §4, RFC 9220 §3). A classic CONNECT carries the host and port in
+  `:authority` and neither `:scheme` nor `:path` (RFC 9113 §8.5, RFC 9114 §4.4),
+  and a `:path` that starts with `*` is exactly `*` on an OPTIONS request
+  (RFC 9110 §7.1, #1334). Both return a violation message rather than throw, so
+  HTTP/2 resets the stream with `PROTOCOL_ERROR` and HTTP/3 with
+  `H3_MESSAGE_ERROR`. `ValidateRequestTarget` reuses
+  `HttpRequestTarget.TryParse` for the authority-form, so HTTP/1.1, which
+  parses its request line through the same type, accepts the same CONNECT and
+  asterisk-form targets.
 - **Field syntax** (`IsValidFieldName`, `IsValidFieldValue`,
   `IndexOfInvalidControlCharacter`) — the one field rule every reader and
   writer applies, received or sent (#1341; decision 27 of the HTTP/Web
