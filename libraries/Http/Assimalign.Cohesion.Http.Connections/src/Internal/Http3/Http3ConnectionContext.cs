@@ -1402,7 +1402,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // RFC 9114 §4.2.2 — the request head decodes past SETTINGS_MAX_FIELD_SECTION_SIZE. The decoder
             // stopped at the field that crossed it, and the request never became an exchange, so the
             // transport answers 431 itself. The reader sits just past the HEADERS frame, so what follows is
-            // drained or stopped like any unread request; the connection keeps serving its other streams.
+            // refused like any unread request (STOP_SENDING unless its FIN is already buffered); the connection keeps serving its other streams.
             Http3RequestBodyStream remainder = new(
                 this,
                 reader,

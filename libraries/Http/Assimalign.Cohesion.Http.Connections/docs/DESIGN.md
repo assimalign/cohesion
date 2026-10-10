@@ -2942,7 +2942,7 @@ The signals and their RFC 9114 §8.1 codes:
 | Refused before dispatch — an interceptor rejection, teardown before dispatch, or assembled but never handed over | reset | `H3_REQUEST_REJECTED` | §4.1.1: no application processing, so the peer may retry |
 | Malformed request (field section, `:path`, Content-Length, trailers) | reset | `H3_MESSAGE_ERROR` | §4.1.2 |
 | HEADERS frame longer than `MaxRequestHeadersFrameSize` | reset | `H3_FRAME_ERROR` | §7.1 names invalid frame sizes; a local limit leaves connection state intact, so the error is scoped to the stream (§8) |
-| Request head decoded past `MaxFieldSectionSize` | `431` response, then drained or `STOP_SENDING` | `H3_NO_ERROR` | §4.2.2 lets the server answer 431; the request was never dispatched |
+| Request head decoded past `MaxFieldSectionSize` | `431` response, then `STOP_SENDING` unless the request's FIN is already buffered | `H3_NO_ERROR` | §4.2.2 lets the server answer 431; the request was never dispatched |
 | Trailer section decoded past `MaxFieldSectionSize` after the response head was committed | reset | `H3_MESSAGE_ERROR` | §10.5.1 lets an oversized section be treated as malformed (§4.1.2); no status can follow a committed head |
 | Stream ended before its HEADERS frame | reset | `H3_REQUEST_INCOMPLETE` | §8.1 |
 | A frame truncated by the stream's end | connection close | `H3_FRAME_ERROR` | §7.1 requires a connection error |
@@ -3494,8 +3494,9 @@ listener, from an unauthenticated client.
 - **The response.** The decoder throws `Http3LimitExceededException` carrying
   `431 Request Header Fields Too Large`, which RFC 9114 §4.2.2 lets a server send
   and which HTTP/1.1 sends for the same condition. A request head over the limit
-  is never dispatched: the transport writes a bodyless `431`, then drains or stops
-  the rest of the stream as for any refused request. A trailer section over the
+  is never dispatched: the transport writes a bodyless `431`, then refuses the rest of the
+  stream as for any refused request: `STOP_SENDING` with `H3_NO_ERROR`, unless the
+  request's FIN is already buffered. A trailer section over the
   limit fails the body read and is recorded like an over-cap body. `SendAsync`
   then answers `431` if the response head is uncommitted. If the head is already
   on the wire, no status can follow it, so the stream is reset with
