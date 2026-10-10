@@ -53,8 +53,9 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
     /// <remarks>
     /// The status <see cref="Http1Context.RequestBodyRejectedStatusCode"/> latched when a body read after
     /// dispatch failed on the client's side: <c>400</c> for malformed chunked framing or a malformed
-    /// trailer section, <c>413</c> over the body-size cap, <c>408</c> below the minimum data rate, and
-    /// <c>431</c> for a trailer section over the header-section bounds.
+    /// trailer section, <c>413</c> over the body-size cap, <c>408</c> below the minimum data rate,
+    /// <c>431</c> for a trailer section over the header-section bounds, and <c>400</c> for a body the peer
+    /// cut short by closing the connection (the read throws <see cref="System.IO.EndOfStreamException"/>).
     /// <see cref="Http1ConnectionContext.SendAsync"/> answers the exchange with the same status.
     /// </remarks>
     public HttpStatusCode? ClientFaultStatusCode => _context.RequestBodyRejectedStatusCode;

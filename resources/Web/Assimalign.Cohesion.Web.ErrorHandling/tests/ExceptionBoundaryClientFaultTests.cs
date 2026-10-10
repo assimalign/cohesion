@@ -68,6 +68,53 @@ public class ExceptionBoundaryClientFaultTests
         observed.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary E2E: A body the client cuts short by closing its side should reach the client as the transport's 400 without OnException")]
+    [InlineData("Content-Length: 100\r\n\r\n{")]
+    [InlineData("Transfer-Encoding: chunked\r\n\r\n10\r\nshort")]
+    public async Task Boundary_BodyCutShortByTheClient_ShouldAnswerTheTransport400WithoutObserving(string framingAndBody)
+    {
+        // Arrange — the client writes part of the body its framing declares, then closes its sending side,
+        // so the read throws EndOfStreamException: the cheapest way to make a read fail on demand.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        int observed = 0;
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
+        factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+        {
+            Interlocked.Increment(ref observed);
+            return ValueTask.CompletedTask;
+        });
+        factory.Application.Use(async (context, next) =>
+        {
+            byte[] buffer = new byte[256];
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+
+            context.Response.StatusCode = HttpStatusCode.NoContent;
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        // Act
+        string response = await ExchangeRawAsync(
+            transport,
+            "POST /widgets HTTP/1.1\r\nHost: localhost\r\n" + framingAndBody,
+            cancellationToken,
+            closeSendingSide: true);
+
+        // Assert
+        response.ShouldStartWith("HTTP/1.1 400");
+        response.ShouldContain("Connection: close");
+        response.ShouldNotContain("application/problem+json");
+        response.ShouldNotContain("500");
+        observed.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary E2E: An application fault reading a well-formed body should still be observed and answered 500")]
     public async Task Boundary_ApplicationFaultAfterAWellFormedBody_ShouldObserveAndRender500()
     {
@@ -106,15 +153,25 @@ public class ExceptionBoundaryClientFaultTests
 
     /// <summary>
     /// Writes <paramref name="request"/> on one raw connection to <paramref name="transport"/> and reads
-    /// until the server closes the connection, returning everything it wrote.
+    /// until the server closes the connection, returning everything it wrote. With
+    /// <paramref name="closeSendingSide"/> the client closes its sending side after the request.
     /// </summary>
-    private static async Task<string> ExchangeRawAsync(InMemoryConnectionListener transport, string request, CancellationToken cancellationToken)
+    private static async Task<string> ExchangeRawAsync(
+        InMemoryConnectionListener transport,
+        string request,
+        CancellationToken cancellationToken,
+        bool closeSendingSide = false)
     {
         await using Connection connection = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
         Stream stream = connection.AsStream();
 
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);
         await stream.FlushAsync(cancellationToken);
+
+        if (closeSendingSide)
+        {
+            await connection.Output.CompleteAsync();
+        }
 
         StringBuilder received = new();
         byte[] buffer = new byte[1024];

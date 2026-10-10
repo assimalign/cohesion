@@ -60,13 +60,16 @@ internal sealed class Http1Context : TransportHttpContext
     /// <summary>
     /// The status the transport answers this exchange with because reading its request body after
     /// dispatch failed on the client's side, or <see langword="null"/> when it did not: <c>400</c> for a
-    /// malformed chunked framing or trailer section (RFC 9112 §5.1, #1333), and the latched limit
+    /// malformed chunked framing or trailer section (RFC 9112 §5.1, #1333), the latched limit
     /// status for a body over the size cap (<c>413</c>) or below the minimum data rate (<c>408</c>,
-    /// #1339), or for a trailer section over the header-section bounds (<c>431</c>, #1375). The
+    /// #1339), or for a trailer section over the header-section bounds (<c>431</c>, #1375), and
+    /// <c>400</c> for a body the peer cut short by closing the connection (RFC 9112 §8, #1340). The
     /// rejection replaces a response that has not started, and the connection closes.
     /// </summary>
     public HttpStatusCode? RequestBodyRejectedStatusCode =>
-        _requestBody.IsMalformed ? HttpStatusCode.BadRequest : _requestBody.RejectedStatusCode;
+        _requestBody.IsMalformed || _requestBody.IsIncomplete
+            ? HttpStatusCode.BadRequest
+            : _requestBody.RejectedStatusCode;
 
     /// <summary>
     /// Consumes and discards any request body the application did not read, so the connection

@@ -349,7 +349,9 @@ and closes the connection (#1339); a malformed body gets `400` the same way (#13
 own stream.
 
 **A client fault is not an application fault (#1340).** The read above throws an
-`InvalidDataException` or an `IOException`, and before #1340 everything in the pipeline that
+`InvalidDataException` or an `IOException`, and so does a read the client cuts short by closing the
+connection before the body is complete (an `EndOfStreamException`, which the HTTP/1.1 transport also
+answers `400`, RFC 9112 §8). Before #1340 everything in the pipeline that
 observed it treated it as an application defect: the HTTP logging middleware logged it at
 `Error`, the exception boundary ran `OnException` and rendered a `500` problem, and the request
 decompression middleware relabeled a framing failure under its decoders as malformed content.
@@ -360,7 +362,10 @@ finalization needs no change: it still stages its `500`, the transport still rep
 the exchange's telemetry reads the status the transport set, so the span and the duration carry
 `http.response.status_code` `400`, `413` or `408`, no `error.type`, and an unset span status
 (`WebServerTelemetryTests` pins it). The faulted pipeline is otherwise handled as before, since
-it is the application's code that did not catch the read's exception.
+it is the application's code that did not catch the read's exception. The one place the server
+reads the feature itself is its telemetry, for a fault after the response started: the transport's
+status can no longer replace that response, so the exchange is reset, and its `error.type` is
+`client_fault` rather than `unhandled_exception` (see "Outcomes and `error.type`").
 
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
@@ -625,11 +630,25 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | How the exchange ended | `http.response.status_code` | `error.type` |
 | --- | --- | --- |
 | A response was sent with a status below 500 | the status | none |
-| The request body broke its framing or a limit while it was read, and the HTTP/1.1 transport answered it in place of the staged response (#1333, #1339, #1340) | the transport's `400`, `413`, `408` or `431`, which it also sets on the exchange | none |
+| The request body broke its framing or a limit while it was read, or the client cut it short, and the HTTP/1.1 transport answered it in place of the staged response (#1333, #1339, #1340) | the transport's `400`, `413`, `408` or `431`, which it also sets on the exchange | none |
 | A response was sent with a 5xx status, including the server's replacement `500` after a fault | the status | the status, for example `500` |
 | The exchange was cancelled (a peer reset or closed connection, the server stopping, `IHttpContext.Cancel`) and reset | only when a streamed response had started | `request_canceled` |
+| The pipeline threw after its response started, or its response could not be replaced, after the transport reported a client fault (`IWebClientFaultFeature`), and the exchange was reset (#1340) | only when the response had started | `client_fault` |
 | The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
 | The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
+
+**A client fault after the response started (#1340).** An endpoint that starts a streamed response
+and then reads a malformed, over-limit or cut-short body throws after its response started, so the
+transport's status cannot replace it and the server resets the exchange. Before, that was
+`unhandled_exception`, while the HTTP access log recorded the same exchange as a client fault at its
+configured level; any client could raise it on such an endpoint. `WebExchangeTelemetry.Stop` now reads
+`IWebClientFaultFeature` for a faulted exchange and reports `client_fault`, so `unhandled_exception`
+means the application's own defect again. It reads the feature only when the exchange is instrumented
+and faulted, so the fast path pays nothing. The span status stays `Error`, as for `request_canceled`:
+the reset cut off a response whose status (usually a `2xx`) is not how the exchange ended, and the
+semantic convention sets `Error` on a `1xx`–`3xx` span that ended in another error. The `4xx`-is-unset
+rule covers a `4xx` that was sent, which is the case where the transport's status replaced the staged
+response (the table's second row).
 
 **How `http.route` reaches the span.** The template travels through `IWebEndpointFeature`, which
 already carries the selected endpoint to the pipeline terminal. When this was designed COHRES002
@@ -1396,11 +1415,18 @@ The client-fault interceptor follows the same rule with a wider condition. Only 
 body is read after dispatch can fault that way, so it joins the response phase of an HTTP/1.1 request
 that declares a body (a `Transfer-Encoding`, or a `Content-Length` other than zero, RFC 9112 §6) and
 installs the feature there. Its head hook allocates nothing, so a request without a body (a plain `GET`)
-keeps the fast path and carries no feature. The feature collection's capacity does not count it
-(`HostFeatureCount` stays four), because the rounding absorbs an uncounted feature. A request with a
-body pays for the response sink, the control, the response context and the feature: measured over the
-in-memory transport with a raw keep-alive client, a 3-byte `POST` allocated about 600 B more (35,640 B
-against 34,990 B), while a plain `GET` stayed within the run-to-run noise. HTTP/2 and HTTP/3 exchanges
+keeps the fast path and carries no feature. `HostFeatureCount` stays four because the feature is not on
+every exchange; when it overflows the rounded capacity, the collection grows as an unsized one would
+(see "Rounding: an overflow never costs more than not presizing"), so it never costs more than not
+presizing. That is not spare room: the rounding leaves a free slot only when the count falls between
+two growth sizes, and a count already on one (three stamped application features make seven) is full.
+A request with a body pays for the response sink, the control, the response context and the feature,
+and for that growth when the count sits on a growth size. Measured over the in-memory transport with a
+raw keep-alive client (Debug build, median of five rounds of 5,000 requests, three runs), a 3-byte
+`POST` allocated about 470 B more with no stamped application features (36,837 B against 36,308 B),
+where the host's four round up to seven slots and the feature takes a free one, and about 1,150 B more
+with three (37,512 B against 36,351 B), where the count is seven and the feature grows the collection
+to 17 slots. A plain `GET` stayed within the run-to-run noise in both. HTTP/2 and HTTP/3 exchanges
 are left alone: their controls keep the interface's `null` default until #1378, so the response phase
 would buy nothing there.
 

@@ -14,7 +14,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// The HTTP/1.1 exchange control's client-fault report (#1340). A body read after dispatch that fails
 /// on the client's side throws, and the transport latches the status it answers with: <c>400</c> for
 /// malformed chunked framing (#1333), <c>413</c> over the body-size cap and <c>408</c> below the minimum
-/// data rate (#1339). <see cref="IHttpExchangeControl.ClientFaultStatusCode"/> reports that status to the
+/// data rate (#1339), and <c>400</c> for a body the peer cut short by closing the connection.
+/// <see cref="IHttpExchangeControl.ClientFaultStatusCode"/> reports that status to the
 /// code that observes the exception, so it can tell the client's fault from the application's.
 /// </summary>
 public class Http1ExchangeControlClientFaultTests
@@ -71,6 +72,31 @@ public class Http1ExchangeControlClientFaultTests
         observed.ReadFailure.ShouldBeAssignableTo<IOException>();
         observed.AfterRead.ShouldBe(HttpStatusCode.RequestTimeout);
         observed.Output.ShouldStartWith("HTTP/1.1 408");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: A body the peer cuts short by closing the connection should be reported as a 400 client fault once the read fails")]
+    [InlineData("Content-Length: 100\r\n\r\n{")]
+    [InlineData("Transfer-Encoding: chunked\r\n\r\n10\r\nshort")]
+    [InlineData("Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")]
+    [InlineData("Transfer-Encoding: chunked\r\n\r\n1")]
+    public async Task ClientFaultStatusCode_OnBodyCutShortByThePeer_ShouldReportBadRequest(string framingAndBody)
+    {
+        // Arrange — the peer closes its side before the body its framing declared is complete: a
+        // Content-Length body short of its length, a chunk cut off inside its data, a chunked body cut
+        // off before the next chunk-size line, and one cut off inside a chunk-size line. RFC 9112 §8 lets
+        // the server answer the incomplete request with an error before it closes the connection.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\n" + framingAndBody);
+
+        // Act
+        Observed observed = await ServeAsync(payload, http1 => { });
+
+        // Assert
+        observed.BeforeRead.ShouldBeNull();
+        observed.ReadFailure.ShouldBeOfType<EndOfStreamException>();
+        observed.AfterRead.ShouldBe(HttpStatusCode.BadRequest);
+        observed.Output.ShouldStartWith("HTTP/1.1 400");
+        observed.Output.ShouldContain("Connection: close");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Client Fault: A well-formed body should report no client fault")]

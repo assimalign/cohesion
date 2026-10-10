@@ -85,8 +85,9 @@ which sees the exchange's features and not the server.
 
 **`IWebClientFaultFeature`** is the client-fault seam (#1340, owner decision 28). Its `StatusCode` is
 the `4xx` the transport answers an exchange with because the client's request was at fault while the
-application read its body: `400` for a malformed body, `413` over the body-size cap, `408` below the
-minimum data rate, `431` for a trailer section over its bounds. The read throws as any stream read
+application read its body: `400` for a malformed body or one the client cut short by closing the
+connection, `413` over the body-size cap, `408` below the minimum data rate, `431` for a trailer
+section over its bounds. The read throws as any stream read
 does; this feature is how the code that sees the exception learns it was not an application defect.
 `Web.Diagnostics` then logs the exchange at its configured level with the status sent,
 `Web.ErrorHandling` skips `OnException` and the `500` problem, and `Web.Compression` leaves the

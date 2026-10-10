@@ -165,6 +165,7 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
             {
                 ExchangeResult.Responded => null,
                 ExchangeResult.Canceled => WebServerTelemetry.RequestCanceled,
+                ExchangeResult.Faulted when IsClientFault() => WebServerTelemetry.ClientFault,
                 ExchangeResult.Faulted => WebServerTelemetry.UnhandledException,
                 _ => WebServerTelemetry.ResponseSendFailed,
             };
@@ -199,6 +200,14 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
             StopActivity(statusCode, error, route, elapsed);
         }
     }
+
+    /// <summary>
+    /// Whether the transport reported that the client's request was at fault (#1340). A faulted exchange
+    /// reaches here only when its response had started or could not be reshaped: before that the
+    /// transport answers with its own status in place of the server's <c>500</c>, and the exchange counts
+    /// as responded. The pipeline's exception was then the body read's, not the application's.
+    /// </summary>
+    private bool IsClientFault() => _exchange.Features.Get<IWebClientFaultFeature>()?.StatusCode is not null;
 
     private void Instrument(bool traced, bool timed, bool counted)
     {

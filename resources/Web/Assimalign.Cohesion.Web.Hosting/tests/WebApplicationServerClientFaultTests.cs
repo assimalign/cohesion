@@ -68,6 +68,30 @@ public class WebApplicationServerClientFaultTests
         response.ShouldStartWith("HTTP/1.1 413");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: A body the client cuts short by closing its side should be reported to the pipeline as the 400 the transport sends")]
+    [InlineData("Content-Length: 100\r\n\r\n{")]
+    [InlineData("Transfer-Encoding: chunked\r\n\r\n10\r\nshort")]
+    public async Task ClientFault_OnBodyCutShortByTheClient_ShouldReportTheTransportStatus(string framingAndBody)
+    {
+        // Arrange — the client writes part of the body its framing declares, then closes its sending
+        // side. RFC 9112 §8 lets the server answer the incomplete request before it closes the connection.
+        Observed observed = new();
+
+        // Act
+        string response = await ServeRawAsync(
+            "POST /widgets HTTP/1.1\r\nHost: localhost\r\n" + framingAndBody,
+            observed,
+            configure: null,
+            closeSendingSide: true);
+
+        // Assert
+        observed.FeaturePresent.ShouldBeTrue();
+        observed.BeforeRead.ShouldBeNull();
+        observed.ReadFailure.ShouldBeOfType<EndOfStreamException>();
+        observed.AfterRead.ShouldBe(CohesionHttpStatusCode.BadRequest);
+        response.ShouldStartWith("HTTP/1.1 400");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: A well-formed body should report no client fault")]
     public async Task ClientFault_OnWellFormedBody_ShouldReportNone()
     {
@@ -115,10 +139,15 @@ public class WebApplicationServerClientFaultTests
     /// <summary>
     /// Serves <paramref name="request"/> on one raw connection to a default Web server whose pipeline reads
     /// the request body to its end, recording the client-fault feature's report before and after the read
-    /// and the read's failure, then answers <c>204</c>. Reads until the server closes the connection and
-    /// returns everything it wrote.
+    /// and the read's failure, then answers <c>204</c>. With <paramref name="closeSendingSide"/> the client
+    /// closes its sending side after the request, as a peer that cuts the body short does. Reads until the
+    /// server closes the connection and returns everything it wrote.
     /// </summary>
-    private static async Task<string> ServeRawAsync(string request, Observed observed, Action<Http1ConnectionListenerOptions>? configure)
+    private static async Task<string> ServeRawAsync(
+        string request,
+        Observed observed,
+        Action<Http1ConnectionListenerOptions>? configure,
+        bool closeSendingSide = false)
     {
         using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
@@ -156,6 +185,11 @@ public class WebApplicationServerClientFaultTests
 
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken);
         await stream.FlushAsync(cancellationToken);
+
+        if (closeSendingSide)
+        {
+            await connection.Output.CompleteAsync();
+        }
 
         StringBuilder received = new();
         byte[] chunk = new byte[1024];

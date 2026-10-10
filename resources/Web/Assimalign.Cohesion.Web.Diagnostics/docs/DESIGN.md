@@ -120,8 +120,9 @@ One entry per completed exchange, emitted in the middleware's `finally`:
 - **Message** — `"GET /orders -> 200 in 12.345 ms"`, composed only from enabled fields
   (invariant culture, `string.Create`); `"(faulted)"` appended on exceptions, `"(client fault)"` on a
   client fault.
-- **Client faults (#1340).** A request body that breaks its framing or a configured limit fails the
-  application's read, and the transport answers the exchange itself with `400`, `413`, `408` or `431`.
+- **Client faults (#1340).** A request body that breaks its framing or a configured limit, or that the
+  client cuts short by closing the connection, fails the application's read, and the transport answers
+  the exchange itself with `400`, `413`, `408` or `431`.
   Any client can cause that, so it is not an application defect, and escalating it filled the log with
   `Error` entries on demand. The server reports it through `IWebClientFaultFeature` (`Web.Server`,
   installed by the default Web server on an HTTP/1.1 request with a body). When the feature reports a
@@ -132,6 +133,14 @@ One entry per completed exchange, emitted in the middleware's `finally`:
   that response as it stands and its own status is logged. That holds whether the read's exception
   reaches the middleware or a binder or the exception boundary answered it first. Under a server that
   does not install the feature, the entry is escalated as before.
+  #1340's first acceptance criterion asked for these entries at `Debug`, like other peer faults. They
+  stay at `Options.Level` instead, deliberately: this is an access log, one entry per exchange at one
+  level, and a client fault is an exchange the server answered. At `Debug` a `400` would rank below an
+  ordinary `200` and vanish from a log configured at the default `Information`, the opposite of what an
+  access log is for. What the criterion was after, not escalating to `Error` and not attaching the
+  exception, holds, and `http.client_fault` lets a reader filter the entries out or route them
+  elsewhere. The server's own diagnostics (`Web.Hosting`'s `WebApplicationServerLog`) write no entry
+  per exchange, a client fault included, so this entry is the one place it is logged.
 - **Attributes** — per the `HttpLoggingAttributes` contract, only for enabled fields.
 - **Never throws.** Attribute building is guarded; a logging failure cannot fail an exchange or
   mask an application exception mid-unwind. Sink failures are already isolated by the logging

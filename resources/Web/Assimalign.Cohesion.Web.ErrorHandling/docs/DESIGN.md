@@ -132,9 +132,11 @@ distinction is deliberate (an observer only watches; a handler owns the response
 ### Client faults are outcomes, not faults (#1340)
 
 A request body that breaks its framing (a malformed chunk size or trailer section) or a configured
-limit (the body-size cap, the minimum data rate, the trailer-section bounds) fails the application's
-read with an `InvalidDataException` or an `IOException`. That exception is the transport's answer to
-the client's bytes: the transport latches a `400`, `413`, `408` or `431`, sends it in place of any
+limit (the body-size cap, the minimum data rate, the trailer-section bounds), or that the client cuts
+short by closing the connection before the body is complete, fails the application's read with an
+`InvalidDataException` or an `IOException` (an `EndOfStreamException` for a body cut short). That
+exception is the transport's answer to the client's bytes: the transport latches a `400`, `413`, `408`
+or `431`, sends it in place of any
 response that has not started, and closes the connection. Before #1340 the boundary treated it as a
 fault like any other: `OnException` ran and a `500` problem was staged, which the transport then
 replaced. Any client could make the application's fault observer fire at will.

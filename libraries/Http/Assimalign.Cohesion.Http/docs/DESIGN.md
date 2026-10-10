@@ -805,7 +805,8 @@ not a core one.
 exchange with because the client's request was at fault, or `null`. A transport that dispatches a
 request at its head learns some faults only while the application reads the body: the body breaks the
 message framing (a malformed chunk size, a malformed trailer section) or a configured limit (its size,
-its data rate, the bounds on a trailer section). The read throws, as any stream read does, and the
+its data rate, the bounds on a trailer section), or the client closes the connection before the body
+its framing declared is complete (RFC 9112 §8). The read throws, as any stream read does, and the
 transport answers the exchange itself, replacing a response that has not started and closing the
 connection (`Http.Connections` DESIGN, "Reporting the client fault"). The member tells the code that
 observes the exception that it was the client's fault, without inspecting the exception.

@@ -547,6 +547,59 @@ public class WebServerTelemetryTests
         span.GetTagItem("http.response.status_code").ShouldBe(200);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A client fault found reading the body after the response started should report client_fault, not unhandled_exception")]
+    public async Task ServerSpan_ClientFaultAfterResponseStarted_ShouldReportClientFault()
+    {
+        // Arrange — the pipeline starts a streamed response, then reads a malformed chunked body and lets
+        // the failed read escape. The transport's 400 can no longer replace the response, so the server
+        // resets the exchange; the fault is still the client's, not the application's (#1340).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new();
+
+        string path = $"/telemetry/client-fault-streamed/{Guid.NewGuid():N}";
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options =>
+        {
+            options.UseHttp1(transport);
+            options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        });
+        factory.Application.Use(async (context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            IHttpResponseStreamingFeature streaming = context.Response.Streaming;
+            await streaming.WriteAsync(Encoding.UTF8.GetBytes("partial"), cancellationToken);
+            await streaming.FlushAsync(cancellationToken);
+
+            byte[] buffer = new byte[256];
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Connection client = await transport.CreateFactory().ConnectAsync(transport.EndPoint, cancellationToken);
+        Stream stream = client.AsStream();
+
+        // Act — "zz" is not a chunk size (RFC 9112 §7.1).
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"POST {path} HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nabc\r\n0\r\n\r\n"), cancellationToken);
+        await stream.FlushAsync(cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+        RecordedMeasurement duration = await recorder.WaitForMeasurementAsync(
+            m => m.Instrument == "http.server.request.duration" && Equals(m.Tags.GetValueOrDefault("error.type"), "client_fault"),
+            cancellationToken);
+
+        // Assert
+        span.GetTagItem("error.type").ShouldBe("client_fault");
+        span.GetTagItem("http.response.status_code").ShouldBe(200);
+        span.Status.ShouldBe(ActivityStatusCode.Error);
+        duration.Tags.GetValueOrDefault("http.response.status_code").ShouldBe(200);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A response that cannot be sent should report response_send_failed")]
     public async Task ServerSpan_ResponseSendFailure_ShouldReportResponseSendFailed()
     {

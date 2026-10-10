@@ -50,6 +50,15 @@ internal static class WebServerTelemetry
     public const string UnhandledException = "unhandled_exception";
 
     /// <summary>
+    /// <c>error.type</c> for a pipeline that threw when its response could no longer be replaced, after
+    /// the transport reported that the client's request was at fault (<see cref="IWebClientFaultFeature"/>):
+    /// reading its body failed on the client's side once the response had started, so the transport's
+    /// own status could not replace it and the exchange was reset. The application did not fail, so it is
+    /// not <see cref="UnhandledException"/>.
+    /// </summary>
+    public const string ClientFault = "client_fault";
+
+    /// <summary>
     /// <c>error.type</c> for a response that could not be put on the wire.
     /// </summary>
     public const string ResponseSendFailed = "response_send_failed";

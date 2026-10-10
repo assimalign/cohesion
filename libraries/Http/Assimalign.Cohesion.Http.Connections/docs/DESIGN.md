@@ -1652,12 +1652,25 @@ from the control its response interceptor captures, as it reads the other probes
 The exception types are unchanged: the body is a `Stream`, and a reader that
 catches `InvalidDataException` or `IOException` keeps working.
 
+- **A body cut short is a client fault too.** A peer that closes the connection
+  before the body its framing declared is complete (a `Content-Length` body short
+  of its length, or a chunked body cut off inside a chunk or a framing line, before
+  its last chunk) fails the read with an `EndOfStreamException` and latches
+  `Http1RequestBodyStream.IsIncomplete`, which `RequestBodyRejectedStatusCode`
+  maps to `400`. Without it nothing was latched, so the cheapest way around the
+  report was `Content-Length: 100`, one octet and a half-close: the host logged the
+  exchange at `Error`, ran its fault observer, and wrote its `500` onto the
+  half-closed connection. RFC 9112 §8 lets a server answer an incomplete request
+  with an error before it closes the connection, Kestrel's
+  `UnexpectedEndOfRequestContent` answers `400` the same way, and the peer that
+  closed only its sending side can still read the answer. The exception type stays
+  `EndOfStreamException`, and the body is not read or drained again.
 - **When it reports.** `null` until a read fails on the client's side, then the
   latched status for the rest of the exchange. A read cancelled by the
   application, or one that stopped inside the framing because of it, is not a
   client fault and reports nothing. A body the application never read is found
-  malformed or over its limit only by the drain, after the response, so its
-  report comes too late for the pipeline; the connection still closes.
+  malformed, over its limit or cut short only by the drain, after the response, so
+  its report comes too late for the pipeline; the connection still closes.
 - **Where it does not report.** `Http2ExchangeControl` and `Http3ExchangeControl`
   keep the interface's default, `null`, until #1378 (Stage 12) reports their
   rejections.

@@ -190,6 +190,16 @@ internal sealed class Http1RequestBodyStream : Stream
     /// </summary>
     internal HttpStatusCode? RejectedStatusCode { get; private set; }
 
+    /// <summary>
+    /// Whether the peer closed the connection before the body its framing declared was complete: a
+    /// <c>Content-Length</c> body short of its length, or a chunked body cut off inside a chunk or a
+    /// framing line before its last chunk. The read fails with an <see cref="EndOfStreamException"/>.
+    /// RFC 9112 §8 lets a server answer an incomplete request with an error before it closes the
+    /// connection, so the exchange's response becomes a <c>400</c> when it has not started, as it does
+    /// for a malformed body. Once set, the body is never read again and is not drained.
+    /// </summary>
+    internal bool IsIncomplete { get; private set; }
+
     /// <inheritdoc />
     public override bool CanRead => !_disposed;
 
@@ -267,8 +277,8 @@ internal sealed class Http1RequestBodyStream : Stream
         // new request (#1339). Nor can one whose read stopped inside its framing, cancelled by the
         // application for instance: the octets of the line read so far are gone, so a drain would
         // resume mid-line, and the rest of a chunk-size line "40" read as a line of its own is "0", a
-        // last chunk.
-        if (IsMalformed || RejectedStatusCode is not null || _framingInterrupted)
+        // last chunk. Nor, finally, can one the peer cut short: the connection's read side has ended.
+        if (IsMalformed || RejectedStatusCode is not null || _framingInterrupted || IsIncomplete)
         {
             return false;
         }
@@ -372,7 +382,7 @@ internal sealed class Http1RequestBodyStream : Stream
         int read = await ReadFromConnectionAsync(buffer[..toRead], cancellationToken).ConfigureAwait(false);
         if (read == 0)
         {
-            throw new EndOfStreamException(
+            throw Truncated(
                 $"The connection closed after {_totalRead} of {_contentLength} expected request-body octets.");
         }
 
@@ -471,7 +481,7 @@ internal sealed class Http1RequestBodyStream : Stream
             int read = await ReadFromConnectionAsync(buffer[..toRead], cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
-                throw new EndOfStreamException(
+                throw Truncated(
                     $"RFC 9112 §7.1: connection closed mid-chunk with {_chunkRemaining} octets outstanding.");
             }
 
@@ -711,7 +721,7 @@ internal sealed class Http1RequestBodyStream : Stream
             int read = await ReadFromConnectionAsync(_oneByte, cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
-                throw new EndOfStreamException("RFC 9112 §7.1: connection closed while a chunk framing line was being read.");
+                throw Truncated("RFC 9112 §7.1: connection closed while a chunk framing line was being read.");
             }
 
             byte b = _oneByte[0];
@@ -847,6 +857,17 @@ internal sealed class Http1RequestBodyStream : Stream
     {
         RejectedStatusCode ??= statusCode;
         return new Http1LimitExceededException(statusCode, message);
+    }
+
+    /// <summary>
+    /// Marks the body <see cref="IsIncomplete"/>, because the peer closed the connection before the
+    /// body its framing declared was complete, and returns the exception the caller throws. The type
+    /// stays <see cref="EndOfStreamException"/>, so a reader that catches it keeps working.
+    /// </summary>
+    private EndOfStreamException Truncated(string message)
+    {
+        IsIncomplete = true;
+        return new EndOfStreamException(message);
     }
 
     /// <inheritdoc />

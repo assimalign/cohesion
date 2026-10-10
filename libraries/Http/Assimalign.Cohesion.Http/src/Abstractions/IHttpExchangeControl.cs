@@ -64,10 +64,12 @@ public interface IHttpExchangeControl
     /// <remarks>
     /// <para>
     /// A transport that dispatches a request at its head learns some of the client's faults only while
-    /// the application reads the request body: the body breaks the message framing, or it breaks a
-    /// configured limit (its size, its data rate, the bounds on a trailer section). The body stream
+    /// the application reads the request body: the body breaks the message framing, it breaks a
+    /// configured limit (its size, its data rate, the bounds on a trailer section), or the client
+    /// closes the connection before the body its framing declared is complete. The body stream
     /// throws, as any stream does: an <see cref="System.IO.InvalidDataException"/> for a malformed
-    /// body and an <see cref="IOException"/> for a broken limit. The transport also latches the
+    /// body, an <see cref="IOException"/> for a broken limit, and an
+    /// <see cref="System.IO.EndOfStreamException"/> for a body cut short. The transport also latches the
     /// <c>4xx</c> status it answers the exchange with (<c>400</c>, <c>408</c>, <c>413</c> or
     /// <c>431</c>), which replaces any response that has not started, and it closes the connection
     /// after the exchange. A response that had already started is finished or reset as the host
