@@ -240,6 +240,39 @@ public sealed class SqlDeferredProvisioningTests
         engine.DeclaredDatabases.Single().Result.ShouldNotBeNull().OperationCount.ShouldBe(4);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: canceling after cheap DDL compensates with a live lock owner and retries on restart")]
+    public async Task BuildAsync_CanceledAtDeferredHandoff_ShouldCompensateAndConverge()
+    {
+        // Arrange: cancellation interrupts the handoff after cheap DDL has committed.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource();
+        SqlSchema desired = Desired();
+        var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token);
+        int applied = 0;
+        var builder = Builder(storage);
+        builder.AddWorker(engine =>
+        {
+            engine.BeforeProvisioning = database => database.SchemaProvisioner.StepApplied = _ =>
+            {
+                Interlocked.Increment(ref applied);
+                cancellation.Cancel();
+            };
+            return new RecordingWorker(engine);
+        });
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await builder.AddDatabase(desired).BuildAsync(cancellation.Token));
+        await using var retry = await Builder(storage.CaptureDurableImages()).AddDatabase(desired).BuildAsync(timeout.Token);
+        var database = await retry.OpenDatabaseAsync("pending", timeout.Token);
+        await WaitDoneAsync(database, timeout.Token);
+
+        // Assert
+        applied.ShouldBe(1);
+        database.Catalog.PendingMigration.ShouldBeNull();
+        database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: canceling Build after a pending reservation releases the worker transaction and retries on restart")]
     public async Task BuildAsync_CanceledAfterReservation_ShouldRetainPendingAndConverge()
     {

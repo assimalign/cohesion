@@ -126,7 +126,20 @@ internal sealed partial class SqlSchemaProvisioner
             }
             catch (Exception failure)
             {
-                CompensationResult compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
+                CompensationResult compensation;
+                if (locks is null && applied.Count > 0 && !_database.IsOffline)
+                {
+                    // The deferred handoff released the inline reservation before persisting
+                    // intent. Compensation must acquire locks with a live transaction identity,
+                    // even when cancellation interrupted that handoff.
+                    locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None).ConfigureAwait(false);
+                    await using var compensationSession = _database.CreateSchemaSession(schema.Name, CancellationToken.None, locks.Sequence);
+                    compensation = await CompensateAsync(compensationSession, applied).ConfigureAwait(false);
+                }
+                else
+                {
+                    compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
+                }
 
                 // A canceled token can also surface as the failure of the step it interrupted (a
                 // commit whose record could not be written is an aborted transaction), so the

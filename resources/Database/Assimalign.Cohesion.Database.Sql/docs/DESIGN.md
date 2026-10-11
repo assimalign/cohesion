@@ -1128,6 +1128,9 @@ composite primary key, which the retained builder does not declare.
 
 ### Deferred data-scaling steps (B2, decision 49a)
 
+If cancellation interrupts the handoff after cheap-step locks were released, compensation owns a
+fresh transaction. An ended reservation is never reused to acquire compensation locks.
+
 Build probes each affected table for one stored record. It runs creation, nullable column
 addition, drops, and work on empty tables inline. Populated-table index creation, constraint
 validation, required-column addition, additions of columns whose domains carry checks, and validation-only column tightening run on the engine's
