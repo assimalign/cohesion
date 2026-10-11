@@ -71,6 +71,41 @@ their parsing rules.
 `ResourceContext` and `ResourceRuntime` live in `Assimalign.Cohesion.Hosting.Resources`, not
 Core; they are the in-process carrier delivered by runtime-contract item 12.
 
+## FileSystemPath and Win32 device paths
+
+`FileSystemPath.Parse` normalizes a Win32 extended-length (`\\?\`) or device (`\\.\`) prefix
+away when the prefix names a drive or a UNC share, rather than preserving it:
+
+| Input | Parsed value |
+| --- | --- |
+| `\\?\C:\a\b`, `\\.\C:\a\b` | `C:/a/b` |
+| `\\?\UNC\server\share\a`, `\\.\UNC\server\share\a` | `//server/share/a` |
+| `\\?\Volume{guid}\a`, `\\.\pipe\name`, `\\?\GLOBALROOT\...` | `ArgumentException` |
+
+Why it matters: the .NET host fully qualifies an application path at or past `MAX_PATH` (260)
+with `\\?\`, so `AppContext.BaseDirectory`, and `ResourceContext.ContentRootPath` derived from
+it, arrive prefixed. Every area hosting module parses one of them at startup, so rejecting the
+`?` stopped every Cohesion application installed under a deep directory.
+
+Why normalize rather than preserve:
+
+- **One spelling per location.** `FileSystemPath` equality, hashing, and
+  `FileSystemPathComparer` are plain string comparisons, so `\\?\C:\a` and `C:\a` would otherwise
+  be two different keys for one directory. `HasDrive`, `HasShare`, `HasRoot`, `GetSegments`,
+  `Join`, and `Merge` also keep working unchanged on the normalized form.
+- **Nothing is lost for long paths.** .NET file APIs add `\\?\` themselves to a path at or past
+  `MAX_PATH` after normalizing it, so `PhysicalFileSystem` opens a normalized `C:/...` path past
+  260 characters (covered by a Physical test and checked by hand through `dotnet <app>.dll` from a
+  279-character directory).
+
+Known costs: `\\?\` also suppresses Win32 normalization, so a component that only that form can
+name, such as a trailing dot or space, loses that meaning once the prefix is stripped.
+`FileSystemPath` treats both separators alike on every platform, so the same normalization
+applies off Windows. A device target that is neither a drive nor `UNC\` has no ordinary spelling,
+so it is rejected rather than silently turned into a share named `.` or `?`. `?` stays illegal
+everywhere except the prefix, and the NT `\??\` prefix is still rejected. Error indexes refer to
+the caller's original string.
+
 ## AOT posture
 
 Runtime-contract parsing uses direct string, integer, and URI operations. It performs no

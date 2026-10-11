@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+
+using Shouldly;
 using Xunit;
 
 namespace System.IO.Tests;
@@ -119,6 +121,87 @@ public class FileSystemPathTests
 
         Assert.Equal(count, segments.Length);
         Assert.Equal(firstSegment, segments[0]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [FileSystemPath] - Parse: Should strip a device prefix from a drive path")]
+    [InlineData(@"\\?\C:\users\dotnetcadet", "C:/users/dotnetcadet")]
+    [InlineData(@"\\.\C:\users\dotnetcadet", "C:/users/dotnetcadet")]
+    [InlineData("//?/C:/users/dotnetcadet", "C:/users/dotnetcadet")]
+    [InlineData(@"\\?\C:\users\dotnetcadet\", "C:/users/dotnetcadet")]
+    [InlineData(@"\\?\C:", "C:")]
+    public void Parse_DevicePrefixedDrivePath_ShouldStripPrefix(string value, string expected)
+    {
+        // Act
+        var path = FileSystemPath.Parse(value);
+
+        // Assert
+        path.ToString().ShouldBe(expected);
+        path.HasDrive(out var drive).ShouldBeTrue();
+        drive.ShouldBe('C');
+    }
+
+    [Theory(DisplayName = "Cohesion Test [FileSystemPath] - Parse: Should re-root a device UNC path as a share")]
+    [InlineData(@"\\?\UNC\server\share\directory", "//server/share/directory")]
+    [InlineData(@"\\?\unc\server\share\directory", "//server/share/directory")]
+    [InlineData(@"\\.\UNC\server\share\directory", "//server/share/directory")]
+    [InlineData(@"\\?\UNC\server\share", "//server/share")]
+    public void Parse_DevicePrefixedUncPath_ShouldReRootAsShare(string value, string expected)
+    {
+        // Act
+        var path = FileSystemPath.Parse(value);
+
+        // Assert
+        path.ToString().ShouldBe(expected);
+        path.HasShare(out var share).ShouldBeTrue();
+        share.ShouldBe("//server/share");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [FileSystemPath] - Parse: Should accept an extended-length path past MAX_PATH")]
+    public void Parse_ExtendedPathPastMaxPath_ShouldEqualOrdinaryPath()
+    {
+        // Arrange
+        var ordinary = @"C:\" + string.Join('\\', Enumerable.Repeat("directory-segment-0123456789", 12)) + @"\app.exe";
+
+        // Act
+        var extended = FileSystemPath.Parse(@"\\?\" + ordinary);
+        var extendedUnc = FileSystemPath.Parse(@"\\?\UNC\server\share\" + ordinary.Substring(3));
+
+        // Assert
+        ordinary.Length.ShouldBeGreaterThan(260);
+        extended.ShouldBe(FileSystemPath.Parse(ordinary));
+        extended.Length.ShouldBe(ordinary.Length);
+        extendedUnc.ToString().ShouldStartWith("//server/share/directory-segment-0123456789/");
+        extendedUnc.Length.ShouldBeGreaterThan(260);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [FileSystemPath] - Parse: Should reject '?' and unsupported device paths")]
+    [InlineData("C:/users/?test.cs")]
+    [InlineData(@"\\?\C:\users\?test.cs")]
+    [InlineData(@"C:\?\users")]
+    [InlineData(@"users\\?\C:\directory")]
+    [InlineData(@"\??\C:\users")]
+    [InlineData(@"\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\users")]
+    [InlineData(@"\\.\pipe\cohesion")]
+    [InlineData(@"\\?\GLOBALROOT\Device\HarddiskVolume1\users")]
+    [InlineData(@"\\?\C:users")]
+    [InlineData(@"\\?\UNC\\share")]
+    [InlineData(@"\\?\UNC")]
+    public void Parse_QuestionMarkOrUnsupportedDevicePath_ShouldThrow(string value)
+    {
+        // Act / Assert
+        Should.Throw<ArgumentException>(() => FileSystemPath.Parse(value));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [FileSystemPath] - Parse: Should report the caller's index after a device prefix")]
+    [InlineData(@"\\?\C:\a?b", 8)]
+    [InlineData(@"\\?\UNC\s\h?", 11)]
+    public void Parse_IllegalCharacterAfterDevicePrefix_ShouldReportCallerIndex(string value, int index)
+    {
+        // Act
+        var exception = Should.Throw<ArgumentException>(() => FileSystemPath.Parse(value));
+
+        // Assert
+        exception.Message.ShouldContain($"'?' at index {index}.");
     }
 
     [Theory]
