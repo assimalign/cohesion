@@ -724,19 +724,38 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     }
 
     // The format marker's tuple has remained (kind, version), using kind 4 before
-    // format 4 and the downgrade-fenced kind 8 thereafter. Read only that stable
-    // metadata on a failed open: no compatibility decoder and no extra successful-open
+    // format 4 and the downgrade-fenced kind 8 thereafter. Read that stable metadata
+    // and recognize a marker-free old counter on a failed open: no compatibility decoder and no extra successful-open
     // catalog traversal. An ambiguous or damaged marker leaves the original error intact.
     private static int? ReadFormatVersionAfterCatalogFailure(SqlStorage storage)
     {
         try
         {
             int? version = null;
+            bool counterFound = false;
+            bool legacyCounter = false;
             using var iterator = storage.GetUnitIterator();
             while (iterator.MoveNext())
             {
                 var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
-                if (reader.ReadInt32() is not (4 or 8))
+                int kind = reader.ReadInt32();
+                if (kind == 2)
+                {
+                    // The pre-marker format-1 counter is exactly (kind, next identity).
+                    // Recognize its shape only to refuse it, never to load old metadata.
+                    if (counterFound || reader.ReadInt64() == 0)
+                    {
+                        return null;
+                    }
+                    counterFound = true;
+                    legacyCounter = reader.IsAtEnd;
+                    continue;
+                }
+                if (kind is < 1 or > 8)
+                {
+                    return null;
+                }
+                if (kind is not (4 or 8))
                 {
                     continue;
                 }
@@ -748,7 +767,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 }
                 version = found;
             }
-            return version;
+            return version ?? (legacyCounter ? 1 : null);
         }
         catch (DatabaseTypeException)
         {

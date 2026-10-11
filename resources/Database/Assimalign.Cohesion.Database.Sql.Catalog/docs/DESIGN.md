@@ -206,9 +206,17 @@ creation and drop, column and constraint changes, index creation and drop, chang
 physical registrations, default-collation initialization and format-marker changes.
 Schema-owned and ad-hoc objects follow the same path. `CommitCatalogChange` stages the
 counter with the change and publishes the generation, identity and record locations
-only after commit succeeds. Failed transactions preserve the committed generation;
-recovery replays or discards the metadata and its counter together. Exhaustion refuses
-the mutation rather than wrapping.
+only after commit succeeds. A failure before the commit record leaves the transaction
+active; disposal rolls it back, preserving the committed generation and allowing a retry.
+A failure after that record takes the storage offline through the kernel's existing
+fail-stop latch and reports an unconfirmed commit. SQL's paired-storage hooks take the
+whole database offline and end lock waits. Cached catalog reads and mutations are refused:
+the identity, generation and record locations may be stale. Reopen recovers the actual
+outcome before another mutation can allocate an identity or generation. This is the same
+rule PostgreSQL applies in `RecordTransactionCommit`'s critical section
+(`src/backend/access/transam/xact.c:1470-1583`) and on WAL fsync failure
+(`src/backend/access/transam/xlog.c:9877-9937`). Exhaustion refuses the mutation rather
+than wrapping.
 
 Saving an unchanged registration directory or format marker is a no-op. In particular,
 checkpoint and shutdown persistence do not invalidate a fully applied schema. Recording
@@ -217,6 +225,8 @@ catalog after every provisioning step succeeded and does not advance the counter
 `SaveSchemaStateAsync` requires that supplied generation to equal the live generation
 under the metadata lock, so intervening DDL cannot be acknowledged accidentally. Every
 state chunk carries the same hash and generation; load refuses mixed generations.
+An unconfirmed state save follows the same fail-stop path, so another save cannot
+reuse the previous chunk locations after a replacement may already have committed.
 
 This changes the on-disk catalog shape and advances the SQL database's existing
 record-space format gate from 7 to 8. Counter and schema-state records require the
@@ -224,7 +234,10 @@ generation suffix; older records fail with an explicit unsupported-format error 
 they can be trusted. There is no upgrade or compatibility reader. After such a load
 failure, the SQL engine reads only the unchanged format-marker tuple and sends a
 different recorded version through its existing format gate, preserving its actionable
-refusal over the wire. A current, missing, malformed or ambiguous marker preserves
+refusal over the wire. A missing marker together with exactly one valid old counter
+tuple identifies the pre-marker format 1 and reaches that same refusal. This only
+recognizes the old shape to refuse it; it does not load an older catalog. A current,
+malformed or ambiguous marker, duplicate counter or unknown record kind preserves
 the original catalog error; successful opens require no additional traversal.
 
 There is no transaction across provisioning statements. A crash after a committed step
@@ -235,7 +248,7 @@ nullability, canonical defaults, primary keys, unique and foreign-key constraint
 checks and indexes so that reconciliation can represent each provisionable kind.
 Engine-registered domains remain code and are represented by their column references.
 
-Owner proposal 49a is not implemented. If accepted later, its pending-step record would
+Owner decision 49a was accepted on 2026-10-11 and lands next. Its pending-step record will
 attach between planning and step execution in the SQL provisioner; successful deferred
 DDL would use the same catalog commit path, and the applied state would be recorded only
 after all steps completed. No worker, pending state or progress surface exists here.

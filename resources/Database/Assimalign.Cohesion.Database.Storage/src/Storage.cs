@@ -2323,11 +2323,16 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // Any other failure of the wait (the storage disposed under it, a durable flush the
             // handle stopped supporting after the check above): the commit record is in the journal
             // all the same, so recovery redoes the bracket whenever the record reaches the media.
-            // The bracket must not roll back in memory — its pages would return to bases the journal
-            // has moved past — so it ends committed, unconfirmed, and the failure propagates.
+            // Its caller has not published cached metadata or record locations, so allowing another
+            // mutation would reuse stale state (B2 catalog review). Fence through the same journal
+            // latch and engine hook as an fsync failure; only reopen can reconcile the outcome.
+            // PostgreSQL stops on every error in its commit critical section too
+            // (src/backend/access/transam/xact.c:1470-1583).
+            var offline = GoOffline(StorageOfflineException.Create(StorageOfflineCause.JournalFlush,
+                "confirmation of an appended commit record", failure));
             CompleteCommitted(transaction);
-            StorageEventSource.Log.StorageCommitUnconfirmed(this, transaction.Sequence, commitLsn, failure);
-            throw;
+            StorageEventSource.Log.StorageCommitUnconfirmed(this, transaction.Sequence, commitLsn, offline);
+            throw StorageOfflineException.CommitUnconfirmed(offline);
         }
 
         CompleteCommitted(transaction);

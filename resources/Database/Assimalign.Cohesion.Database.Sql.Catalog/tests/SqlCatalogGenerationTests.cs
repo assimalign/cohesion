@@ -121,6 +121,7 @@ public sealed class SqlCatalogGenerationTests
             await catalog.CreateTableAsync("dbo", "refused", [Column("id")], cancellationToken: CancellationToken.None));
 
         // Assert
+        storage.IsOffline.ShouldBeFalse();
         catalog.DdlGeneration.ShouldBe(0UL);
         catalog.Tables.ShouldBeEmpty();
         using (var rolledBackStorage = Reopen(data, journal))
@@ -167,6 +168,7 @@ public sealed class SqlCatalogGenerationTests
         var reopened = SqlCatalog.Open(reopenedStorage);
 
         // Assert
+        storage.IsOffline.ShouldBeFalse();
         catalog.SchemaState.ShouldBeSameAs(prior);
         catalog.DdlGeneration.ShouldBe(2UL);
         reopened.DdlGeneration.ShouldBe(2UL);
@@ -205,6 +207,7 @@ public sealed class SqlCatalogGenerationTests
         var reopened = SqlCatalog.Open(reopenedStorage);
 
         // Assert
+        storage.IsOffline.ShouldBeFalse();
         catalog.DdlGeneration.ShouldBe(1UL);
         catalog.TryGetTable("dbo", "t", out var live).ShouldBeTrue();
         live.Columns.Count.ShouldBe(1);
@@ -317,9 +320,85 @@ public sealed class SqlCatalogGenerationTests
         SqlCatalog.Open(storage).Tables.ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Unconfirmed catalog commit: grouped flush failure fences stale metadata until recovery")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Commit_GroupedDurableFlushFailure_ShouldFenceCatalogAndRecoverWithoutReusedCounters(bool schemaState)
+    {
+        // Arrange: the handle advertises durability until its actual fsync fails, after
+        // storage appended the commit record. NotSupportedException exercised the old
+        // completed-but-online path, unlike IOException's existing offline path.
+        using var data = new MemoryStream();
+        using var journal = new MemoryStream();
+        var journalHandle = new CatalogDurabilityHandle(journal);
+        using var storage = SqlStorage.Create(new StorageStream(new CatalogDurabilityHandle(data)),
+            new StorageStream(journalHandle), new StorageStream(new CatalogDurabilityHandle(new MemoryStream())), "unconfirmed-catalog");
+        storage.CommitDurability = StorageCommitDurability.Grouped;
+        storage.GroupCommitWindow = TimeSpan.Zero;
+        var catalog = SqlCatalog.Open(storage);
+        if (schemaState)
+        {
+            await catalog.CreateTableAsync("dbo", "first", [Column("id")], cancellationToken: CancellationToken.None);
+            await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("prior", "prior document", catalog.DdlGeneration), CancellationToken.None);
+        }
+        var target = new SqlCatalogSchemaState("target", new string('y', 25_000), catalog.DdlGeneration);
+        journalHandle.NextDurableFlushFailure = new NotSupportedException("Injected durable flush failure after the commit record.");
+
+        // Act
+        var failure = await Should.ThrowAsync<StorageOfflineException>(async () =>
+        {
+            if (schemaState)
+            {
+                await catalog.SaveSchemaStateAsync(target, CancellationToken.None);
+            }
+            else
+            {
+                await catalog.CreateTableAsync("dbo", "first", [Column("id")], cancellationToken: CancellationToken.None);
+            }
+        });
+
+        // Assert: neither stale metadata reads nor a retry may use the old locations.
+        journalHandle.FailedDurableFlushes.ShouldBe(1);
+        failure.CommitRecordWritten.ShouldBeTrue();
+        storage.IsOffline.ShouldBeTrue();
+        Should.Throw<StorageOfflineException>(() => catalog.DdlGeneration);
+        Should.Throw<StorageOfflineException>(() => catalog.SchemaState);
+        Should.Throw<StorageOfflineException>(() => catalog.Tables);
+        await Should.ThrowAsync<StorageOfflineException>(async () =>
+            await catalog.CreateTableAsync("dbo", "retry", [Column("id")], cancellationToken: CancellationToken.None));
+        await Should.ThrowAsync<StorageOfflineException>(async () =>
+            await catalog.SaveSchemaStateAsync(target, CancellationToken.None));
+
+        // Act / Assert: the failed fsync's bytes survived; recovery owns their outcome.
+        using var reopenedStorage = Reopen(data, journal);
+        var reopened = SqlCatalog.Open(reopenedStorage);
+        reopened.DdlGeneration.ShouldBe(1UL);
+        reopened.TryGetTable("dbo", "first", out var first).ShouldBeTrue();
+        first.ObjectId.ShouldBe(1UL);
+        reopened.TryGetTable("dbo", "retry", out _).ShouldBeFalse();
+        if (schemaState)
+        {
+            reopened.SchemaState.ShouldNotBeNull().CanonicalDocument.ShouldBe(target.CanonicalDocument);
+            await reopened.SaveSchemaStateAsync(new SqlCatalogSchemaState("next", "replacement", reopened.DdlGeneration), CancellationToken.None);
+            SqlCatalog.Open(reopenedStorage).SchemaState.ShouldNotBeNull().ContentHash.ShouldBe("next");
+        }
+        var second = await reopened.CreateTableAsync("dbo", "second", [Column("id")], cancellationToken: CancellationToken.None);
+        second.ObjectId.ShouldBe(2UL);
+        reopened.DdlGeneration.ShouldBe(2UL);
+        SqlCatalog.Open(reopenedStorage).DdlGeneration.ShouldBe(2UL);
+    }
+
     private static SqlCatalogColumn Column(string name)
         => new(name, new DatabaseTypeInfo(DatabaseType.Int64), isNullable: false);
 
     private static SqlStorage Reopen(MemoryStream data, MemoryStream journal)
-        => SqlStorage.Open(new MemoryStream(data.ToArray()), new MemoryStream(journal.ToArray()), new MemoryStream());
+        => SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
+
+    private static MemoryStream Copy(MemoryStream source)
+    {
+        var copy = new MemoryStream();
+        copy.Write(source.ToArray());
+        copy.Position = 0;
+        return copy;
+    }
 }

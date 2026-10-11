@@ -1818,10 +1818,17 @@ refuses a durable mode on such a store first, but the public `CommitDurability` 
 check, and a handle's capability can change under the storage) is refused with
 `NotSupportedException` before any page record is journaled: the bracket stays active and the
 caller's rollback agrees with recovery. And a durable wait that fails after the commit record
-was appended ends the bracket committed before the failure propagates, whatever the failure:
-a failed flush that takes the storage offline (as before, reported as unconfirmed), or anything
-else. A rollback of a bracket with a commit record is refused as a defect in every mode.
-`StorageRedoTests` covers both, each followed by another commit on the same page and a reopen.
+was appended ends the bracket committed and takes the storage offline before the failure
+propagates. This includes a durable handle that throws `NotSupportedException` during the
+actual flush and a grouped-commit notification that throws: callers have not published
+their cached metadata or record locations, and a retry could reuse stale state (B2 review).
+The existing journal latch, `OnOffline` hook and `CommitRecordWritten` exception flag apply
+to every such failure. Only reopen may decide the outcome and admit another writer.
+PostgreSQL likewise treats errors inside `RecordTransactionCommit`'s critical section as
+fatal (`src/backend/access/transam/xact.c:1470-1583`). A rollback of a bracket with a commit
+record is refused as a defect in every mode. `StorageRedoTests` covers the pre-record
+rollback and the post-record fence in synchronous and grouped modes; the recovered page
+then accepts a later commit and recovers again with an intact delta chain.
 
 The gate lives in storage (not the engine) because commit blocks inside
 `CommitTransaction`; the engine contributes only the worker loop and the wake signal.
@@ -2231,7 +2238,7 @@ session enables.
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
 | 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
 | 10 | `StorageOffline` | Error | — | `database`, `cause` (the `StorageOfflineCause` name), `exceptionType`, `exceptionMessage` (of the failure that took it offline: the I/O error, or the engine worker's last failure) | `RaiseOffline`, once per instance, before `OnOffline` runs; for an engine give-up the root source writes its `DatabaseTakenOffline` too |
-| 11 | `StorageCommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `commitLsn`, `exceptionMessage` (for an offline storage, the device failure's, as event 10 writes it; otherwise the wait's own failure's) | `CommitTransaction`: the commit record is in the journal but the wait for its durability failed, offline or otherwise; the bracket ends committed and recovery decides |
+| 11 | `StorageCommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `commitLsn`, `exceptionMessage` (the failure that prevented confirmation, as event 10 writes it) | `CommitTransaction`: the commit record is in the journal but the wait for its durability failed; the storage goes offline, the bracket ends committed and recovery decides |
 | 12 | `ShutdownFlushSkipped` | Warning | — | `database`, `reason` (`Offline: <cause>`) | `ShutdownFlush` of an offline storage, which writes nothing |
 | 13 | `BufferPoolExhausted` | Error | — | `database`, `capacity` | the pool's eviction, when every resident page is pinned |
 | 14 | `DirtyPageEvicted` | Verbose | `BufferPool` | `database`, `pageId`, `pageLsn` | the pool's eviction of a dirty page, written back on the thread that needed the frame (a pin miss or a shrink) |

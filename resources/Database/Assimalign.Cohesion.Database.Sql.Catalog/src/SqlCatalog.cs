@@ -36,6 +36,12 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// DDL per database.
 /// </para>
 /// <para>
+/// A commit whose record was appended but whose durability was not confirmed takes
+/// this catalog's storage offline. Every subsequent catalog read and mutation throws
+/// <see cref="StorageOfflineException"/> until the database is reopened: its cached
+/// identities, generations and record locations may no longer describe durable state.
+/// </para>
+/// <para>
 /// Records are encoded with the shared self-describing tuple codec, one record per
 /// table plus one for the object-id counter and one for index registrations. They
 /// rewrite in place when they fit and relocate (delete and insert) when they grow.
@@ -109,6 +115,7 @@ public sealed class SqlCatalog
     /// <returns>The catalog.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="SqlCatalogException">A persisted record is malformed.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public static SqlCatalog Open(SqlStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -133,6 +140,7 @@ public sealed class SqlCatalog
     /// default. Their index keys are encoded through the collation they inherited, so it cannot be
     /// changed.
     /// </exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public static SqlCatalog Open(SqlStorage storage, Collation defaultCollation)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -147,10 +155,12 @@ public sealed class SqlCatalog
     /// Captures the table directory, index descriptions, and default collation atomically.
     /// </summary>
     /// <returns>A read-only capture unaffected by later catalog publications.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public SqlCatalogSnapshot CaptureSnapshot()
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation);
         }
     }
@@ -164,12 +174,14 @@ public sealed class SqlCatalog
     /// because every index key on a column that inherited it is encoded through its
     /// byte transform.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public Collation DefaultCollation
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _defaultCollation;
             }
         }
@@ -187,6 +199,7 @@ public sealed class SqlCatalog
         ArgumentNullException.ThrowIfNull(collation);
         lock (_sync)
         {
+            ThrowIfOffline();
             if (collation.Id == _defaultCollation.Id)
             {
                 return;
@@ -210,12 +223,14 @@ public sealed class SqlCatalog
     /// Gets the canonical compiled schema most recently applied to this database,
     /// or <see langword="null"/> when no schema has been recorded.
     /// </summary>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public SqlCatalogSchemaState? SchemaState
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _schemaState;
             }
         }
@@ -229,12 +244,14 @@ public sealed class SqlCatalog
     /// The counter and the metadata change share one transaction. Recording applied-schema
     /// state or saving an unchanged index directory does not advance the generation.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ulong DdlGeneration
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _ddlGeneration;
             }
         }
@@ -243,12 +260,14 @@ public sealed class SqlCatalog
     /// <summary>
     /// Gets every table in the catalog.
     /// </summary>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<SqlCatalogTable> Tables
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _tables.Values.Select(slot => slot.Table).ToList();
             }
         }
@@ -261,10 +280,12 @@ public sealed class SqlCatalog
     /// <param name="name">The table name.</param>
     /// <param name="table">When this method returns true, the table.</param>
     /// <returns>True when the table exists; otherwise false.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public bool TryGetTable(string schema, string name, out SqlCatalogTable table)
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_tables.TryGetValue((schema, name), out var slot))
             {
                 table = slot.Table;
@@ -287,6 +308,7 @@ public sealed class SqlCatalog
     /// <returns>The created table with its assigned object identity.</returns>
     /// <exception cref="SqlCatalogException">A table with the name already exists, or the definition is invalid.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> CreateTableAsync(
         string schema,
         string name,
@@ -315,6 +337,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
@@ -345,12 +368,14 @@ public sealed class SqlCatalog
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The table does not exist, or another table references it.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask DropTableAsync(string schema, string name, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (!_tables.TryGetValue((schema, name), out var slot))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
@@ -439,6 +464,7 @@ public sealed class SqlCatalog
     /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="column"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> AddColumnAsync(string schema, string name, SqlCatalogColumn column, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -446,6 +472,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
 
             if (slot.Table.FindColumn(column.Name) is not null)
@@ -481,12 +508,14 @@ public sealed class SqlCatalog
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
             int ordinal = -1;
             for (int index = 0; index < slot.Table.Columns.Count; index++)
@@ -562,10 +591,12 @@ public sealed class SqlCatalog
     /// </summary>
     /// <param name="tableObjectId">The table's object identity.</param>
     /// <returns>The table's index descriptions; empty when it has none.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong tableObjectId)
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             var result = new List<SqlCatalogIndex>();
 
             foreach (var slot in _indexes.Values)
@@ -587,10 +618,12 @@ public sealed class SqlCatalog
     /// <param name="name">The index name.</param>
     /// <param name="index">When this method returns true, the index description.</param>
     /// <returns>True when the index exists; otherwise false.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public bool TryGetIndex(ulong tableObjectId, string name, out SqlCatalogIndex index)
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_indexes.TryGetValue((tableObjectId, name), out var slot))
             {
                 index = slot.Index;
@@ -616,6 +649,7 @@ public sealed class SqlCatalog
     /// <exception cref="SqlCatalogException">The table does not exist, a key column does not exist, or an index with the name already exists on the table.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="index"/> or <paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogIndex> CreateIndexAsync(SqlCatalogIndex index, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(index);
@@ -624,6 +658,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             var table = FindTableByObjectId(index.TableObjectId)
                 ?? throw new SqlCatalogException($"No table with object id {index.TableObjectId} exists.");
 
@@ -668,6 +703,7 @@ public sealed class SqlCatalog
     /// <exception cref="SqlCatalogException">The index does not exist.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask DropIndexAsync(ulong tableObjectId, string name, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(registrations);
@@ -675,6 +711,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (!_indexes.TryGetValue((tableObjectId, name), out var slot))
             {
                 throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
@@ -703,6 +740,7 @@ public sealed class SqlCatalog
     /// <returns>A task that completes once the registrations are durable.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask SaveIndexRegistrationsAsync(IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(registrations);
@@ -710,6 +748,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_registrations.SequenceEqual(registrations))
             {
                 return default;
@@ -733,10 +772,12 @@ public sealed class SqlCatalog
     /// Loads the persisted index registrations.
     /// </summary>
     /// <returns>The stored registrations, empty when none were saved.</returns>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations()
     {
         lock (_sync)
         {
+            ThrowIfOffline();
             return _registrations;
         }
     }
@@ -751,12 +792,14 @@ public sealed class SqlCatalog
     /// format changes — the engine reads this at open and refuses a data storage
     /// on any version but its own (it has no upgrade path).
     /// </summary>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public int RecordSpaceFormatVersion
     {
         get
         {
             lock (_sync)
             {
+                ThrowIfOffline();
                 return _recordSpaceFormatVersion;
             }
         }
@@ -775,6 +818,7 @@ public sealed class SqlCatalog
     /// <returns>A task that completes once the marker is durable.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="version"/> is zero or negative.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
@@ -782,6 +826,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_formatLocation is not null && version == _recordSpaceFormatVersion)
             {
                 return default;
@@ -816,6 +861,7 @@ public sealed class SqlCatalog
     /// <exception cref="ArgumentNullException"><paramref name="state"/> is null.</exception>
     /// <exception cref="SqlCatalogException">The state's generation differs from the current catalog generation.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -841,6 +887,7 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            ThrowIfOffline();
             if (state.Generation != _ddlGeneration)
             {
                 throw new SqlCatalogException("The applied-schema state does not describe the current DDL generation.");
@@ -873,6 +920,7 @@ public sealed class SqlCatalog
 
     private void Load()
     {
+        ThrowIfOffline();
         var schemaStateChunks = new List<SchemaStateChunk>();
         using var iterator = _storage.GetUnitIterator();
 
@@ -962,6 +1010,14 @@ public sealed class SqlCatalog
         {
             _schemaState = AssembleSchemaState(schemaStateChunks);
             _schemaStateLocations = schemaStateChunks.Select(chunk => chunk.Location).ToList();
+        }
+    }
+
+    private void ThrowIfOffline()
+    {
+        if (_storage.OfflineError is { } offline)
+        {
+            throw offline;
         }
     }
 
@@ -1470,6 +1526,7 @@ public sealed class SqlCatalog
     /// <see cref="PublishTableAsync"/> succeeds; abandoning a reservation never reuses
     /// its identity. Callers serialize DDL, and a reservation does not lock the name.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> ReserveTableAsync(
         string schema, string name, IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns, IReadOnlyList<SqlCatalogConstraint> constraints,
@@ -1482,6 +1539,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
@@ -1525,6 +1583,7 @@ public sealed class SqlCatalog
     /// another column. The catalog owns metadata persistence; physical tree creation and row
     /// validation remain the caller's responsibility.
     /// </remarks>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask PublishTableAsync(
         SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
         IReadOnlyList<BTreeIndexRegistration> registrations, bool replaceExisting = false,
@@ -1536,6 +1595,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             if (!replaceExisting && (table.ObjectId == 0 || table.ObjectId >= _nextObjectId))
             {
                 throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has no reserved catalog identity.");
@@ -1635,6 +1695,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
             if (_indexes.ContainsKey((slot.Table.ObjectId, constraint.Name)))
             {
@@ -1662,6 +1723,7 @@ public sealed class SqlCatalog
     /// <exception cref="SqlCatalogException">The table or constraint does not exist.</exception>
     /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public ValueTask<SqlCatalogTable> DropConstraintAsync(
         string schema, string name, string constraintName, CancellationToken cancellationToken = default)
     {
@@ -1671,6 +1733,7 @@ public sealed class SqlCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfOffline();
             var slot = GetSlot(schema, name);
             var constraints = slot.Table.Constraints.Where(constraint =>
                 !string.Equals(constraint.Name, constraintName, StringComparison.OrdinalIgnoreCase)).ToArray();

@@ -142,6 +142,58 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertUnchanged(before);
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a marker-free legacy counter reaches the actionable format refusal")]
+    public async Task Open_MarkerFreeLegacyCounter_ShouldRefuseFormatOneWithoutTouchingFiles()
+    {
+        // Arrange: format 1 genuinely predates the marker and generation suffix.
+        await CreateDatabaseAsync(formatVersion: 1);
+        RemoveCounterGeneration(removeFormatMarker: true);
+        var before = Snapshot();
+
+        // Act
+        await using var engine = CreateEngine();
+        var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
+
+        // Assert
+        refusal.Message.ShouldContain("uses data-storage format 1, but this engine supports only format 8");
+        refusal.Message.ShouldContain("drop the database (DropDatabaseAsync) and create it again");
+        engine.TryGetDatabase(TestDatabase, out _).ShouldBeFalse();
+        AssertUnchanged(before);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a damaged marker-free legacy catalog remains corruption")]
+    [InlineData(2, 2)]
+    [InlineData(4, -1)]
+    [InlineData(9, 1)]
+    public async Task Open_DamagedMarkerFreeLegacyCatalog_ShouldPreserveCatalogRefusal(int kind, int value)
+    {
+        // Arrange: one genuine old counter, plus corruption that must not become a format refusal.
+        await CreateDatabaseAsync(formatVersion: 1);
+        RemoveCounterGeneration(removeFormatMarker: true);
+        using (var storage = new FileSystemSqlStorageStrategy(_rootPath).OpenStorage(TestDatabase, catalog: true))
+        {
+            var record = new DatabaseKeyWriter();
+            record.AppendInt32(kind);
+            if (kind == 2)
+            {
+                record.AppendInt64(value);
+            }
+            else
+            {
+                record.AppendInt32(value);
+            }
+            using var transaction = storage.BeginTransaction();
+            storage.InsertRow(transaction, record.ToArray());
+            transaction.Commit();
+        }
+        var before = Snapshot();
+
+        // Act / Assert
+        await using var engine = CreateEngine();
+        await Should.ThrowAsync<SqlCatalogException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
+        AssertUnchanged(before);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a current-format counter missing its generation remains catalog damage (B2)")]
     public async Task Open_CurrentFormatCounterWithoutGeneration_ShouldPreserveCatalogRefusal()
     {
@@ -408,13 +460,14 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a client whose startup names a refused database gets the refusal over the wire (#1099, B2)")]
     [InlineData(3, false)]
     [InlineData(7, true)]
+    [InlineData(1, true)]
     public async Task Handshake_OlderFormatDatabase_ShouldSendRefusalToClient(int version, bool removeCounterGeneration)
     {
         // Arrange
         await CreateDatabaseAsync(formatVersion: version);
         if (removeCounterGeneration)
         {
-            RemoveCounterGeneration();
+            RemoveCounterGeneration(removeFormatMarker: version == 1);
         }
         await using var engine = CreateEngine();
         await using var listener = new InMemoryConnectionListener();
@@ -471,19 +524,25 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         }
     }
 
-    private void RemoveCounterGeneration()
+    private void RemoveCounterGeneration(bool removeFormatMarker = false)
     {
         var strategy = new FileSystemSqlStorageStrategy(_rootPath);
         using var storage = strategy.OpenStorage(TestDatabase, catalog: true);
         (PageId PageId, int SlotIndex)? location = null;
         long nextObjectId = 0;
+        (PageId PageId, int SlotIndex)? formatLocation = null;
         using (var iterator = storage.GetUnitIterator())
         {
             while (iterator.MoveNext())
             {
                 var unit = iterator.Current;
                 var reader = new DatabaseKeyReader(unit.Data.Span);
-                if (reader.ReadInt32() == 2)
+                int kind = reader.ReadInt32();
+                if (kind is 4 or 8)
+                {
+                    formatLocation = (unit.PageId, unit.SlotIndex);
+                }
+                if (kind == 2)
                 {
                     location.ShouldBeNull();
                     location = (unit.PageId, unit.SlotIndex);
@@ -498,6 +557,11 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         using var transaction = storage.BeginTransaction();
         var persisted = location.GetValueOrDefault();
         storage.UpdateRow(transaction, persisted.PageId, persisted.SlotIndex, counter.ToArray());
+        if (removeFormatMarker)
+        {
+            var format = formatLocation.ShouldNotBeNull();
+            storage.DeleteRow(transaction, format.PageId, format.SlotIndex);
+        }
         transaction.Commit();
     }
 

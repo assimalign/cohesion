@@ -17,6 +17,9 @@ internal sealed class CatalogDurabilityHandle : IFileSystemFileHandle
         _stream = stream;
     }
 
+    internal Exception? NextDurableFlushFailure { get; set; }
+    internal int FailedDurableFlushes { get; private set; }
+
     public bool SupportsDurableFlush { get; set; } = true;
     public long Length => _stream.Length;
 
@@ -49,6 +52,12 @@ internal sealed class CatalogDurabilityHandle : IFileSystemFileHandle
 
     public void Flush(bool durable)
     {
+        if (durable && NextDurableFlushFailure is { } failure)
+        {
+            NextDurableFlushFailure = null;
+            FailedDurableFlushes++;
+            throw failure;
+        }
         if (durable && !SupportsDurableFlush)
         {
             throw new NotSupportedException("Durability revoked for the catalog rollback test.");
