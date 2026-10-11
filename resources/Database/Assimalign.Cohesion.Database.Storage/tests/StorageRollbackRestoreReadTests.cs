@@ -14,19 +14,6 @@ using Assimalign.Cohesion.Database.Storage.Units;
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
-/// Runs the rollback-restore races alone: a writer and up to three readers would starve, or be
-/// starved by, other tests running beside them on a small CI runner.
-/// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class StorageRollbackRaceCollection
-{
-    /// <summary>
-    /// The collection name.
-    /// </summary>
-    public const string Name = "Storage rollback-restore races";
-}
-
-/// <summary>
 /// A rollback restores each page it changed in place, and a record read holds a pin, not a latch,
 /// so committed records that share a page with a failed bracket's inserts are read while that page
 /// is rewritten. Until the #1371 review the restore cleared the page and then wrote the pre-image's
@@ -36,13 +23,14 @@ public sealed class StorageRollbackRaceCollection
 /// copy with the page's restore sequence, which <see cref="Storage.TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>,
 /// the model storages' direct record read and the unit iterator confirm their read against.
 /// </summary>
-[Collection(StorageRollbackRaceCollection.Name)]
+[Collection(StorageRaceCollection.Name)]
 public sealed class StorageRollbackRestoreReadTests
 {
     private const ulong Owner = 7;
     private const int CommittedRecords = 30;
     private const int RecordLength = 128;
     private const int FailedInserts = 20;
+
     /// <summary>The shortest time a race runs.</summary>
     private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
 

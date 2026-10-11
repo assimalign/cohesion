@@ -1,10 +1,12 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Shouldly;
 using Xunit;
 
@@ -20,10 +22,17 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// that cannot be read (a failed checksum, a malformed slot, a short read) throws instead of reading
 /// as reclaimed.
 /// </summary>
+[Collection(StorageRaceCollection.Name)]
 public sealed class StorageRecordReclamationTests
 {
     private const ulong Owner = 7;
     private const ulong OtherOwner = 9;
+
+    /// <summary>The shortest time a race runs.</summary>
+    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+
+    /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
+    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Reclaimed records: a live record reads back through both overloads")]
     public void TryReadRecord_LiveRecord_ShouldReturnACopy()
@@ -230,12 +239,14 @@ public sealed class StorageRecordReclamationTests
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
         var stale = Insert(storage, Owner, "alpha");
         Delete(storage, stale);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var stop = new CancellationTokenSource();
+        long cycles = 0;
         var writer = Task.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {
                 Delete(storage, Insert(storage, OtherOwner, "gamma"));
+                Interlocked.Increment(ref cycles);
             }
         });
 
@@ -243,7 +254,8 @@ public sealed class StorageRecordReclamationTests
         long reads = 0;
         long found = 0;
         Exception? failure = null;
-        while (!stop.IsCancellationRequested && failure is null)
+        var elapsed = Stopwatch.StartNew();
+        while (KeepRacing(elapsed, writer, failure, Interlocked.Read(ref cycles) >= 100 && reads >= 100))
         {
             try
             {
@@ -260,12 +272,14 @@ public sealed class StorageRecordReclamationTests
             }
         }
 
+        stop.Cancel();
         await writer;
 
         // Assert: the record is gone for good, and its page always belonged to another owner or none.
         failure.ShouldBeNull();
         found.ShouldBe(0);
-        reads.ShouldBeGreaterThan(0);
+        Interlocked.Read(ref cycles).ShouldBeGreaterThanOrEqualTo(100);
+        reads.ShouldBeGreaterThanOrEqualTo(100);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Reclaimed records: a scan skips a slot deleted, a slot reverted and a page freed beneath its pinned page")]
@@ -317,7 +331,8 @@ public sealed class StorageRecordReclamationTests
         // Arrange
         using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
         byte[] payload = new byte[900];
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var stop = new CancellationTokenSource();
+        long cycles = 0;
         var writer = Task.Run(() =>
         {
             var live = new List<(PageId PageId, int SlotIndex)>();
@@ -345,13 +360,15 @@ public sealed class StorageRecordReclamationTests
                 }
 
                 live.Clear();
+                Interlocked.Increment(ref cycles);
             }
         });
 
         // Act
         long scans = 0;
         Exception? failure = null;
-        while (!stop.IsCancellationRequested && failure is null)
+        var elapsed = Stopwatch.StartNew();
+        while (KeepRacing(elapsed, writer, failure, Interlocked.Read(ref cycles) >= 20 && scans >= 20))
         {
             try
             {
@@ -368,12 +385,25 @@ public sealed class StorageRecordReclamationTests
             }
         }
 
+        stop.Cancel();
         await writer;
 
         // Assert
         failure.ShouldBeNull();
-        scans.ShouldBeGreaterThan(0);
+        Interlocked.Read(ref cycles).ShouldBeGreaterThanOrEqualTo(20);
+        scans.ShouldBeGreaterThanOrEqualTo(20);
     }
+
+    /// <summary>
+    /// Whether a race goes on: for at least <see cref="RaceMinimum"/>, then until it has done the
+    /// work it needs, for at most <see cref="RaceCeiling"/> more, and never past a failure or a
+    /// writer that stopped. A fixed window lets a starved writer finish no cycle on a small CI
+    /// runner, and the race never happens.
+    /// </summary>
+    private static bool KeepRacing(Stopwatch elapsed, Task writer, Exception? failure, bool exercised)
+        => failure is null
+            && !writer.IsCompleted
+            && (elapsed.Elapsed < RaceMinimum || (!exercised && elapsed.Elapsed < RaceMinimum + RaceCeiling));
 
     private static (PageId PageId, int SlotIndex) Insert(RecordStorage storage, ulong owner, string text)
     {

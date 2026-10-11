@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,20 @@ using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
+/// Runs the record-decode tests alone: the scan race keeps a writer reclaiming slots and pages
+/// beside the scans, and beside other tests on a small CI runner that writer can be starved until
+/// the race never happens.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SqlRecordDecodeRaceCollection
+{
+    /// <summary>
+    /// The collection name.
+    /// </summary>
+    public const string Name = "SQL record-decode races";
+}
+
+/// <summary>
 /// Row records that pass their page's checksum and owner check and still do not decode (#1362).
 /// Every read of a row (the index seek through <c>Storage.TryReadRecord</c> with the table's object
 /// id, the scan through the table's owner-scoped iterator) finds the record in a live slot of the
@@ -27,9 +42,16 @@ using Assimalign.Cohesion.Database.Types;
 /// written through the storage API in its own committed bracket, and the page is then evicted, so
 /// the statement reads it back from the data file and its checksum verifies.
 /// </summary>
+[Collection(SqlRecordDecodeRaceCollection.Name)]
 public sealed class SqlRecordDecodeIntegrityTests
 {
     private const string Seek = "SELECT id FROM t WHERE val = 20";
+
+    /// <summary>The shortest time the scan race runs.</summary>
+    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+
+    /// <summary>The longest the scan race waits past its minimum for the work it needs.</summary>
+    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
 
     /// <summary>How a test damages a row record.</summary>
     public enum RecordDamage
@@ -262,7 +284,8 @@ public sealed class SqlRecordDecodeIntegrityTests
         var table = Table(database);
         var storage = database.DataStorage;
         string label = new('x', 900);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var stop = new CancellationTokenSource();
+        long cycles = 0;
         var writer = Task.Run(() =>
         {
             var live = new List<(PageId PageId, int SlotIndex)>();
@@ -293,13 +316,19 @@ public sealed class SqlRecordDecodeIntegrityTests
                 }
 
                 live.Clear();
+                Interlocked.Increment(ref cycles);
             }
         });
 
-        // Act
+        // Act: at least RaceMinimum, then until the writer has reclaimed under the scans several
+        // times. A fixed window let a starved writer finish no cycle, so the race never happened.
         long scans = 0;
         Exception? failure = null;
-        while (!stop.IsCancellationRequested && failure is null)
+        var elapsed = Stopwatch.StartNew();
+        while (failure is null
+            && !writer.IsCompleted
+            && (elapsed.Elapsed < RaceMinimum
+                || ((Interlocked.Read(ref cycles) < 20 || scans < 20) && elapsed.Elapsed < RaceMinimum + RaceCeiling)))
         {
             try
             {
@@ -312,11 +341,13 @@ public sealed class SqlRecordDecodeIntegrityTests
             }
         }
 
+        stop.Cancel();
         await writer;
 
         // Assert
         failure.ShouldBeNull();
-        scans.ShouldBeGreaterThan(0);
+        Interlocked.Read(ref cycles).ShouldBeGreaterThanOrEqualTo(20);
+        scans.ShouldBeGreaterThanOrEqualTo(20);
     }
 
     private static SqlDatabaseEngine CreateEngine()
