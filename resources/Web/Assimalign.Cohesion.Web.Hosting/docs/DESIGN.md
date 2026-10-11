@@ -954,10 +954,12 @@ flowchart TD
     Snapshot -->|no| Stamp["Stamped onto every exchange"]
 ```
 
-**The pipeline is built before any service starts (#1051).** `WebApplication.OnStartingAsync`
-resolves the servers, and with them the pipeline and every middleware factory, so a composition
-failure such as an invalid route table fails `StartAsync` with nothing to roll back and leaves the
-host `Failed`. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
+**The pipeline is built before any service starts (#1051, #1079).** The host resolves
+`WebApplicationContext.HostedServices`, including the servers, pipeline and every middleware
+factory, before entering service lifecycle callbacks. A composition failure such as an invalid
+route table fails `StartAsync` and leaves the host `Failed`, even when resolving the same services
+also fails during rollback. The generic host owns this guarantee; Web needs no startup-hook
+workaround. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
 observe cancellation through `RequestCancelled`.
 
 ### Sizing each exchange's feature collection (owner decision 36, #1381)

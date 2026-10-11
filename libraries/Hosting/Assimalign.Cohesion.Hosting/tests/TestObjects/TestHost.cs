@@ -37,6 +37,11 @@ internal class TestHostOptions : HostOptions<TestHostContext>
 
 internal class TestHost : Host<TestHostContext>
 {
+    public TestHost(TestHostOptions options, IEnumerable<IHostService> services) : base(options)
+    {
+        Context = new TestHostContext(services, options.ContentRootPath);
+    }
+
     public TestHost(TestHostOptions options) : base(options)
     {
         Context = new TestHostContext(options.HostedServices, options.ContentRootPath);

@@ -17,6 +17,10 @@ running → `OnStoppingAsync` → services `StoppingAsync`/`StopAsync`/`StoppedA
 Startup is dependency-sensitive: serial startup stops at the first failure, while configured
 concurrent startup collects failures. Either path performs best-effort reverse-order compensation,
 marks the host `Failed`, completes its run signals, and preserves the original startup exception.
+This finalization also runs when startup budget setup or rollback service resolution/enumeration
+throws. A retry executes a fresh attempt and surfaces a persistent failure again. Compared with
+10.0.0-preview.1, such retries now throw instead of silently succeeding while stuck in `Starting`
+(#1079; behavioral breaking change).
 
 Graceful shutdown is best-effort. Every service receives a stop attempt, in reverse registration
 order or concurrently according to `StopServicesConcurrently`, and failures are reported after the
