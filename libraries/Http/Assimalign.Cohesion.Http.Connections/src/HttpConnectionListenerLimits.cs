@@ -244,6 +244,11 @@ public abstract class HttpConnectionListenerLimits
     /// <c>CONNECT</c>) is not a response body and is never held to it, and neither are interim
     /// (<c>1xx</c>) responses, except that on HTTP/2 their writes to the shared output are.
     /// </para>
+    /// <para>
+    /// On HTTP/2, HTTP/3 and the HTTP/1.1 buffered path the rate applies from this release on; earlier
+    /// releases enforced it on the HTTP/1.1 streaming path only, where a reader below it failed the write
+    /// with an <see cref="System.IO.IOException"/> instead.
+    /// </para>
     /// </remarks>
     public HttpMinDataRate? MinResponseDataRate
     {

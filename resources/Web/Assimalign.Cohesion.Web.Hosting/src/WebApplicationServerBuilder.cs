@@ -22,8 +22,9 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// The number of features the default server's exchanges carry besides the application's own:
     /// the request-limits feature the first default interceptor attaches while the request is parsed
-    /// (one object carries <c>IHttpMaxRequestBodySizeFeature</c> and the per-request data rates, #1383;
-    /// see <see cref="ApplyDefaultInterceptors"/>), and the request id, response
+    /// (one object carries <c>IHttpMaxRequestBodySizeFeature</c>, <c>IHttpMinRequestBodyDataRateFeature</c>
+    /// and <c>IHttpMinResponseDataRateFeature</c>, #1383 and #1384; see
+    /// <see cref="ApplyDefaultInterceptors"/>), and the request id, response
     /// completion and drain features the server installs before the pipeline runs. The other default
     /// interceptors attach a feature only to an upgrade, an extended CONNECT, or an HTTP/1.1 request that
     /// declares a body (the client-fault feature, #1340). Each exchange's feature collection is sized for
@@ -258,8 +259,9 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// Installs the web host's default interceptors. Runs before any user configuration so the
     /// defaults occupy the front of the interceptor order: the request-limits interceptor is registered
-    /// first, guaranteeing every request carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and
-    /// <c>IHttpMinRequestBodyDataRateFeature</c> (one object, #1383) and that user-registered
+    /// first, guaranteeing every request carries the typed <c>IHttpMaxRequestBodySizeFeature</c>,
+    /// <c>IHttpMinRequestBodyDataRateFeature</c> and <c>IHttpMinResponseDataRateFeature</c> (one object,
+    /// #1383 and #1384) and that user-registered
     /// interceptors' <c>AfterRequestHead</c> hooks can observe them (all three protocol versions run the
     /// request-parse seam). The HTTP/1.1 protocol-upgrade interceptor follows, so
     /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1

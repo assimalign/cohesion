@@ -2208,6 +2208,26 @@ is shared by every stream and the pump, so it stays held to the listener's rate.
   connection (HTTP/1.1) or request stream (HTTP/3). On HTTP/2 they share the connection's output and are
   bounded with it.
 
+### Breaking changes
+
+These are behavior breaks against 10.0.0-preview.1, accepted on decision 15's terms like #1383's type
+move:
+
+1. **Slow readers are cut by default.** HTTP/2 and HTTP/3 responses, and HTTP/1.1 buffered responses,
+   used to wait for a reader indefinitely. Under the default 240 octets per second over 5 seconds, a
+   reader slower than the rate, or one that pauses longer than its allowance, now has its response
+   cancelled with the version's signal above. On HTTP/2 a connection window left uncredited for a grace
+   period ends every stream with `GOAWAY(ENHANCE_YOUR_CALM)`, and an output that stops draining, a peer
+   that has stopped reading the connection, aborts it, whatever writer the stall holds. An endpoint
+   whose readers legitimately pause disables the rate for its own responses.
+2. **The HTTP/1.1 streaming sink fails differently.** A reader below the rate used to fail the write
+   with an `IOException` and abort the exchange. The write now throws an `OperationCanceledException`
+   carrying the exchange's `RequestCancelled`, and the connection is aborted.
+3. **Web.Hosting rejects malformed rate configuration.** `Limits:MinRequestBodyDataRate` (#1383) and
+   `Limits:MinResponseDataRate` were not bound before, so any value under them was ignored. They now
+   bind, and a value that is neither `none`/`disabled` nor a section with a positive `BytesPerSecond`
+   and `GracePeriod`, such as a bare number, fails startup.
+
 ### AOT posture and cost
 
 No reflection or code generation. A deadline is armed only when an operation actually waits

@@ -1465,12 +1465,13 @@ also removes the client-fault interceptor: a malformed or over-limit body is the
 and observed by `OnException` again, while the transport still answers it with its own status.
 
 The request-limits interceptor occupies slot 0 of the interceptor order so every
-request carries the typed `IHttpMaxRequestBodySizeFeature` and
-`IHttpMinRequestBodyDataRateFeature` and user-registered interceptors'
-`AfterRequestHead` hooks can observe them. Both contracts sit on one feature
-object (#1383), so the rate added no slot and `HostFeatureCount` is unchanged.
-The rate's knob freezes at the first body read on every protocol, so an endpoint
-can disable it for its own request before it reads. As of #819 the seam is
+request carries the typed `IHttpMaxRequestBodySizeFeature`,
+`IHttpMinRequestBodyDataRateFeature` and `IHttpMinResponseDataRateFeature`, and
+user-registered interceptors' `AfterRequestHead` hooks can observe them. All three
+contracts sit on one feature object (#1383, #1384), so the rates added no slot and
+`HostFeatureCount` is unchanged. The request-body rate's knob freezes at the first
+body read on every protocol, and the response rate's at the response's first write,
+so an endpoint can disable either for its own exchange before then. As of #819 the seam is
 invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
 feature is attached uniformly regardless of protocol. The cap is *enforced*
 with 413 on all three: HTTP/1.1 inline in its parser, HTTP/2 against the value
