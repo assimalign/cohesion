@@ -109,6 +109,8 @@ metadata, validators and digests are excluded even when explicitly preserved, so
 calculates the new length. This corrects the hook added after preview.1 without a preview.1 break;
 invalid callback fields are refused again. The optional `preservedHeaders` registration argument
 also retains final values or absence of policy headers that a callback accepts without changing.
+Only syntactically valid unchanged application fields are retained; a refused application value
+cannot reappear on the clean replacement. Callback-modified invalid fields are still refused.
 Keys are copied at registration and values are captured after all callbacks succeed. SecurityHeaders
 declares its policy fields (including no-clobber framing), and CORS declares its grant fields and
 early cache-selection `Vary`. The server has no middleware-specific header list. An outer error

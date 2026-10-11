@@ -1636,6 +1636,11 @@ snapshot. The optional `preservedHeaders` argument copies policy header keys at 
 retains their final values or absence after all callbacks succeed, even if unchanged. This covers
 SecurityHeaders' no-clobber framing and CORS' early cache-selection `Vary` and accepted grants,
 without a middleware-specific list in Hosting or copying unrelated application fields.
+Unchanged preserved fields must have a valid field name and no forbidden control character in any
+value, matching transport validation. Invalid application values are omitted from replay so they
+cannot defeat the replacement 500; valid policy fields survive. Callback-modified invalid fields
+still fail transport validation. This is a correction to the post-preview.1 hook, with no released
+preview.1 behavior change.
 
 Compared with 10.0.0-preview.1, the contract is additive. Callback exceptions abort the exchange;
 security/CORS fields now stage at commit, including error responses caught by an outer boundary.

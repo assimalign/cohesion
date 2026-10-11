@@ -592,6 +592,52 @@ public class SecurityHeadersEndToEndTests
         calls.ShouldBe(1);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Coverage: Invalid unchanged application policy fields must not poison the server replacement")]
+    [InlineData(WebApplicationTestProtocol.Http1, false, "bad\r\nfield")]
+    [InlineData(WebApplicationTestProtocol.Http1, true, "bad\r\nfield")]
+    [InlineData(WebApplicationTestProtocol.Http2, false, "bad\r\nfield")]
+    [InlineData(WebApplicationTestProtocol.Http2, true, "bad\r\nfield")]
+    [InlineData(WebApplicationTestProtocol.Http1, false, "bad\u0001field")]
+    [InlineData(WebApplicationTestProtocol.Http1, true, "bad\u0001field")]
+    [InlineData(WebApplicationTestProtocol.Http2, false, "bad\u0001field")]
+    [InlineData(WebApplicationTestProtocol.Http2, true, "bad\u0001field")]
+    public async Task UseSecurityHeaders_InvalidApplicationPolicy_ShouldSendCleanServerReplacement(
+        WebApplicationTestProtocol protocol, bool streamed, string invalidValue)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Application.UseSecurityHeaders();
+        factory.Application.Use(async (context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            context.Response.Headers[HttpHeaderKey.XFrameOptions] = new HttpHeaderValue(["SAMEORIGIN", invalidValue]);
+            context.Response.Headers[HttpHeaderKey.ContentSecurityPolicy] = "default-src 'self'";
+            context.Response.Headers[HttpHeaderKey.ReferrerPolicy] = "no-referrer";
+            if (streamed)
+            {
+                await context.Response.Streaming.StartAsync(cancellation.Token);
+            }
+            else
+            {
+                await WriteTextAsync(context, "refused");
+            }
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        (await response.Content.ReadAsByteArrayAsync(cancellation.Token)).ShouldBeEmpty();
+        Header(response, "X-Frame-Options").ShouldBeNull();
+        Header(response, "Content-Security-Policy").ShouldBe("default-src 'self'");
+        Header(response, "Referrer-Policy").ShouldBe("no-referrer");
+        Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Streaming: Buffered and streamed HTTP/2 responses should both carry the headers")]
     public async Task UseSecurityHeaders_Http2_ShouldCoverBufferedAndStreamedResponses()
     {

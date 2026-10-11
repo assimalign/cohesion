@@ -77,7 +77,12 @@ callback again. The middleware also registers every security-policy field above 
 preserved key, including both `Content-Security-Policy` and `X-Frame-Options`. The server snapshots
 these keys at registration and captures their final values or absence after every callback succeeds.
 This keeps application-owned values honored by no-clobber, including framing ownership, even when the
-callback left them unchanged. Other unchanged application fields are excluded; the replacement owns
+callback left them unchanged. Before retaining an unchanged application field, the server checks its
+name and every value against the transport's syntax rules. An invalid value (including CR, LF, NUL
+or another disallowed control character) is omitted from replacement replay, so it cannot defeat the
+clean server 500. Valid application policy fields and the callback's protections still survive.
+This corrects the post-preview.1 starting hook; the package did not exist in that release.
+Other unchanged application fields are excluded; the replacement owns
 its status and body.
 The nonce stays the exchange's nonce. A callback failure faults the exchange before any bytes are sent;
 no partially applied security policy is sent as a fallback response.

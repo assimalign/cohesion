@@ -30,6 +30,7 @@ public interface IWebResponseStartingFeature : IHttpFeature
     /// Optional header keys whose final values, or absence, must survive a refused head even when
     /// unchanged by the callbacks. Keys are copied at registration; values are captured after all
     /// callbacks succeed. Use this for policy headers that accept an existing application value.
+    /// Unchanged application fields with invalid names or values are not retained on a replacement.
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="callback"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Starting callbacks have begun or the response has started.</exception>

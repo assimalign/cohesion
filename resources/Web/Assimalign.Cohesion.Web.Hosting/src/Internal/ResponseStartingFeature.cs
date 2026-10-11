@@ -115,12 +115,37 @@ internal sealed class ResponseStartingFeature : IWebResponseStartingFeature
         {
             foreach (HttpHeaderKey key in _preservedHeaders)
             {
-                (_headerChanges ??= new())[key] = headers.TryGetValue(key, out HttpHeaderValue value)
-                    ? value
+                HttpHeaderValue value = headers.TryGetValue(key, out HttpHeaderValue current)
+                    ? current
                     : HttpHeaderValue.Empty;
+                // An unchanged application field may be exactly what refused the original
+                // head. Do not put it back on the server's clean replacement. Callback edits
+                // remain in the delta so invalid callback output is still refused, never hidden.
+                if ((_headerChanges is null || !_headerChanges.ContainsKey(key)) && !IsValidPreservedHeader(key, value))
+                {
+                    continue;
+                }
+                (_headerChanges ??= new())[key] = value;
             }
             _preservedHeaders = null;
         }
+    }
+
+    private static bool IsValidPreservedHeader(HttpHeaderKey key, HttpHeaderValue value)
+    {
+        if (!HttpFieldNormalization.IsValidFieldName(key.Value))
+        {
+            return false;
+        }
+
+        foreach (string? item in value)
+        {
+            if (HttpFieldNormalization.IndexOfInvalidControlCharacter(item.AsSpan()) >= 0)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     internal void RestoreHeaders()
