@@ -1085,7 +1085,14 @@ emit no DDL. Principals/grants and ALTER metadata remain explicitly refused, as 
 
 `table.Default(selector, literal)` and `CompiledSchemaColumn.DefaultLiteral` express the existing
 SQL literal DEFAULT capability. The engine validates one literal before writing anything and
-renders its canonical SQL; expressions/functions are refused, and `DEFAULT NULL` has the same live
+resolves its column's effective type, including a domain's base type. Preflight calls the same
+`SqlPlanExecutor.ResolveDefault` conversion as CREATE TABLE and ADD COLUMN, which uses
+`SqlCastConverter.ParseNumericText` and `ApplyModifiers` for numeric rounding and effective
+length, precision and scale bounds. Conversion failures and values outside those bounds fail
+Build with `COHSQLP001` before either file set exists; finite and underflow checks for floating
+defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
+therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
+and `DEFAULT NULL` has the same live
 meaning as absence. Null defaults are omitted from canonical JSON, preserving existing defaultless
 v3 identities. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction preserves the same text and hash.
@@ -1149,9 +1156,10 @@ stateDiagram-v2
    Each declared column type resolves to the frozen type catalog too. A schema that does not
    compile, declares a principal (decision 58), declares a domain that conflicts with a registered
    type, declares a column of a type the catalog does not know or does not store as its member's,
+   declares a DEFAULT that cannot convert to that effective type or fit its bounds,
    or declares a CHECK that does not bind (not exactly one predicate, an unknown column or function, a call no
    overload accepts, a function that is not `Immutable`) is refused here with `COHSQLP001`, naming
-   the table and the constraint, before any file is touched: the engine, whose creation makes the
+   the table and its column or constraint, before any file is touched: the engine, whose creation makes the
    root directory, does not exist yet.
 4. **Engine.** Created; its built-in workers attach and start.
 5. **Composition.** The `AddWorker` products attach, then the `AddServer` products (a server is

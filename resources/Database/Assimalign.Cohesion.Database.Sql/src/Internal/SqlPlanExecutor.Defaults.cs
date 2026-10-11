@@ -179,9 +179,10 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultValue">
     /// The value text of the column's DEFAULT literal, or null when the column declares none. A
     /// statement's write reads the value bound once per table version (<see cref="BindDefault"/>)
-    /// and calls this only for a column with no DEFAULT; DDL calls it to prove a new DEFAULT converts.
+    /// and calls this only for a column with no DEFAULT; DDL and pre-I/O schema validation call it
+    /// to prove a new DEFAULT converts and satisfies its column's effective bounds.
     /// </param>
-    private static object? ResolveDefault(SqlCatalogColumn column, string? defaultValue)
+    internal static object? ResolveDefault(SqlCatalogColumn column, string? defaultValue)
     {
         if (defaultValue is null)
         {

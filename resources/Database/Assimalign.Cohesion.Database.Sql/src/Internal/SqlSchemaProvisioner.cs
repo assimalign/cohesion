@@ -290,7 +290,8 @@ internal sealed class SqlSchemaProvisioner
     }
 
     /// <summary>
-    /// Binds every CHECK a compiled schema declares to the engine's function catalog and its table's
+    /// Validates every DEFAULT against its column's effective type and bounds, and binds every
+    /// CHECK a compiled schema declares to the engine's function catalog and its table's
     /// declared columns, as the DDL that applies it will, without touching a database: the text must
     /// be exactly one predicate, every column and function must resolve, every call must match an
     /// overload, and every function must be <see cref="SqlFunctionVolatility.Immutable"/> (owner
@@ -301,7 +302,7 @@ internal sealed class SqlSchemaProvisioner
     /// <param name="defaultCollation">The collation of the database the schema is for.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="parserOptions">The engine's parser options.</param>
-    /// <exception cref="DatabaseException">A declared CHECK does not bind; the message names its table and constraint.</exception>
+    /// <exception cref="DatabaseException">A declared DEFAULT or CHECK does not bind; the message names its table and column or constraint.</exception>
     internal static void BindDeclaredChecks(SqlCompiledSchema schema, Collation defaultCollation, SqlFunctionEnvironment functions,
         SqlQueryParserOptions parserOptions)
     {
@@ -311,7 +312,16 @@ internal sealed class SqlSchemaProvisioner
             {
                 try
                 {
-                    _ = CanonicalDefault(column.DefaultLiteral);
+                    if (CanonicalDefault(column.DefaultLiteral) is { } literal)
+                    {
+                        var boundColumn = new SqlCatalogColumn(column.Name,
+                            ResolveColumnType(column, functions.Types, out string? domain), column.IsNullable,
+                            literal, domainName: domain);
+                        // Use the DDL path before any storage exists: domain base types and
+                        // numeric/length bounds must accept exactly the same literal here.
+                        SqlPlanExecutor.ResolveDefault(boundColumn, SqlPersistedExpression.LoadDefaultValue(literal,
+                            $"DEFAULT on column '{table.Name}.{column.Name}'"));
+                    }
                 }
                 catch (DatabaseException exception)
                 {

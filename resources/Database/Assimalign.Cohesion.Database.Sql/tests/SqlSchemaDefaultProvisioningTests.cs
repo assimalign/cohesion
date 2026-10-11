@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -111,6 +112,118 @@ public sealed class SqlSchemaDefaultProvisioningTests : IDisposable
         Directory.Exists(_rootPath).ShouldBeFalse();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Build: DEFAULT conversion and effective type bounds fail before creating either file set")]
+    [InlineData("Quantity", "INT", "'oops'")]
+    [InlineData("Quantity", "INT", "2147483648")]
+    [InlineData("Enabled", "BOOLEAN", "'oops'")]
+    [InlineData("Code", "VARCHAR(3)", "'abcd'")]
+    [InlineData("Code", "short_code", "'abcd'")]
+    [InlineData("Amount", "NUMERIC(3, 2)", "'oops'")]
+    [InlineData("Amount", "NUMERIC(3, 2)", "9.995")]
+    [InlineData("Amount", "bounded_price", "9.995")]
+    [InlineData("Amount", "NUMERIC(29, 0)", "79228162514264337593543950336")]
+    [InlineData("Amount", "NUMERIC(30, 29)", "0.12345678901234567890123456789")]
+    [InlineData("Amount", "NUMERIC(3, 2)", "'1e1'")]
+    [InlineData("Ratio", "DOUBLE", "1e999")]
+    [InlineData("Ratio", "DOUBLE", "1e-999")]
+    [InlineData("Day", "DATE", "'not-a-date'")]
+    [InlineData("Token", "UUID", "'not-a-guid'")]
+    public async Task Build_WithUnstorableDefault_ShouldRefuseBeforeCreatingFiles(string column, string type, string literal)
+    {
+        // Arrange
+        SqlSchema schema = SqlSchema.Create("defaults", declaration => declaration.Table<PreflightRow>("orders", table =>
+        {
+            switch (column)
+            {
+                case "Quantity":
+                    table.Column(row => row.Quantity, type);
+                    table.Default(row => row.Quantity, literal);
+                    break;
+                case "Enabled":
+                    table.Column(row => row.Enabled, type);
+                    table.Default(row => row.Enabled, literal);
+                    break;
+                case "Code":
+                    table.Column(row => row.Code, type);
+                    table.Default(row => row.Code, literal);
+                    break;
+                case "Amount":
+                    table.Column(row => row.Amount, type);
+                    table.Default(row => row.Amount, literal);
+                    break;
+                case "Ratio":
+                    table.Column(row => row.Ratio, type);
+                    table.Default(row => row.Ratio, literal);
+                    break;
+                case "Day":
+                    table.Column(row => row.Day, type);
+                    table.Default(row => row.Day, literal);
+                    break;
+                case "Token":
+                    table.Column(row => row.Token, type);
+                    table.Default(row => row.Token, literal);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(column));
+            }
+        }));
+        var builder = SqlDatabaseEngine.CreateBuilder("default-preflight");
+        builder.Options.RootPath = _rootPath;
+        builder.Types.Add(SqlType.CreateDomain("short_code", SqlType.VarChar(3)));
+        builder.Types.Add(SqlType.CreateDomain("bounded_price", SqlType.Decimal(3, 2)));
+        builder.AddDatabase(schema);
+
+        // Act
+        SqlSchemaMigrationException refusal = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+            await builder.BuildAsync(CancellationToken.None));
+
+        // Assert: neither the data nor catalog file set may exist after a preflight refusal.
+        Directory.Exists(_rootPath).ShouldBeFalse(refusal.Message);
+        refusal.Message.ShouldStartWith("COHSQLP001:", Case.Sensitive);
+        refusal.Message.ShouldContain($"DEFAULT on column 'orders.{column}'", Case.Sensitive);
+        refusal.Message.ShouldEndWith("Nothing was opened or written.", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Build: DEFAULT preflight preserves DDL rounding, character and domain conversion")]
+    [InlineData(false, "'abc   '", "9.994", "abc", "9.99")]
+    [InlineData(true, "'😀xy '", "'-9.994'", "😀xy", "-9.99")]
+    [InlineData(false, "'a'", "0.123456789012345678901234567895", "a", "0.12")]
+    [InlineData(true, "'abc'", "1.245e0", "abc", "1.25")]
+    [InlineData(true, "'abc'", "'-1.245'", "abc", "-1.25")]
+    public async Task Build_WithBoundedDefault_ShouldMatchDdlValues(bool useDomains, string codeLiteral,
+        string amountLiteral, string expectedCode, string expectedAmount)
+    {
+        // Arrange
+        string codeType = useDomains ? "short_code" : "VARCHAR(3)";
+        string amountType = useDomains ? "bounded_price" : "NUMERIC(3, 2)";
+        var builder = SqlDatabaseEngine.CreateBuilder("bounded-default-preflight");
+        builder.Options.RootPath = _rootPath;
+        builder.Types.Add(SqlType.CreateDomain("short_code", SqlType.VarChar(3)));
+        builder.Types.Add(SqlType.CreateDomain("bounded_price", SqlType.Decimal(3, 2)));
+        builder.AddDatabase(SqlSchema.Create("defaults", declaration => declaration.Table<BoundedDefaultRow>("orders", table =>
+        {
+            table.Column(row => row.Id);
+            table.Column(row => row.Code, codeType);
+            table.Default(row => row.Code, codeLiteral);
+            table.Column(row => row.Amount, amountType);
+            table.Default(row => row.Amount, amountLiteral);
+        })));
+
+        // Act
+        await using SqlDatabaseEngine engine = await builder.BuildAsync(CancellationToken.None);
+        SqlDatabase database = await engine.OpenDatabaseAsync("defaults", CancellationToken.None);
+        await using SqlDatabaseSession session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync($"CREATE TABLE direct_defaults (Id INT NOT NULL, Code {codeType} NOT NULL DEFAULT {codeLiteral}, " +
+            $"Amount {amountType} NOT NULL DEFAULT {amountLiteral})", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO orders (Id) VALUES (1)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO direct_defaults (Id) VALUES (1)", cancellationToken: CancellationToken.None);
+
+        // Assert
+        var declaredRows = await RowsAsync(session, "SELECT Id, Code, Amount FROM orders", CancellationToken.None);
+        declaredRows.ShouldBe(await RowsAsync(session, "SELECT Id, Code, Amount FROM direct_defaults", CancellationToken.None));
+        declaredRows.ShouldBe([[1, expectedCode, decimal.Parse(expectedAmount, CultureInfo.InvariantCulture)]]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Build: DEFAULT NULL reconciles with the catalog's absent default")]
     public async Task Build_WithNullDefault_ShouldReconcileEffectiveAbsence()
     {
@@ -176,4 +289,6 @@ public sealed class SqlSchemaDefaultProvisioningTests : IDisposable
 
     private readonly record struct Price(decimal Value);
     private sealed record DefaultRow(long Id, int Quantity, string? Note, bool Enabled, string Code, Price Amount);
+    private sealed record PreflightRow(int Quantity, bool Enabled, string Code, decimal Amount, double Ratio, DateOnly Day, Guid Token);
+    private sealed record BoundedDefaultRow(int Id, string Code, decimal Amount);
 }
