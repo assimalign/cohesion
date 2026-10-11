@@ -1039,7 +1039,7 @@ index, an undeclared one, or a column's type, nullability or default).
 
 ### Provisioning hardening (B2)
 
-The database format is **8**: format 7's rows and index pages are unchanged, but the catalog
+The B2 core introduced format **8** (superseded by format **9** for 49a below): format 7's rows and index pages are unchanged, but the catalog
 counter now persists its DDL generation, and every chunk of the applied-schema document carries
 the generation it describes. The counter advances in the same storage transaction as each catalog
 change, regardless of ownership. A table reservation and its publication are separate commits and
@@ -1619,7 +1619,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 8).**
+  chains (since record-space format version 3; the current format is 9).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
