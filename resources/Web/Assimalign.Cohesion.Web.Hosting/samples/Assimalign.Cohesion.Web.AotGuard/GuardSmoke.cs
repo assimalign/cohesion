@@ -11,6 +11,7 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -152,9 +153,15 @@ internal static class GuardSmoke
             using var content = new StringContent("{\"id\":4,\"name\":\"\"}", Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await client.PostAsync("items", content, cancellationToken);
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using JsonDocument problem = JsonDocument.Parse(body);
             return response.StatusCode == HttpStatusCode.BadRequest
                 && response.Content.Headers.ContentType?.MediaType == "application/problem+json"
-                && body.Contains("\"Name\"", StringComparison.Ordinal);
+                && problem.RootElement.TryGetProperty("errors", out JsonElement errors)
+                && errors.ValueKind == JsonValueKind.Object
+                && errors.TryGetProperty("name", out JsonElement messages)
+                && messages.ValueKind == JsonValueKind.Array
+                && messages.GetArrayLength() > 0
+                && !errors.TryGetProperty("Name", out _);
         });
 
         failures += await CheckAsync("an uploaded file binds to a typed handler", async () =>

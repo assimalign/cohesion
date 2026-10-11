@@ -938,6 +938,7 @@ publish. `resource-web.yml`'s `aot-guard` job publishes it with `PublishAot` for
 the native binary with `--smoke`, which serves on a free loopback port and checks every feature
 over real HTTP. The first run surfaced four DependencyInjection call-site diagnostics, resolved as
 described in that library's DESIGN ("NativeAOT compatibility checks").
+The validation smoke check verifies the registered camelCase contract's `errors.name` key and rejects the legacy CLR spelling (#1209).
 
 ## Application feature seeding
 
