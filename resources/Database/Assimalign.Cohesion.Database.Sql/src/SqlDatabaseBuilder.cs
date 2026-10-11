@@ -107,8 +107,8 @@ public sealed class SqlDatabaseBuilder
     /// build fails with <c>COHDBSDK102</c> or <c>COHDBSDK103</c>). Declare a reusable or
     /// helper-built schema as a <see cref="SqlSchema.Create(string, Action{SqlSchemaBuilder})"/> value
     /// instead. The SDK writes one artifact per database name, so with it a database name is
-    /// unique across every engine of the project (<c>COHDBSDK101</c>), and a principal or a custom
-    /// type, which every engine build refuses, fails the project's build (<c>COHDBSDK108</c>).
+    /// unique across every engine of the project (<c>COHDBSDK101</c>), and a principal, which every
+    /// engine build refuses, fails the project's build (<c>COHDBSDK108</c>).
     /// </remarks>
     public SqlDatabaseBuilder Schema(Action<SqlSchemaBuilder> declare)
     {

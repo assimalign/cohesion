@@ -200,7 +200,8 @@ internal static class SqlPersistedExpression
                 Collation.FromName(collate.CollationName);
                 break;
             case SqlCastExpression { TargetTypeInfo: null } cast:
-                throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
+                SqlPlanner.ResolveCastTarget(cast, evaluator.Functions.Types);
+                break;
             case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
                 throw new DatabaseException("Parameters, subqueries and * have no value in a persisted row expression.");
             case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
@@ -367,8 +368,9 @@ internal static class SqlPersistedExpression
             Same(a.FunctionName, b.FunctionName) && a.Arguments.Count == b.Arguments.Count,
         (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null) &&
             (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
-        (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo is { } x && b.TargetTypeInfo is { } y &&
-            x.Type == y.Type && x.MaxLength == y.MaxLength && x.Precision == y.Precision && x.Scale == y.Scale,
+        (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo is { } x && b.TargetTypeInfo is { } y
+            ? x.Type == y.Type && x.MaxLength == y.MaxLength && x.Precision == y.Precision && x.Scale == y.Scale
+            : a.TargetTypeInfo is null && b.TargetTypeInfo is null && SqlTypeRules.SameTypeName(a.TargetType, b.TargetType),
         (SqlExistsExpression a, SqlExistsExpression b) => a.IsNegated == b.IsNegated && SameQuery(a.Subquery, b.Subquery),
         (SqlSubqueryExpression a, SqlSubqueryExpression b) => SameQuery(a.Select, b.Select),
         _ => false,

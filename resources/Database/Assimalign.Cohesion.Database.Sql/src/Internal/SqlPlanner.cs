@@ -811,14 +811,15 @@ internal sealed partial class SqlPlanner
 
         foreach (var definition in create.Columns)
         {
-            var typeInfo = ResolveTypeName(definition.DataType, definition.ColumnName);
+            var type = ResolveTypeName(definition.DataType, definition.ColumnName);
+            var typeInfo = type.Storage;
 
             string? defaultLiteral = ResolveDefaultLiteral(definition, $"{schema}.{create.Table.TableName}");
 
             // PRIMARY KEY columns are implicitly NOT NULL.
             bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
             columns.Add(new SqlCatalogColumn(definition.ColumnName, typeInfo, nullable, defaultLiteral,
-                ResolveColumnCollation(definition, typeInfo)));
+                ResolveColumnCollation(definition, typeInfo), type.IsDomain ? type.Name : null));
 
             if (definition.IsPrimaryKey)
             {
@@ -841,7 +842,7 @@ internal sealed partial class SqlPlanner
             var column = columns[i];
             if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
             {
-                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation);
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation, column.DomainName);
             }
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
@@ -929,21 +930,28 @@ internal sealed partial class SqlPlanner
 
         return alter.Action switch
         {
-            SqlAlterAddColumnAction add => new SqlAddColumnPlan(
-                schema,
-                alter.Table.TableName,
-                new SqlCatalogColumn(
-                    add.Column.ColumnName,
-                    ResolveTypeName(add.Column.DataType, add.Column.ColumnName),
-                    add.Column.IsNullable && !add.Column.IsPrimaryKey,
-                    ResolveDefaultLiteral(add.Column, $"{schema}.{alter.Table.TableName}"),
-                    ResolveColumnCollation(add.Column, ResolveTypeName(add.Column.DataType, add.Column.ColumnName))),
-                add.Column.Constraints),
+            SqlAlterAddColumnAction add => PlanAddColumn(schema, alter.Table.TableName, add),
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             _ => throw new DatabaseException("This ALTER TABLE action is not supported by the executor yet."),
         };
+    }
+
+    private SqlAddColumnPlan PlanAddColumn(string schema, string table, SqlAlterAddColumnAction add)
+    {
+        var type = ResolveTypeName(add.Column.DataType, add.Column.ColumnName);
+        return new SqlAddColumnPlan(
+            schema,
+            table,
+            new SqlCatalogColumn(
+                add.Column.ColumnName,
+                type.Storage,
+                add.Column.IsNullable && !add.Column.IsPrimaryKey,
+                ResolveDefaultLiteral(add.Column, $"{schema}.{table}"),
+                ResolveColumnCollation(add.Column, type.Storage),
+                type.IsDomain ? type.Name : null),
+            add.Column.Constraints);
     }
 
     private SqlCatalogTable ResolveTable(SqlTableReference reference)
@@ -972,45 +980,57 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
-    /// Parses a DDL type token like <c>VARCHAR(100)</c> or <c>DECIMAL(18, 4)</c>
-    /// through the declared dialect's type table.
+    /// Resolves a DDL type token like <c>VARCHAR(100)</c>, <c>DECIMAL(18, 4)</c> or <c>email</c>: a
+    /// built-in type name of the declared dialect first, then a domain of the engine's type catalog
+    /// (phase E3), whose column stores its base type.
     /// </summary>
-    private static DatabaseTypeInfo ResolveTypeName(string dataType, string columnName)
+    /// <exception cref="DatabaseException">The arguments are malformed, or a domain is given arguments.</exception>
+    /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>COHSQLE010</c>).</exception>
+    private SqlType ResolveTypeName(string dataType, string columnName)
     {
-        string name = dataType;
-        int? first = null;
-        int? second = null;
-
-        int open = dataType.IndexOf('(');
-        if (open >= 0)
+        // The parser normalizes the arguments; the catalog guards the planner seam so a malformed
+        // argument is a statement error, never a raw FormatException that ends a wire session.
+        if (_functions.Types.Resolve(dataType, out string? error) is { } type)
         {
-            name = dataType[..open];
-            var parts = dataType[(open + 1)..].TrimEnd(')').Split(',', StringSplitOptions.TrimEntries);
-
-            // The parser normalizes the arguments; this guards the planner seam so a
-            // malformed argument is a statement error, never a raw FormatException that
-            // ends a wire session.
-            int parsedSecond = 0;
-            if (parts.Length > 2 ||
-                !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int parsedFirst) ||
-                (parts.Length == 2 && !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out parsedSecond)))
-            {
-                throw new DatabaseException(
-                    $"Column '{columnName}': type arguments in '{dataType}' must be one or two unsigned integers.");
-            }
-
-            first = parsedFirst;
-            second = parts.Length == 2 ? parsedSecond : null;
+            return type;
         }
 
-        // A second argument is always a scale (DECIMAL(p, s)); SqlTypeNames moves a
-        // single argument from length to precision for decimal kinds.
-        if (!SqlTypeNames.TryResolve(name, first, second is null ? null : first, second, out var typeInfo))
+        if (error is not null)
         {
-            throw new DatabaseException($"Column '{columnName}': unknown type '{dataType}'.");
+            throw new DatabaseException($"Column '{columnName}': {error}.");
         }
 
-        return typeInfo;
+        throw SqlEvaluationException.UnknownType(dataType, $"Column '{columnName}'");
+    }
+
+    /// <summary>
+    /// Resolves a CAST's target: the built-in type the parser resolved, with its length, precision
+    /// and scale, or a domain of the engine's type catalog (phase E3), which the parser leaves to the
+    /// planner.
+    /// </summary>
+    /// <param name="cast">The CAST.</param>
+    /// <param name="types">The engine's type catalog.</param>
+    /// <returns>The target type.</returns>
+    /// <exception cref="DatabaseException">A domain is given type arguments.</exception>
+    /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>COHSQLE010</c>).</exception>
+    internal static SqlType ResolveCastTarget(SqlCastExpression cast, SqlTypeCatalog types)
+    {
+        if (cast.TargetTypeInfo is { } builtIn)
+        {
+            return SqlType.ForStorage(builtIn);
+        }
+
+        if (types.Resolve(cast.TargetType, out string? error) is { } type)
+        {
+            return type;
+        }
+
+        if (error is not null)
+        {
+            throw new DatabaseException($"CAST target '{cast.TargetType}': {error}.");
+        }
+
+        throw SqlEvaluationException.UnknownType(cast.TargetType, "CAST target");
     }
 
     private long? EvaluateCount(SqlExpression? expression, string clause)
@@ -1062,8 +1082,9 @@ internal sealed partial class SqlPlanner
             case SqlCollateExpression collate:
                 Collation.FromName(collate.CollationName);
                 break;
-            case SqlCastExpression { TargetTypeInfo: null } cast:
-                throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
+            case SqlCastExpression cast:
+                ValidateCast(cast, evaluator, boundSubqueries, boundValues);
+                break;
             case SqlSubqueryExpression or SqlExistsExpression when !isBound:
                 throw new DatabaseException("COHDBL001: Subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
             case SqlColumnReferenceExpression reference:
@@ -1108,6 +1129,51 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
+    /// Checks a <c>CAST</c> while planning, the same over an empty table as over a populated one: its
+    /// target resolves (a name the parser does not know is a domain of the engine's type catalog, or
+    /// <c>COHSQLE010</c>), and when the plan knows the operand's type, a registered cast converts it
+    /// to the target, or the operand has the target's storage type already (<c>COHSQLE011</c>
+    /// otherwise, PostgreSQL's "cannot cast type ... to ..." at parse analysis). An operand whose
+    /// type only its value reveals, a parameter or NULL, is checked when it is evaluated.
+    /// </summary>
+    /// <param name="cast">The CAST.</param>
+    /// <param name="evaluator">The scope its operand is typed in.</param>
+    /// <param name="boundSubqueries">The subqueries the statement bound, with their types.</param>
+    /// <param name="boundValues">ORDER BY nodes already bound to output values.</param>
+    /// <exception cref="SqlEvaluationException">The target does not resolve, or no cast converts the operand.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ValidateCast(SqlCastExpression cast, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        var types = evaluator.Functions.Types;
+        var target = ResolveCastTarget(cast, types);
+        if (StaticOperandType(cast.Operand, evaluator, boundSubqueries, boundValues) is not { } declared || declared == DatabaseType.Null)
+        {
+            return;
+        }
+
+        // The value the evaluator converts is the row's: a JSON value is text and a JSONB value bytes,
+        // so the cast is chosen as SqlCastConverter chooses it for that value.
+        var source = declared switch
+        {
+            DatabaseType.Json => DatabaseType.String,
+            DatabaseType.JsonBinary => DatabaseType.Binary,
+            _ => declared,
+        };
+        if (source == target.Storage.Type)
+        {
+            return;
+        }
+
+        var sourceDomain = evaluator.SourceDomain(cast.Operand);
+        if (types.ResolveCast(sourceDomain, source, target) is null)
+        {
+            throw SqlEvaluationException.CannotCast(
+                sourceDomain is not null && sourceDomain.Storage.Type == declared ? sourceDomain.Name : SqlType.NameOf(declared), target);
+        }
+    }
+
+    /// <summary>
     /// Resolves a call to its overload while planning: a call no overload's types accept fails here
     /// with <c>COHSQLE006</c>, and one several accept equally well with <c>COHSQLE008</c>, the same
     /// over an empty table as over a populated one.
@@ -1125,12 +1191,13 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
-    /// The type a sign's operand has whatever row it is evaluated on, when the plan can tell:
-    /// a string or Boolean literal, a column, a COLLATE or CAST, a predicate, a concatenation,
-    /// <c>UPPER</c>/<c>LOWER</c>, or a bound scalar subquery. Null when only the value can tell —
-    /// a parameter (which <see cref="ValidateExpression"/> checks against its supplied value
-    /// instead), arithmetic, other calls, CASE, NULL — or when the node is an ORDER BY value
-    /// bound to an output column.
+    /// The type a sign's or a CAST's operand has whatever row it is evaluated on, when the plan can
+    /// tell: a literal (an integer literal is BIGINT and a fractional one NUMERIC, the values they
+    /// bind to), a column, a COLLATE or CAST, a predicate, a concatenation, a scalar call's resolved
+    /// result type, or a bound scalar subquery. Null when only the value can tell — a parameter
+    /// (which <see cref="ValidateExpression"/> checks against its supplied value instead for a
+    /// sign), arithmetic, an aggregate, CASE, NULL — or when the node is an ORDER BY value bound to
+    /// an output column.
     /// </summary>
     private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
@@ -1145,9 +1212,11 @@ internal sealed partial class SqlPlanner
         {
             SqlLiteralExpression { LiteralType: SqlLiteralType.String } => DatabaseType.String,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Boolean } => DatabaseType.Boolean,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } => DatabaseType.Int64,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Float } => DatabaseType.Decimal,
             SqlColumnReferenceExpression column => evaluator.ResolveColumnType(column),
             SqlCollateExpression collate => StaticOperandType(collate.Operand, evaluator, boundSubqueries, boundValues),
-            SqlCastExpression { TargetTypeInfo: { } target } => target.Type,
+            SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? evaluator.TryResolveCastTarget(cast)?.Storage.Type,
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
             SqlLogicalExpression => DatabaseType.Boolean,
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,

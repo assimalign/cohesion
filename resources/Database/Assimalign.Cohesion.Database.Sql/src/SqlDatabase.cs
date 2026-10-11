@@ -112,7 +112,7 @@ public sealed class SqlDatabase : DatabaseInstance
         // Parse and bind every persisted CHECK and DEFAULT now, once, before anything else
         // touches the database: a definition that does not load fails the open, naming its
         // table, instead of failing an arbitrary later write. Writes reuse these bindings.
-        _definitions = new SqlBoundTableCache(_catalog, new SqlFunctionEnvironment(engine.Functions, name));
+        _definitions = new SqlBoundTableCache(_catalog, new SqlFunctionEnvironment(engine.Functions, name, engine.Types));
         try
         {
             _definitions.BindCatalog();
@@ -537,10 +537,11 @@ public sealed class SqlDatabase : DatabaseInstance
     /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
-    /// The schema targets another database, declares what the engine has no DDL for (custom types,
-    /// principals), would adopt an ad-hoc object (<c>COHSQLP005</c>), needs a destructive step it
-    /// does not allow (<c>COHSQLP005</c>), or a step failed (<c>COHSQLP004</c>, after the completed
-    /// reversible steps were compensated).
+    /// The schema targets another database, declares what the engine has no DDL for (principals),
+    /// declares a domain the engine does not register with that base type (<c>COHSQLP005</c>: an
+    /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
+    /// (<c>COHSQLP005</c>), needs a destructive step it does not allow (<c>COHSQLP005</c>), or a step
+    /// failed (<c>COHSQLP004</c>, after the completed reversible steps were compensated).
     /// </exception>
     /// <remarks>
     /// Kept public on the sealed leaf for tools, Studio and tests (owner decision 53 of

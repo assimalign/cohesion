@@ -26,10 +26,13 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>The build runs fixed phases</b>, each seeing only what earlier phases produced (the design's
 /// §5.2): (1) the options are checked and copied; (2) <see cref="Functions"/> is frozen into the
-/// engine's function catalog; (3) each declared database's schema is compiled and its CHECKs bound
-/// to that catalog, and a declaration the engine cannot provision (a principal, a custom type, a
-/// CHECK naming an unknown function, a function that is not immutable, or a call no overload
-/// accepts) is refused before any file is touched; (4) the engine is created and its
+/// engine's function catalog, each declared database's schema is compiled, its domains
+/// (<c>schema.Type&lt;T&gt;</c>) are added to <see cref="Types"/>, and the types are frozen into the
+/// engine's type catalog; (3) each schema's CHECKs and column types are bound to those catalogs, and
+/// a declaration the engine cannot provision (a principal, a domain that conflicts with a registered
+/// type, a column of a type the catalog does not know or whose storage is not its member's, a CHECK
+/// naming an unknown function, a function that is not immutable, or a call no overload accepts) is
+/// refused before any file is touched; (4) the engine is created and its
 /// built-in workers start; (5) the <see cref="AddWorker"/> products are attached, then the
 /// <see cref="AddServer(Func{SqlDatabaseEngine, DatabaseServer})"/> products (servers are created
 /// stopped), and composition is frozen; (6) each declared database is provisioned in declaration
@@ -78,7 +81,7 @@ public sealed class SqlDatabaseEngineBuilder
     {
         _state = new(name, SqlDatabaseEngine.ModelName);
         Functions = new SqlFunctionCollection(_state.EnsureMutable);
-        Types = new SqlTypeCollection();
+        Types = new SqlTypeCollection(_state.EnsureMutable);
     }
 
     /// <summary>
@@ -112,9 +115,17 @@ public sealed class SqlDatabaseEngineBuilder
     public SqlFunctionCollection Functions { get; }
 
     /// <summary>
-    /// Gets the SQL types the engine knows: the built-in storage types in phase E2; the domains and
-    /// casts an application adds arrive with phase E3.
+    /// Gets the SQL types and casts the engine knows: the built-in types and casts, registered first,
+    /// and the application's domains and casts, added with <see cref="SqlTypeCollection.Add"/> and
+    /// <see cref="SqlTypeCollection.AddCast"/> (phase E3).
     /// </summary>
+    /// <remarks>
+    /// A domain is visible in every database of the engine, and DDL and <c>CAST</c> resolve it through
+    /// the same catalog as the built-in types. The build adds the domains the declared schemas declare
+    /// (<c>schema.Type&lt;T&gt;</c>) and freezes the collection into <see cref="SqlDatabaseEngine.Types"/>
+    /// (phase 2), before any declared database binds a column to it; a registration after the build
+    /// began throws.
+    /// </remarks>
     public SqlTypeCollection Types { get; }
 
     /// <summary>
@@ -302,24 +313,33 @@ public sealed class SqlDatabaseEngineBuilder
         SqlDatabaseEngine.ValidateOptions(Name, options);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Phase 2: the function catalog, frozen. Registration closed when the build began
-        // (Functions.Add checks the same state as every other verb), so this is the final set.
+        // Phase 2: the function and type catalogs, frozen. Registration closed when the build began
+        // (Functions.Add and Types.Add check the same state as every other verb), so this is the
+        // final set, with the domains the declared schemas declare added first: a schema is
+        // compiled here, which touches no file, and bound in phase 3.
         SqlFunctionCatalog functions = Functions.Freeze();
+        var schemas = new SqlCompiledSchema?[_databases.Count];
+        for (int index = 0; index < schemas.Length; index++)
+        {
+            schemas[index] = SqlDeclaredDatabase.CompileSchema(Name, _databases[index], Types);
+        }
 
-        // Phase 3: every declaration compiled, and its CHECKs bound to the frozen catalog; a refusal
-        // touches no file.
+        SqlTypeCatalog types = Types.Freeze();
+
+        // Phase 3: every declaration's CHECKs and column types bound to the frozen catalogs; a
+        // refusal touches no file.
         var parserOptions = new SqlQueryParserOptions { ExpressionNestingLimit = options.ExpressionNestingLimit };
         var declarations = new SqlDeclaredDatabase[_databases.Count];
         for (int index = 0; index < declarations.Length; index++)
         {
-            declarations[index] = SqlDeclaredDatabase.Compile(Name, _databases[index], functions, parserOptions);
+            declarations[index] = SqlDeclaredDatabase.Compile(Name, _databases[index], schemas[index], functions, types, parserOptions);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
 
         // Phases 4 and 5: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = SqlDatabaseEngine.CreateUncomposed(Name, options, functions);
+        var engine = SqlDatabaseEngine.CreateUncomposed(Name, options, functions, types);
         _state.Complete(engine, engine.Compose, SqlDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 6: each declared database, in declaration order.

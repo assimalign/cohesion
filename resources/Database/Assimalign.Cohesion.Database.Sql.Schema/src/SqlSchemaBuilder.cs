@@ -40,13 +40,18 @@ public sealed class SqlSchemaBuilder
     /// <summary>Allows migrations that remove or rewrite existing data.</summary>
     public void AllowDestructiveChanges() => _allowsDestructiveChanges = true;
 
-    /// <summary>Declares a custom database type.</summary>
+    /// <summary>Declares a custom database type: a domain over a fixed-precision decimal.</summary>
     /// <typeparam name="T">The CLR type represented by the declaration.</typeparam>
     /// <param name="configure">Configures the type.</param>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
     /// <remarks>
-    /// The declaration compiles, but a SQL engine has no DDL for a custom type yet: its Build
-    /// refuses a declared database whose schema declares one, before any file is touched.
+    /// The declaration lowers to a domain of the SQL engine (phase E3), named for
+    /// <typeparamref name="T"/>'s simple name, which must be a SQL identifier, over the representation
+    /// <see cref="SqlTypeBuilder.Decimal"/> configures. Every column whose member is of
+    /// <typeparamref name="T"/> is declared with the domain. The SQL engine whose builder declares the
+    /// database registers the domain when it builds, engine-wide (a domain it registers already, of the
+    /// same name and base type, is the same domain), and refuses one that conflicts before it touches
+    /// any file.
     /// </remarks>
     public void Type<T>(Action<SqlTypeBuilder> configure)
     {

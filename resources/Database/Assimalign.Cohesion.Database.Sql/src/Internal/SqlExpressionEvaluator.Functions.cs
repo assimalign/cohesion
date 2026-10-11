@@ -130,7 +130,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlCollateExpression collate:
                 return StaticTypeOf(collate.Operand);
             case SqlCastExpression cast:
-                return cast.TargetTypeInfo?.Type ?? DatabaseType.Null;
+                return cast.TargetTypeInfo?.Type ?? TryResolveCastTarget(cast)?.Storage.Type ?? DatabaseType.Null;
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Not }:
                 return DatabaseType.Boolean;
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus:

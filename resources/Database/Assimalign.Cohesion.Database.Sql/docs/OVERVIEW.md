@@ -70,6 +70,19 @@ shared storage, with DDL flowing through the relational catalog
   with that code. `COHESION_SCHEMA.FUNCTIONS` lists the catalog and the special forms.
   `samples/Assimalign.Cohesion.Database.Sql.AotSample` is the NativeAOT guard for all of it, in
   process and over the wire. See DESIGN.md, "Functions (E2)".
+- **Types, domains and casts** — `SqlDatabaseEngineBuilder.Types` holds the built-in types and
+  the built-in casts, and an application's domains (`SqlType.CreateDomain(name, baseType,
+  check?)`, added with `Types.Add`) and casts to or from them (`SqlCast.Create<TSource,
+  TTarget>(...)`, added with `Types.AddCast`), frozen into `SqlDatabaseEngine.Types`. DDL and
+  `CAST` resolve a built-in type name first and a domain otherwise (`COHSQLE010` for neither).
+  A column of a domain stores its base type and keeps the domain's name in the catalog; every
+  write that assigns it, and every `CAST` to it, runs the domain's immutable check. A database
+  whose column names a domain the opening engine does not register opens, reads, and refuses
+  writes to that column with `COHSQLE010`. `CAST` applies the registry's casts, the engine's own
+  (now including text to DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, REAL and DOUBLE)
+  and the application's alike. A typed schema names a domain with `table.Column(selector,
+  "email")`, and `schema.Type<T>(t => t.Decimal(p, s))` declares one. See DESIGN.md, "Types,
+  domains and casts (E3)".
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).

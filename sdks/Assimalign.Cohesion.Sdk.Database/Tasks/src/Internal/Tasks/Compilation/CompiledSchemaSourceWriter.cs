@@ -18,20 +18,24 @@ internal static class CompiledSchemaSourceWriter
             throw new InvalidOperationException($"Database model '{modelName}' has no model-specific compiled-schema package.");
         }
 
+        // A declared type is a domain named for its CLR type's simple name (phase E3), matched to a
+        // column by the member's CLR type identity, as the runtime compiler does.
         var customTypes = source.Types.ToDictionary(
             static type => type.TypeName,
-            static type => new CompiledSchemaType(type.TypeName, DatabaseType.Decimal, type.Precision, type.Scale),
+            static type => new CompiledSchemaType(type.SqlName, DatabaseType.Decimal, type.Precision, type.Scale),
             StringComparer.Ordinal);
         CompiledSchemaColumn CreateColumn(SchemaColumnSource column)
         {
             (DatabaseType type, string? custom, int? precision, int? scale) = ResolveType(column.TypeName, customTypes);
-            return new CompiledSchemaColumn(
-                column.Name,
-                type,
-                column.IsNullable,
-                Precision: precision,
-                Scale: scale,
-                CustomType: custom);
+            return column.SqlType is { } sqlType
+                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType)
+                : new CompiledSchemaColumn(
+                    column.Name,
+                    type,
+                    column.IsNullable,
+                    Precision: precision,
+                    Scale: scale,
+                    CustomType: custom);
         }
 
         var tablesByRowType = source.Tables.ToDictionary(static table => table.RowType, StringComparer.Ordinal);

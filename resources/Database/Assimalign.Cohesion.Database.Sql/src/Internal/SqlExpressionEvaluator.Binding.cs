@@ -181,12 +181,83 @@ internal sealed partial class SqlExpressionEvaluator
             SqlBoundCollation.Of(operandCollation, patternCollation, _defaultCollation));
     }
 
+    /// <remarks>
+    /// The target resolves once, here: a built-in type the parser resolved, or a domain of the engine's
+    /// type catalog (phase E3); a name the catalog does not know binds as the failure it raises when
+    /// evaluated (the planner reports it while planning first). The casts of the registry the CAST may
+    /// apply are chosen here too, by the storage type of the value they convert, so a row looks up
+    /// nothing: a cast from the operand's domain, when the plan knows it, before a cast from its storage
+    /// type, and for a domain target a cast to its base type when none to the domain is registered.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCast(SqlCastExpression cast, out SqlCollationCandidate collation)
     {
         var operand = Bind(cast.Operand, out SqlCollationCandidate operandCollation);
         collation = CollationOf(cast, [operandCollation]);
-        return new SqlBoundCast(operand, cast);
+        SqlType target;
+        try
+        {
+            target = SqlPlanner.ResolveCastTarget(cast, _functions.Types);
+        }
+        catch (Exception exception) when (IsDeferrable(exception))
+        {
+            return CastTargetFailure(cast, _functions.Types);
+        }
+
+        return new SqlBoundCast(operand, cast.TargetType, target, _functions.Types.ResolveCasts(SourceDomain(cast.Operand), target),
+            _functions.Database, _defaultCollation);
+    }
+
+    /// <summary>
+    /// The domain a CAST's operand is known to be of while planning: a column of a domain, or a CAST to
+    /// one, under any COLLATE; null for any other operand, whose casts are its storage type's. An
+    /// expression over a domain's value (<c>COALESCE</c>, <c>CASE</c>, arithmetic) has the base type,
+    /// so a cast from the domain does not apply to it: the dialect documents the shape.
+    /// </summary>
+    internal SqlType? SourceDomain(SqlExpression operand)
+    {
+        while (operand is SqlCollateExpression collate)
+        {
+            operand = collate.Operand;
+        }
+
+        switch (operand)
+        {
+            case SqlColumnReferenceExpression column:
+                try
+                {
+                    int ordinal = ResolveColumn(column);
+                    return ordinal < _columns.Count && _columns[ordinal].DomainName is { } name && _functions.Types.TryGetDomain(name, out var domain)
+                        ? domain
+                        : null;
+                }
+                catch (DatabaseException)
+                {
+                    return null;
+                }
+            case SqlCastExpression inner:
+                return TryResolveCastTarget(inner) is { IsDomain: true } target ? target : null;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a CAST's target for the planner's own questions (a static type, a source domain),
+    /// without raising: null when the target does not resolve, which planning reports on its own.
+    /// </summary>
+    /// <param name="cast">The CAST.</param>
+    /// <returns>The target type, or null.</returns>
+    internal SqlType? TryResolveCastTarget(SqlCastExpression cast)
+    {
+        try
+        {
+            return SqlPlanner.ResolveCastTarget(cast, _functions.Types);
+        }
+        catch (DatabaseException)
+        {
+            return null;
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -541,4 +612,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     private static SqlBoundFailure UnsupportedFunction(string name)
         => new(() => throw new DatabaseException($"Function '{name}' is not supported by the executor yet."));
+
+    private static SqlBoundFailure CastTargetFailure(SqlCastExpression cast, SqlTypeCatalog types)
+        => new(() => SqlPlanner.ResolveCastTarget(cast, types));
 }

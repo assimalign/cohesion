@@ -346,7 +346,6 @@ internal sealed class CSharpSchemaExtractor
                     allowsDestructiveChanges = true;
                     break;
                 case "Type":
-                    ReportUnprovisionable(method, invocation);
                     types.Add(ExtractType(model, invocation, method));
                     break;
                 case "Table":
@@ -363,6 +362,7 @@ internal sealed class CSharpSchemaExtractor
         }
 
         ValidateUnique(types.Select(static item => item.TypeName), "type", configure.GetLocation());
+        ValidateUnique(types.Select(static item => item.SqlName), "type name", configure.GetLocation());
         ValidateUnique(tables.Select(static item => item.RowType), "table", configure.GetLocation());
         ValidateUnique(tables.Select(static item => item.Name), "table name", configure.GetLocation());
         ValidateUnique(principals.Select(static item => item.Name), "principal", configure.GetLocation());
@@ -385,20 +385,29 @@ internal sealed class CSharpSchemaExtractor
         Error(
             "COHDBSDK108",
             $"SqlSchemaBuilder.{method.Name} declares what no SQL engine can provision yet: every engine build refuses it " +
-            "before touching any file (COHSQLP001, owner decision 58). Remove it; principals, grants and custom types " +
-            "wait for their DDL.",
+            "before touching any file (COHSQLP001, owner decision 58). Remove it; principals and grants wait for their DDL.",
             invocation.GetLocation());
     }
 
+    // schema.Type<T>(t => t.Decimal(p, s)) lowers to a domain of the SQL engine named for T's simple
+    // name (phase E3), as the runtime compiler names it: a generic or array type has no such name, and
+    // the runtime refuses it, so the build does.
     private SchemaTypeSource ExtractType(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
     {
         ITypeSymbol type = method.TypeArguments.Single();
+        string sqlName = type is INamedTypeSymbol { IsGenericType: false } named ? named.Name : string.Empty;
+        if (!IsSqlIdentifier(sqlName))
+        {
+            Error("COHDBSDK106", $"Custom type '{TypeName(type)}' cannot be a domain: its name '{type.MetadataName}' is not a SQL identifier.",
+                invocation.GetLocation());
+        }
+
         ExpressionSyntax? configureExpression = GetArgument(invocation, method, "configure", 0);
         LambdaExpressionSyntax? configure = UnwrapLambda(configureExpression);
         if (configure is null)
         {
             Error("COHDBSDK103", "Type configuration must be an inline lambda.", configureExpression?.GetLocation() ?? invocation.GetLocation());
-            return new SchemaTypeSource(TypeName(type), null, null);
+            return new SchemaTypeSource(TypeName(type), sqlName, null, null);
         }
 
         int? precision = null;
@@ -434,7 +443,49 @@ internal sealed class CSharpSchemaExtractor
             Error("COHDBSDK106", $"Custom type '{TypeName(type)}' must declare its storage representation with Decimal(precision, scale).", configure.GetLocation());
         }
 
-        return new SchemaTypeSource(TypeName(type), precision, scale);
+        return new SchemaTypeSource(TypeName(type), sqlName, precision, scale);
+    }
+
+    // The runtime's rule for a domain's or a type name's identifier (Sql.Schema's CompiledSchemaTypeNames).
+    private static bool IsSqlIdentifier(string text)
+    {
+        if (text.Length == 0 || !(char.IsAsciiLetter(text[0]) || text[0] == '_'))
+        {
+            return false;
+        }
+
+        foreach (char character in text)
+        {
+            if (!(char.IsAsciiLetterOrDigit(character) || character == '_'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // The runtime's shape of table.Column(selector, sqlType)'s name: an identifier, optionally with one
+    // or two unsigned integer arguments in parentheses.
+    private static bool IsSqlTypeName(string text)
+    {
+        int open = text.IndexOf('(');
+        if (open < 0)
+        {
+            return IsSqlIdentifier(text);
+        }
+
+        if (!IsSqlIdentifier(text[..open].TrimEnd()) || !text.EndsWith(')'))
+        {
+            return false;
+        }
+
+        string[] arguments = text[(open + 1)..^1].Split(',');
+        return arguments.Length <= 2 && arguments.All(static argument =>
+        {
+            string digits = argument.Trim();
+            return digits.Length is > 0 and <= 9 && digits.All(char.IsAsciiDigit);
+        });
     }
 
     private SchemaTableSource ExtractTable(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
@@ -481,9 +532,11 @@ internal sealed class CSharpSchemaExtractor
                 continue;
             }
 
-            SchemaColumnSource? selectedColumn = operation.ArgumentList.Arguments.Count == 0
+            // The selector by its name, so table.Column(sqlType: "email", selector: c => c.Email) reads too.
+            ExpressionSyntax? selectorExpression = GetArgument(operation, operationMethod, "selector", 0);
+            SchemaColumnSource? selectedColumn = selectorExpression is null
                 ? null
-                : SelectedColumn(model, operation.ArgumentList.Arguments[0].Expression, rowType);
+                : SelectedColumn(model, selectorExpression, rowType);
             if (selectedColumn is null)
             {
                 Error("COHDBSDK106", $"Table operation '{operationMethod.Name}' must select a direct member of '{TypeName(rowType)}'.", operation.GetLocation());
@@ -496,6 +549,9 @@ internal sealed class CSharpSchemaExtractor
 
             switch (operationMethod.Name)
             {
+                case "Column" when operationMethod.Parameters.Length == 2:
+                    ExtractColumnType(model, operation, operationMethod, tableName, columns, selectedColumn.Name);
+                    break;
                 case "Column":
                     break;
                 case "Key":
@@ -526,6 +582,39 @@ internal sealed class CSharpSchemaExtractor
             indexes.OrderBy(static item => item, StringComparer.Ordinal).ToArray(),
             references.OrderBy(static item => item.Member, StringComparer.Ordinal).ThenBy(static item => item.TargetType, StringComparer.Ordinal).ToArray(),
             checks);
+    }
+
+    // table.Column(selector, sqlType) (phase E3): the type a compile-time string constant, kept as
+    // written. The SDK never sees the engine's domains; the engine's build resolves the name before it
+    // touches a file. A member declared with two SQL types is refused, as the runtime builder refuses it.
+    private void ExtractColumnType(SemanticModel model, InvocationExpressionSyntax operation, IMethodSymbol method, string tableName,
+        List<SchemaColumnSource> columns, string columnName)
+    {
+        ExpressionSyntax? typeExpression = GetArgument(operation, method, "sqlType", 1);
+        string? sqlType = typeExpression is null ? null : ConstantString(model, typeExpression);
+        if (string.IsNullOrWhiteSpace(sqlType))
+        {
+            Error("COHDBSDK104", $"Column '{tableName}.{columnName}' needs its SQL type as a non-empty compile-time string constant, " +
+                "so the build can read it without executing Program.Main.", typeExpression?.GetLocation() ?? operation.GetLocation());
+            return;
+        }
+
+        if (!IsSqlTypeName(sqlType))
+        {
+            Error("COHDBSDK106", $"Column '{tableName}.{columnName}' is declared with '{sqlType}', which is not a SQL type name: an identifier, " +
+                "optionally followed by one or two unsigned integer arguments in parentheses.", typeExpression!.GetLocation());
+            return;
+        }
+
+        int index = columns.FindIndex(column => string.Equals(column.Name, columnName, StringComparison.Ordinal));
+        SchemaColumnSource declared = columns[index];
+        if (declared.SqlType is not null && !string.Equals(declared.SqlType, sqlType, StringComparison.Ordinal))
+        {
+            Error("COHDBSDK105", $"Column '{tableName}.{columnName}' is already declared with SQL type '{declared.SqlType}'.", operation.GetLocation());
+            return;
+        }
+
+        columns[index] = declared with { SqlType = sqlType };
     }
 
     // table.Check(name, sql): both arguments compile-time string constants, read as written. The SQL

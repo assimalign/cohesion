@@ -93,12 +93,12 @@ public class SqlSchemaStatementRendererTests
     [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: unsupported schema shapes fail explicitly")]
     public void Render_UnsupportedShape_ShouldFailPrecisely()
     {
-        // Arrange
+        // Arrange: a column whose declared type is not a type name never reaches the statement.
         var customColumn = new CompiledSchemaColumn(
             "amount",
             DatabaseType.Decimal,
             IsNullable: false,
-            CustomType: "Currency");
+            CustomType: "Currency); DROP TABLE dbo.ledger; --");
         var customTable = new CompiledSchemaTable(
             "ledger",
             "Example.Ledger",
@@ -109,9 +109,32 @@ public class SqlSchemaStatementRendererTests
 
         // Act / Assert
         Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.CreateTable(customTable))
-            .Message.ShouldContain("custom type");
+            .Message.ShouldContain("which is not a SQL type name");
         Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.DropTable("not\"safe"))
             .Message.ShouldContain("embedded double quote");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Schema statements: a column declared with a domain or a built-in type name renders that name (E3)")]
+    public void Render_ColumnOfDeclaredType_ShouldRenderTheName()
+    {
+        // Arrange
+        var table = new CompiledSchemaTable(
+            "ledger",
+            "Example.Ledger",
+            [
+                new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false),
+                new CompiledSchemaColumn("amount", DatabaseType.Decimal, IsNullable: true, Precision: 18, Scale: 2, CustomType: "Currency"),
+                new CompiledSchemaColumn("code", DatabaseType.String, IsNullable: true, CustomType: "VARCHAR( 16 )"),
+            ],
+            new CompiledSchemaKey("pk_ledger", ["id"]),
+            [],
+            []);
+
+        // Act
+        string statement = SqlSchemaStatementRenderer.CreateTable(table);
+
+        // Assert
+        statement.ShouldBe("CREATE TABLE IF NOT EXISTS dbo.ledger (id BIGINT PRIMARY KEY NOT NULL, amount Currency NULL, code VARCHAR(16) NULL);");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: portable operations render in plan order")]

@@ -26,6 +26,14 @@ public enum SqlSchemaMigrationOperationKind : byte
     AddConstraint,
     /// <summary>Drops a foreign-key or check constraint.</summary>
     DropConstraint,
+    /// <summary>
+    /// Adds a domain the schema declares (<c>schema.Type&lt;T&gt;</c>, phase E3). A SQL engine's domains
+    /// are registered on the engine, not stored in the database, so the step changes no catalog: the
+    /// engine that declares the database registers the domain when it builds.
+    /// </summary>
+    AddDomain,
+    /// <summary>Drops a domain the schema no longer declares; like <see cref="AddDomain"/>, it changes no catalog.</summary>
+    DropDomain,
 }
 
 /// <summary>Classifies the data-loss risk of a migration step.</summary>
@@ -50,6 +58,7 @@ public sealed class SqlSchemaMigrationOperation
     /// <param name="previousColumn">The previous column definition, when applicable.</param>
     /// <param name="index">The desired index definition, when applicable.</param>
     /// <param name="constraint">The constraint definition, when applicable.</param>
+    /// <param name="domain">The domain definition, when applicable.</param>
     public SqlSchemaMigrationOperation(
         SqlSchemaMigrationOperationKind kind,
         SqlSchemaMigrationSafety safety,
@@ -59,8 +68,10 @@ public sealed class SqlSchemaMigrationOperation
         CompiledSchemaColumn? column = null,
         CompiledSchemaColumn? previousColumn = null,
         CompiledSchemaIndex? index = null,
-        CompiledSchemaConstraint? constraint = null)
+        CompiledSchemaConstraint? constraint = null,
+        CompiledSchemaType? domain = null)
     {
+        Domain = domain;
         ArgumentException.ThrowIfNullOrWhiteSpace(objectName);
         Kind = kind;
         Safety = safety;
@@ -91,6 +102,8 @@ public sealed class SqlSchemaMigrationOperation
     public CompiledSchemaIndex? Index { get; }
     /// <summary>Gets the constraint definition.</summary>
     public CompiledSchemaConstraint? Constraint { get; }
+    /// <summary>Gets the domain definition of an <see cref="SqlSchemaMigrationOperationKind.AddDomain"/> or <see cref="SqlSchemaMigrationOperationKind.DropDomain"/> step.</summary>
+    public CompiledSchemaType? Domain { get; }
 }
 
 /// <summary>Contains a deterministic ordered migration plan.</summary>

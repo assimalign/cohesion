@@ -43,6 +43,50 @@ public sealed class SqlTableBuilder<TRow>
     public void Column(Expression<Func<TRow, object?>> selector)
         => AddColumn(selector);
 
+    /// <summary>
+    /// Declares a column of a named SQL type: a domain the SQL engine registers
+    /// (<c>sql.Types.Add(SqlType.CreateDomain("email", ...))</c>), or a built-in type name with its
+    /// arguments (<c>VARCHAR(320)</c>, <c>DECIMAL(18, 2)</c>).
+    /// </summary>
+    /// <param name="selector">Selects a direct row member stored in the column.</param>
+    /// <param name="sqlType">
+    /// The type's name as DDL writes it: an identifier, optionally followed by one or two unsigned
+    /// integer arguments in parentheses. Pass a constant string, so the <c>Sdk.Database</c> build task
+    /// can read the declaration without running the program.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="selector"/> does not select a direct row member; <paramref name="sqlType"/> is
+    /// empty, white space or not a type name; or the member was already declared with another SQL type.
+    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="selector"/> or <paramref name="sqlType"/> is null.</exception>
+    /// <remarks>
+    /// This package does not know the engine's types: the name is kept as written, in the compiled
+    /// schema's document and hash, and the SQL engine that provisions the schema resolves it as its DDL
+    /// does, a built-in type name first and then a domain of its type catalog. The engine's build
+    /// refuses a name it does not know, or a type not stored as the member's CLR type is (a domain
+    /// over <c>VARCHAR(320)</c> for a <see cref="string"/> member), before it touches any file.
+    /// </remarks>
+    public void Column(Expression<Func<TRow, object?>> selector, string sqlType)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sqlType);
+        if (!CompiledSchemaTypeNames.IsTypeName(sqlType))
+        {
+            throw new ArgumentException(
+                $"'{sqlType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments in parentheses.",
+                nameof(sqlType));
+        }
+
+        string name = AddColumn(selector);
+        int index = _columnDefinitions.FindIndex(column => column.Name == name);
+        var column = _columnDefinitions[index];
+        if (column.SqlType is not null && !string.Equals(column.SqlType, sqlType, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Column '{name}' is already declared with SQL type '{column.SqlType}'.", nameof(sqlType));
+        }
+
+        _columnDefinitions[index] = column with { SqlType = sqlType };
+    }
+
     /// <summary>Declares the table's primary key.</summary>
     /// <param name="selector">Selects the direct primary-key member.</param>
     /// <exception cref="ArgumentException"><paramref name="selector"/> does not select a direct row member.</exception>

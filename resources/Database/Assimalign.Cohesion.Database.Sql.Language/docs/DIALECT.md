@@ -50,7 +50,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
-| `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
+| `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions, text to the date, time, UUID and binary floating-point types, and an application's casts, to and from its domains and between built-in types the engine does not convert (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
@@ -1268,27 +1268,88 @@ Coercion rules are an engine concern (planner/executor); the language layer
 guarantees only that declared names resolve to shared type identities so every
 model orders and stores values identically.
 
-## Explicit conversion (`CAST`, #1022)
+**A name that is not in this table** (phase E3) is not an error of the language
+layer: a SQL engine resolves it against its type catalog, where an application
+registers domains (`SqlType.CreateDomain`, `SqlDatabaseEngineBuilder.Types`). DDL
+(`CREATE TABLE`, `ALTER TABLE ADD COLUMN`) and `CAST` read a built-in name from this
+table first and fall back to the engine's domains for any other name; a domain takes
+no type arguments. A name neither resolves fails while planning with `COHSQLE010`
+(SQLSTATE 42704), the same over an empty table as over a populated one. A column of
+a domain stores its base type and keeps the domain's name in the catalog; every
+write that assigns the column, its INSERT default included, and every `CAST` to the
+domain applies the base type's length, precision and scale, then evaluates the
+domain's check, of which only FALSE refuses the value (`DOMAIN constraint 'email' on
+'dbo.contacts' was violated.`, a `SqlConstraintViolationException` of kind `DOMAIN`,
+which a `CAST` raises too, with an empty table). A plain `VARCHAR(n)` or
+`NUMERIC(p, s)` column does not apply its bound on a write yet. A domain's name is an
+ASCII identifier.
 
-Targets resolve through `SqlTypeNames` into `DatabaseTypeInfo`; the executor uses
-that shared identity, never a second SQL-name table. All aliases in the type-name
-table for Boolean, Int8, Int16, Int32, Int64, Decimal, and String are accepted.
-The complete non-null source/target pair set is:
+## Explicit conversion (`CAST`, #1022, E3)
+
+A target that is a built-in type name resolves through `SqlTypeNames` into
+`DatabaseTypeInfo`, which the parser checks for argument shape only: every built-in
+type is a valid target. Any other name is left to the engine's type catalog (a
+domain, or `COHSQLE010` while planning). Which conversions exist is the engine's
+**cast registry** (phase E3), PostgreSQL's `pg_cast` (`castfunc`, `castcontext`): the
+engine's own conversions and an application's casts, to and from its domains and
+between built-in types the engine does not convert, are entries of the same
+registry, and `CAST` applies an entry of any context. A `CAST` picks the entry by
+the operand's storage type at run time, preferring a cast from the operand's domain
+when the plan knows it (a column of a domain, or a `CAST` to one, under any
+`COLLATE`; any other expression over a domain's value has the base type, so
+`CAST(COALESCE(amount, 0) AS TEXT)` runs the base type's cast where
+`CAST(amount AS TEXT)` runs the domain's), and for a domain target a cast to the
+domain before one to its base type; a value that already has the target's storage
+type needs no entry, and a value of a domain cast to that same domain takes none.
+Then the target's length, precision and scale apply, then a domain target's check.
+The built-in non-null source/target pairs are:
 
 | Evaluated source | Allowed targets |
 |---|---|
-| Signed `sbyte`, `short`, `int`, `long`, or `decimal` | Any signed integer width, Decimal, String |
-| String | Any signed integer width, Decimal, Boolean, String |
+| Signed `sbyte`, `short`, `int`, `long`, or `decimal` | Any signed integer width, Decimal, String, REAL, DOUBLE |
+| String | Any signed integer width, Decimal, Boolean, String, REAL, DOUBLE, DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID |
 | Boolean | Boolean, String |
+| REAL | REAL, DOUBLE |
+| DOUBLE | DOUBLE, REAL |
+| TIMESTAMP | TIMESTAMP, DATE |
+| DATE, TIME, TIMESTAMPTZ, INTERVAL, UUID, BINARY, JSON, JSONB | the same type only |
 
-All other pairs are rejected, including floating-point (`float`/`double`),
-unsigned integers, binary, temporal, GUID and JSON targets. Numeric/boolean
-conversion is not supported. Sources are evaluated values: SQL integer literals
-are Int64 and SQL fractional literals are Decimal; parameters and columns retain
-their runtime types. SQL fractional literals permit exponent and leading decimal
-point syntax (such as `1e2` and `.5`) but must also fit Decimal exactly; literal
-underflow/rounding is rejected before conversion. Insignificant zeros may be
-normalized. Identity conversions in the table still enforce target bounds.
+All other pairs are rejected unless an application registers a cast for them
+(`COHSQLE011: Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is
+registered. ...`), including floating-point sources to exact numbers and text,
+temporal, GUID and binary sources to text, and every conversion to JSON, JSONB and
+binary. Numeric/boolean conversion is not supported. The refusal is raised while
+planning whenever the plan knows the operand's type (a literal, a column, a `CAST`,
+a predicate, a scalar call's result, a scalar subquery), the same over an empty
+table as over a populated one; a parameter's type only its value reveals, so it is
+refused with the same code when evaluated. Unsigned integers and other CLR parameter
+types the codec does not store fail as conversion failures (`CAST from Byte to TEXT
+failed: Unsupported source/target pair.`). Sources are evaluated values: SQL
+integer literals are Int64 and SQL fractional literals are Decimal; parameters and
+columns retain their runtime types. SQL fractional literals permit exponent and
+leading decimal point syntax (such as `1e2` and `.5`) but must also fit Decimal
+exactly; literal underflow/rounding is rejected before conversion. Insignificant
+zeros may be normalized. Identity conversions in the table still enforce target
+bounds.
+
+- **Contexts.** Each built-in entry carries PostgreSQL's context for the same pair
+  (`src/include/catalog/pg_cast.dat`): widenings among the numbers implicit,
+  narrowings and conversions to text assignment, conversions from text explicit. In
+  this iteration only `CAST` consults the registry; assignment coercion and overload
+  resolution keep their own rules, so a literal string still does not reach a DATE
+  function parameter without a `CAST` (`day_of_year(CAST('2026-02-01' AS DATE))`).
+- **Temporal, UUID and binary floating-point text** parses as INSERT parses text for
+  a column of the type, in the invariant culture and independent of the host's clock
+  and time zone. DATE, TIMESTAMP and TIMESTAMPTZ text starts with an ISO 8601 date,
+  `yyyy-mm-dd` (`'1.5'` is refused rather than given the current year), optionally
+  followed by a time of day and an offset. `TIMESTAMP` keeps the clock time as
+  written and ignores an offset, as PostgreSQL's `timestamp_in` does; `TIMESTAMPTZ`
+  keeps a written offset and takes UTC when none is written (the engine has no
+  session time zone). TIME text is a time of day (`13:45`, `13:45:30.5`); INTERVAL text is .NET's
+  constant form `[-][d.]hh:mm[:ss[.fffffff]]`, so `'12'` is twelve days, not
+  PostgreSQL's twelve seconds. REAL and DOUBLE text is `NumberStyles.Float`: no
+  grouping; `NaN` and `Infinity` are accepted. A finite value REAL overflows or
+  underflows to zero is an error, as in PostgreSQL.
 
 - **Text:** surrounding whitespace is trimmed when reading numbers or booleans.
   Numeric text must match `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation,
@@ -1312,12 +1373,23 @@ normalized. Identity conversions in the table still enforce target bounds.
   be rounded. The output does not promise padding to the declared scale.
 - **Strings:** all four string aliases permit an optional positive Int32 length
   n; bare aliases have no CAST length limit. Length counts UTF-16 code units.
-  Longer results error; CHAR/CHARACTER do not pad, and no alias truncates.
-  Integer and Boolean targets take no parameters.
-- **Diagnostics and metadata:** unknown names produce parse error `SQL0004`;
-  recognized unsupported targets and invalid target
-  arguments produce `SQL0005`; malformed CAST syntax produces `SQL0003`. Conversion failures throw `DatabaseException`
-  naming CAST and its target, surfaced as query errors over the wire. The AST
+  Longer results error; CHAR/CHARACTER do not pad, and no alias truncates. The
+  binary aliases permit an optional positive length too. Every other built-in
+  target, and a domain, takes no parameters.
+- **Diagnostics and metadata:** a name that is not a built-in type and that the
+  engine does not register as a domain fails while planning with `COHSQLE010`
+  (`SQL0004` is retired: the parser no longer knows which names exist); invalid
+  target arguments produce `SQL0005`; malformed CAST syntax produces `SQL0003`.
+  A pair no registered cast converts is `COHSQLE011` (SQLSTATE 42846). A conversion
+  that fails on the value (a `FormatException`, `OverflowException` or
+  `InvalidCastException`, the only failures the built-in casts throw, an
+  application's alike) throws `DatabaseException` naming CAST and its target, with
+  the original as the inner exception, surfaced as a query error over the wire. A
+  cast that throws anything else, a cancellation the statement did not ask for
+  included, fails with `COHSQLE007` (`Cast TEXT AS cents failed: ...`), as a
+  function does, and the connection stays usable; a `DatabaseException` it throws
+  passes unchanged. A value a domain target's check refuses is the
+  `SqlConstraintViolationException` of kind `DOMAIN` a write raises. The AST
   retains full `DatabaseTypeInfo`; in-process result columns expose the base
   `DatabaseType` and conservative nullability. The existing wire/client contract
   exposes the base type, with a matching boxed runtime value. Neither result
@@ -1432,8 +1504,8 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
 | `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
-| `SQL0004` | Error | Unknown CAST target type |
-| `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
+| `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
+| `SQL0005` | Error | Invalid CAST target parameters: malformed arguments, or arguments a built-in target does not take |
 | `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -1443,9 +1515,11 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
-| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, a cancellation or an exhausted stack or memory, which is the inner exception; or it returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
+| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, a cancellation or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
 | `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
 | `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
+| `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain the engine registers: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the engine that opened the database does not register, or registers over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
+| `COHSQLE011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1490,6 +1564,6 @@ defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
 counts when `COHSQLE005` is, the function-argument and overload rules under Statement
 completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function rules
-under Builtin functions when `COHSQLE007` and `COHSQLE009` are. The engine's transaction-state codes,
+under Builtin functions when `COHSQLE007` and `COHSQLE009` are, and the type and cast rules under Explicit conversion when `COHSQLE010` and `COHSQLE011` are. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
 code, `COHSQLT005`, are documented in the SQL engine design.

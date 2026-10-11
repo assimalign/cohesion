@@ -287,14 +287,65 @@ public sealed class SqlCastWireTests
         failure.Message.ShouldContain("CAST", Case.Sensitive);
     }
 
-    /// <summary>Unknown types, unsupported targets, and illegal modifiers fail before any rows are read.</summary>
+    /// <summary>
+    /// A name the engine's type catalog does not know fails while planning with <c>COHSQLE010</c>,
+    /// before any row is read: the parser leaves a name that is not a built-in type to the engine (E3).
+    /// </summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: an unknown target type is a coded execution failure before execution")]
+    public async Task QueryAsync_UnknownTarget_ShouldBeCodedBeforeExecution()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.QueryAsync("SELECT CAST(name AS NOTATYPE) AS converted FROM users WHERE id = 0",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        failure.Message.ShouldStartWith("COHSQLE010: CAST target: type 'NOTATYPE' does not exist", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Text reaches the date, time, UUID and binary floating-point types through <c>CAST</c> (E3), and
+    /// the client decodes each value as its type.
+    /// </summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: text converts to DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, REAL and DOUBLE over the wire")]
+    public async Task QueryAsync_TextToTypedTargets_ShouldConvert()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlRow row = (await connection.QueryAsync(
+            "SELECT CAST('2026-02-01' AS DATE) AS d, CAST('13:45:30' AS TIME) AS t, CAST('2026-02-01T13:45:30' AS TIMESTAMP) AS ts, " +
+            "CAST('2026-02-01T13:45:30+02:00' AS TIMESTAMPTZ) AS tz, CAST('01:30:00' AS INTERVAL) AS i, " +
+            "CAST('6f9619ff-8b86-d011-b42d-00c04fc964ff' AS UUID) AS u, CAST('1.5' AS REAL) AS r, CAST(id AS DOUBLE) AS f " +
+            "FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem();
+
+        // Assert
+        row["d"].ShouldBe(new DateOnly(2026, 2, 1));
+        row["t"].ShouldBe(new TimeOnly(13, 45, 30));
+        row["ts"].ShouldBe(new DateTime(2026, 2, 1, 13, 45, 30));
+        row["tz"].ShouldBe(new DateTimeOffset(2026, 2, 1, 13, 45, 30, TimeSpan.FromHours(2)));
+        row["i"].ShouldBe(TimeSpan.FromMinutes(90));
+        row["u"].ShouldBe(Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff"));
+        row["r"].ShouldBe(1.5f);
+        row["f"].ShouldBe(1d);
+    }
+
+    /// <summary>Illegal modifiers fail before any rows are read.</summary>
     /// <param name="typeName">The invalid target specification.</param>
     /// <param name="diagnostic">The precise parser diagnostic.</param>
     /// <returns>The asynchronous test operation.</returns>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: invalid target specifications return parse failures")]
-    [InlineData("NOTATYPE", "SQL0004")]
-    [InlineData("FLOAT", "SQL0005")]
-    [InlineData("DATE", "SQL0005")]
+    [InlineData("DATE(3)", "SQL0005")]
     [InlineData("INT(3)", "SQL0005")]
     [InlineData("VARCHAR(0)", "SQL0005")]
     [InlineData("VARCHAR(3, 1)", "SQL0005")]

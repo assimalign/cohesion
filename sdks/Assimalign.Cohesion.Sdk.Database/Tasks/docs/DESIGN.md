@@ -92,7 +92,7 @@ and a `database.Schema(...)` call is made on the `AddDatabase` callback's own pa
 method that receives the `SqlDatabaseBuilder` works at run time but fails here; declare a reusable
 schema as a `SqlSchema.Create(name, ...)` value instead). Artifacts are keyed by database name
 alone, so a database name is unique across every engine of the project, although two engines may
-each own a database of one name at run time. A schema principal or custom type fails the build
+each own a database of one name at run time. A schema principal fails the build
 (`COHDBSDK108`): every SQL engine build refuses it before touching a file (`COHSQLP001`, owner
 decision 58), so an artifact for it would only move the failure to the first start. Every
 declaration is compiled before any artifact is written, so a failure replaces none.
@@ -105,7 +105,17 @@ The task does not parse the SQL: it references only `Database.Sql.Schema`, never
 on its engine builder compiles into the artifact like any other; the engine's build binds it to its
 function catalog before it touches a file (`COHSQLP001` when it does not bind). A CHECK's name
 shares the table's constraint, primary-key and index name space (`COHDBSDK105`, as the runtime
-compiler's `DuplicateDeclaration`). The diagnostics:
+compiler's `DuplicateDeclaration`).
+
+`table.Column(selector, sqlType)` and `schema.Type<T>` (E3, design §5.7) extract with the same
+parity. The SQL type is a compile-time string constant kept as written (`COHDBSDK104` when it is
+not one), checked only for the runtime's shape, an identifier with up to two unsigned integer
+arguments (`COHDBSDK106`), and a member declared with two names is `COHDBSDK105`. **Domains are
+invisible to the task** as functions are: a column of a domain the application registers on its
+engine builder compiles into the artifact, and the engine's build resolves the name before it
+touches a file. `schema.Type<T>(t => t.Decimal(p, s))` is a domain named for `T`'s simple name, as
+the runtime compiler names it; a generic or array `T`, which has no such name, is `COHDBSDK106`.
+The diagnostics:
 
 | Code | Meaning |
 | --- | --- |
@@ -116,7 +126,7 @@ compiler's `DuplicateDeclaration`). The diagnostics:
 | `COHDBSDK104` | An operation the DSL does not support, or a CHECK whose SQL text is not a non-empty constant. |
 | `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
 | `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
-| `COHDBSDK108` | `SqlSchemaBuilder.Principal` or `SqlSchemaBuilder.Type<T>`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal, grant and custom-type DDL exists. |
+| `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
 
 The outputs are:
 
@@ -157,7 +167,7 @@ atomically emits matching `NNNN_name.sql` and `NNNN_name.schema.json` files. The
 timestamps. Missing names, invalid schemas, unsupported/destructive operations, and path
 collisions fail without partial outputs. `KeyValuePair` fails explicitly because a SQL script is
 not a valid migration artifact for that model. SQL text uses the same guarded, `dbo`-qualified
-dialect as the runtime renderer; the current dialect explicitly rejects constraints, custom types,
+dialect as the runtime renderer; the current dialect explicitly rejects constraints,
 ALTER metadata, and required column additions that have no default or backfill.
 
 ## Verification
@@ -168,7 +178,7 @@ it, the migration target's parameters, and the fallback diagnostic for unknown/c
 selectors. Task tests cover static/runtime canonical JSON and hash parity for both anchors, one
 artifact per database and the manifest, removal of an undeclared database's artifacts while a
 foreign `*.schema.json` stays, the hosted `AddSql` shape, the unanalyzable-name and file-name
-refusals, duplicate and missing declarations, the principal and custom-type refusals
+refusals, duplicate and missing declarations, the principal refusal, domain and column-type parity and refusals
 (`COHDBSDK108`), invalid C# schema diagnostics, per-database SQL migration numbering, the
 one-database default and dialect output, and the KeyValuePair compilation and migration errors. The SampleHost end-to-end test in
 `Database.Testing` checks the remaining link: the SDK's hash equals the hash the running host

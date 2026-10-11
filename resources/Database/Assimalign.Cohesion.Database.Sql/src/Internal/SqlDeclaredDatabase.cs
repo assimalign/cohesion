@@ -49,43 +49,87 @@ internal sealed class SqlDeclaredDatabase
     internal SqlSchemaMigrationResult? Result => _result;
 
     /// <summary>
-    /// Compiles one database declaration and refuses what the engine cannot provision, before any
-    /// file is touched (phase 3 of the build): a schema that does not compile, or declares a
-    /// principal (owner decision 58 of 2026-10-09) or a custom type, or a CHECK that does not bind
-    /// to the engine's frozen function catalog: one that is not exactly one predicate, names an
-    /// unknown column or function, calls a function with arguments no overload accepts, or calls a
-    /// function that is not immutable (owner decision 64).
+    /// Compiles one database declaration's schema and adds the domains it declares
+    /// (<c>schema.Type&lt;T&gt;</c>) to the engine's types, before the build freezes them (phase 2):
+    /// a schema that does not compile, declares a principal (owner decision 58 of 2026-10-09), or
+    /// declares a domain whose name another type of the engine has with another base type is refused.
+    /// Touches no file.
     /// </summary>
     /// <param name="engineName">The engine's name, for the message.</param>
     /// <param name="declaration">The database's declaration.</param>
+    /// <param name="types">The engine's types, not yet frozen.</param>
+    /// <returns>The compiled schema, or null when the database declares none.</returns>
+    /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>COHSQLP001</c>).</exception>
+    internal static SqlCompiledSchema? CompileSchema(string engineName, SqlDatabaseBuilder declaration, SqlTypeCollection types)
+    {
+        if (declaration.DeclaredSchema is not { } schema)
+        {
+            return null;
+        }
+
+        SqlCompiledSchema compiled;
+        try
+        {
+            compiled = schema.Compile();
+        }
+        catch (SqlSchemaValidationException invalid)
+        {
+            throw Refuse(engineName, declaration.Name, invalid.Message, invalid);
+        }
+
+        if (SqlSchemaProvisioner.DescribeUnsupported(compiled) is { } unsupported)
+        {
+            throw Refuse(engineName, declaration.Name, $"its schema declares {unsupported}.", inner: null);
+        }
+
+        foreach (CompiledSchemaType declared in compiled.Types)
+        {
+            SqlType domain;
+            try
+            {
+                domain = SqlSchemaProvisioner.CreateDomain(declared);
+            }
+            catch (ArgumentException invalid)
+            {
+                throw Refuse(engineName, declaration.Name, $"its schema declares type '{declared.Name}', which cannot be a domain: {invalid.Message}", invalid);
+            }
+
+            if (types.AddDeclared(domain) is { } conflict)
+            {
+                throw Refuse(engineName, declaration.Name, $"its schema conflicts with the engine's types: {conflict}.", inner: null);
+            }
+        }
+
+        return compiled;
+    }
+
+    /// <summary>
+    /// Binds one database declaration's compiled schema to the engine's frozen catalogs and refuses
+    /// what the engine cannot provision, before any file is touched (phase 3 of the build): a column
+    /// whose declared type the type catalog does not resolve or does not store as its member's type,
+    /// or a CHECK that does not bind to the function catalog: one that is not exactly one predicate,
+    /// names an unknown column or function, calls a function with arguments no overload accepts, or
+    /// calls a function that is not immutable (owner decision 64).
+    /// </summary>
+    /// <param name="engineName">The engine's name, for the message.</param>
+    /// <param name="declaration">The database's declaration.</param>
+    /// <param name="compiled">The schema phase 2 compiled, or null when the database declares none.</param>
     /// <param name="functions">The engine's frozen function catalog (phase 2).</param>
+    /// <param name="types">The engine's frozen type catalog (phase 2).</param>
     /// <param name="parserOptions">The engine's parser options, which its DDL will parse the CHECK with.</param>
     /// <returns>The compiled declaration.</returns>
     /// <exception cref="SqlSchemaMigrationException">The declaration is refused (<c>COHSQLP001</c>).</exception>
-    internal static SqlDeclaredDatabase Compile(string engineName, SqlDatabaseBuilder declaration, SqlFunctionCatalog functions,
-        SqlQueryParserOptions parserOptions)
+    internal static SqlDeclaredDatabase Compile(string engineName, SqlDatabaseBuilder declaration, SqlCompiledSchema? compiled,
+        SqlFunctionCatalog functions, SqlTypeCatalog types, SqlQueryParserOptions parserOptions)
     {
-        SqlCompiledSchema? compiled = null;
         Collation collation = declaration.DefaultCollation ?? Collation.Binary;
-        if (declaration.DeclaredSchema is { } schema)
+        if (compiled is not null)
         {
             try
             {
-                compiled = schema.Compile();
-            }
-            catch (SqlSchemaValidationException invalid)
-            {
-                throw Refuse(engineName, declaration.Name, invalid.Message, invalid);
-            }
-
-            if (SqlSchemaProvisioner.DescribeUnsupported(compiled) is { } unsupported)
-            {
-                throw Refuse(engineName, declaration.Name, $"its schema declares {unsupported}.", inner: null);
-            }
-
-            try
-            {
-                SqlSchemaProvisioner.BindDeclaredChecks(compiled, collation, new SqlFunctionEnvironment(functions, declaration.Name), parserOptions);
+                var environment = new SqlFunctionEnvironment(functions, declaration.Name, types);
+                SqlSchemaProvisioner.BindDeclaredTypes(compiled, types);
+                SqlSchemaProvisioner.BindDeclaredChecks(compiled, collation, environment, parserOptions);
             }
             catch (DatabaseException invalid)
             {
@@ -146,6 +190,17 @@ internal sealed class SqlDeclaredDatabase
                 "engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint through an engine that does not declare " +
                 "the database.",
                 SqlEvaluationException.UnregisteredFunction(unresolved));
+        }
+
+        // The same rule for a column of a domain (phase E3): the database opens and writes to the
+        // column fail, but the application that declares the database removed the domain.
+        if (database.Definitions.FindUnresolvedDomain() is { } domain)
+        {
+            throw new SqlSchemaMigrationException(
+                $"{SqlEvaluationException.UnregisteredTypeCode}: SQL engine '{engine.Name}', database '{Name}': {domain.Describe()}. " +
+                "The engine declares this database, so its build fails before the engine accepts work: register the domain on the " +
+                "engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column through an engine that does not declare the database.",
+                SqlEvaluationException.UnregisteredDomain(domain));
         }
     }
 

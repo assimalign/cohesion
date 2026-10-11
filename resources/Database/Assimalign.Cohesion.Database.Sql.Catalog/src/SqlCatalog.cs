@@ -72,8 +72,9 @@ public sealed class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // every version up to it. Version 3 adds the dropped columns' physical ordinals (#1241).
-    private const int tableExtensionVersion = 3;
+    // every version up to it. Version 3 adds the dropped columns' physical ordinals (#1241),
+    // version 4 (data-storage format 7, phase E3) each column's domain name.
+    private const int tableExtensionVersion = 4;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -1081,8 +1082,9 @@ public sealed class SqlCatalog
 
         AppendOwnership(ref writer, table.Owner, table.OwningSchema);
         // Versioned trailing extension; old records end after keys or ownership. Version 1
-        // carries the constraints, 2 adds the column collations and 3 (data-storage format 6,
-        // #1241) the dropped columns' physical ordinals.
+        // carries the constraints, 2 adds the column collations, 3 (data-storage format 6,
+        // #1241) the dropped columns' physical ordinals and 4 (data-storage format 7, phase E3)
+        // each column's domain name, NULL for a column of a built-in type.
         writer.AppendInt32(tableExtensionVersion).AppendInt32(table.Constraints.Count);
         foreach (SqlCatalogConstraint constraint in table.Constraints)
         {
@@ -1111,6 +1113,10 @@ public sealed class SqlCatalog
         foreach (int ordinal in table.DroppedColumnOrdinals)
         {
             writer.AppendInt32(ordinal);
+        }
+        foreach (var column in table.Columns)
+        {
+            AppendOptionalString(ref writer, column.DomainName);
         }
         return writer.ToArray();
     }
@@ -1165,9 +1171,10 @@ public sealed class SqlCatalog
         var dropped = new List<int>();
         if (!reader.IsAtEnd)
         {
-            // Versions 1 and 2 still load, so that the data-storage format gate, which
+            // Versions 1 to 3 still load, so that the data-storage format gate, which
             // reads the loaded catalog, refuses an older database with its own message
-            // (format 5 and earlier wrote version 2; they had no dropped columns).
+            // (format 5 and earlier wrote version 2, with no dropped columns; format 6 wrote
+            // version 3, with no domains).
             int version = reader.ReadInt32();
             if (version is < 1 or > tableExtensionVersion)
             {
@@ -1222,6 +1229,24 @@ public sealed class SqlCatalog
                 for (int index = 0; index < droppedCount; index++)
                 {
                     dropped.Add(reader.ReadInt32());
+                }
+            }
+            if (version >= 4)
+            {
+                for (int index = 0; index < columns.Count; index++)
+                {
+                    string? domain = ReadOptionalString(ref reader);
+                    if (domain is null)
+                    {
+                        continue;
+                    }
+                    if (string.IsNullOrWhiteSpace(domain))
+                    {
+                        throw new SqlCatalogException($"The persisted domain name of column '{columns[index].Name}' of '{schema}.{name}' is empty.");
+                    }
+                    var column = columns[index];
+                    columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
+                        column.DefaultLiteral, column.Collation, domain);
                 }
             }
         }

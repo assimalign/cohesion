@@ -195,9 +195,9 @@ public class SqlSchemaTests
 
     /// <summary>
     /// <c>table.Check(name, sql)</c> compiles to a CHECK constraint whose text is the author's, in the
-    /// v2 document and its hash, with no advisory columns; the package never parses the SQL.
+    /// v3 document and its hash, with no advisory columns; the package never parses the SQL.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declared CHECK compiles its SQL text as written into the v2 document")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declared CHECK compiles its SQL text as written into the v3 document")]
     public void Compile_WithTableCheck_ShouldRecordTheSqlTextAsAConstraint()
     {
         // Arrange
@@ -215,7 +215,7 @@ public class SqlSchemaTests
         SqlCompiledSchema reread = SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument);
 
         // Assert
-        schema.Format.ShouldBe("cohesion/database-schema/v2");
+        schema.Format.ShouldBe("cohesion/database-schema/v3");
         CompiledSchemaTable lines = schema.Tables.ShouldHaveSingleItem();
         lines.Constraints.Select(constraint => (constraint.Name, constraint.Kind, constraint.Expression?.CanonicalText, constraint.Columns.Count))
             .ShouldBe([

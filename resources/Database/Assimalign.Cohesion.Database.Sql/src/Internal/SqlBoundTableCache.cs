@@ -110,7 +110,7 @@ internal sealed class SqlBoundTableCache
             }
         }
 
-        return Store(published, new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues));
+        return Store(published, new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, bound.Domains));
     }
 
     /// <summary>Whether a table version is already bound, without binding it.</summary>
@@ -201,6 +201,7 @@ internal sealed class SqlBoundTableCache
         }
 
         var defaults = new SqlBoundExpression?[table.Columns.Count];
+        List<SqlBoundDomain>? domains = null;
         for (int ordinal = 0; ordinal < defaults.Length; ordinal++)
         {
             var column = table.Columns[ordinal];
@@ -210,9 +211,73 @@ internal sealed class SqlBoundTableCache
                 defaults[ordinal] = SqlPlanExecutor.BindDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
                     $"DEFAULT of column '{column.Name}' on table '{tableName}'"));
             }
+
+            if (column.DomainName is not null)
+            {
+                (domains ??= []).Add(BindDomain(table, ordinal, tableName));
+            }
         }
 
-        return new SqlBoundTable(table, checks.ToArray(), defaults);
+        return new SqlBoundTable(table, checks.ToArray(), defaults, domains?.ToArray());
+    }
+
+    /// <summary>
+    /// Binds a stored column's domain against the engine's type catalog (phase E3): its check as a call
+    /// over the column's value, or, when the engine registers no domain of the name, or one over another
+    /// storage type or another length, precision or scale than the column stores, an unresolved
+    /// binding that fails each write to the column with <c>COHSQLE010</c> while the table opens and its
+    /// reads proceed, as owner decision 65 has it for a function. A column keeps the bound it was
+    /// created with, so a domain whose base type changed would otherwise bound the column's writes and
+    /// a <c>CAST</c> to the domain differently.
+    /// </summary>
+    private SqlBoundDomain BindDomain(SqlCatalogTable table, int ordinal, string tableName)
+    {
+        var column = table.Columns[ordinal];
+        string name = column.DomainName!;
+        string? reason = !Functions.Types.TryGetDomain(name, out var domain)
+            ? "which this engine does not register"
+            : domain.Storage.Type != column.Type.Type
+                || domain.Storage.MaxLength != column.Type.MaxLength
+                || domain.Storage.Precision != column.Type.Precision
+                || domain.Storage.Scale != column.Type.Scale
+                ? $"which this engine registers over {domain.BaseType!.Name}, but the column stores {SqlType.ForStorage(column.Type).Name}"
+                : null;
+        if (reason is not null)
+        {
+            return new SqlBoundDomain(ordinal, name, null, new SqlUnresolvedDomain(tableName, column.Name, name, reason));
+        }
+
+        if (domain.Check is not { } check)
+        {
+            return new SqlBoundDomain(ordinal, domain.Name, null, null);
+        }
+
+        var call = new SqlBoundCall(check, [new SqlBoundColumn(ordinal)], SqlFunctionResolver.CoercionTargets(check, 1),
+            new SqlBoundCollation(column.Collation ?? _catalog.DefaultCollation), Functions.Database);
+        return new SqlBoundDomain(ordinal, domain.Name, call, null);
+    }
+
+    /// <summary>
+    /// Finds the first stored column of the database, in catalog order, whose domain the engine does
+    /// not resolve: what an engine build verifies for a database it declares (provisioning step 6,
+    /// phase E3), binding every table version it has not bound yet.
+    /// </summary>
+    /// <returns>The first unresolved domain, or null when every column's domain resolves.</returns>
+    /// <exception cref="DatabaseException">A persisted definition of a table does not load.</exception>
+    internal SqlUnresolvedDomain? FindUnresolvedDomain()
+    {
+        foreach (var table in _catalog.Tables)
+        {
+            foreach (var domain in Get(table).Domains)
+            {
+                if (domain.Unresolved is { } unresolved)
+                {
+                    return unresolved;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

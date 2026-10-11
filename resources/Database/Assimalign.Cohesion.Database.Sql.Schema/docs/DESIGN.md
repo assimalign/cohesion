@@ -60,9 +60,32 @@ duplicate declarations, missing references, and unsupported value types.
 
 `SqlSchemaMigrationPlanner` produces deterministic dependency-ordered operations
 and requires the declaration's destructive-change opt-in for data-losing steps.
-Unsupported metadata changes (custom types, principals) fail explicitly. SQL identifiers compare
+Unsupported metadata changes (principals) fail explicitly. SQL identifiers compare
 without case. Applying a plan is the SQL engine's (`Database.Sql`), which reports the outcome as a
 `SqlSchemaMigrationResult` (`FromHash`, `ToHash`, `OperationCount`, `WasAlreadyApplied`).
+
+**Domains and column SQL types (E3, owner decision 68; format `v3`).** A declared type,
+`schema.Type<T>(t => t.Decimal(p, s))`, lowers to a domain of the SQL engine: the compiled
+`CompiledSchemaType.Name` is `T`'s simple name, which must be a SQL identifier (a generic, nested
+generic or array type is `UnsupportedType`, naming the CLR identity), and every column whose
+member is of `T` is declared with it (`CompiledSchemaColumn.CustomType`, with the precision and
+scale). `table.Column(selector, sqlType)` declares a column of a named SQL type, a domain the
+engine registers (`"email"`) or a built-in type name with its arguments (`"VARCHAR(320)"`): the
+column keeps its member's storage type and the name as written, without length, precision or
+scale, and a member declared with two names is refused at the second. This package does not know
+the engine's types, so it checks only the name's shape (an identifier, optionally one or two
+unsigned integer arguments; `CompiledSchemaTypeNames`), which also keeps the name safe to write
+into DDL; the SQL engine's build resolves it, built-in names first, and refuses an unknown name or
+a type not stored as the member is, before it touches any file. Because a declared type's name and
+a column's type changed meaning, the document format is `cohesion/database-schema/v3`; a `v2`
+document no longer deserializes, so a recorded `v2` state is replanned once from the catalog. The
+validator accepts a column `CustomType` the schema does not declare when it has the shape (the
+engine's domain or a built-in name), and checks the storage type of one it declares. The planner
+plans `AddDomain` before the tables (so columns can be declared with the domain) and `DropDomain`
+after them, both safe and carrying the `CompiledSchemaType` (`SqlSchemaMigrationOperation.Domain`);
+a redefined domain is a drop and an add, and the columns declared with it change through their own
+`AlterColumn` steps. A domain is registered on the engine, not stored in the database, so a SQL
+engine renders no statement for either step.
 
 Foreign keys and checks are executable schema metadata. The planner first creates
 all tables and their indexes, then emits `AddConstraint` operations rendered as
@@ -97,7 +120,7 @@ declares a CHECK as a name and SQL text: `SqlTableBuilder<TRow>.Check(string nam
 sql)`, both non-blank. The compiler lowers it to a `CompiledSchemaConstraintKind.Check`
 constraint whose `Expression.CanonicalText` is the text exactly as written and whose
 `Columns` list is empty, in the `cohesion/database-schema/v2` document (no format change: the
-v2 record already carried compiled checks). A CHECK's name shares the table's constraint
+v2 record already carried compiled checks; E3 later moved the format to `v3`, above). A CHECK's name shares the table's constraint
 and index name space, as in the SQL catalog: a name another constraint, the primary key
 (`PK_<table>`) or an index (`IX_<table>_<member>`) already has is `DuplicateDeclaration`.
 This package does not parse SQL, so it neither validates the predicate nor knows which

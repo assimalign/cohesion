@@ -68,7 +68,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _definitions.Functions.Catalog.HasApplicationFunctions ? cancellationToken : default);
+            _definitions.Functions.RunsApplicationCode ? cancellationToken : default);
 
     /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
@@ -362,7 +362,10 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var replacements = new List<(PageId PageId, int SlotIndex, object?[] OldValues, object?[] NewValues, byte[] NewVersion)>(targets.Count);
+        var bound = _definitions.Get(plan.Table);
 
+        // Only the columns the statement sets are assigned their domain (phase E3): listed once, not per row.
+        int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
             var updated = (object?[])values.Clone();
@@ -371,6 +374,11 @@ internal sealed partial class SqlPlanExecutor
             {
                 // Assignments evaluate against the ORIGINAL row (SQL semantics).
                 updated[ordinal] = CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
+            }
+
+            if (assigned is not null)
+            {
+                CheckDomains(bound, updated, evaluator, assigned);
             }
 
             replacements.Add((pageId, slotIndex, values, updated,
@@ -1451,7 +1459,7 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Date => value switch
                 {
                     DateOnly date => date,
-                    string text => DateOnly.Parse(text, CultureInfo.InvariantCulture),
+                    string text => SqlTemporalText.ParseDate(text),
                     DateTime dateTime => DateOnly.FromDateTime(dateTime),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to DATE."),
                 },
@@ -1464,13 +1472,13 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.DateTime => value switch
                 {
                     DateTime dateTime => dateTime,
-                    string text => DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                    string text => SqlTemporalText.ParseTimestamp(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMP."),
                 },
                 DatabaseType.DateTimeOffset => value switch
                 {
                     DateTimeOffset dateTimeOffset => dateTimeOffset,
-                    string text => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                    string text => SqlTemporalText.ParseTimestampTz(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMPTZ."),
                 },
                 DatabaseType.TimeSpan => value switch
