@@ -15,12 +15,20 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// lock (a B-tree) changes its pages under its <see cref="StoragePageLatch"/>, which the storage
 /// enlists with the transaction, and the rollback restores those pages while it holds every
 /// enlisted latch exclusively, after the transaction's other pages (#1371). Each test here holds a
-/// latch shared on the test thread, as a reader does, and rolls back on another.
+/// latch shared on the test thread, as a reader does, and rolls back on another. The rollbacks run
+/// on threads of their own, apart from other tests: Windows CI once let ten seconds pass before
+/// the thread pool started a queued rollback, so it never reached the latch the test waited on.
 /// </summary>
+[Collection(StorageRaceCollection.Name)]
 public sealed class StoragePageLatchTests
 {
     private const ulong RecordOwner = 7;
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The longest a test waits for a rollback to reach or pass a latch. Every wait ends as soon as
+    /// its condition holds, so the ceiling costs nothing when the test passes.
+    /// </summary>
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(60);
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Page latch: a rollback restores a latched page only once the latch's reader has left (#1371)")]
     public async Task Rollback_WhileAReaderHoldsTheLatch_ShouldRestoreOnlyAfterTheReaderLeaves()
@@ -195,7 +203,7 @@ public sealed class StoragePageLatchTests
         latch.EnterRead();
         try
         {
-            var rollback = Task.Run(transaction.Rollback);
+            var rollback = RunOnThread(transaction.Rollback);
             bool waited = SpinWait.SpinUntil(() => latch.WaitingWriters == 1 || rollback.IsCompleted, Wait) && !rollback.IsCompleted;
             whileHeld?.Invoke();
             return (Body(storage, pageId)[0], waited, rollback.IsCompleted, rollback);
@@ -216,9 +224,9 @@ public sealed class StoragePageLatchTests
         first.EnterRead();
         try
         {
-            Task[] rollbacks = [Task.Run(forward.Rollback), Task.Run(backward.Rollback)];
+            Task[] rollbacks = [RunOnThread(forward.Rollback), RunOnThread(backward.Rollback)];
             bool bothWaited = SpinWait.SpinUntil(() => first.WaitingWriters == 2, Wait);
-            var probe = Task.Run(() =>
+            var probe = RunOnThread(() =>
             {
                 second.EnterRead();
                 second.ExitRead();
@@ -272,4 +280,31 @@ public sealed class StoragePageLatchTests
     }
 
     private static byte[] Body(TornStorage storage, PageId pageId) => storage.PageBytes(pageId).AsSpan(Page.HeaderSize).ToArray();
+
+    /// <summary>
+    /// Runs an action on a thread of its own, so it starts at once whatever the thread pool is
+    /// doing, and completes the returned task with the action's outcome.
+    /// </summary>
+    private static Task RunOnThread(Action action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+                completion.SetResult();
+            }
+            catch (Exception exception)
+            {
+                // The task carries the failure to the test, which awaits it.
+                completion.SetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+        };
+        thread.Start();
+        return completion.Task;
+    }
 }
