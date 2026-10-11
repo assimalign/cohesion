@@ -40,6 +40,7 @@ public enum DeviceFault
 internal sealed class DeviceFaults
 {
     private int _failPageWrites;
+    private int _failNextPageWrites;
     private int _failHeaderWrites;
     private int _failJournalFlushes;
     private int _failJournalWrites;
@@ -86,6 +87,15 @@ internal sealed class DeviceFaults
         get => Volatile.Read(ref _failPageWrites) != 0;
         set => Volatile.Write(ref _failPageWrites, value ? 1 : 0);
     }
+
+    /// <summary>
+    /// Fails the next <paramref name="count"/> writes to a data page, then lets writes through again,
+    /// on whatever thread they run. A test that needs exactly that many failures uses this instead of
+    /// switching <see cref="FailPageWrites"/> off once it sees one: under load the writer's retry
+    /// can run before the test does, and fail a second time.
+    /// </summary>
+    /// <param name="count">The number of data page writes to fail.</param>
+    internal void FailNextPageWrites(int count) => Volatile.Write(ref _failNextPageWrites, count);
 
     /// <summary>
     /// Gets or sets whether every write to page 0 of the data file fails: the header slot write of a
@@ -184,6 +194,7 @@ internal sealed class DeviceFaults
     internal void Clear()
     {
         FailPageWrites = false;
+        FailNextPageWrites(0);
         FailHeaderWrites = false;
         FailJournalFlushes = false;
         FailJournalWrites = false;
@@ -239,11 +250,28 @@ internal sealed class DeviceFaults
                 throw new System.IO.IOException("Injected header write failure.");
             }
         }
-        else if (FailPageWrites)
+        else if (FailPageWrites || TakeNextPageWriteFailure())
         {
             Interlocked.Increment(ref _pageWriteFailures);
             throw new System.IO.IOException("Injected page write failure.");
         }
+    }
+
+    // Claims one of the failures FailNextPageWrites armed; false once they are used up.
+    private bool TakeNextPageWriteFailure()
+    {
+        int remaining;
+        do
+        {
+            remaining = Volatile.Read(ref _failNextPageWrites);
+            if (remaining <= 0)
+            {
+                return false;
+            }
+        }
+        while (Interlocked.CompareExchange(ref _failNextPageWrites, remaining - 1, remaining) != remaining);
+
+        return true;
     }
 
     private void AfterDataRead(Span<byte> read, long offset)

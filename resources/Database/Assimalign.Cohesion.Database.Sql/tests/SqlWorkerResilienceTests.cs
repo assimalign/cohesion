@@ -733,18 +733,20 @@ public sealed class SqlWorkerResilienceTests
 
         long grown = database.DataStorage.JournalLength;
 
-        // Act: the size trigger is armed and the first checkpoint fails; the fault clears before
-        // the worker retries the database a backoff later.
-        faults.FailPageWrites = true;
+        // Act: the size trigger is armed and exactly one page write fails, so the first checkpoint
+        // fails and the worker's retry, a backoff later, finds the fault gone. A fault the test
+        // switched off after seeing the failure raced that retry: under load the retry ran first,
+        // failed too, and two failed checkpoints of a journal past the cap took the database offline.
+        faults.FailNextPageWrites(1);
         database.DataStorage.CheckpointJournalSize = PaceJournalSize;
         bool failed = await Eventually(() => worker.FailureCount >= 1);
-        faults.FailPageWrites = false;
         bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
 
         // Assert
         grown.ShouldBeGreaterThanOrEqualTo(options.JournalSizeLimit);
         failed.ShouldBeTrue();
         truncated.ShouldBeTrue();
+        faults.PageWriteFailures.ShouldBe(1);
         worker.FailureCount.ShouldBe(1);
         database.IsOffline.ShouldBeFalse();
         engine.OfflineDatabases.ShouldBeEmpty();
