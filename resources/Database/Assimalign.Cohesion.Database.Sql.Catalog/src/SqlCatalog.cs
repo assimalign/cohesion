@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -66,6 +67,7 @@ public sealed class SqlCatalog
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
     private const int defaultCollationRecordKind = 7;
+    private const int _pendingMigrationRecordKind = 9;
 
     // The record-space format marker from version 4 on (#1099). Catalogs written
     // before format 4 (through 10.0.0-preview.1) load kinds 1-7 only and refuse
@@ -101,6 +103,8 @@ public sealed class SqlCatalog
     private List<(PageId PageId, int SlotIndex)> _schemaStateLocations = [];
     private IReadOnlyList<BTreeIndexRegistration> _registrations = Array.Empty<BTreeIndexRegistration>();
     private SqlCatalogSchemaState? _schemaState;
+    private SqlCatalogPendingMigration? _pendingMigration;
+    private List<(PageId PageId, int SlotIndex)> _pendingMigrationLocations = [];
 
     private SqlCatalog(SqlStorage storage)
     {
@@ -232,6 +236,20 @@ public sealed class SqlCatalog
             {
                 ThrowIfOffline();
                 return _schemaState;
+            }
+        }
+    }
+
+    /// <summary>Gets the durable deferred migration, or null when no migration is pending.</summary>
+    /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
+    public SqlCatalogPendingMigration? PendingMigration
+    {
+        get
+        {
+            lock (_sync)
+            {
+                ThrowIfOffline();
+                return _pendingMigration;
             }
         }
     }
@@ -867,6 +885,27 @@ public sealed class SqlCatalog
         ArgumentNullException.ThrowIfNull(state);
         cancellationToken.ThrowIfCancellationRequested();
 
+        return SaveSchemaDocument(state, pending: null, cancellationToken);
+    }
+
+    /// <summary>Atomically records a migration intent before its worker may execute.</summary>
+    /// <param name="migration">The target schema and deferred step order.</param>
+    /// <param name="cancellationToken">Observed before writing the intent.</param>
+    /// <returns>A task that completes when the intent is durable.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="migration"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    /// <exception cref="StorageOfflineException">The catalog is offline.</exception>
+    public ValueTask SavePendingMigrationAsync(SqlCatalogPendingMigration migration, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(migration);
+        cancellationToken.ThrowIfCancellationRequested();
+        string document = JsonSerializer.Serialize(migration, SqlCatalogJsonContext.Default.SqlCatalogPendingMigration);
+        return SaveSchemaDocument(new SqlCatalogSchemaState(migration.ContentHash, document, DdlGeneration), migration, cancellationToken);
+    }
+
+    private ValueTask SaveSchemaDocument(SqlCatalogSchemaState state, SqlCatalogPendingMigration? pending, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         byte[] document = _strictUtf8.GetBytes(state.CanonicalDocument);
         int chunkCount = document.Length == 0
             ? 1
@@ -882,7 +921,7 @@ public sealed class SqlCatalog
                 state.Generation,
                 index,
                 chunkCount,
-                document.AsSpan(offset, length)));
+                document.AsSpan(offset, length), pending is null ? schemaStateRecordKind : _pendingMigrationRecordKind));
         }
 
         lock (_sync)
@@ -897,9 +936,18 @@ public sealed class SqlCatalog
 
             using (var transaction = _storage.BeginTransaction())
             {
-                foreach (var location in _schemaStateLocations)
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var location in pending is null ? _schemaStateLocations : _pendingMigrationLocations)
                 {
                     _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                }
+
+                if (pending is null)
+                {
+                    foreach (var location in _pendingMigrationLocations)
+                    {
+                        _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                    }
                 }
 
                 foreach (byte[] record in records)
@@ -910,8 +958,18 @@ public sealed class SqlCatalog
                 transaction.Commit();
             }
 
-            _schemaStateLocations = locations;
-            _schemaState = state;
+            if (pending is null)
+            {
+                _schemaStateLocations = locations;
+                _schemaState = state;
+                _pendingMigrationLocations = [];
+                _pendingMigration = null;
+            }
+            else
+            {
+                _pendingMigrationLocations = locations;
+                _pendingMigration = pending;
+            }
             return default;
         }
     }
@@ -922,6 +980,7 @@ public sealed class SqlCatalog
     {
         ThrowIfOffline();
         var schemaStateChunks = new List<SchemaStateChunk>();
+        var pendingChunks = new List<SchemaStateChunk>();
         using var iterator = _storage.GetUnitIterator();
 
         while (iterator.MoveNext())
@@ -982,8 +1041,9 @@ public sealed class SqlCatalog
                     break;
 
                 case schemaStateRecordKind:
+                case _pendingMigrationRecordKind:
                     var chunk = DecodeSchemaStateChunk(ref reader);
-                    schemaStateChunks.Add(new SchemaStateChunk(
+                    (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
                         chunk.ContentHash,
                         chunk.Generation,
                         chunk.Index,
@@ -1010,6 +1070,26 @@ public sealed class SqlCatalog
         {
             _schemaState = AssembleSchemaState(schemaStateChunks);
             _schemaStateLocations = schemaStateChunks.Select(chunk => chunk.Location).ToList();
+        }
+
+        if (pendingChunks.Count > 0)
+        {
+            SqlCatalogSchemaState pending = AssembleSchemaState(pendingChunks);
+            try
+            {
+                _pendingMigration = JsonSerializer.Deserialize(pending.CanonicalDocument,
+                    SqlCatalogJsonContext.Default.SqlCatalogPendingMigration)
+                    ?? throw new SqlCatalogException("Malformed pending migration: no intent.");
+                if (!string.Equals(pending.ContentHash, _pendingMigration.ContentHash, StringComparison.Ordinal))
+                {
+                    throw new SqlCatalogException("Malformed pending migration: target hashes differ.");
+                }
+            }
+            catch (Exception failure) when (failure is JsonException or ArgumentException)
+            {
+                throw new SqlCatalogException($"Malformed pending migration: {failure.Message}");
+            }
+            _pendingMigrationLocations = pendingChunks.Select(chunk => chunk.Location).ToList();
         }
     }
 
@@ -1833,10 +1913,11 @@ public sealed class SqlCatalog
         ulong generation,
         int index,
         int count,
-        ReadOnlySpan<byte> document)
+        ReadOnlySpan<byte> document,
+        int kind)
     {
         var writer = new DatabaseKeyWriter();
-        writer.AppendInt32(schemaStateRecordKind)
+        writer.AppendInt32(kind)
               .AppendString(contentHash, Collation.Binary)
               .AppendInt32(index)
               .AppendInt32(count)

@@ -5,6 +5,18 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+## Durable pending migrations (49a)
+
+Catalog kind 9 is a chunked UTF-8, source-generated JSON `SqlCatalogPendingMigration` envelope.
+It carries the complete target document/hash, ordered immutable step identities and their
+one-based positions after inline steps. It uses the same strict chunk assembly and one storage
+transaction as applied-schema records (kind 6). The SQL engine gates this addition with data
+format 9; no legacy reader or upgrade path is added. Persisting intent does not advance DDL
+generation or replace the old applied marker. Saving the completed applied marker deletes every
+pending chunk in the same transaction. Open validates the envelope and ordering, and the engine
+checks the target document's hash before resuming. Catalog persistence knows no SQL executor,
+worker, or hosting lifecycle.
+
 ## Collation metadata (#1025)
 
 `SqlCatalogColumn.Collation` is an optional string-column override. Null inherits

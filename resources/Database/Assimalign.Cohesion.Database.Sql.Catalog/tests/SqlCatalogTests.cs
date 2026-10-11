@@ -193,6 +193,34 @@ public class SqlCatalogTests
         replacementReopen.SchemaState.CanonicalDocument.ShouldBe(replacementDocument);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - 49a: pending intent spans records, survives reopen, and clears atomically with its applied marker")]
+    public async Task SavePendingMigration_AcrossReopen_ShouldRetainOrderedIntentUntilCompletion()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        string document = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("old", "{}", catalog.DdlGeneration));
+        var steps = new[] { new SqlCatalogMigrationStep("AddIndex", "items", "ix_value", 2) };
+        var pending = new SqlCatalogPendingMigration("new", document, steps, 2);
+        steps[0] = new SqlCatalogMigrationStep("AddConstraint", "items", "ck_value", 1);
+
+        // Act
+        await catalog.SavePendingMigrationAsync(pending);
+        var reopened = Reopen(harness);
+
+        // Assert: intent is immutable and distinct from the old trusted marker.
+        reopened.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe("old");
+        var intent = reopened.PendingMigration.ShouldNotBeNull();
+        intent.ContentHash.ShouldBe("new");
+        intent.CanonicalDocument.ShouldBe(document);
+        intent.Steps.ShouldHaveSingleItem().Position.ShouldBe(2);
+        intent.Steps[0].Kind.ShouldBe("AddIndex");
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("new", document, catalog.DdlGeneration));
+        var completed = Reopen(harness);
+        completed.PendingMigration.ShouldBeNull();
+        completed.SchemaState.ShouldNotBeNull().CanonicalDocument.ShouldBe(document);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: invalid values are rejected")]
     public void CreateSchemaState_InvalidValues_ShouldThrow()
     {
