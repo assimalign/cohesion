@@ -272,8 +272,10 @@ public sealed class SqlDatabaseEventSourceTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Statement tracing: A real statement should retain its allocation baseline while disabled")]
-    public async Task ExecuteAsync_NoListener_ShouldRetainStatementAllocationBaseline()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Statement tracing: A real statement should retain its allocation baseline while disabled")]
+    [InlineData("SELECT id FROM items WHERE id = 1")]
+    [InlineData("SELECT id, id FROM items WHERE id = 1")]
+    public async Task ExecuteAsync_NoListener_ShouldRetainStatementAllocationBaseline(string statement)
     {
         // Arrange: parsing, binding, planning and materialization all run through the public
         // session path. One snapshot transaction holds the database state steady across rounds.
@@ -284,39 +286,38 @@ public sealed class SqlDatabaseEventSourceTests
         await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO items VALUES (1)", cancellationToken: CancellationToken.None);
         await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        var baseline = new SqlStatementAllocationBaseline(session);
         const int iterations = 1_000;
-        Measure(100);
+        Measure(100, reference: true);
+        Measure(100, reference: false);
 
         // Act: take the fewest bytes of three warmed rounds, as DatabaseEventSourceTests does.
         // Runtime bookkeeping can charge an occasional allocation to this thread; an allocation
         // in ExecuteRequestAsync, its finally, or an event argument repeats in every round.
         long allocated = long.MaxValue;
+        long baselineAllocated = long.MaxValue;
         for (int round = 0; round < 3; round++)
         {
-            allocated = Math.Min(allocated, Measure(iterations));
+            baselineAllocated = Math.Min(baselineAllocated, Measure(iterations, reference: true));
+            allocated = Math.Min(allocated, Measure(iterations, reference: false));
         }
 
         // Assert
-        // Baseline measured on 2026-10-11 with SqlDatabaseSession.cs restored from e2830a17d,
-        // before batch D statement tracing; the unchanged parser/planner/executor still run.
-        // Keep the whole public path pinned so a wrapper/finally allocation cannot hide behind
-        // a direct event-helper measurement. Debug allocates its existing async state machines.
-#if DEBUG
-        const long baselineBytesPerStatement = 10_648;
-#else
-        const long baselineBytesPerStatement = 9_088;
-#endif
-        allocated.ShouldBe(baselineBytesPerStatement * iterations);
+        // The reference omits tracing, but uses the same current parser and executor. The
+        // two projections deliberately allocate different totals; neither pins a byte count.
+        (allocated - baselineAllocated).ShouldBe(0);
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldStartWith("seek:");
         session.LastStatementMetrics.RecordsExamined.ShouldBe(1);
         SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
 
-        long Measure(int count)
+        long Measure(int count, bool reference)
         {
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int index = 0; index < count; index++)
             {
-                var pending = session.ExecuteAsync("SELECT id FROM items WHERE id = 1", cancellationToken: CancellationToken.None);
+                var pending = reference
+                    ? baseline.ExecuteAsync(statement, CancellationToken.None)
+                    : session.ExecuteAsync(statement, cancellationToken: CancellationToken.None);
                 if (!pending.IsCompletedSuccessfully)
                 {
                     throw new InvalidOperationException("The measured statement did not complete synchronously.");

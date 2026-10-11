@@ -3808,8 +3808,15 @@ Debug async state machine. The review's real-path allocation test caught 24 addi
 statement before this change. The disabled-hook test still runs 10,000 iterations and requires
 zero bytes. A separate test parses and executes a real indexed SELECT through the public session
 inside a snapshot transaction, requires synchronous completion and result disposal, and compares
-the fewest bytes of three warmed 1,000-statement rounds with the pre-tracing session's baseline
-(`e2830a17d`, measured 2026-10-11): 10,648 bytes per statement in Debug, 9,088 in Release. It covers
+the fewest bytes of three warmed 1,000-statement rounds in each of two arms: the current public
+path with the source disabled, and a test-only request wrapper without the tracing catch/finally
+calls. Both arms parse the same text with the session's current parser options and execute on the
+same session through the current statement executor; static `UnsafeAccessor` bindings keep this
+reference entirely in tests without widening shipped visibility. The reference keeps the existing
+offline/stack error translation and non-diagnostic async locals. Its maintenance obligation is to
+track changes to that non-diagnostic wrapper, not parser/planner/executor allocation counts.
+The measured difference must be zero in Debug and Release. Two SELECT projections with different
+total allocations prove that no historical byte count is pinned. It covers
 `ExecuteRequestAsync`, its `finally`, and event argument evaluation as well as the guarded helpers.
 
 `StatementTooComplex` reports the text parser's nesting/stack diagnostic, the typed request's
