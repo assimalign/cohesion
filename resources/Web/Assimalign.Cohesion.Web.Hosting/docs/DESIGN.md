@@ -1624,7 +1624,12 @@ registration: successful starting callbacks do not run again. Their header edits
 values and removals) are captured as a delta, and the
 server reapplies that delta immediately before an unstarted buffered send, after clearing a refused
 response for its own bodyless 500. This also covers a boundary or handler that clears the refused
-streamed head and stages a buffered replacement. Status and body are the replacement's; application
+streamed head and stages a buffered replacement. Status, body, framing and representation metadata
+are the replacement's. Replay excludes connection-specific fields, Content-Length, Trailer, content
+type/encoding/language/location/range/disposition, validators, digests and Accept-Ranges, including
+their removal or explicit preservation by a callback. The transport derives the new body length;
+callback policy fields still survive. These replay corrections affect the hook introduced after
+10.0.0-preview.1 and add no public surface or preview.1 behavior break. Application
 fields that callbacks neither changed nor explicitly preserved are not carried into the server's 500. An invalid field added
 by a callback is still rejected; it is never sanitized or sent. The no-callback path takes no header
 snapshot. The optional `preservedHeaders` argument copies policy header keys at registration and

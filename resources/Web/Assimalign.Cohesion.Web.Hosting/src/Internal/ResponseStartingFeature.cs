@@ -10,6 +10,17 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// <summary>Callback registrations driven by the transport's existing head-commit hook.</summary>
 internal sealed class ResponseStartingFeature : IWebResponseStartingFeature
 {
+    // These fields describe the refused message's body or framing, not policy that can
+    // be carried to a replacement. The replacement and transport own their new values.
+    private static readonly HashSet<HttpHeaderKey> _replacementOwnedHeaders =
+    [
+        new("Content-Length"), new("Trailer"), new("Content-Type"),
+        new("Content-Encoding"), new("Content-Language"), new("Content-Location"),
+        new("Content-Range"), new("Content-Disposition"), new("Content-MD5"),
+        new("Content-Digest"), new("Repr-Digest"), new("Digest"),
+        new("ETag"), new("Last-Modified"), new("Accept-Ranges"),
+    ];
+
     private readonly HttpExchangeInterceptorResponseContext _context;
     private IHttpContext? _exchange;
     private List<(Func<object?, Task> Callback, object? State)>? _callbacks;
@@ -121,7 +132,10 @@ internal sealed class ResponseStartingFeature : IWebResponseStartingFeature
 
         foreach ((HttpHeaderKey key, HttpHeaderValue value) in _headerChanges)
         {
-            _context.Headers[key] = value;
+            if (!HttpFieldRules.IsConnectionSpecific(key) && !_replacementOwnedHeaders.Contains(key))
+            {
+                _context.Headers[key] = value;
+            }
         }
     }
 }

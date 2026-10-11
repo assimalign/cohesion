@@ -15,7 +15,9 @@ namespace Assimalign.Cohesion.Web;
 /// its head; remaining callbacks do not run. Registration and response writes are single-consumer.
 /// If the transport refuses the head, callback header changes and explicitly preserved headers
 /// are carried onto a buffered replacement, including a server-generated error, without invoking
-/// any callback again. Other application headers belong to the refused response.
+/// any callback again. Framing and representation metadata belong to the replacement and are
+/// never replayed, including explicitly preserved fields. Other application headers belong to
+/// the refused response.
 /// The default Web server publishes this feature; a custom server must implement it to support
 /// middleware that requires response-starting callbacks.
 /// </remarks>

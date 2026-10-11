@@ -103,7 +103,10 @@ Protocol takeover and transport-generated rejection responses retain the transpo
 
 If `InvalidResponseField` refuses the head, callbacks never rerun. Their added/changed header values
 and removals are reapplied before the server sends an unstarted buffered replacement, including its
-own 500 after discarding application headers. Replacement status/body remain the replacement's;
+own 500 after discarding application headers. Replacement status, body, framing and representation
+metadata remain the replacement's: connection-specific fields, Content-Length, Trailer, content
+metadata, validators and digests are excluded even when explicitly preserved, so the transport
+calculates the new length. This corrects the hook added after preview.1 without a preview.1 break;
 invalid callback fields are refused again. The optional `preservedHeaders` registration argument
 also retains final values or absence of policy headers that a callback accepts without changing.
 Keys are copied at registration and values are captured after all callbacks succeed. SecurityHeaders

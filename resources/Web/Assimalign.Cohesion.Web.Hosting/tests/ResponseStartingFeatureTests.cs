@@ -738,6 +738,105 @@ public class ResponseStartingFeatureTests
         calls.ShouldBe(1);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - OnStarting: Server replacements discard callback framing and representation metadata")]
+    [InlineData(1, false)]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(3, true)]
+    public async Task OnStarting_CallbackBodyMetadata_ShouldNotReplayOnServerReplacement(int protocol, bool streamed)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_timeout);
+        HttpHeaderKey[] representationHeaders =
+        [
+            new("Content-Type"), new("Content-Encoding"), new("Content-Language"),
+            new("Content-Location"), new("Content-Range"), new("Content-Disposition"),
+            new("Content-MD5"), new("Content-Digest"), new("Repr-Digest"), new("Digest"),
+            new("ETag"), new("Last-Modified"), new("Accept-Ranges"), new("Trailer"),
+        ];
+        int calls = 0;
+
+        // Act
+        ResponseSnapshot response = await SendAsync(protocol, async context =>
+        {
+            context.Response.Headers[_invalid] = "value\r\nx-injected: true";
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                calls++;
+                context.Response.Headers[HttpHeaderKey.ContentLength] = "4";
+                foreach (HttpHeaderKey key in representationHeaders)
+                {
+                    context.Response.Headers[key] = "original";
+                }
+                context.Response.Headers[_security] = "nosniff";
+                return Task.CompletedTask;
+            }, null, [HttpHeaderKey.ContentLength, .. representationHeaders]);
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            if (streamed)
+            {
+                await context.Response.Streaming.StartAsync(cancellation.Token);
+            }
+            else
+            {
+                await context.Response.Body.WriteAsync(Encoding.ASCII.GetBytes("body"), cancellation.Token);
+            }
+        }, cancellation.Token);
+
+        // Assert
+        response.Failure.ShouldBeNull();
+        response.Status.ShouldBe(500);
+        response.Body.ShouldBeEmpty();
+        response.Headers["content-length"].ShouldBe("0");
+        foreach (HttpHeaderKey key in representationHeaders)
+        {
+            response.Headers.ContainsKey(key.Value).ShouldBeFalse(key.Value);
+        }
+        response.Headers["x-starting-security"].ShouldBe("nosniff");
+        calls.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - OnStarting: Middleware replacements own metadata even when callbacks changed or removed the original fields")]
+    [InlineData(1, false)]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(3, true)]
+    public async Task OnStarting_CallbackBodyMetadata_ShouldNotOverrideMiddlewareReplacement(int protocol, bool remove)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_timeout);
+
+        // Act
+        ResponseSnapshot response = await SendAsync(protocol, async context =>
+        {
+            context.Response.Headers[_invalid] = "value\r\nx-injected: true";
+            context.Response.Headers[HttpHeaderKey.ContentType] = "text/original";
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                context.Response.Headers[HttpHeaderKey.ContentLength] = "4";
+                context.Response.Headers[HttpHeaderKey.ContentType] = remove ? HttpHeaderValue.Empty : "text/changed";
+                return Task.CompletedTask;
+            }, null);
+            HttpException refused = await Should.ThrowAsync<HttpException>(
+                () => context.Response.Streaming.StartAsync(cancellation.Token).AsTask());
+            refused.Code.ShouldBe(HttpErrorCode.InvalidResponseField);
+            context.Response.Headers.Clear();
+            context.Response.StatusCode = HttpStatusCode.BadGateway;
+            context.Response.Headers[HttpHeaderKey.ContentType] = "text/replacement";
+            context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("replacement"));
+        }, cancellation.Token);
+
+        // Assert
+        response.Failure.ShouldBeNull();
+        response.Status.ShouldBe(502);
+        response.Body.ShouldBe("replacement");
+        response.Headers["content-length"].ShouldBe("11");
+        response.Headers["content-type"].ShouldBe("text/replacement");
+    }
+
     private static ValueTask InvokeStreamingOperationAsync(
         IHttpResponseStreamingFeature streaming,
         string operation,
