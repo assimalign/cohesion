@@ -39,6 +39,17 @@ public sealed class HttpConnectionListenerOptions
     private int _backlogCapacity = 512;
     private int _exchangeFeatureCapacity;
 
+    /// <summary>
+    /// Gets or sets whether cleartext HTTP/2 accepts an <c>https</c> <c>:scheme</c>.
+    /// Defaults to <see langword="false"/>, which answers such requests with 421 before dispatch.
+    /// </summary>
+    /// <remarks>
+    /// Enable only for a trusted gateway that terminates TLS and forwards the original scheme to
+    /// an h2c backend. When enabled, <c>Request.Scheme</c> reports the gateway's scheme; the connection
+    /// remains cleartext. This option does not change HTTP/1.1 absolute-form target validation.
+    /// </remarks>
+    public bool AllowAlternateSchemes { get; set; }
+
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
 
     /// <summary>
@@ -269,7 +280,7 @@ public sealed class HttpConnectionListenerOptions
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity));
+        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity, AllowAlternateSchemes));
     }
 
     /// <summary>
@@ -308,7 +319,7 @@ public sealed class HttpConnectionListenerOptions
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity));
+        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors, featureCapacity) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity, AllowAlternateSchemes));
     }
 
     /// <summary>
@@ -511,7 +522,7 @@ public sealed class HttpConnectionListenerOptions
         return this;
     }
 
-    private static Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> CreateAlpnConnectionFactoryBuilder(
+    private Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], int, HttpConnectionFactory> CreateAlpnConnectionFactoryBuilder(
         Action<Http1ConnectionListenerOptions> configureHttp1,
         Action<Http2ConnectionListenerOptions> configureHttp2)
     {
@@ -529,7 +540,7 @@ public sealed class HttpConnectionListenerOptions
 
         return (interceptors, responseInterceptors, featureCapacity) => new HttpAlpnConnectionFactory(
             new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors, featureCapacity),
-            new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity));
+            new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors, featureCapacity, AllowAlternateSchemes));
     }
 
     private HttpConnectionListenerOptions UseStreamListener(

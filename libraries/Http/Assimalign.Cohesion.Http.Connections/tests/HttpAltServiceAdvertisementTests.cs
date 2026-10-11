@@ -144,7 +144,7 @@ public class HttpAltServiceAdvertisementTests
     public async Task Http2_OnAdvertisementEnabledWithHttp3_ShouldEmitAltSvcHeader()
     {
         // Arrange
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -163,7 +163,7 @@ public class HttpAltServiceAdvertisementTests
     public async Task Http2_OnNoHttp3Listener_ShouldNotEmitAltSvcHeader()
     {
         // Arrange
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -180,7 +180,7 @@ public class HttpAltServiceAdvertisementTests
     public async Task Http2_OnApplicationSetAltSvc_ShouldNotOverwrite()
     {
         // Arrange
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));

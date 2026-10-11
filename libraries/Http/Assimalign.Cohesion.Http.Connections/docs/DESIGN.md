@@ -725,24 +725,33 @@ the Secure-cookie decisions in CookiePolicy and Antiforgery read it as secure. R
   `Http1MisdirectedRequestException` once the head is read, before any interceptor
   or the application runs; `Http1ConnectionContext` writes the 421 the way it writes
   a 400.
-- **HTTP/2 over cleartext (h2c)** gives the request the connection's `http`
-  whatever `:scheme` says, so the request is no longer marked secure; it is not
-  rejected yet. The test fixtures send `:scheme https` over plaintext connections
-  throughout (more than 300 tests), so a 421 on h2c needs them moved to `http` or
-  to a TLS-capable listener first. A reverse proxy that forwards `:scheme https` to
-  an h2c backend also raises the question Kestrel answers with
-  `AllowAlternateSchemes`, a trusted-gateway opt-out that §7.4 permits. Both are
-  owner decisions.
+- **HTTP/2 over cleartext (h2c)** answers an `https` `:scheme` with 421 before
+  request interceptors or application dispatch (#1415, owner decision 44). The full
+  field block is decoded and validated first, preserving HPACK state. The existing
+  pre-dispatch 413 path supplies the response shape: HEADERS with `END_STREAM` and
+  `content-length: 0`, followed by `RST_STREAM(NO_ERROR)` when the request is still
+  open (RFC 9113 §8.1). A finished request needs no reset. This preserves the 421
+  status and keeps the connection available for other streams; a reset alone would
+  discard useful status information despite an existing status-answer path.
+- **Trusted h2c gateways** can set listener-wide
+  `HttpConnectionListenerOptions.AllowAlternateSchemes = true` (default false).
+  Under this explicit trust decision `Request.Scheme` retains the gateway's
+  `:scheme`; connection security still reports cleartext. Web.Hosting binds
+  `Http:AllowAlternateSchemes`. HTTP/1.1 validation remains unchanged.
 - **HTTP/3** is unchanged: QUIC always carries TLS.
 - **An `http` target on a secured connection** keeps `http`. It claims less than the
   connection gives, so at worst `UseHttpsRedirection` sends the client to the
   `https` URI once.
 
-`https` on `Request.Scheme` therefore means a secured connection on every version. A
-proxy that terminates TLS and forwards cleartext reports the client's scheme
-through `UseForwardedHeaders`, not through the request-target, and that is the trust
-model the effective scheme reads. `HttpRequestSchemeTests` pins each case, and
-Web.HttpsPolicy's end-to-end tests pin the 421 in front of its redirect.
+By default, `https` on `Request.Scheme` means a secured connection. A proxy can
+report its client's scheme through trusted forwarded headers, or use the explicit
+h2c listener opt-out above. Plaintext HTTP/2 fixtures now use `http`; TLS and
+intentional scheme tests retain `https`.
+
+**Breaking behavior against 10.0.0-preview.1 (decision 15).** An h2c request naming
+`https` used to reach the application and now receives 421 by default. Trusted
+TLS-terminating gateways forwarding that scheme must enable the option or send
+`http` and use trusted forwarded headers. No existing public interface changes.
 
 ### Non-goals
 

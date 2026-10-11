@@ -21,6 +21,64 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public class HttpServerConfigurationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Applies the configured alternate-scheme policy on both binding paths")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Bind_OnConfiguredAlternateSchemes_ShouldApplyListenerOption(bool useDefaultEndpoint, bool allowAlternateSchemes)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["GatewayHttp:AllowAlternateSchemes"] = allowAlternateSchemes.ToString(),
+        });
+        HttpConnectionListenerOptions options = new() { AllowAlternateSchemes = !allowAlternateSchemes };
+
+        // Act
+        if (useDefaultEndpoint)
+        {
+            HttpServerConfiguration.BindOrDefault(configuration, "GatewayHttp", options, HttpServerConfiguration.DevelopmentEndPoint);
+        }
+        else
+        {
+            HttpServerConfiguration.Bind(configuration, "GatewayHttp", options);
+        }
+
+        // Assert
+        options.AllowAlternateSchemes.ShouldBe(allowAlternateSchemes);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Refuses an invalid alternate-scheme policy before registering endpoints")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bind_OnInvalidAlternateSchemes_ShouldThrow(bool useDefaultEndpoint)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:AllowAlternateSchemes"] = "trusted",
+        });
+        HttpConnectionListenerOptions options = new();
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() =>
+        {
+            if (useDefaultEndpoint)
+            {
+                HttpServerConfiguration.BindOrDefault(configuration, "Http", options, HttpServerConfiguration.DevelopmentEndPoint);
+            }
+            else
+            {
+                HttpServerConfiguration.Bind(configuration, "Http", options);
+            }
+        });
+
+        // Assert
+        error.Message.ShouldContain("Http:AllowAlternateSchemes", Case.Sensitive);
+        options.AllowAlternateSchemes.ShouldBeFalse();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Resolves the named Secret mount for each secure protocol")]
     [InlineData("Https", HttpProtocol.Http11 | HttpProtocol.Http20)]
     [InlineData("Http1s", HttpProtocol.Http11)]

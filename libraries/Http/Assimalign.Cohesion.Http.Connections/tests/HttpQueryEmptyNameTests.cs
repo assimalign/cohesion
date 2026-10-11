@@ -46,7 +46,7 @@ public class HttpQueryEmptyNameTests
         // Arrange
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(new TestConnection(
-            HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", $"/x?{query}", "https", "api.test"))));
+            HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", $"/x?{query}", "http", "api.test"))));
 
         // Act
         IHttpContext? context = await ReadFirstContextOrNullAsync(options);

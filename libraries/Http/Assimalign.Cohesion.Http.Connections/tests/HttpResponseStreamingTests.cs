@@ -117,7 +117,7 @@ public class HttpResponseStreamingTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Streaming/Http2: Should emit incremental DATA frames without a Content-Length")]
     public async Task Http2_Streaming_ShouldEmitDataFramesBeforeComplete()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -166,7 +166,7 @@ public class HttpResponseStreamingTests
             0x4 | 0x1, // END_HEADERS + END_STREAM
             (":method", "GET"),
             (":path", "/sse"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":authority", "api.test"));
         byte[] streamWindowUpdate = Http2TestSettings.RawFrame(0x8, 0, 1, WindowUpdateIncrement(1000));
         byte[] connectionWindowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, WindowUpdateIncrement(1000));
@@ -207,7 +207,7 @@ public class HttpResponseStreamingTests
         // Regression: a streamed response must remove its fully-closed stream from the connection's
         // stream map (like the buffered path), so a long-lived connection serving many streamed
         // responses does not accumulate stream state without bound.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));

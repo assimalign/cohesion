@@ -171,9 +171,9 @@ public class Http2RequestPseudoHeaderTests
     [InlineData(null, null, null)]
     [InlineData(null, null, "")]
     [InlineData(null, null, "upstream.test")]
-    [InlineData("https", null, "upstream.test:443")]
+    [InlineData("http", null, "upstream.test:443")]
     [InlineData(null, "/", "upstream.test:443")]
-    [InlineData("https", "/tunnel", "upstream.test:443")]
+    [InlineData("http", "/tunnel", "upstream.test:443")]
     public async Task ReceiveAsync_OnMalformedClassicConnect_ShouldResetStreamWithProtocolError(string? scheme, string? path, string? authority)
     {
         // Arrange — RFC 9113 §8.5: a CONNECT without :protocol carries the host and port to connect to in
@@ -237,7 +237,7 @@ public class Http2RequestPseudoHeaderTests
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
         byte[] block = HPackTestEncoder.Block(
             Latin1Literal(":method", method),
-            HPackTestEncoder.Literal(":scheme", "https"),
+            HPackTestEncoder.Literal(":scheme", "http"),
             HPackTestEncoder.Literal(":path", "/malformed"),
             HPackTestEncoder.Literal(":authority", "api.test"));
 

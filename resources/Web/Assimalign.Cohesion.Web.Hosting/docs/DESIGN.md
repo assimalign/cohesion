@@ -1320,11 +1320,12 @@ command-line configuration providers; it adds no reflection binder or
 
 `WebApplicationServerBuilder.UseConfiguration(IConfiguration, sectionKey = "Http")`
 (an extension member in `WebHostingExtensions`) binds the server's listener
-**endpoints**, **server limits**, and **connection cap** from a Cohesion
+**endpoints**, **server limits**, **connection cap**, and **listener policy** from a Cohesion
 `IConfiguration` section, giving `appsettings`-style Kestrel-section parity:
 
 ```json
 "Http": {
+  "AllowAlternateSchemes": false,
   "Endpoints": {
     "Public":   { "Protocol": "Https", "Host": "0.0.0.0", "Port": 443,
                   "Certificate": { "Path": "certs/site.pem", "KeyPath": "certs/site.key" } },
@@ -1405,6 +1406,15 @@ before its response starts.
 server (see "Concurrency cap (`MaxConcurrentConnections`)"). The binder hands it to the
 server builder, and a cap set through `LimitConcurrentConnections` takes precedence.
 
+`AllowAlternateSchemes` binds the aggregate listener option of the same name, defaulting to
+`false`. Cleartext HTTP/2 now answers `:scheme https` with `421` before the Web pipeline runs
+(#1415, owner decision 44). A trusted gateway deployment can set `Http:AllowAlternateSchemes`
+to `true` to accept that forwarded scheme; `Request.Scheme` then reports the gateway's value.
+This is a behavioral break from 10.0.0-preview.1, which trusted the client's scheme on every
+HTTP/2 listener. The boolean is read on both explicit `UseConfiguration` and entry-point
+default binding, before endpoint registration; an invalid value fails startup. An absent key
+preserves the listener's current setting, and a later `UseServer` callback can override it.
+
 ### Why explicit, hand-rolled binding
 
 The binding is deliberately **not** reflection-based:
@@ -1481,7 +1491,7 @@ The binding is deliberately **not** reflection-based:
 ### Scope boundary
 
 `UseConfiguration` binds HTTP, HTTPS, and HTTP/3 endpoints, their protocol-specific server
-limits, their client-certificate mode, and the connection cap. Not bound: the HTTP/3
+limits, their client-certificate mode, the connection cap, and `AllowAlternateSchemes`. Not bound: the HTTP/3
 `MaxRequestHeadersFrameSize` and QPACK options, QUIC stream limits, and a client-certificate
 validation callback. The minimum request-body and response data rates are bound
 (`Limits:MinRequestBodyDataRate`, `Limits:MinResponseDataRate`; #1383, #1384).

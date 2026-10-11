@@ -129,6 +129,7 @@ internal static class HttpServerConfiguration
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(developmentEndPoint);
 
+        BindListenerOptions(configuration, sectionKey, options);
         BoundLimits limits = BindAllLimits(configuration, sectionKey, limitConcurrentConnections);
 
         if (HasEndpoints(configuration, sectionKey))
@@ -185,11 +186,30 @@ internal static class HttpServerConfiguration
         ArgumentException.ThrowIfNullOrEmpty(sectionKey);
         ArgumentNullException.ThrowIfNull(options);
 
+        BindListenerOptions(configuration, sectionKey, options);
+
         // Parse the Limits section eagerly into templates so an unparseable value fails loudly
         // even when no endpoint is declared; each registered endpoint then copies the bound
         // values into its own per-registration limits.
         BoundLimits limits = BindAllLimits(configuration, sectionKey, limitConcurrentConnections);
         BindEndpoints(configuration, sectionKey, options, limits, ownCertificate, contentRootPath);
+    }
+
+    private static void BindListenerOptions(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options)
+    {
+        string path = $"{sectionKey}:AllowAlternateSchemes";
+        string? raw = GetString(configuration, path);
+        if (raw is null)
+        {
+            return;
+        }
+
+        if (!bool.TryParse(raw, out bool allowAlternateSchemes))
+        {
+            throw new InvalidOperationException($"The configured value at '{path}' ('{raw}') is not a valid boolean.");
+        }
+
+        options.AllowAlternateSchemes = allowAlternateSchemes;
     }
 
     /// <summary>

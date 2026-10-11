@@ -52,7 +52,7 @@ public class Http2MalformedRequestHeadTests
         // Arrange — a late :path stands in for the request's own; the others ride a complete head.
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
         (string Name, string Value)[] fields = afterRegularField
-            ? [(":method", "GET"), (":scheme", "https"), (":authority", "api.test"), ("user-agent", "tests"), (name, "/malformed")]
+            ? [(":method", "GET"), (":scheme", "http"), (":authority", "api.test"), ("user-agent", "tests"), (name, "/malformed")]
             : [.. Http2TestPeer.Get("/malformed"), (name, "200")];
 
         // Act

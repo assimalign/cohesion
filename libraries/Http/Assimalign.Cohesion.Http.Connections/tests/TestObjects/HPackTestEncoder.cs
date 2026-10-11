@@ -38,7 +38,7 @@ internal static class HPackTestEncoder
     {
         return Block(
             Literal(":method", method),
-            Literal(":scheme", "https"),
+            Literal(":scheme", "http"),
             Literal(":path", path),
             Literal(":authority", "api.test"));
     }

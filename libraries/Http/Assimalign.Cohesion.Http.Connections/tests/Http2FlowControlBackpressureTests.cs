@@ -294,7 +294,7 @@ public class Http2FlowControlBackpressureTests
             streamId,
             flags,
             (":method", "POST"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/upload"),
             (":authority", "api.test"));
     }

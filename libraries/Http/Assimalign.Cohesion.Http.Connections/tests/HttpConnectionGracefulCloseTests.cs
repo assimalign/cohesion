@@ -113,7 +113,7 @@ public class HttpConnectionGracefulCloseTests
         // Arrange — stream 1 is dispatched and still being served; the input stays live so the frame
         // pump keeps running through the close.
         TestConnection connection = new(
-            HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test"),
+            HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "http", "api.test"),
             completeInput: false);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -139,7 +139,7 @@ public class HttpConnectionGracefulCloseTests
         (await exchanges.MoveNextAsync().AsTask().WaitAsync(_timeout)).ShouldBeFalse();
 
         // A stream the peer opens after the close is refused, and is not yielded.
-        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "http", "api.test");
         await connection.WriteInputAsync(second.AsSpan(24 + 9).ToArray());
         await output.ReadUntilAsync(
             observed => observed.Any(frame => frame.IsRstStream && frame.StreamId == 3),
@@ -166,7 +166,7 @@ public class HttpConnectionGracefulCloseTests
     {
         // Arrange — stream 1's request ended with its HEADERS (END_STREAM), so its body is complete.
         TestConnection connection = new(
-            HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test"),
+            HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "http", "api.test"),
             completeInput: false);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));

@@ -196,7 +196,7 @@ public class InterimResponseTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http2: An interim response is a separate HEADERS frame (1xx status, no Content-Length) before the final HEADERS")]
     public async Task Http2_Interim_ShouldEmitHeadersFrameBeforeFinal()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -236,7 +236,7 @@ public class InterimResponseTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http2: A 1xx final status code is rejected")]
     public async Task Http2_FinalStatus1xx_ShouldThrow()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/page", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));

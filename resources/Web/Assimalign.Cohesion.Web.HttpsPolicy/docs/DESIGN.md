@@ -43,10 +43,16 @@ What #763 actually shipped, traced through the code:
   of `https`, used to become `IHttpRequest.Scheme` whatever the connection, so a
   cleartext request that named an `https` target skipped the redirect and reached
   the application in cleartext. Since #1324's review the HTTP/1.1 transport answers
-  that target with `421` (RFC 9110 §7.4) before the pipeline runs, and an h2c
-  request takes the connection's `http` (`Http.Connections` DESIGN, "The request
-  scheme and an https target on cleartext"). `https` on the request therefore
-  means a secured connection; `HttpsRedirectionEndToEndTests` pins the 421.
+  that target with `421` (RFC 9110 §7.4) before the pipeline runs. Cleartext HTTP/2
+  now also answers `:scheme https` with `421` (#1415), replacing the intermediate
+  behavior that reported the connection's `http`. The listener's
+  `AllowAlternateSchemes` option lets a trusted gateway forward `https` to an h2c
+  backend and preserves that scheme on the request (`Http.Connections` DESIGN,
+  "The request scheme and an https target on cleartext"). With the option enabled,
+  this middleware trusts the gateway's scheme and skips the redirect. Otherwise
+  `https` on the request means a secured connection; `HttpsRedirectionEndToEndTests`
+  pins the HTTP/1.1 421. Rejecting h2c's secure scheme is a behavioral break from
+  10.0.0-preview.1, which accepted the client-supplied scheme on every listener.
 
 So the "typed TLS feature" the issue calls for is realized, for this package's
 question, as the transport-derived `HttpScheme` enum on the request. The TLS

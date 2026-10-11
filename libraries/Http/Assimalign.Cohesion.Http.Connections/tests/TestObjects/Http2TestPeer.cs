@@ -105,7 +105,7 @@ internal sealed class Http2TestPeer : IAsyncDisposable
         List<(string Name, string Value)> fields = new()
         {
             (":method", method),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", path),
             (":authority", "api.test"),
         };

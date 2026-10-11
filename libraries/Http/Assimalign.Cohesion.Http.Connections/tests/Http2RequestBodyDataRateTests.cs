@@ -255,7 +255,7 @@ public class Http2RequestBodyDataRateTests
             endStream: false,
             (":method", "CONNECT"),
             (":protocol", "websocket"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/chat"),
             (":authority", "api.test"));
         IHttpContext exchange = await peer.ReceiveContextAsync();

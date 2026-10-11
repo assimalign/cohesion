@@ -214,7 +214,7 @@ public class Http2ContentDigestVerificationTests
             streamId,
             0x4, // END_HEADERS only — the body follows in DATA frames
             (":method", "POST"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/upload"),
             (":authority", "api.test"),
             ("content-digest", contentDigest));

@@ -1108,7 +1108,7 @@ internal sealed class Http2Stream
     /// <param name="decoder">The connection's HPACK decoder.</param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="fallbackScheme">
-    /// The connection's scheme: the request's when it omits <c>:scheme</c> or the connection is not secured.
+    /// The connection's scheme, used when the request omits <c>:scheme</c>.
     /// </param>
     /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
@@ -1121,7 +1121,8 @@ internal sealed class Http2Stream
     /// and the body holds the peer to the rate the request ends up with at its first read (#1383). A
     /// CONNECT, whose DATA is tunnel traffic rather than a request body, is never held to it.
     /// </param>
-    /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
+    /// <param name="allowAlternateSchemes">Whether a trusted gateway may forward https over h2c.</param>
+    /// <returns>The materialized request context, or null for an https target rejected on cleartext.</returns>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when a request-parse interceptor rejects the request.
     /// </exception>
@@ -1140,7 +1141,7 @@ internal sealed class Http2Stream
     /// The block is not valid HPACK, or its decoded list exceeds the advertised
     /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>. The caller maps it to a connection error.
     /// </exception>
-    public async ValueTask<Http2Context> CreateContextAsync(
+    public async ValueTask<Http2Context?> CreateContextAsync(
         HPackDecoder decoder,
         HttpConnectionInfo connectionInfo,
         HttpScheme fallbackScheme,
@@ -1148,7 +1149,8 @@ internal sealed class Http2Stream
         IHttpExchangeInterceptor[] interceptors,
         HttpConnectionListenerLimits limits,
         int featureCapacity,
-        Http2RequestBodyDataRate? requestBodyDataRate = null)
+        Http2RequestBodyDataRate? requestBodyDataRate = null,
+        bool allowAlternateSchemes = false)
     {
         if (!HeadersCompleted)
         {
@@ -1314,6 +1316,16 @@ internal sealed class Http2Stream
                 $"declares a content-length of {_declaredContentLength} octets but ends the stream with its head (RFC 9113 §8.1.1)");
         }
 
+        // RFC 9110 §4.2.2 / §7.4: reject an https target on h2c before constructing the body or
+        // invoking interceptors. The caller writes 421 using its pre-dispatch status path.
+        HttpScheme scheme = decodedHeaders.Scheme is null
+            ? fallbackScheme
+            : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
+        if (fallbackScheme != HttpScheme.Https && scheme == HttpScheme.Https && !allowAlternateSchemes)
+        {
+            return null;
+        }
+
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
         // bounded by the advertised receive window and paced by the reader. RFC 9110
@@ -1335,17 +1347,6 @@ internal sealed class Http2Stream
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
         HttpHost host = HttpFieldNormalization.ResolveAuthority(decodedHeaders.Authority, decodedHeaders.Headers);
-
-        // RFC 9113 §8.3.1 — :scheme is the target URI's scheme, and it decides the request's scheme only on
-        // a secured connection. An "https" resource is reachable only over one (RFC 9110 §4.2.2), so on
-        // cleartext HTTP/2 (h2c) the request takes the connection's http: taking :scheme as it is would
-        // mark a cleartext request secure, so UseHttpsRedirection would pass it on, and HSTS and
-        // Secure-cookie decisions would read it as https. RFC 9110 §7.4 asks an origin server to reject
-        // such a request, as HTTP/1.1 does with 421 for an https absolute-form target; on h2c that is
-        // not done yet (docs/DESIGN.md, "The request scheme and an https target on cleartext").
-        HttpScheme scheme = decodedHeaders.Scheme is null || fallbackScheme != HttpScheme.Https
-            ? fallbackScheme
-            : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
         // RFC 8441 §4 — :protocol is non-null only on a valid extended CONNECT (validated above). The
         // request-parse interceptors read it, so a feature package can offer the tunnel, and the exchange

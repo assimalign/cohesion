@@ -75,7 +75,7 @@ public class HttpContextTransportExtensionsTests
     public async Task HasResponseStarted_Http2StreamedFlush_ShouldTurnTrueAtTheFirstFlush()
     {
         // Arrange
-        TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/stream", "https", "api.test"));
+        TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/stream", "http", "api.test"));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
         options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());

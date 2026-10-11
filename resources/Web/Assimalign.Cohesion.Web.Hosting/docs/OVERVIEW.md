@@ -50,6 +50,11 @@ the transport refuses to send because a header or trailer name is not a token or
 LF, NUL, or another control character but HTAB — typically request text copied into a header
 unvalidated, which would otherwise split the response.
 
+Cleartext HTTP/2 rejects `:scheme https` with `421` before dispatch. A trusted gateway that
+forwards that scheme to an h2c backend can opt in with `options.AllowAlternateSchemes = true`
+inside `Server.UseServer`, or with `Http:AllowAlternateSchemes` through `UseConfiguration`.
+The opt-out preserves the gateway's scheme in `Request.Scheme`.
+
 ## Telemetry
 
 The default server traces and measures every request (#1064). Subscribe by name:

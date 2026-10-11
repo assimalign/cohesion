@@ -150,7 +150,7 @@ public class HttpExchangeResponseInterceptorTests
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
 
         // Act
-        await peer.SendHeadersAsync(1, endStream: true, ExtendedConnectFields());
+        await peer.SendHeadersAsync(1, endStream: true, ExtendedConnectFields("http"));
         IHttpContext context = await peer.ReceiveContextAsync();
 
         // Assert
@@ -177,7 +177,7 @@ public class HttpExchangeResponseInterceptorTests
         Connection request = await peer.OpenRequestStreamAsync();
 
         // Act
-        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(ExtendedConnectFields()));
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(ExtendedConnectFields("https")));
         IHttpContext context = await peer.NextContextAsync();
 
         // Assert
@@ -218,11 +218,11 @@ public class HttpExchangeResponseInterceptorTests
         await context.DisposeAsync();
     }
 
-    private static (string Name, string Value)[] ExtendedConnectFields() =>
+    private static (string Name, string Value)[] ExtendedConnectFields(string scheme) =>
     [
         (":method", "CONNECT"),
         (":protocol", "websocket"),
-        (":scheme", "https"),
+        (":scheme", scheme),
         (":path", "/chat"),
         (":authority", "api.test"),
         ("sec-websocket-version", "13"),
@@ -288,7 +288,7 @@ public class HttpExchangeResponseInterceptorTests
                     headers.Remove("connection");
                     headers.Remove("upgrade");
                     options.UseHttp2(new TestConnectionListener(new TestConnection(
-                        HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/chat", "https", "api.test", headers))));
+                        HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/chat", "http", "api.test", headers))));
                     break;
 
                 default:

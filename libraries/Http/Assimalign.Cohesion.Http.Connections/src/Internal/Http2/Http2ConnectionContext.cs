@@ -208,10 +208,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     private long _receiveWindowLowSince;
     private long _receiveWindowLowTicks;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
+    private readonly bool _allowAlternateSchemes;
+
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, bool allowAlternateSchemes = false)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
+        _allowAlternateSchemes = allowAlternateSchemes;
         _floodGuard = new Http2FloodGuard(limits);
         _altSvcHeaderValue = altSvcHeaderValue;
         _connectionSendCreditAt = _timeProvider.GetTimestamp();
@@ -2266,7 +2269,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         // it is in HalfClosedRemote (or Open, if the body is still arriving),
         // and a subsequent RST_STREAM from the peer needs to find it so it can
         // fire RequestAborted on the application's IHttpContext.
-        Http2Context context;
+        Http2Context? context;
         try
         {
             context = await stream.CreateContextAsync(
@@ -2277,7 +2280,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 _requestInterceptors,
                 _http2Limits,
                 _featureCapacity,
-                _requestBodyDataRate).ConfigureAwait(false);
+                _requestBodyDataRate,
+                _allowAlternateSchemes).ConfigureAwait(false);
         }
         catch (HPackDecodingException error)
         {
@@ -2305,6 +2309,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 stream.StreamId,
                 Http2ErrorCode.Cancel,
                 $"HTTP/2 stream {stream.StreamId} was rejected by a request-parse interceptor with status '{rejection.StatusCode}'.");
+        }
+
+        if (context is null)
+        {
+            // #1415: the validated head names an https resource on cleartext. No interceptor or
+            // application has run. Use the existing complete status answer and stop any upload.
+            await RejectRequestBodyAsync(stream, HttpStatusCode.MisdirectedRequest, cancellationToken).ConfigureAwait(false);
+            return null;
         }
 
         if (stream.IsDeclaredBodyOverLimit)
@@ -2375,7 +2387,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
     /// <summary>
     /// Writes the transport's own response rejecting <paramref name="stream"/>'s request body —
-    /// <c>413 Content Too Large</c> or <c>408 Request Timeout</c>: a HEADERS frame with <c>END_STREAM</c>
+    /// <c>413 Content Too Large</c>, <c>408 Request Timeout</c>, or the pre-dispatch
+    /// <c>421 Misdirected Request</c>: a HEADERS frame with <c>END_STREAM</c>
     /// and <c>content-length: 0</c>, bypassing the response hooks like HTTP/1.1's minimal limit
     /// responses — then either removes the fully-closed stream or resets it with <c>NO_ERROR</c> to stop
     /// the rest of the request body (RFC 9113 §8.1). The caller must hold the stream's final-response

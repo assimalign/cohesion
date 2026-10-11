@@ -213,7 +213,7 @@ public class Http2CancelledSendTests
     [
         (":method", "CONNECT"),
         (":protocol", "websocket"),
-        (":scheme", "https"),
+        (":scheme", "http"),
         (":path", "/chat"),
         (":authority", "api.test"),
     ];

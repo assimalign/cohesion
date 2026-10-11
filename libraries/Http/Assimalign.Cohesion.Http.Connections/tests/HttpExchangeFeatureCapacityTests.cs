@@ -181,7 +181,7 @@ public class HttpExchangeFeatureCapacityTests
                 break;
             case HttpProtocol.Http20:
                 options.UseHttp2(new TestConnectionListener(new TestConnection(
-                    HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test"))));
+                    HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test"))));
                 break;
             default:
                 options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(new TestConnection(

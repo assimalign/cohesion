@@ -415,7 +415,7 @@ public class HttpResponseFieldSyntaxTests
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
-        await peer.SendHeadersAsync(1, endStream: false, (":method", "CONNECT"), (":protocol", "websocket"), (":scheme", "https"), (":path", "/chat"), (":authority", "api.test"));
+        await peer.SendHeadersAsync(1, endStream: false, (":method", "CONNECT"), (":protocol", "websocket"), (":scheme", "http"), (":path", "/chat"), (":authority", "api.test"));
         IHttpContext context = await peer.ReceiveContextAsync();
         context.Response.StatusCode = HttpStatusCode.BadRequest;
         context.Response.Headers[_field] = "a\r\nb";

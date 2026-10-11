@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Http.Connections.Internal;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 using Shouldly;
@@ -16,8 +18,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// The request scheme against the connection's security (RFC 9110 §4.2.2, §7.4). An <c>https</c> target
 /// URI names a resource reachable only over a secured connection, so a request for one never reaches the
 /// application marked <c>https</c> over cleartext: HTTP/1.1 answers an <c>https</c> absolute-form target
-/// with <c>421 Misdirected Request</c>, and HTTP/2 over cleartext (h2c) takes the connection's
-/// <c>http</c> instead of an <c>https</c> <c>:scheme</c>. Over a secured connection the target's scheme is
+/// with <c>421 Misdirected Request</c>, as does HTTP/2 unless a trusted gateway opt-out is enabled. Over a secured connection the target's scheme is
 /// the request's, as RFC 9112 §3.3 builds the target URI.
 /// </summary>
 public class HttpRequestSchemeTests
@@ -70,20 +71,59 @@ public class HttpRequestSchemeTests
         result.Schemes.ShouldBe([HttpScheme.Http]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Scheme: Http2 over cleartext (h2c) should take http whatever :scheme says")]
-    [InlineData("https")]
-    [InlineData("http")]
-    public async Task Http2_SchemeOverCleartext_ShouldTakeHttp(string scheme)
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Scheme: h2c https should answer 421 before hooks and keep serving other streams")]
+    [InlineData(true, "https")]
+    [InlineData(false, "https")]
+    [InlineData(true, "HTTPS")]
+    public async Task Http2_HttpsOverCleartext_ShouldRejectBeforeDispatch(bool endStream, string scheme)
     {
-        // Arrange — an https :scheme on h2c must not mark the request secure: UseHttpsRedirection, HSTS
-        // and Secure-cookie decisions read Request.Scheme when no trusted proxy forwarded one.
+        // Arrange
+        SchemeProbe probe = new();
+        HttpConnectionListenerOptions options = new();
+        options.Interceptors.Add(probe);
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(options);
+
+        // Act
+        await peer.SendHeadersAsync(1, endStream, (":method", "GET"), (":scheme", scheme), (":path", "/rejected"), (":authority", "example.com"));
+        await peer.SendHeadersAsync(3, true, Http2TestPeer.Get("/next"));
+        IHttpContext next = await peer.ReceiveContextAsync();
+        await peer.SyncAsync();
+
+        // Assert
+        next.Request.Path.Value.ShouldBe("/next");
+        next.Request.Scheme.ShouldBe(HttpScheme.Http);
+        probe.Paths.ShouldBe(["/next"]);
+        Http2WireFrame head = peer.Output.ForStream(1).Single(frame => frame.IsHeaders);
+        head.EndStream.ShouldBeTrue();
+        Dictionary<string, string> headers = HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(head.Payload);
+        headers[":status"].ShouldBe("421");
+        headers["content-length"].ShouldBe("0");
+        peer.Output.ForStream(1).ShouldNotContain(frame => frame.IsData);
+        if (endStream)
+        {
+            peer.Output.ForStream(1).ShouldNotContain(frame => frame.IsRstStream);
+        }
+        else
+        {
+            peer.Output.ForStream(1).Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.NoError);
+        }
+        peer.Output.Frames.ShouldNotContain(frame => frame.IsGoAway);
+        await peer.ConnectionContext.SendAsync(next);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Scheme: trusted h2c gateway should retain the forwarded scheme")]
+    [InlineData("https", HttpScheme.Https)]
+    [InlineData("http", HttpScheme.Http)]
+    public async Task Http2_AlternateSchemesAllowed_ShouldRetainGatewayScheme(string scheme, HttpScheme expectedScheme)
+    {
+        // Arrange
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/admin", scheme, "example.com");
 
         // Act
-        IHttpContext context = await ReadHttp2ContextAsync(payload, ConnectionSecurity.None);
+        IHttpContext context = await ReadHttp2ContextAsync(payload, ConnectionSecurity.None, allowAlternateSchemes: true);
 
         // Assert
-        context.Request.Scheme.ShouldBe(HttpScheme.Http);
+        context.Request.Scheme.ShouldBe(expectedScheme);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Scheme: Http2 over TLS should take :scheme")]
@@ -125,10 +165,10 @@ public class HttpRequestSchemeTests
         return served;
     }
 
-    private static async Task<IHttpContext> ReadHttp2ContextAsync(byte[] payload, ConnectionSecurity security)
+    private static async Task<IHttpContext> ReadHttp2ContextAsync(byte[] payload, ConnectionSecurity security, bool allowAlternateSchemes = false)
     {
         TestConnection connection = new(payload);
-        HttpConnectionListenerOptions options = new();
+        HttpConnectionListenerOptions options = new() { AllowAlternateSchemes = allowAlternateSchemes };
         options.UseHttp2(new TestConnectionListener(TestConnection.DefaultCapabilities with { Security = security }, connection));
 
         await using HttpConnectionListener listener = new(options);
@@ -137,6 +177,13 @@ public class HttpRequestSchemeTests
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;
+    }
+
+    private sealed class SchemeProbe : HttpExchangeInterceptor
+    {
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+        public List<string> Paths { get; } = new();
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context) => Paths.Add(context.Path.Value);
     }
 
     private sealed class Served

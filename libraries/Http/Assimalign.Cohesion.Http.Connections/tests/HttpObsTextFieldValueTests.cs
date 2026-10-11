@@ -66,7 +66,7 @@ public class HttpObsTextFieldValueTests
         await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync();
         byte[] block = HPackTestEncoder.Block(
             HPackTestEncoder.Literal(":method", "GET"),
-            HPackTestEncoder.Literal(":scheme", "https"),
+            HPackTestEncoder.Literal(":scheme", "http"),
             name == ":path" ? HPackLiteral(":path", value) : HPackTestEncoder.Literal(":path", "/admin"),
             name == ":authority" ? HPackLiteral(":authority", value) : HPackTestEncoder.Literal(":authority", "api.test"),
             name == "host" ? HPackLiteral("host", value) : HPackTestEncoder.Literal("x-sibling", "none"));

@@ -171,7 +171,7 @@ public class Http2RequestBodyLimitTests
             endStream: false,
             (":method", "CONNECT"),
             (":protocol", "websocket"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/chat"),
             (":authority", "api.test"));
         IHttpContext exchange = await peer.ReceiveContextAsync();

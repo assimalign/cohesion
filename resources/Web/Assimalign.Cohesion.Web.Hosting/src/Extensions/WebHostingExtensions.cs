@@ -76,7 +76,8 @@ public static class WebHostingExtensions
         /// <c>Limits:MaxConcurrentConnections</c> caps the default server unless
         /// <see cref="WebApplicationServerBuilder.LimitConcurrentConnections(int)"/> set a cap. See
         /// <c>HttpServerConfiguration</c> for the expected section shape (Kestrel <c>appsettings</c>
-        /// parity).
+        /// parity). <c>AllowAlternateSchemes</c> binds the listener's trusted-gateway opt-out from
+        /// rejecting an <c>https</c> scheme on cleartext HTTP/2.
         /// </summary>
         /// <param name="configuration">The configuration to bind from.</param>
         /// <param name="sectionKey">The root section key. Defaults to <c>"Http"</c>.</param>

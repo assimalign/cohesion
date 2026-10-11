@@ -146,7 +146,7 @@ public class HttpConnectionListenerTests
     public async Task AcceptOrListenAsync_OnHttp2Registration_ShouldYieldHttp20Contexts()
     {
         // Arrange
-        TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test"));
+        TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test"));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
 

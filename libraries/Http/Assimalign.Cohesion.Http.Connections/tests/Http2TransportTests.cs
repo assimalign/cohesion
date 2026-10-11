@@ -20,7 +20,7 @@ public class Http2TransportTests
     public async Task Http2_OnRequest_ShouldParseHeadersAndWriteResponseFrames()
     {
         // Arrange — a secured connection, so the https :scheme is the request's; on cleartext (h2c) the
-        // request takes http (HttpRequestSchemeTests).
+        // request is rejected (HttpRequestSchemeTests).
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/items?id=7", "https", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
@@ -68,7 +68,7 @@ public class Http2TransportTests
         // the query content. Equivalent to the HTTP/1.1 QUERY round-trip on the h2 path.
         const string queryBody = "{\"select\":\"widgets\"}";
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "QUERY", "/search", "https", "api.test", body: Encoding.UTF8.GetBytes(queryBody));
+            1, "QUERY", "/search", "http", "api.test", body: Encoding.UTF8.GetBytes(queryBody));
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -91,7 +91,7 @@ public class Http2TransportTests
     public async Task Http2_OnMethodInAnotherCase_ShouldParseAnUnknownMethod(string method, string standard)
     {
         // Arrange — 'connect' carries :scheme and :path, as any method but CONNECT must, so it is not a tunnel.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, method, "/items", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, method, "/items", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -113,8 +113,8 @@ public class Http2TransportTests
     public async Task Http2_OnMultipleStreams_ShouldYieldRequestsInSequence()
     {
         // Arrange
-        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
-        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "http", "api.test");
+        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "http", "api.test");
         byte[] secondWithoutPreface = new byte[second.Length - 24];
         Array.Copy(second, 24, secondWithoutPreface, 0, secondWithoutPreface.Length);
         byte[] payload = Combine(first, secondWithoutPreface);
@@ -145,7 +145,7 @@ public class Http2TransportTests
         // emit a GOAWAY frame carrying NO_ERROR before tearing down the wire.
         // This fixes #686: without the graceful close, Http2Connection.Dispose
         // can race the underlying socket's send task and lose buffered bytes.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -187,7 +187,7 @@ public class Http2TransportTests
         // observes end-of-stream during the drain, but the fully-received
         // request stays answerable (only truncated requests are abandoned), so
         // the drain keeps holding until the response is sent.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -252,7 +252,7 @@ public class Http2TransportTests
         // connection (RFC §8.1.4). The input stays live (completeInput: false)
         // so the frame pump — which deliberately keeps running through the
         // drain window — processes a stream opened AFTER the close began.
-        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
+        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "http", "api.test");
         TestConnection connection = new(first, completeInput: false);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -274,7 +274,7 @@ public class Http2TransportTests
 
         // The peer now opens stream 3 — a NEW stream after graceful close began.
         // The still-running pump must answer it with RST_STREAM(REFUSED_STREAM).
-        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "http", "api.test");
         byte[] secondWithoutPreface = new byte[second.Length - 24];
         Array.Copy(second, 24, secondWithoutPreface, 0, secondWithoutPreface.Length);
         await connection.WriteInputAsync(secondWithoutPreface);
@@ -331,8 +331,8 @@ public class Http2TransportTests
         // SendAsync calls cannot tear each other's HEADERS+DATA sequence even
         // when invoked from racing tasks. This test confirms each DATA frame
         // carries a contiguous response body (no split / interleave).
-        byte[] firstRequest = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
-        byte[] secondRequest = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] firstRequest = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "http", "api.test");
+        byte[] secondRequest = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "http", "api.test");
         byte[] secondRequestWithoutPreface = new byte[secondRequest.Length - 24];
         Array.Copy(secondRequest, 24, secondRequestWithoutPreface, 0, secondRequestWithoutPreface.Length);
         byte[] combined = Combine(firstRequest, secondRequestWithoutPreface);
@@ -391,7 +391,7 @@ public class Http2TransportTests
         // SETTINGS frame. We advertise our local defaults so the peer never has
         // to guess; the most important one is ENABLE_PUSH=0 because the server
         // does not implement push.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -535,7 +535,7 @@ public class Http2TransportTests
             0x4 | 0x1, // END_HEADERS + END_STREAM
             (":method", "CONNECT"),
             (":protocol", "websocket"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/chat"),
             (":authority", "api.test"));
 
@@ -567,7 +567,7 @@ public class Http2TransportTests
             0x4 | 0x1,
             (":method", "CONNECT"),
             (":protocol", "websocket"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/chat"),
             (":authority", "api.test"));
 
@@ -588,7 +588,7 @@ public class Http2TransportTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A normal request exposes no ExtendedConnect feature")]
     public async Task Http2_OnNormalRequest_ShouldNotExposeExtendedConnectFeature()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
@@ -727,7 +727,7 @@ public class Http2TransportTests
         byte[] payload = Http2TestSettings.SettingsPayloadRaw((unknownParameter, 1234u));
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: payload);
         // Follow with a valid request so we can confirm the connection continued.
-        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
         Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
 
@@ -783,7 +783,7 @@ public class Http2TransportTests
             streamId,
             0x4 /* END_HEADERS */,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"));
     }
@@ -817,7 +817,7 @@ public class Http2TransportTests
     {
         // RFC 9113 §5.1.1 — newly opened client streams MUST use a
         // strictly higher id than every previously opened client stream.
-        byte[] firstRequest = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/three", "https", "api.test");
+        byte[] firstRequest = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/three", "http", "api.test");
         // Build a HEADERS frame on stream 1 (lower) — the connection has
         // already seen stream 3, so opening stream 1 now is an ordering
         // violation.
@@ -879,7 +879,7 @@ public class Http2TransportTests
         byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
         // A complete HEADERS+END_STREAM request for stream 1, with the
         // factory's own preface stripped — we already have one above.
-        byte[] requestWithBody = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] requestWithBody = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         byte[] requestWithoutPreface = new byte[requestWithBody.Length - Http2TestSettings.Preface().Length];
         Array.Copy(requestWithBody, Http2TestSettings.Preface().Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
         // Now a DATA frame on the just-closed stream.
@@ -969,7 +969,7 @@ public class Http2TransportTests
         // Increment = 1024, big-endian.
         byte[] increment = new byte[] { 0, 0, 4, 0 };
         byte[] windowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, increment);
-        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
         Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
 
@@ -999,7 +999,7 @@ public class Http2TransportTests
         byte[] goAwayPayload = new byte[] { 0, 0, 0, 1, 0, 0, 0, 0 };
         byte[] goAway = Http2TestSettings.RawFrame(0x7, 0, 0, goAwayPayload);
 
-        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
         Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
 
@@ -1038,7 +1038,7 @@ public class Http2TransportTests
 
         // A complete request on stream 1 (HEADERS + END_STREAM); the stream
         // is briefly HalfClosedRemote when yielded, then RST_STREAM closes it.
-        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "POST", "/upload", "https", "api.test");
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "POST", "/upload", "http", "api.test");
         byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
         Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
 
@@ -1094,7 +1094,7 @@ public class Http2TransportTests
             streamId: 1,
             flags: 0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"),
             ("te", "trailers"));
@@ -1122,7 +1122,7 @@ public class Http2TransportTests
             streamId: 1,
             flags: 0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"),
             ("cookie", "a=1"),
@@ -1150,7 +1150,7 @@ public class Http2TransportTests
             flags: 0x4 | 0x1,
             [
                 (":method", "GET"),
-                (":scheme", "https"),
+                (":scheme", "http"),
                 (":path", "/"),
                 (":authority", "api.test"),
                 ("x-before", "1"),
@@ -1296,7 +1296,7 @@ public class Http2TransportTests
             1,
             0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"));
 
@@ -1323,7 +1323,7 @@ public class Http2TransportTests
             1,
             0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"),
             ("priority", "u=6, i"));
@@ -1351,7 +1351,7 @@ public class Http2TransportTests
             1,
             0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"),
             ("priority", "u=5"));
@@ -1412,7 +1412,7 @@ public class Http2TransportTests
             1,
             0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"));
 
@@ -1554,11 +1554,11 @@ public class Http2TransportTests
     public async Task Http2_OnHeaderListWithinLimit_ShouldYieldRequest()
     {
         // RFC 9113 §10.5.1 — a request whose decoded header list stays within the advertised
-        // MAX_HEADER_LIST_SIZE decodes normally. A standard GET's field list is 174 octets
-        // (:method+GET+32=42, :path+/+32=38, :scheme+https+32=44, :authority+api.test+32=50),
+        // MAX_HEADER_LIST_SIZE decodes normally. A standard GET's field list is 173 octets
+        // (:method+GET+32=42, :path+/+32=38, :scheme+http+32=43, :authority+api.test+32=50),
         // comfortably under a 200-octet cap — the "just under succeeds" companion to the
         // over-the-limit rejection above.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxRequestHeaderListSize = 200);
@@ -1642,7 +1642,7 @@ public class Http2TransportTests
             1,
             0x4,
             (":method", "POST"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/upload"),
             (":authority", "api.test"));
         // Stream 3: a second concurrent stream that exceeds the cap of one.
@@ -1650,7 +1650,7 @@ public class Http2TransportTests
             3,
             0x4 | 0x1,
             (":method", "GET"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/"),
             (":authority", "api.test"));
 

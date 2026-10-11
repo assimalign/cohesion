@@ -28,7 +28,7 @@ public class Http2InterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hook should attach a feature visible on the dispatched context")]
     public async Task AfterRequestHead_ShouldAttachFeatureVisibleOnContext()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new HostFeatureAttachingInterceptor());
 
@@ -43,7 +43,7 @@ public class Http2InterceptorTests
     public async Task AfterRequestBody_ShouldWrapStreamInRegistrationOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
+            1, "POST", "/upload", "http", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new WrappingInterceptor("inner"));
         options.Interceptors.Add(new WrappingInterceptor("outer"));
@@ -62,7 +62,7 @@ public class Http2InterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A rejecting head hook should reset the stream and yield no context")]
     public async Task AfterRequestHead_Rejecting_ShouldResetStreamWithCancel()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/forbidden", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/forbidden", "http", "api.test");
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new HeadRejectingInterceptor(HttpStatusCode.Forbidden));
 
@@ -81,7 +81,7 @@ public class Http2InterceptorTests
         // from its body hook. The already-built wrapper chain and the attached feature must both be
         // torn down before the stream is reset, since no exchange context will own their disposal.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
+            1, "POST", "/upload", "http", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
         DisposableFeatureAttachingInterceptor first = new();
         WrappingInterceptor wrapper = new("inner");
@@ -103,7 +103,7 @@ public class Http2InterceptorTests
     public async Task Knob_ShouldFreezeAfterHeadHooks()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
+            1, "POST", "/upload", "http", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
@@ -120,7 +120,7 @@ public class Http2InterceptorTests
     public async Task AfterRequestHead_Headers_ShouldBeReadOnly()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "GET", "/", "https", "api.test", headers: new Dictionary<string, string> { ["content-type"] = "text/plain" });
+            1, "GET", "/", "http", "api.test", headers: new Dictionary<string, string> { ["content-type"] = "text/plain" });
         HttpConnectionListenerOptions options = new();
         HeaderProbingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
@@ -144,7 +144,7 @@ public class Http2InterceptorTests
             0x4 | 0x1, // END_HEADERS + END_STREAM
             (":method", "CONNECT"),
             (":protocol", "websocket"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/chat"),
             (":authority", "api.test"));
         HttpConnectionListenerOptions options = new();
@@ -170,7 +170,7 @@ public class Http2InterceptorTests
             0x4 | 0x1, // END_HEADERS + END_STREAM
             (":method", "CONNECT"),
             (":protocol", "websocket"),
-            (":scheme", "https"),
+            (":scheme", "http"),
             (":path", "/chat"),
             (":authority", "api.test"));
         HttpConnectionListenerOptions options = new();
@@ -195,7 +195,7 @@ public class Http2InterceptorTests
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = classicConnect
             ? HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "CONNECT"), (":authority", "api.test:443"))
-            : HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "GET"), (":scheme", "https"), (":path", "/"), (":authority", "api.test"));
+            : HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(1, 0x4 | 0x1, (":method", "GET"), (":scheme", "http"), (":path", "/"), (":authority", "api.test"));
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
@@ -211,7 +211,7 @@ public class Http2InterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Body hooks should run for empty bodies")]
     public async Task EmptyBody_ShouldStillRunBodyHooks()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
@@ -229,7 +229,7 @@ public class Http2InterceptorTests
         // frozen value on receipt (RFC 9110 §15.5.14), so the stream is answered 413 and the
         // handler's body read fails instead of delivering the oversized body.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
+            1, "POST", "/upload", "http", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new CapSettingInterceptor(16));
         TestConnection connection = new(payload);
@@ -268,7 +268,7 @@ public class Http2InterceptorTests
         // The listener-wide cap (16) would reject the 64-octet body; the head hook raises the
         // per-request cap, and the frozen per-request value is what HTTP/2 enforces.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
+            1, "POST", "/upload", "http", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new CapSettingInterceptor(1024));
         TestConnection connection = new(payload);
@@ -287,7 +287,7 @@ public class Http2InterceptorTests
     {
         // The fast path: with no registered interceptors the transport allocates no parse context
         // or feature collection, and the request flows through exactly as before the seam existed.
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         HttpConnectionListenerOptions options = new();
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);

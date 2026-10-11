@@ -61,7 +61,7 @@ public class InterceptorLifecycleTests
     public async Task Http2_RequestHooks_ShouldFireInLifecycleOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
-            1, "POST", "/upload", "https", "api.test", body: Encoding.ASCII.GetBytes("hello"));
+            1, "POST", "/upload", "http", "api.test", body: Encoding.ASCII.GetBytes("hello"));
         TestConnection connection = new(payload);
         RecordingRequestInterceptor recorder = new();
         HttpConnectionListenerOptions options = new();
@@ -139,7 +139,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: BeforeResponseHead mutates the final HEADERS block (buffered path)")]
     public async Task Http2_BeforeResponseHead_ShouldMutateFinalHead()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new()
         {
@@ -260,7 +260,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: BeforeResponseHead fires exactly once when the streaming path commits the head")]
     public async Task Http2_BeforeResponseHead_OnStreamingCommit_ShouldFireOnce()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new()
         {
@@ -404,7 +404,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: An application cancel (IHttpContext.Cancel) resets the stream with RST_STREAM(CANCEL)")]
     public async Task Http2_ApplicationCancel_ShouldResetStreamWithCancel()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new();
         HttpConnectionListenerOptions options = new();
@@ -458,7 +458,7 @@ public class InterceptorLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http2: An application cancel during BeforeResponseHead resets the stream instead of writing the head")]
     public async Task Http2_CancelDuringBeforeResponseHead_ShouldResetStream()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
         TestConnection connection = new(payload);
         RecordingResponseInterceptor recorder = new();
         HttpConnectionListenerOptions options = new();
@@ -579,7 +579,7 @@ public class InterceptorLifecycleTests
 
         // HTTP/2 — multiplexed streams over a shared connection: report false, throw on misuse.
         {
-            byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+            byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test");
             TestConnection connection = new(payload);
             RecordingResponseInterceptor recorder = new();
             HttpConnectionListenerOptions options = new();

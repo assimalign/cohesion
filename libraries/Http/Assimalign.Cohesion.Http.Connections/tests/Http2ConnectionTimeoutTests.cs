@@ -187,7 +187,7 @@ public class Http2ConnectionTimeoutTests
         // Act — at 0.8 × the keep-alive, a HEADERS frame without :method opens stream 1, which the server
         // resets as malformed (RFC 9113 §8.1.1) without handing it to the host.
         await Task.Delay(keepAlive * 0.8);
-        await peer.SendHeadersAsync(1, endStream: true, (":scheme", "https"), (":path", "/malformed"), (":authority", "api.test"));
+        await peer.SendHeadersAsync(1, endStream: true, (":scheme", "http"), (":path", "/malformed"), (":authority", "api.test"));
         Stopwatch sinceMalformed = Stopwatch.StartNew();
         await receiveEnded;
         TimeSpan closedAfter = sinceMalformed.Elapsed;

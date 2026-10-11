@@ -13,19 +13,22 @@ internal sealed class Http2ConnectionFactory : HttpConnectionFactory
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly int _featureCapacity;
+    private readonly bool _allowAlternateSchemes;
 
     public Http2ConnectionFactory(
         Http2ConnectionListenerOptions.Http2Limits limits,
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
-        int featureCapacity)
+        int featureCapacity,
+        bool allowAlternateSchemes = false)
     {
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
+        _allowAlternateSchemes = allowAlternateSchemes;
     }
 
     public override HttpConnection Create(IConnection connection, bool isSecure)
-        => new Http2Connection(connection, isSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, AltSvcHeaderValue);
+        => new Http2Connection(connection, isSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, AltSvcHeaderValue, _allowAlternateSchemes);
 }

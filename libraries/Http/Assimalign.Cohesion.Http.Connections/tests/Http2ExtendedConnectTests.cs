@@ -446,7 +446,7 @@ public class Http2ExtendedConnectTests
     [
         (":method", "CONNECT"),
         (":protocol", "websocket"),
-        (":scheme", "https"),
+        (":scheme", "http"),
         (":path", "/chat"),
         (":authority", "api.test"),
     ];

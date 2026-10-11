@@ -13,10 +13,11 @@ internal sealed class Http2Connection : HttpConnection
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly int _featureCapacity;
+    private readonly bool _allowAlternateSchemes;
     private readonly string? _altSvcHeaderValue;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
+    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, bool allowAlternateSchemes = false)
         : base(isSecure)
     {
         _connection = connection;
@@ -24,6 +25,7 @@ internal sealed class Http2Connection : HttpConnection
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
+        _allowAlternateSchemes = allowAlternateSchemes;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -42,7 +44,7 @@ internal sealed class Http2Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _context ??= new Http2ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _altSvcHeaderValue);
+        return _context ??= new Http2ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _altSvcHeaderValue, _allowAlternateSchemes);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

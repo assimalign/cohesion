@@ -141,7 +141,7 @@ public class HttpRequestTargetDecodeParityTests
 
     private static async Task<IHttpContext?> ReadHttp2ContextAsync(string rawPath)
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", rawPath, "https", "api.test");
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", rawPath, "http", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
