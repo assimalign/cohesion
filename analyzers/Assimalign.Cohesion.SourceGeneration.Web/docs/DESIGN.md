@@ -317,8 +317,12 @@ with `[JsonSerializable]` when the compilation can resolve Web.Validation's opti
 `[JsonPropertyName]` spelling, including the empty name, or the registered contract's naming policy.
 It returns the matching `JsonPropertyInfo` from the actual contract supplied by Web.Serialization's
 `TryGetJsonTypeInfo` seam, so validation can walk property types and use the names the writer exposes.
-The graph includes nested object properties, inherited class and interface members, fields, arrays
-and generic collection arguments. Fields require `IncludeFields` unless `[JsonInclude]` names them;
+The graph includes nested object properties, inherited class and interface members, fields, arrays,
+generic collection arguments, and each visited model's `[JsonDerivedType]` targets. A context that
+explicitly registers only a polymorphic base therefore maps the derived contracts System.Text.Json
+registers, including further attributed descendants. Derived targets share the visited-type set and
+carry the same ancestry tracking as member contracts, so base/derived cycles and self-references do
+not repeat traversal. Fields require `IncludeFields` unless `[JsonInclude]` names them;
 the same attribute admits nonpublic members, and `[JsonIgnore]` with its `Always` condition excludes
 members. Partial containing types are reopened for nested contexts, and attributes spread across
 partial declarations produce one resolver. Inaccessible model types and non-partial contexts are
@@ -340,6 +344,14 @@ records the first repeated generic definition on a traversal path but stops foll
 deeper constructed types require an explicit `[JsonSerializable]` root or a custom resolver. Ordinary
 self-references are visited once. This additive optional generator did not ship in `10.0.0-preview.1`;
 applications without Web.Validation keep their existing generated contexts unchanged.
+
+**Preview behavior change (#1209, HTTP/Web decision 15 terms).** Discovering attributed derived
+contracts changes their validation keys from CLR spellings such as `DisplayName` to registered JSON
+spellings such as `display_name`; clients that relied on the previous spelling must update. Neither
+this generator nor Web.Validation shipped in `10.0.0-preview.1`, so this corrects the pre-release
+implementation without changing that released package surface. Web.Validation's integration tests
+compile a base-only context with the actual System.Text.Json generator and cover renamed derived
+members, further descendants, and recursive properties.
 
 ## Delivery
 

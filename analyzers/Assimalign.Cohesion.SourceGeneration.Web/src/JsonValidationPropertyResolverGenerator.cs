@@ -22,6 +22,7 @@ public sealed class JsonValidationPropertyResolverGenerator : IIncrementalGenera
     private const string resolverName = "Assimalign.Cohesion.Web.Validation.IValidationJsonPropertyResolver";
     private const string contextName = "System.Text.Json.Serialization.JsonSerializerContext";
     private const string serializableName = "System.Text.Json.Serialization.JsonSerializableAttribute";
+    private const string derivedTypeAttribute = "System.Text.Json.Serialization.JsonDerivedTypeAttribute";
     private const string propertyNameAttribute = "System.Text.Json.Serialization.JsonPropertyNameAttribute";
     private const string ignoreAttribute = "System.Text.Json.Serialization.JsonIgnoreAttribute";
     private const string includeAttribute = "System.Text.Json.Serialization.JsonIncludeAttribute";
@@ -128,6 +129,18 @@ public sealed class JsonValidationPropertyResolverGenerator : IIncrementalGenera
             {
                 named.OriginalDefinition
             };
+
+            // System.Text.Json registers attributed derived types even without an explicit root.
+            // The visited set breaks base/derived cycles; preserve ancestry for member expansion.
+            foreach (AttributeData attribute in named.GetAttributes())
+            {
+                if (attribute.AttributeClass?.ToDisplayString() == derivedTypeAttribute
+                    && attribute.ConstructorArguments.Length > 0
+                    && attribute.ConstructorArguments[0].Value is ITypeSymbol derivedType)
+                {
+                    pending.Enqueue((derivedType, ancestors));
+                }
+            }
 
             var members = new List<(string MemberName, string? JsonName, bool RequiresIncludeFields)>();
             var memberNames = new HashSet<string>(StringComparer.Ordinal);
