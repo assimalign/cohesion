@@ -21,9 +21,14 @@ registers, or a built-in name such as `"VARCHAR(320)"`), and `schema.Type<T>(t =
 declares a domain named for `T` that every member of `T` uses. The engine resolves the names when
 it builds; the migration planner plans `AddDomain` and `DropDomain`.
 
-`table.Default(selector, "7")` declares a column's SQL default literal; quoted SQL text such as
-`"'pending'"` declares a string. The compiled column keeps it in `DefaultLiteral`, and the SQL
-engine validates the literal before provisioning. Defaults survive canonical
-documents and catalog reconstruction after an interrupted migration.
+`table.Default(row => row.Status, "pending")` declares a string value and renders `'pending'`;
+`Default(row => row.Quantity, 7)` renders `7`. The typed API also accepts Boolean, nullable,
+numeric, char, enum, date/time, Guid and binary values, using invariant SQL literals.
+`table.DefaultSql(selector, "'pending'")` supplies raw SQL literal text as an escape hatch.
+The compiled column keeps the rendered text in `DefaultLiteral`, so equivalent typed and raw
+declarations have identical documents and hashes; the format remains v4. The SDK uses the same
+renderer for C# compile-time constants and directs nonconstant declarations to `DefaultSql`.
+The SQL engine validates defaults before provisioning, and they survive canonical documents
+and catalog reconstruction after an interrupted migration.
 
 See [DESIGN.md](DESIGN.md) for boundaries, canonicalization, and AOT decisions.

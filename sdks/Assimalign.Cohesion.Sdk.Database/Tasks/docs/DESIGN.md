@@ -116,14 +116,35 @@ invisible to the task** as functions are: a column of a domain the application r
 engine builder compiles into the artifact, and the engine's build resolves the name before it
 touches a file. `schema.Type<T>(t => t.Decimal(p, s))` is a domain named for `T`'s simple name, as
 the runtime compiler names it; a generic or array `T`, which has no such name, is `COHDBSDK106`.
-`table.Default(selector, literal)` (B2) extracts a non-empty compile-time string constant into
-the column's `DefaultLiteral`, preserving the SQL text in the canonical document and hash. It
-can select a column on its own, before or after a type declaration, including an explicit SQL
-type or an inferred domain. Repeating the same literal is idempotent; a different literal for
-that column is `COHDBSDK105`. A nonconstant, null or blank literal is `COHDBSDK104`. Like a CHECK,
-the task preserves its text without parsing SQL; the engine validates the literal before applying
-the schema. The SDK/runtime parity tests cover constant concatenation, named arguments, domains,
-type bounds, and exact document/hash equality.
+`table.Default<TValue>(selector, value)` accepts C# compile-time constants: strings, characters,
+Boolean values, numeric values, `null`, and enum members (including constant expressions and
+casts). Roslyn evaluates the expression and the extractor applies its contextual numeric
+conversion, so `Default(row => row.Amount, 7)` on a decimal member produces exactly the literal
+the runtime builder receives. Both paths compile the same stateless internal literal renderer
+from `Database.Sql.Schema/shared` through `CohesionSharedSource`; no public helper or
+shipped-to-shipped internal grant widens that boundary. The renderer quotes strings and doubles
+apostrophes, preserves decimal scale using invariant culture, writes uppercase Boolean and NULL
+literals, and validates the value against the member's mapped storage type. Characters use string
+storage; enums use their underlying integer's storage, widening unsigned enum storage where
+necessary. Explicit SQL type names still resolve and validate at engine build.
+
+A value Roslyn cannot evaluate fails with `COHDBSDK109`, at its source location, naming
+`DefaultSql` as the escape hatch. The extractor does not invoke constructors, read mutable fields,
+or execute helper methods. Date/time, Guid, and binary CLR values are supported by the runtime
+builder; their nonconstant C# constructions use `DefaultSql` in SDK-analyzed declarations.
+`table.DefaultSql(selector, sqlLiteral)` retains the existing requirement for a non-empty
+compile-time string constant (`COHDBSDK104`) and preserves its SQL text for engine validation as
+exactly one supported literal before any file is touched. Typed mismatches are `COHDBSDK106`.
+
+Either verb selects a column on its own, before or after `Column`, including an explicit SQL
+type or inferred domain. Repeating the same rendered literal is idempotent; a different literal
+for that column is `COHDBSDK105`. Only `DefaultLiteral` reaches the document: a typed default and
+`DefaultSql` containing its exact rendered literal produce identical documents and hashes. The
+shape remains v4. The SDK/runtime parity tests cover every constant kind, all enum backing widths,
+nullable values, implicit numeric conversions, constant concatenation, named arguments, domains,
+and exact document/hash equality. Foreign-key compatibility compares the compiled storage and
+SQL type metadata, so an enum and its integer storage, or char and string, match when their
+domain/type declarations do too.
 
 The diagnostics:
 
@@ -133,10 +154,11 @@ The diagnostics:
 | `COHDBSDK101` | No schema declaration was found, or a database name (compared ignoring case, across every engine of the project) has more than one. |
 | `COHDBSDK102` | A name is not a non-empty constant (a CHECK's included); a `database.Schema(...)` call has no constant enclosing `AddDatabase` name; or a database name cannot name a file. |
 | `COHDBSDK103` | A schema, table, type or principal callback is not an inline lambda. |
-| `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DEFAULT literal that is not a non-empty constant. |
+| `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DefaultSql literal that is not a non-empty constant. |
 | `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, a conflicting column type or DEFAULT literal, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
 | `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
 | `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
+| `COHDBSDK109` | A typed Default value is not a C# compile-time constant; use DefaultSql with a constant SQL literal. |
 
 The outputs are:
 
@@ -182,7 +204,7 @@ not a valid migration artifact for that model. SQL text uses the same guarded, `
 dialect as the runtime renderer; the current dialect explicitly rejects constraints,
 ALTER metadata, and required column additions that have no non-null literal default or backfill.
 Every emitted column retains its DEFAULT. The migration writer validates it as exactly one SQL
-literal through `Sql.Language`, then renders the parsed value, so signs, Boolean spelling and
+literal through `Sql.Language`, then renders the parsed value, accepting a minus sign on a numeric literal and no other expressions, so signs, Boolean spelling and
 escaped strings match the runtime's DDL. Required additions retain the shared planner's
 conservative destructive-change opt-in; after that opt-in, a non-null default makes the DDL valid;
 `DEFAULT NULL` has the same effect as absence and cannot supply that addition. Nonliteral text is

@@ -64,6 +64,8 @@ public sealed class SqlPersistedExpressionTests
     [InlineData("'it''s'", "it's")]
     [InlineData("5", "5")]
     [InlineData("1.50", "1.50")]
+    [InlineData("-5", "-5")]
+    [InlineData("-1.50", "-1.50")]
     [InlineData("TRUE", "TRUE")]
     public void LoadDefaultValue_Literal_ShouldReturnValueText(string text, string value)
         => SqlPersistedExpression.LoadDefaultValue(text, "test").ShouldBe(value);
@@ -72,7 +74,8 @@ public sealed class SqlPersistedExpressionTests
     [InlineData("abc")]
     [InlineData("NULL")]
     [InlineData("1 + 1")]
-    [InlineData("-5")]
+    [InlineData("-(-5)")]
+    [InlineData("-(1 + 1)")]
     public void LoadDefaultValue_NotALiteral_ShouldFail(string text)
         => Should.Throw<DatabaseException>(() => SqlPersistedExpression.LoadDefaultValue(text, "DEFAULT of column 'c' on table 'dbo.t'"))
             .Message.ShouldContain("is not a literal value", Case.Sensitive);

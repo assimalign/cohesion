@@ -263,7 +263,9 @@ public sealed partial class SqlQueryParser
             else if (IsKeyword(ref lexer, "DEFAULT"))
             {
                 Advance(ref lexer);
-                defaultValue = ParsePrimary(ref lexer);
+                // A signed numeric default uses the same unary node as an expression. The
+                // engine admits only one literal (including one numeric minus), not expressions.
+                defaultValue = ParseUnary(ref lexer);
             }
             else
             {

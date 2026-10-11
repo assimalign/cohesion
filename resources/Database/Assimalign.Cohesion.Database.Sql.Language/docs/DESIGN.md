@@ -334,6 +334,12 @@ Directly before a numeric literal the sign stays part of the literal, so `+1` an
 `1` are the same tree and `ORDER BY +1` keeps its ordinal meaning; `+a`, `+(1 + 2)`
 and `+@p` build a unary-plus node. Typing and evaluation belong to the engine.
 
+Column DEFAULT parses through the unary rung too, so negative numeric defaults retain the same
+unary-minus node as a scalar expression. The engine's DEFAULT admission remains narrower than
+the expression grammar: one literal, or one minus over a numeric literal. Arithmetic, nested
+signs and function calls do not become expression defaults. This supports the schema builder's
+invariant rendering of negative C# numeric values without rewriting them as text literals.
+
 ## AOT posture
 
 Hand-written parser over the zero-allocation `TokenLexer` ref struct; no

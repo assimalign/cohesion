@@ -9,7 +9,14 @@ builder.AddSql("orders-sql", sql =>
 {
     sql.AddDatabase("sales", database => database.Schema(schema =>
     {
-        schema.Table<Order>("orders", table => table.Key(order => order.Id));
+        schema.Table<Order>("orders", table =>
+        {
+            table.Key(order => order.Id);
+            table.Default(order => order.Status, "pending");
+            table.Default(order => order.Quantity, 7);
+            table.Default(order => order.Active, true);
+            table.DefaultSql(order => order.Placed, "'2026-01-01'");
+        });
     }));
     sql.AddDatabase(ReportingSchema.Declaration);   // a SqlSchema.Create("reporting", ...) value
 });
@@ -42,6 +49,12 @@ its own canonical schema document,
 hash, `<database>.schema.sha256`, listed in the directory's `schemas.manifest`. The directory can
 be overridden with `CohesionDatabaseSchemaOutputDirectory`; the build removes the artifacts of a
 database that is no longer declared and touches no other file in it.
+
+`Default` takes a typed C# value and handles SQL quoting; `DefaultSql` accepts one SQL literal
+as written. The SDK accepts compile-time constants for typed defaults, including enum members,
+characters, and `null`. A constructor, method call, or other nonconstant value fails with
+`COHDBSDK109` and points to `DefaultSql`. Runtime and SDK use the same literal renderer, and a
+typed value and its exact `DefaultSql` literal have identical v4 documents and hashes.
 
 Built-in tool sets are `Sql` and `KeyValuePair`. Model names are case-sensitive. SQL migration
 generation is explicit and names its database (optional when the project declares exactly one);

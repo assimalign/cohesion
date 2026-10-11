@@ -142,8 +142,8 @@ internal sealed partial class SqlPlanExecutor
     /// catalog the engine wrote. One that does not convert binds as a <see cref="SqlBoundFailure"/>
     /// that converts it again, and so fails, each time the default is used, as it did before the
     /// value was bound: the table still opens, and reads and writes that never need the default
-    /// still succeed. The converted value is immutable (a binary column has no literal DEFAULT that
-    /// converts), so every row shares it.
+    /// still succeed. Immutable converted values are shared; binary defaults are copied on delivery
+    /// so a caller cannot mutate the cached value through a materialized row.
     /// </remarks>
     /// <param name="column">The column.</param>
     /// <param name="defaultValue">The value text of the column's DEFAULT literal (<see cref="SqlPersistedExpression.LoadDefaultValue"/>).</param>
@@ -168,7 +168,12 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="bound">The bound DEFAULT (<see cref="BindDefault"/>).</param>
     /// <returns>The value.</returns>
     private static object? DefaultValue(SqlBoundExpression bound)
-        => bound.Kind == SqlBoundExpressionKind.Constant ? ((SqlBoundConstant)bound).Value : ((SqlBoundFailure)bound).Raise();
+    {
+        object? value = bound.Kind == SqlBoundExpressionKind.Constant
+            ? ((SqlBoundConstant)bound).Value
+            : ((SqlBoundFailure)bound).Raise();
+        return value is byte[] bytes ? bytes.Clone() : value;
+    }
 
     /// <summary>
     /// Converts a column's DEFAULT value using the same rules for backfill and omitted
@@ -195,7 +200,9 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            object? value = column.Type.Type == DatabaseType.Decimal
+            object? value = column.Type.Type is DatabaseType.Binary or DatabaseType.JsonBinary
+                ? CoerceForColumn(ParseBinaryDefault(defaultValue), column)
+                : column.Type.Type == DatabaseType.Decimal
                 // Canonical DEFAULT text preserves quotes. Only an unquoted numeric literal
                 // accepts exponent/decimal-point forms; quoted text uses CAST's grammar.
                 ? CoerceForColumn(SqlCastConverter.ParseNumericText(defaultValue, column.Type,
@@ -234,5 +241,17 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException(
                 $"Column '{column.Name}': DEFAULT value cannot be stored as {column.Type.Type}. {exception.Message}", exception);
         }
+    }
+
+    private static byte[] ParseBinaryDefault(string value)
+    {
+        // PostgreSQL's bytea hex input uses this prefix (src/backend/utils/adt/bytea.c:201-224).
+        // Defaults accept hex only: no octal escapes, whitespace or general text-to-binary cast.
+        if (!value.StartsWith("\\x", StringComparison.Ordinal))
+        {
+            throw new FormatException("A binary DEFAULT must be a quoted \\x-prefixed hexadecimal value.");
+        }
+
+        return Convert.FromHexString(value.AsSpan(2));
     }
 }

@@ -159,8 +159,8 @@ flowchart TD
   the column and every INSERT omitting it reads, where each use converted the text
   before. A DEFAULT that does not convert, which DDL never stores, binds as a
   `SqlBoundFailure` that fails each use as before, so the table still opens. Bound
-  trees and converted values are immutable and failure nodes construct a new exception
-  per throw, so sharing them across threads is safe.
+  trees and immutable converted values are shared; binary defaults are copied on delivery.
+  Failure nodes construct a new exception per throw, so sharing the cache across threads is safe.
 - **Allocation.** Literals and parameters are boxed once per statement instead of per
   row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed
   sentinel; a projected value already of its declared type is not converted and boxed
@@ -1084,8 +1084,13 @@ catalog metadata. E3 domains are engine registrations made before provisioning, 
 declared domains are included in the snapshot even when no table exists; their planner operations
 emit no DDL. Principals/grants and ALTER metadata remain explicitly refused, as before B2.
 
-`table.Default(selector, literal)` and `CompiledSchemaColumn.DefaultLiteral` express the existing
-SQL literal DEFAULT capability. The engine validates one literal before writing anything and
+`table.Default(selector, value)` renders a typed C# value through the schema package's shared
+renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
+on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
+Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
+has the same canonical document and hash. The document remains `cohesion/database-schema/v4`:
+this changes declaration syntax and literal admission, not the document shape.
+The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
 `SqlPlanExecutor.ResolveDefault` conversion as CREATE TABLE and ADD COLUMN, which uses
 `SqlCastConverter.ParseNumericText` and `ApplyModifiers` for numeric rounding and effective
@@ -1096,7 +1101,23 @@ therefore agree with DDL. The renderer emits canonical SQL; expressions/function
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
 `cohesion/database-schema/v4`, because strict v3 readers cannot read `defaultLiteral`. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
-existing destructive-change opt-in. SDK extraction preserves the same text and hash.
+existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
+same schema renderer and preserves the same text and hash.
+
+Negative numeric defaults admit exactly one unary-minus node over one integer or floating literal,
+including values such as `-7` and `-1.2500`. The DDL parser reads that node, and provisioning,
+DDL planning and persisted-default loading apply the same literal-only rule. Arithmetic,
+nested unary expressions and function calls remain refused. Temporal values and UUIDs use quoted invariant
+text and the existing column conversions. The raw form for a date is `'2026-01-01'`;
+the `DATE '2026-01-01'` typed SQL prefix is outside the current dialect.
+
+Binary defaults use a quoted `\x` prefix followed by an even number of hexadecimal digits;
+the typed renderer writes uppercase digits. This follows PostgreSQL's bytea hex marker
+(`src/backend/utils/adt/bytea.c:201-224`), with no octal or whitespace alternative. DEFAULT
+conversion alone decodes the bytes and enforces the column's length bounds; general text-to-binary
+assignment and CAST are unchanged. The table-version cache keeps the converted bytes privately
+and clones them whenever a default is delivered, including backfill of older rows, so caller
+mutation cannot change subsequent defaults.
 
 `SqlProvisioningHardeningTests` captures Sql's crash-storage strategy after every committed step of
 a migration containing all eight executable add/drop operation kinds, including a unique-index

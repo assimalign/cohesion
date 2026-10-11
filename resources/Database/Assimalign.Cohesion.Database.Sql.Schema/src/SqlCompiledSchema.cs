@@ -252,8 +252,9 @@ public sealed class CompiledSchemaTable
 /// arguments, as written (phase E3). The engine resolves it as its DDL does.
 /// </param>
 /// <param name="DefaultLiteral">
-/// The SQL DEFAULT literal as written, including quotes for a string, or null when no default is
-/// declared. The SQL engine validates and canonicalizes the literal before applying it.
+/// The rendered typed default or raw <c>DefaultSql</c> literal as written, including SQL quotes
+/// for a string, or null when no default is declared. The SQL engine validates and canonicalizes
+/// the literal before applying it.
 /// </param>
 public sealed record CompiledSchemaColumn(
     string Name,

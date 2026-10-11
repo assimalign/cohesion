@@ -235,11 +235,11 @@ public sealed class SqlProvisioningHardeningTests
                 table.Key(row => row.Id);
                 if (complete)
                 {
-                    table.Default(row => row.ParentId, "NULL");
+                    table.Default(row => row.ParentId, (int?)null);
                     table.Column(row => row.Note, "label");
-                    table.Default(row => row.Note, " 'pending' ");
+                    table.DefaultSql(row => row.Note, " 'pending' ");
                     table.Column(row => row.Amount, "DECIMAL(12, 3)");
-                    table.Default(row => row.Balance, "0.00");
+                    table.DefaultSql(row => row.Balance, "0.00");
                     table.Index(row => row.Note);
                     table.References<Parent>(row => row.ParentId);
                     table.Check("ck_balance", "Balance >= 0");
@@ -251,7 +251,7 @@ public sealed class SqlProvisioningHardeningTests
                 {
                     table.Key(row => row.Id);
                     table.Column(row => row.Name, "VARCHAR(24)");
-                    table.Default(row => row.Name, "'unnamed'");
+                    table.Default(row => row.Name, "unnamed");
                     table.Index(row => row.Name);
                     table.Check("ck_name", "LENGTH(Name) > 0");
                 });

@@ -858,9 +858,9 @@ internal sealed partial class SqlPlanner
     private static string? ResolveDefaultLiteral(SqlColumnDefinition definition, string table) => definition.DefaultValue switch
     {
         null => null,
-        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null
-            ? null
-            : SqlPersistedExpression.Canonicalize(literal, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'"),
+        SqlLiteralExpression { LiteralType: SqlLiteralType.Null } => null,
+        var expression when SqlPersistedExpression.IsDefaultLiteral(expression)
+            => SqlPersistedExpression.Canonicalize(expression, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'"),
         _ => throw new DatabaseException(
             $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
     };

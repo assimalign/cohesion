@@ -8,6 +8,10 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
+using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Sdk.Database.Tasks.Internal;
 
 /// <summary>
@@ -555,6 +559,7 @@ internal sealed class CSharpSchemaExtractor
                 case "Column":
                     break;
                 case "Default":
+                case "DefaultSql":
                     ExtractColumnDefault(model, operation, operationMethod, tableName, columns, selectedColumn.Name);
                     break;
                 case "Key":
@@ -620,22 +625,54 @@ internal sealed class CSharpSchemaExtractor
         columns[index] = declared with { SqlType = sqlType };
     }
 
-    // table.Default(selector, literal): the SQL literal is preserved as written, like CHECK text.
-    // The engine validates SQL without pulling its parser into this build-time task.
+    // Default evaluates constants only; DefaultSql preserves literal text. Both record the same
+    // DefaultLiteral field and share a document/hash whenever that text is identical.
     private void ExtractColumnDefault(SemanticModel model, InvocationExpressionSyntax operation, IMethodSymbol method, string tableName,
         List<SchemaColumnSource> columns, string columnName)
     {
-        ExpressionSyntax? literalExpression = GetArgument(operation, method, "literal", 1);
-        string? literal = literalExpression is null ? null : ConstantString(model, literalExpression);
-        if (string.IsNullOrWhiteSpace(literal))
-        {
-            Error("COHDBSDK104", $"Column '{tableName}.{columnName}' needs its DEFAULT literal as a non-empty compile-time string constant, " +
-                "so the build can read it without executing Program.Main.", literalExpression?.GetLocation() ?? operation.GetLocation());
-            return;
-        }
-
         int index = columns.FindIndex(column => string.Equals(column.Name, columnName, StringComparison.Ordinal));
         SchemaColumnSource declared = columns[index];
+        bool isTyped = method.Name == "Default";
+        ExpressionSyntax? valueExpression = GetArgument(operation, method, isTyped ? "value" : "sqlLiteral", 1);
+        string? literal;
+        if (isTyped)
+        {
+            Optional<object?> constant = valueExpression is null ? default : model.GetConstantValue(valueExpression);
+            if (!constant.HasValue)
+            {
+                Error("COHDBSDK109", $"Column '{tableName}.{columnName}' needs Default's value as a C# compile-time constant. " +
+                    "Use DefaultSql(selector, sqlLiteral) with a constant SQL literal for a value the build cannot evaluate.",
+                    valueExpression?.GetLocation() ?? operation.GetLocation());
+                return;
+            }
+
+            try
+            {
+                ITypeSymbol? convertedType = model.GetTypeInfo(valueExpression!).ConvertedType;
+                object? value = ConvertConstant(constant.Value, convertedType);
+                DatabaseType type = value is null
+                    ? DatabaseType.Null
+                    : declared.StorageType ?? CompiledSchemaSourceWriter.ResolveBuiltInType(declared.TypeName);
+                literal = SqlDefaultLiteralRenderer.Render(type, value);
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+            {
+                Error("COHDBSDK106", $"Column '{tableName}.{columnName}' cannot hold its typed default: {exception.Message} " +
+                    "Use DefaultSql(selector, sqlLiteral) for an explicit SQL literal.", valueExpression!.GetLocation());
+                return;
+            }
+        }
+        else
+        {
+            literal = valueExpression is null ? null : ConstantString(model, valueExpression);
+            if (string.IsNullOrWhiteSpace(literal))
+            {
+                Error("COHDBSDK104", $"Column '{tableName}.{columnName}' needs its DEFAULT literal as a non-empty compile-time string constant, " +
+                    "so the build can read it without executing Program.Main.", valueExpression?.GetLocation() ?? operation.GetLocation());
+                return;
+            }
+        }
+
         if (declared.DefaultLiteral is not null && !string.Equals(declared.DefaultLiteral, literal, StringComparison.Ordinal))
         {
             Error("COHDBSDK105", $"Column '{tableName}.{columnName}' is already declared with DEFAULT literal '{declared.DefaultLiteral}'.", operation.GetLocation());
@@ -643,6 +680,53 @@ internal sealed class CSharpSchemaExtractor
         }
 
         columns[index] = declared with { DefaultLiteral = literal };
+    }
+
+    // GetConstantValue reports an expression before its contextual conversion. Apply the same
+    // primitive conversion C# passes to Default<TValue>, including a nullable TValue's underlying
+    // type. Enum constants already contain their underlying integer; no consumer code is invoked.
+    private static object? ConvertConstant(object? value, ITypeSymbol? convertedType)
+    {
+        if (value is not (sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal or char) ||
+            convertedType is null)
+        {
+            return value;
+        }
+
+        ITypeSymbol type = UnderlyingType(convertedType);
+        if (type is INamedTypeSymbol { EnumUnderlyingType: { } underlying })
+        {
+            type = underlying;
+        }
+
+        // Char's IConvertible refuses floating-point and decimal conversions even though C#
+        // permits those implicit numeric conversions. Use its unsigned numeric value only when
+        // the bound parameter requests a numeric type; char and object retain the character.
+        if (value is char character && type.SpecialType is
+            SpecialType.System_SByte or SpecialType.System_Byte or
+            SpecialType.System_Int16 or SpecialType.System_UInt16 or
+            SpecialType.System_Int32 or SpecialType.System_UInt32 or
+            SpecialType.System_Int64 or SpecialType.System_UInt64 or
+            SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal)
+        {
+            value = (ushort)character;
+        }
+
+        return type.SpecialType switch
+        {
+            SpecialType.System_SByte => Convert.ToSByte(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Byte => Convert.ToByte(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
+            SpecialType.System_UInt16 => Convert.ToUInt16(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
+            SpecialType.System_UInt32 => Convert.ToUInt32(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+            SpecialType.System_UInt64 => Convert.ToUInt64(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Single => Convert.ToSingle(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Double => Convert.ToDouble(value, CultureInfo.InvariantCulture),
+            SpecialType.System_Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
+            _ => value
+        };
     }
 
     // table.Check(name, sql): both arguments compile-time string constants, read as written. The SQL
@@ -732,12 +816,18 @@ internal sealed class CSharpSchemaExtractor
         Location location)
     {
         var declaredTypes = types.Select(static item => item.TypeName).ToHashSet(StringComparer.Ordinal);
+        var customTypes = types.DistinctBy(static type => type.TypeName).ToDictionary(
+            static type => type.TypeName,
+            static type => new CompiledSchemaType(type.SqlName, DatabaseType.Decimal, type.Precision, type.Scale),
+            StringComparer.Ordinal);
+        bool HasStorageType(SchemaColumnSource column)
+            => column.StorageType is not null || IsBuiltInType(column.TypeName) || declaredTypes.Contains(column.TypeName);
         var declaredTables = tables.Select(static item => item.RowType).ToHashSet(StringComparer.Ordinal);
         foreach (SchemaTableSource table in tables)
         {
             if (table.Columns.Count == 0)
             {
-                Error("COHDBSDK106", $"Table '{table.Name}' must declare at least one column through Column, Default, Key, Index, or References.", location);
+                Error("COHDBSDK106", $"Table '{table.Name}' must declare at least one column through Column, Default, DefaultSql, Key, Index, or References.", location);
             }
             ValidateUnique(table.Columns.Select(static item => item.Name), $"column on table '{table.Name}'", location);
             ValidateUnique(table.Indexes, $"index on table '{table.Name}'", location);
@@ -774,7 +864,9 @@ internal sealed class CSharpSchemaExtractor
                             string.Equals(column.Name, reference.Member, StringComparison.OrdinalIgnoreCase));
                         SchemaColumnSource targetColumn = target.Columns.First(column =>
                             string.Equals(column.Name, target.PrimaryKey, StringComparison.OrdinalIgnoreCase));
-                        if (!string.Equals(sourceColumn.TypeName, targetColumn.TypeName, StringComparison.Ordinal))
+                        if (HasStorageType(sourceColumn) && HasStorageType(targetColumn) &&
+                            CompiledSchemaSourceWriter.ResolveColumnType(sourceColumn, customTypes) !=
+                            CompiledSchemaSourceWriter.ResolveColumnType(targetColumn, customTypes))
                         {
                             Error(
                                 "COHDBSDK106",
@@ -813,12 +905,12 @@ internal sealed class CSharpSchemaExtractor
 
             foreach (SchemaColumnSource column in table.Columns)
             {
-                if (!IsBuiltInType(column.TypeName) && !declaredTypes.Contains(column.TypeName))
+                if (column.StorageType is null && !IsBuiltInType(column.TypeName) && !declaredTypes.Contains(column.TypeName))
                 {
                     Error(
                         "COHDBSDK106",
                         $"Column '{table.Name}.{column.Name}' has type '{column.TypeName}', which is not a SQL column type " +
-                        "(bool, an integer or floating-point type, decimal, string, Guid, a date or time type, TimeSpan or byte[]).",
+                        "(bool, an integer or floating-point type, decimal, string, char, an enum, Guid, a date or time type, TimeSpan or byte[]).",
                         location);
                 }
             }
@@ -868,7 +960,7 @@ internal sealed class CSharpSchemaExtractor
             "System.Private.CoreLib:System.SByte" or "System.Private.CoreLib:System.Int16" or
             "System.Private.CoreLib:System.Int32" or "System.Private.CoreLib:System.Int64" or
             "System.Private.CoreLib:System.Single" or "System.Private.CoreLib:System.Double" or
-            "System.Private.CoreLib:System.Decimal" or "System.Private.CoreLib:System.String" or
+            "System.Private.CoreLib:System.Decimal" or "System.Private.CoreLib:System.String" or "System.Private.CoreLib:System.Char" or
             "System.Private.CoreLib:System.Guid" or "System.Private.CoreLib:System.DateTime" or
             "System.Private.CoreLib:System.DateTimeOffset" or "System.Private.CoreLib:System.DateOnly" or
             "System.Private.CoreLib:System.TimeOnly" or "System.Private.CoreLib:System.TimeSpan" or
@@ -890,6 +982,26 @@ internal sealed class CSharpSchemaExtractor
         while (body is CastExpressionSyntax cast)
         {
             body = cast.Expression;
+            while (body is ParenthesizedExpressionSyntax parenthesizedOperand)
+            {
+                body = parenthesizedOperand.Expression;
+            }
+        }
+
+        if (body is not MemberAccessExpressionSyntax access)
+        {
+            return null;
+        }
+
+        ExpressionSyntax receiver = access.Expression;
+        while (receiver is ParenthesizedExpressionSyntax parenthesizedReceiver)
+        {
+            receiver = parenthesizedReceiver.Expression;
+        }
+        if (model.GetSymbolInfo(receiver).Symbol is not IParameterSymbol parameter ||
+            !DeclaresParameter(model, selector, parameter))
+        {
+            return null;
         }
 
         ISymbol? symbol = model.GetSymbolInfo(body).Symbol;
@@ -905,7 +1017,17 @@ internal sealed class CSharpSchemaExtractor
             IFieldSymbol field => field.Type,
             _ => throw new InvalidOperationException()
         };
-        return new SchemaColumnSource(symbol.Name, TypeName(UnderlyingType(type)), IsNullable(type));
+        ITypeSymbol valueType = UnderlyingType(type);
+        DatabaseType? storageType = valueType is INamedTypeSymbol { EnumUnderlyingType: { } underlying }
+            ? underlying.SpecialType switch
+            {
+                SpecialType.System_UInt16 => DatabaseType.Int32,
+                SpecialType.System_UInt32 => DatabaseType.Int64,
+                SpecialType.System_UInt64 => DatabaseType.Decimal,
+                _ => CompiledSchemaSourceWriter.ResolveBuiltInType(TypeName(underlying))
+            }
+            : null;
+        return new SchemaColumnSource(symbol.Name, TypeName(valueType), IsNullable(type), StorageType: storageType);
     }
 
     private static IMethodSymbol? DelegateInvoke(ITypeSymbol type)

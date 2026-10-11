@@ -155,14 +155,26 @@ internal static class SqlPersistedExpression
     /// </exception>
     internal static string LoadDefaultValue(string text, string subject)
     {
-        if (Load(text, subject) is not SqlLiteralExpression { LiteralType: not SqlLiteralType.Null } literal)
+        return Load(text, subject) switch
         {
-            throw new DatabaseException(
-                $"{subject} cannot be loaded: its persisted definition '{text}' is not a literal value. {DamagedCatalogHint}");
-        }
-
-        return literal.Value;
+            SqlLiteralExpression { LiteralType: not SqlLiteralType.Null } literal => literal.Value,
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Negate,
+                Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float } numeric }
+                => "-" + numeric.Value,
+            _ => throw new DatabaseException(
+                $"{subject} cannot be loaded: its persisted definition '{text}' is not a literal value. {DamagedCatalogHint}"),
+        };
     }
+
+    /// <summary>Whether a DEFAULT is one literal, optionally preceded by one numeric minus.</summary>
+    /// <param name="expression">The parsed default.</param>
+    /// <returns>Whether the expression is a supported literal default.</returns>
+    internal static bool IsDefaultLiteral(SqlExpression expression)
+        => expression is SqlLiteralExpression or SqlUnaryExpression
+        {
+            Operator: SqlUnaryOperator.Negate,
+            Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float },
+        };
 
     /// <summary>
     /// Binds a loaded expression to the row shape it is evaluated over: every column and

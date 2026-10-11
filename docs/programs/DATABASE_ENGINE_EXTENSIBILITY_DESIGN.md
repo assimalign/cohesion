@@ -1227,8 +1227,14 @@ reconciliation without a catalog walk or identity recomputation; retained immuta
 reuse their compiled schema. The open-time definition binding pass also caches its validation at
 that generation. A moved generation reconstructs all provisionable catalog metadata, including
 literal DEFAULTs, unique indexes, composite primary keys, CHECKs, foreign keys and bounded domain
-columns. `table.Default(selector, literal)` and SDK extraction represent the existing literal
-DEFAULT capability. Crash-storage tests recover every committed prefix of all eight executable
+columns. `table.Default(selector, value)` renders a typed C# value; `table.DefaultSql(selector,
+sqlLiteral)` retains the raw literal escape hatch (owner decision, 2026-10-11, B2 round 2). Runtime
+and SDK compilation use one internal renderer owned by `Database.Sql.Schema`; the SDK accepts
+compile-time constants and reports a coded diagnostic for a value it cannot evaluate, naming
+`DefaultSql`. The document still records only `DefaultLiteral`, so a typed value and the same
+literal supplied through `DefaultSql` have identical documents and hashes. The format stays
+`cohesion/database-schema/v4`: this changes declaration syntax, not the document shape.
+Crash-storage tests recover every committed prefix of all eight executable
 add/drop operation kinds and assert the exact remaining plan and final marker. Provisioning name
 collisions refuse before compensation can claim another session's object. Format-7 counters reach
 the existing actionable format refusal; there is no compatibility reader or upgrade.

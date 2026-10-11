@@ -373,23 +373,7 @@ internal static class SqlSchemaCompiler
         customType = null;
         precision = null;
         scale = null;
-        type = valueType == typeof(bool) ? DatabaseType.Boolean
-            : valueType == typeof(sbyte) ? DatabaseType.Int8
-            : valueType == typeof(byte) || valueType == typeof(short) ? DatabaseType.Int16
-            : valueType == typeof(int) ? DatabaseType.Int32
-            : valueType == typeof(long) ? DatabaseType.Int64
-            : valueType == typeof(float) ? DatabaseType.Float32
-            : valueType == typeof(double) ? DatabaseType.Float64
-            : valueType == typeof(decimal) ? DatabaseType.Decimal
-            : valueType == typeof(string) ? DatabaseType.String
-            : valueType == typeof(byte[]) ? DatabaseType.Binary
-            : valueType == typeof(DateOnly) ? DatabaseType.Date
-            : valueType == typeof(TimeOnly) ? DatabaseType.Time
-            : valueType == typeof(DateTime) ? DatabaseType.DateTime
-            : valueType == typeof(DateTimeOffset) ? DatabaseType.DateTimeOffset
-            : valueType == typeof(TimeSpan) ? DatabaseType.TimeSpan
-            : valueType == typeof(Guid) ? DatabaseType.Guid
-            : DatabaseType.Null;
+        type = SqlDefaultLiteralRenderer.StorageType(valueType);
         return type != DatabaseType.Null;
     }
 

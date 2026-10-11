@@ -26,17 +26,15 @@ internal static class CompiledSchemaSourceWriter
             StringComparer.Ordinal);
         CompiledSchemaColumn CreateColumn(SchemaColumnSource column)
         {
-            (DatabaseType type, string? custom, int? precision, int? scale) = ResolveType(column.TypeName, customTypes);
-            return column.SqlType is { } sqlType
-                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType, DefaultLiteral: column.DefaultLiteral)
-                : new CompiledSchemaColumn(
-                    column.Name,
-                    type,
-                    column.IsNullable,
-                    Precision: precision,
-                    Scale: scale,
-                    CustomType: custom,
-                    DefaultLiteral: column.DefaultLiteral);
+            (DatabaseType type, string? custom, int? precision, int? scale) = ResolveColumnType(column, customTypes);
+            return new CompiledSchemaColumn(
+                column.Name,
+                type,
+                column.IsNullable,
+                Precision: precision,
+                Scale: scale,
+                CustomType: custom,
+                DefaultLiteral: column.DefaultLiteral);
         }
 
         var tablesByRowType = source.Tables.ToDictionary(static table => table.RowType, StringComparer.Ordinal);
@@ -104,16 +102,30 @@ internal static class CompiledSchemaSourceWriter
             principals.OrderBy(static principal => principal.Name, StringComparer.Ordinal).ToArray());
     }
 
+    internal static (DatabaseType Type, string? CustomType, int? Precision, int? Scale) ResolveColumnType(
+        SchemaColumnSource column,
+        IReadOnlyDictionary<string, CompiledSchemaType> customTypes)
+    {
+        var resolved = ResolveType(column.TypeName, customTypes, column.StorageType);
+        return column.SqlType is { } sqlType ? (resolved.Type, sqlType, null, null) : resolved;
+    }
+
     private static (DatabaseType Type, string? CustomType, int? Precision, int? Scale) ResolveType(
         string typeName,
-        IReadOnlyDictionary<string, CompiledSchemaType> customTypes)
+        IReadOnlyDictionary<string, CompiledSchemaType> customTypes,
+        DatabaseType? storageType)
     {
         if (customTypes.TryGetValue(typeName, out CompiledSchemaType? custom))
         {
             return (custom.StorageType, custom.Name, custom.Precision, custom.Scale);
         }
 
-        DatabaseType type = typeName switch
+        return (storageType ?? ResolveBuiltInType(typeName), null, null, null);
+    }
+
+    internal static DatabaseType ResolveBuiltInType(string typeName)
+    {
+        return typeName switch
         {
             "System.Private.CoreLib:System.Boolean" => DatabaseType.Boolean,
             "System.Private.CoreLib:System.SByte" => DatabaseType.Int8,
@@ -123,7 +135,7 @@ internal static class CompiledSchemaSourceWriter
             "System.Private.CoreLib:System.Single" => DatabaseType.Float32,
             "System.Private.CoreLib:System.Double" => DatabaseType.Float64,
             "System.Private.CoreLib:System.Decimal" => DatabaseType.Decimal,
-            "System.Private.CoreLib:System.String" => DatabaseType.String,
+            "System.Private.CoreLib:System.String" or "System.Private.CoreLib:System.Char" => DatabaseType.String,
             "System.Private.CoreLib:System.Byte[]" => DatabaseType.Binary,
             "System.Private.CoreLib:System.DateOnly" => DatabaseType.Date,
             "System.Private.CoreLib:System.TimeOnly" => DatabaseType.Time,
@@ -133,6 +145,5 @@ internal static class CompiledSchemaSourceWriter
             "System.Private.CoreLib:System.Guid" => DatabaseType.Guid,
             _ => throw new InvalidOperationException($"CLR type '{typeName}' is not supported by the compiled-schema contract.")
         };
-        return (type, null, null, null);
     }
 }

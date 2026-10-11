@@ -87,15 +87,38 @@ public sealed class SqlTableBuilder<TRow>
         _columnDefinitions[index] = column with { SqlType = sqlType };
     }
 
-    /// <summary>Declares a column's SQL DEFAULT literal.</summary>
+    /// <summary>Declares a column's default from a typed CLR value.</summary>
+    /// <typeparam name="TValue">The selected member's value type.</typeparam>
     /// <param name="selector">Selects a direct row member stored in the column.</param>
-    /// <param name="literal">
+    /// <param name="value">The default value; strings are quoted and escaped as SQL text, and null becomes SQL NULL.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="selector"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="selector"/> does not select a direct row member; <paramref name="value"/>
+    /// cannot be represented by the column's storage type; or the column already declares another default.
+    /// </exception>
+    /// <remarks>
+    /// The column is declared if it has not been mentioned yet. Values render deterministically using
+    /// invariant SQL literals. The SDK extracts C# compile-time constants without running the program;
+    /// use <see cref="DefaultSql"/> for values that cannot be evaluated at build time. The engine also
+    /// validates the literal against any named SQL type and its bounds before it touches a file.
+    /// </remarks>
+    public void Default<TValue>(Expression<Func<TRow, TValue>> selector, TValue value)
+    {
+        MemberExpression member = SelectMember(selector);
+        string literal = SqlDefaultLiteralRenderer.Render(SqlDefaultLiteralRenderer.StorageType(member.Type), value);
+        string name = AddColumn(selector);
+        SetDefault(name, literal, nameof(value));
+    }
+
+    /// <summary>Declares a column's SQL DEFAULT from a raw SQL literal.</summary>
+    /// <param name="selector">Selects a direct row member stored in the column.</param>
+    /// <param name="sqlLiteral">
     /// The SQL literal as written, including quotes for a string (for example <c>'pending'</c>,
     /// <c>7</c> or <c>TRUE</c>). Pass a constant string so the <c>Sdk.Database</c> build task can read it.
     /// </param>
-    /// <exception cref="ArgumentNullException"><paramref name="selector"/> or <paramref name="literal"/> is null.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="selector"/> or <paramref name="sqlLiteral"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="selector"/> does not select a direct row member; <paramref name="literal"/> is
+    /// <paramref name="selector"/> does not select a direct row member; <paramref name="sqlLiteral"/> is
     /// empty or white space; or the column already declares another default literal.
     /// </exception>
     /// <remarks>
@@ -104,15 +127,20 @@ public sealed class SqlTableBuilder<TRow>
     /// supported literal before it touches a file. SQL <c>NULL</c> is permitted
     /// and has the same database behavior as an absent default.
     /// </remarks>
-    public void Default(Expression<Func<TRow, object?>> selector, string literal)
+    public void DefaultSql(Expression<Func<TRow, object?>> selector, string sqlLiteral)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(literal);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sqlLiteral);
         string name = AddColumn(selector);
+        SetDefault(name, sqlLiteral, nameof(sqlLiteral));
+    }
+
+    private void SetDefault(string name, string literal, string parameterName)
+    {
         int index = _columnDefinitions.FindIndex(column => column.Name == name);
         var column = _columnDefinitions[index];
         if (column.DefaultLiteral is not null && !string.Equals(column.DefaultLiteral, literal, StringComparison.Ordinal))
         {
-            throw new ArgumentException($"Column '{name}' is already declared with DEFAULT '{column.DefaultLiteral}'.", nameof(literal));
+            throw new ArgumentException($"Column '{name}' is already declared with DEFAULT '{column.DefaultLiteral}'.", parameterName);
         }
 
         _columnDefinitions[index] = column with { DefaultLiteral = literal };
@@ -195,22 +223,9 @@ public sealed class SqlTableBuilder<TRow>
             Array.AsReadOnly(_references.ToArray()),
             Array.AsReadOnly(_checks.ToArray()));
 
-    private string AddColumn(Expression<Func<TRow, object?>> selector)
+    private string AddColumn(LambdaExpression selector)
     {
-        ArgumentNullException.ThrowIfNull(selector);
-
-        Expression body = selector.Body;
-        if (body is UnaryExpression { NodeType: ExpressionType.Convert } conversion)
-        {
-            body = conversion.Operand;
-        }
-
-        if (body is not MemberExpression member ||
-            !ReferenceEquals(member.Expression, selector.Parameters[0]))
-        {
-            throw new ArgumentException("A schema member selector must select one row member.", nameof(selector));
-        }
-
+        MemberExpression member = SelectMember(selector);
         string name = member.Member.Name;
         if (!_columns.Contains(name))
         {
@@ -223,5 +238,24 @@ public sealed class SqlTableBuilder<TRow>
         }
 
         return name;
+    }
+
+    private static MemberExpression SelectMember(LambdaExpression selector)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        Expression body = selector.Body;
+        while (body is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } conversion)
+        {
+            body = conversion.Operand;
+        }
+
+        if (body is not MemberExpression member ||
+            !ReferenceEquals(member.Expression, selector.Parameters[0]))
+        {
+            throw new ArgumentException("A schema member selector must select one row member.", nameof(selector));
+        }
+
+        return member;
     }
 }

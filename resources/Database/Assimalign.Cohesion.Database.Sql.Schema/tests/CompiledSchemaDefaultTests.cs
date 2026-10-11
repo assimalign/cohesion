@@ -136,12 +136,12 @@ public sealed class CompiledSchemaDefaultTests
             schema.Type<Money>(type => type.Decimal(18, 2));
             schema.Table<Item>("items", table =>
             {
-                table.Default(item => item.Id, "7");
+                table.DefaultSql(item => item.Id, "7");
                 table.Key(item => item.Id);
                 table.Column(item => item.Label, "VARCHAR(16)");
-                table.Default(item => item.Label, "'it''s ready'");
-                table.Default(item => item.Price, "1.25");
-                table.Default(item => item.Price, "1.25");
+                table.DefaultSql(item => item.Label, "'it''s ready'");
+                table.DefaultSql(item => item.Price, "1.25");
+                table.DefaultSql(item => item.Price, "1.25");
             });
         });
 
@@ -163,43 +163,43 @@ public sealed class CompiledSchemaDefaultTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData(" \t")]
-    public void Default_BlankLiteral_ShouldRefuseAtDeclaration(string? literal)
+    public void DefaultSql_BlankLiteral_ShouldRefuseAtDeclaration(string? literal)
     {
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => SqlSchema.Create("defaults", schema =>
-            schema.Table<Item>("items", table => table.Default(item => item.Id, literal!))));
+            schema.Table<Item>("items", table => table.DefaultSql(item => item.Id, literal!))));
 
         // Assert
-        exception.ParamName.ShouldBe("literal");
+        exception.ParamName.ShouldBe("sqlLiteral");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema DEFAULT: the builder refuses conflicting defaults")]
-    public void Default_ConflictingDeclaration_ShouldNameTheColumn()
+    public void DefaultSql_ConflictingDeclaration_ShouldNameTheColumn()
     {
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => SqlSchema.Create("defaults", schema =>
             schema.Table<Item>("items", table =>
             {
-                table.Default(item => item.Id, "7");
-                table.Default(item => item.Id, "9");
+                table.DefaultSql(item => item.Id, "7");
+                table.DefaultSql(item => item.Id, "9");
             })));
 
         // Assert
-        exception.ParamName.ShouldBe("literal");
+        exception.ParamName.ShouldBe("sqlLiteral");
         exception.Message.ShouldContain("Column 'Id' is already declared", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema DEFAULT: selectors must be direct row members")]
-    public void Default_InvalidSelector_ShouldRefuseAtDeclaration()
+    public void DefaultSql_InvalidSelector_ShouldRefuseAtDeclaration()
     {
         // Arrange
         Expression<Func<Item, object?>> calculated = item => item.Id + 1;
 
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => SqlSchema.Create("defaults", schema =>
-            schema.Table<Item>("items", table => table.Default(calculated, "7"))));
+            schema.Table<Item>("items", table => table.DefaultSql(calculated, "7"))));
         ArgumentNullException absent = Should.Throw<ArgumentNullException>(() => SqlSchema.Create("defaults", schema =>
-            schema.Table<Item>("items", table => table.Default(null!, "7"))));
+            schema.Table<Item>("items", table => table.DefaultSql(null!, "7"))));
 
         // Assert
         exception.ParamName.ShouldBe("selector");

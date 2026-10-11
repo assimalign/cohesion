@@ -436,18 +436,18 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 
             // Match the runtime's literal-only declaration admission. The second parse prevents
             // a terminator or trailing comment from escaping the expression; render only the AST.
-            SqlLiteralExpression literal = ParseDefault(text);
+            SqlExpression literal = ParseDefault(text);
             _ = ParseDefault($"({text})");
-            return literal.LiteralType == SqlLiteralType.Null ? null : SqlExpressionRenderer.Render(literal);
+            return literal is SqlLiteralExpression { LiteralType: SqlLiteralType.Null } ? null : SqlExpressionRenderer.Render(literal);
         }
 
-        private static SqlLiteralExpression ParseDefault(string text)
+        private static SqlExpression ParseDefault(string text)
         {
             const string carrierTable = "__migration_default";
             var statement = new SqlQueryParser().Parse($"SELECT * FROM {carrierTable} WHERE {text}");
             if (statement.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
                 statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
-                select.Where is not SqlLiteralExpression literal || select.IsDistinct || select.Columns.Count != 1 ||
+                select.Where is not { } literal || !IsDefaultLiteral(literal) || select.IsDistinct || select.Columns.Count != 1 ||
                 select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
                 select.From is not { TableName: carrierTable, SchemaName: null, Alias: null } ||
                 select.Joins.Count > 0 || select.GroupBy.Count > 0 || select.Having is not null ||
@@ -458,6 +458,13 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 
             return literal;
         }
+
+        private static bool IsDefaultLiteral(SqlExpression expression)
+            => expression is SqlLiteralExpression or SqlUnaryExpression
+            {
+                Operator: SqlUnaryOperator.Negate,
+                Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float }
+            };
 
         private static string SqlType(CompiledSchemaColumn column)
         {

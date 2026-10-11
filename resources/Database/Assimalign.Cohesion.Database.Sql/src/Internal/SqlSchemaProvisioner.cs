@@ -741,14 +741,14 @@ internal sealed class SqlSchemaProvisioner
         }
 
         var expression = SqlPersistedExpression.ParseDeclaration(declared, new SqlQueryParserOptions());
-        if (expression is not SqlLiteralExpression literal)
+        if (!SqlPersistedExpression.IsDefaultLiteral(expression))
         {
             throw new DatabaseException("Only literal DEFAULT values are supported.");
         }
 
-        return literal.LiteralType == SqlLiteralType.Null
+        return expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null }
             ? null
-            : SqlPersistedExpression.Canonicalize(literal, "Compiled column DEFAULT");
+            : SqlPersistedExpression.Canonicalize(expression, "Compiled column DEFAULT");
     }
 
     /// <summary>

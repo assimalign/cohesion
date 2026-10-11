@@ -35,7 +35,8 @@ shared storage, with DDL flowing through the relational catalog
   into parsed `SqlQueryRequest`s, compensate completed reversible steps on failure, and record the
   canonical document/hash and DDL generation only after live-catalog convergence. An unchanged
   hash and generation skip provisioning in constant time; crash recovery snapshots every existing
-  provisionable kind, including literal defaults and bounded domain columns, and applies only the
+  provisionable kind, including typed `Default(selector, value)`, raw `DefaultSql(selector, sqlLiteral)`
+  defaults and bounded domain columns, and applies only the
   remaining steps. Catalog format 8 persists the generation with its DDL. Failures lead with `COHSQLP001` to
   `005`, and a `Verify` drift names the first object that differs. A server keeps a copy of its
   options, as the engine does.

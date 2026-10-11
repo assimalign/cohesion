@@ -95,15 +95,50 @@ a redefined domain is a drop and an add, and the columns declared with it change
 `AlterColumn` steps. A domain is registered on the engine, not stored in the database, so a SQL
 engine renders no statement for either step.
 
-**Column defaults (B2).** `table.Default(selector, literal)` declares a column's SQL default,
-including the column if no earlier verb mentioned it. Its literal is SQL text, for example
-`"7"`, `"TRUE"`, `"'it''s ready'"` or `"NULL"`, kept as written in
-`CompiledSchemaColumn.DefaultLiteral`. It composes with `Column(selector, sqlType)`, a domain,
-a key and an index without changing column order. Repeating the same literal is harmless;
-declaring two different literals for one column fails at the second call. The text must be a
-non-blank constant for the SDK to extract it. This package validates that it is non-blank; the
-SQL engine parses exactly one supported literal before provisioning. An
-expression or a function call is not a supported DEFAULT in the current SQL dialect.
+**Column defaults (B2 round 2, owner decision 2026-10-11).**
+`table.Default<TValue>(selector, value)` declares a column's default from a CLR value, including
+the column if no earlier verb mentioned it. `Default(row => row.Status, "pending")` renders
+`'pending'`, `Default(row => row.Quantity, 7)` renders `7`, and Boolean and null values render
+`TRUE` / `FALSE` and `NULL`. The generic method belongs to the sealed table builder, as
+`database-area.md` rule 5 permits. Nullable members infer their nullable value type without
+another overload. A string passed to `Default` is always a value, never SQL text.
+
+The stateless internal `SqlDefaultLiteralRenderer` in this package's `shared/` folder owns the
+rendering. Both this package and the SDK task compile that source through `CohesionSharedSource`;
+no helper becomes public and no shipped assembly grants internals to another. Strings and chars
+use single quotes and double embedded quotes; backslashes stay literal. Numeric values use the
+invariant culture, decimals keep their scale, finite floating-point values use round-trip text,
+and numeric values outside the column's storage range are refused with `ArgumentException`.
+The builder uses the selected member's actual CLR type even when generic inference inserts a
+conversion. Unsupported CLR values and nonfinite numbers are refused before the column is added.
+
+The renderer and `Column` compiler share the CLR storage mapping. In addition to the existing
+types, chars map to String and enums map by underlying numeric range: sbyte to Int8, byte/short
+to Int16, ushort/int to Int32, uint/long to Int64, and ulong to Decimal. This preserves every
+enum value exactly without adding unsigned scalar column types. Temporal defaults are quoted
+invariant text: DateOnly `yyyy-MM-dd`, TimeOnly `HH:mm:ss.fffffff`, DateTime
+`yyyy-MM-ddTHH:mm:ss.fffffff`, DateTimeOffset the same with `zzz`, and TimeSpan the `c` format.
+DateTime keeps wall-clock ticks without its CLR kind, matching SQL TIMESTAMP semantics;
+DateTimeOffset keeps its written offset. Guid uses the lowercase `D` form. Binary values use
+quoted `\x` followed by uppercase hexadecimal bytes, which the SQL DEFAULT binder decodes.
+These formats do not depend on the current culture or local time zone.
+
+`table.DefaultSql(selector, sqlLiteral)` is the explicit raw-SQL escape hatch; the old raw
+`Default(selector, string)` overload is removed with no shim. The raw text is kept as written
+in `CompiledSchemaColumn.DefaultLiteral`. This package requires nonblank text; the SQL engine
+validates exactly one supported literal and its column bounds before touching any file.
+Expressions and function calls remain unsupported. Custom CLR domain structs have no implicit
+value conversion; declare their defaults through `DefaultSql`. Both verbs compose with
+`Column(selector, sqlType)`, a domain, a key and an index without changing column order.
+Repeating the same rendered literal is harmless; two different literals fail at the second call.
+The SDK extracts compile-time constants for `Default` and invokes the same renderer. A value it
+cannot evaluate produces a coded diagnostic naming `DefaultSql`; raw SQL must still be a
+constant string. Runtime values such as constructed dates, GUIDs and binary arrays are valid
+for retained declarations, while source-extracted schemas express those values with `DefaultSql`.
+
+Typed defaults and raw defaults with the same rendered literal produce identical canonical
+documents and hashes. Arbitrarily different raw spellings are not normalized in the document.
+Only the authoring API and rendering change in round 2: the document's shape and format stay v4.
 
 The optional `defaultLiteral` member is omitted when null. Adding it changes the strict document
 contract, so B2 uses `cohesion/database-schema/v4` for every schema, with or without defaults.

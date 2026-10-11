@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
-public class CompileDatabaseSchemaTaskTests
+public partial class CompileDatabaseSchemaTaskTests
 {
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: C# SQL declaration writes canonical document and hash")]
     public void Execute_WithSqlCSharpSchema_ShouldWriteCanonicalDocumentAndHash()
@@ -399,13 +399,13 @@ public class CompileDatabaseSchemaTaskTests
             schema.Type<Price>(type => type.Decimal(18, 2));
             schema.Table<CrmCustomer>("customers", table =>
             {
-                table.Default(customer => customer.Code, "'guest'");
+                table.DefaultSql(customer => customer.Code, "'guest'");
                 table.Column(customer => customer.Code, "VARCHAR(16)");
                 table.Key(customer => customer.Code);
                 table.Column(customer => customer.Email, "email");
-                table.Default(customer => customer.Email, "'a@b.test'");
-                table.Default(customer => customer.Balance, "0");
-                table.Default(customer => customer.Balance, "0");
+                table.DefaultSql(customer => customer.Email, "'a@b.test'");
+                table.DefaultSql(customer => customer.Balance, "0");
+                table.DefaultSql(customer => customer.Balance, "0");
             });
         });
         using var directory = new TemporaryDirectory();
@@ -432,13 +432,13 @@ public class CompileDatabaseSchemaTaskTests
                             schema.Type<Price>(type => type.Decimal(18, 2));
                             schema.Table<CrmCustomer>("customers", table =>
                             {
-                                table.Default(customer => customer.Code, "'guest'");
+                                table.DefaultSql(customer => customer.Code, "'guest'");
                                 table.Column(customer => customer.Code, "VARCHAR(16)");
                                 table.Key(customer => customer.Code);
                                 table.Column(customer => customer.Email, "email");
-                                table.Default(literal: EmailDefault, selector: customer => customer.Email);
-                                table.Default(customer => customer.Balance, "0");
-                                table.Default(customer => customer.Balance, "0");
+                                table.DefaultSql(sqlLiteral: EmailDefault, selector: customer => customer.Email);
+                                table.DefaultSql(customer => customer.Balance, "0");
+                                table.DefaultSql(customer => customer.Balance, "0");
                             });
                         }));
                         return sql;
@@ -466,7 +466,7 @@ public class CompileDatabaseSchemaTaskTests
     [InlineData("Environment.MachineName", "", "COHDBSDK104", "needs its DEFAULT literal as a non-empty compile-time string constant")]
     [InlineData("\" \"", "", "COHDBSDK104", "needs its DEFAULT literal as a non-empty compile-time string constant")]
     [InlineData("null!", "", "COHDBSDK104", "needs its DEFAULT literal as a non-empty compile-time string constant")]
-    [InlineData("\"1\"", "table.Default(order => order.Id, \"2\");", "COHDBSDK105", "already declared with DEFAULT literal '1'")]
+    [InlineData("\"1\"", "table.DefaultSql(order => order.Id, \"2\");", "COHDBSDK105", "already declared with DEFAULT literal '1'")]
     public void Execute_WithUnreadableOrDuplicateDefault_ShouldFail(string literal, string repeated, string code, string message)
     {
         // Arrange
@@ -484,7 +484,7 @@ public class CompileDatabaseSchemaTaskTests
                 {
                     SqlSchema.Create("sales", schema => schema.Table<SalesOrder>("orders", table =>
                     {
-                        table.Default(order => order.Id, {{literal}});
+                        table.DefaultSql(order => order.Id, {{literal}});
                         {{repeated}}
                     }));
                 }

@@ -1646,10 +1646,21 @@ code, `COHSQLT005`, are documented in the SQL engine design.
 
 ## Code-first literal defaults (B2)
 
-The typed schema's `table.Default(selector, literal)` emits the existing literal `DEFAULT` clause.
-It accepts the same SQL literals as DDL, with quoted text for string values; functions and other
-expressions remain unsupported. `DEFAULT NULL` has the same stored meaning as no default.
-This adds no SQL grammar or new default-expression semantics.
+The typed schema's `table.Default(selector, value)` renders C# values into SQL literals: strings
+and characters are quoted with apostrophes doubled, numbers use invariant culture, Boolean
+values use `TRUE`/`FALSE`, and null uses `NULL`. Temporal values and GUIDs use invariant quoted
+text converted to the column type. Enums use their numeric storage values.
+`table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
+for example `DefaultSql(row => row.Placed, "'2026-01-01'")`; the SQL typed prefix
+`DATE '2026-01-01'` remains unsupported. Both declarations store the rendered literal text in the
+unchanged `cohesion/database-schema/v4` document, so equal text gives the same hash.
+
+`DEFAULT -7` and `DEFAULT -1.2500` accept a single numeric minus. Arithmetic, nested unary expressions,
+functions and other computed expressions remain unsupported. `DEFAULT NULL` has the same
+stored meaning as no default. A binary default is a quoted `\x` prefix followed by even-count
+hexadecimal digits, for example `DEFAULT '\x007FFF'`; no whitespace or octal escapes are accepted,
+and the column's length bounds still apply. The typed `byte[]` renderer emits uppercase digits.
+Hex decoding is specific to DEFAULT and does not add a general string-to-binary cast.
 
 While a compiled-schema apply runs, ordinary session DDL is refused with
 `DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the

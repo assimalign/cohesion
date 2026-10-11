@@ -30,7 +30,7 @@ public class SqlSchemaTests
 
         // Act: even retained builders cannot change a completed declaration.
         retainedSchema!.AllowDestructiveChanges();
-        retainedTable!.Default(order => order.Id, "7");
+        retainedTable!.Default(order => order.Id, 7);
         SqlCompiledSchema repeated = declaration.Compile();
 
         // Assert

@@ -23,6 +23,8 @@ public sealed class MigrationDefaultParityTests
     [InlineData(DatabaseType.Int32, "+7")]
     [InlineData(DatabaseType.Int32, "(7)")]
     [InlineData(DatabaseType.Decimal, "1.25")]
+    [InlineData(DatabaseType.Decimal, "-1.25")]
+    [InlineData(DatabaseType.Int32, "-7")]
     [InlineData(DatabaseType.String, "'it''s ready'")]
     [InlineData(DatabaseType.Boolean, "true")]
     [InlineData(DatabaseType.Int32, "null")]
@@ -98,7 +100,8 @@ public sealed class MigrationDefaultParityTests
     [InlineData("1); DROP TABLE Orders; --")]
     [InlineData("1 ORDER BY Id")]
     [InlineData("1; --")]
-    [InlineData("-1.25")]
+    [InlineData("-(1 + 2)")]
+    [InlineData("-'text'")]
     public void Execute_NonliteralDefault_ShouldMatchRuntimeRefusal(string literal)
     {
         // Arrange
