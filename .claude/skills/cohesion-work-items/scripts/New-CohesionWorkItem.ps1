@@ -14,7 +14,9 @@
          child WBS code (max existing direct child + 1, across OPEN and CLOSED siblings).
       3. Look for EXISTING items that may already cover the request; block on a likely duplicate
          unless -Force (reuse beats re-filing).
-      4. Create the issue ([<wbs>] <title> + templated body) with `gh issue create`.
+      4. Create the issue ([<wbs>] <title> + templated body) with `gh issue create`, then set its
+         GitHub issue type: Feature for a feature, Story for a task (the org's
+         Initiative -> Epic -> Feature -> Story hierarchy).
       5. Add it to Project #13 and set Status / Priority / Wave / Kind / Area / Origin fields.
       6. Link it to its parent as a native GitHub sub-issue (addSubIssue mutation, error-checked).
       7. Record it (with its Origin) in a per-branch manifest so the eventual PR can close every
@@ -466,6 +468,9 @@ else {
 }
 $fullTitle = "[$newWbs] $Title"
 $kindOpt = if ($level -eq 'feature') { 'Feature' } else { 'Task' }
+# The org's issue types form Initiative -> Epic -> Feature -> Story; the Kind field mirrors them
+# (Program, Area Epic, Feature, Task). A child of a feature is a Story.
+$issueType = if ($level -eq 'feature') { 'Feature' } else { 'Story' }
 # Area epic code = the first 3 segments of the (already 3-or-4-segment-validated) parent WBS.
 $areaCode = ((($parentWbs -split '\.') | Select-Object -First 3) -join '.')
 $areaEpic = Get-IssueByWbs -Wbs $areaCode
@@ -518,6 +523,7 @@ if ($DryRun) {
     Write-Host "DRYRUN gh $($createArgs -join ' ')" -ForegroundColor DarkYellow
     Write-Host "DRYRUN body:`n$body" -ForegroundColor DarkGray
     Remove-Item $tmp -Force
+    Write-Host "DRYRUN would set issue type: $issueType" -ForegroundColor DarkYellow
     $extra = @("Status=$Status", "Kind=$kindOpt", "Area=$areaName", "Origin=$Origin")
     if ($Priority) { $extra += "Priority=$Priority" }
     if ($Wave)     { $extra += "Wave=$Wave" }
@@ -533,6 +539,12 @@ if (-not $issueUrl) { throw "Issue creation failed or no issue URL returned:`n$c
 $issueUrl  = $issueUrl.Matches[0].Value
 $newNumber = [int]($issueUrl -split '/')[-1]
 Write-Host "Created #$newNumber -> $issueUrl" -ForegroundColor Green
+
+# 5b. Issue type (REST; `gh issue create` cannot set it). A failure leaves the item untyped, so
+# warn rather than abort: everything after this still needs to happen.
+$typeOut = Invoke-GhRetry -AllowFailure -GhArgs @('api', '-X', 'PATCH', "repos/$Repo/issues/$newNumber", '-f', "type=$issueType", '--jq', '.type.name')
+if ("$typeOut".Trim() -eq $issueType) { Write-Host "Issue type: $issueType" -ForegroundColor Green }
+else { Write-Warning "Could not set the issue type of #$newNumber to $issueType; set it by hand." }
 
 # 6. Add to project and set fields
 $projectId = (Invoke-GhRetry -GhArgs @('project','view',"$ProjectNum",'--owner',$Owner,'--format','json') | ConvertFrom-Json).id

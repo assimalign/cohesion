@@ -18,12 +18,17 @@ understanding the model. If an ID stops working, re-run the discovery commands a
 Work items carry their position in the title as `[<code>] <description>`. The hierarchy is held by
 **native GitHub parent/sub-issue links**, and every item is added to Project #13.
 
-| Code shape | Segments | Level | Example | Parent |
-| --- | --- | --- | --- | --- |
-| `L01.01.00` | 3 (`.00`) | Program root | `[L01.01.00] Cohesion - Foundation Libraries` (#7) | — |
-| `L01.01.NN` | 3 | **Area epic** | `[L01.01.11] Foundation - Http` (#314) | program root |
-| `L01.01.NN.MM` | 4 | **Feature** | `[L01.01.11.18] Implement HTTP request lifetime…` (#703) | area epic |
-| `L01.01.NN.MM.PP` | 5 | **Task** | `[L01.01.11.18.01] Implement the … HttpRequestLifetime` (#713) | feature |
+| Code shape | Segments | Level | Issue type | Kind field | Example | Parent |
+| --- | --- | --- | --- | --- | --- | --- |
+| `L01.01.00` | 3 (`.00`) | Program root | **Initiative** | Program | `[L01.01.00] Cohesion - Foundation Libraries` (#7) | — |
+| `L01.01.NN` | 3 | **Area epic** | **Epic** | Area Epic | `[L01.01.11] Foundation - Http` (#314) | program root |
+| `L01.01.NN.MM` | 4 | **Feature** | **Feature** | Feature | `[L01.01.11.18] Implement HTTP request lifetime…` (#703) | area epic |
+| `L01.01.NN.MM.PP` | 5 | **Task** | **Story** | Task | `[L01.01.11.18.01] Implement the … HttpRequestLifetime` (#713) | feature |
+
+The GitHub **issue type** carries the hierarchy Initiative → Epic → Feature → Story (owner,
+2026-10-11); the script sets it on create. Data Platform's older branches are one level deeper
+(`[L03.02.00]` #1067 was added above its sub-areas): their sixth-segment items are typed **Task**
+under a Story. Retype by WBS depth with the rules above if the types drift again.
 
 `L` = Libraries program; `L01.01` = Foundation Libraries. Area epics are titled `Foundation - <Area>`.
 

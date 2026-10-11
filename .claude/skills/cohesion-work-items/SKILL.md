@@ -16,13 +16,15 @@ The reliable end-to-end path is the script [scripts/New-CohesionWorkItem.ps1](sc
 ## The model (read this first)
 
 Items carry their place in the title as `[<wbs>] <description>`; the tree is held by **native GitHub
-parent/sub-issue links**; every item is added to Project #13.
+parent/sub-issue links**; every item is added to Project #13. The GitHub **issue type** names the
+level: **Initiative → Epic → Feature → Story** (the script sets it on create).
 
-| Code | Level | Example | Parent of new item |
-| --- | --- | --- | --- |
-| `L01.01.NN` (3 seg) | **Area epic** | `[L01.01.11] Foundation - Http` (#314) | parent for a new **feature** |
-| `L01.01.NN.MM` (4 seg) | **Feature** | `[L01.01.11.14] …extended connect` | parent for a new **task** |
-| `L01.01.NN.MM.PP` (5 seg) | **Task** | `[L01.01.11.18.01] …` (#713) | leaf |
+| Code | Level | Issue type | Example | Parent of new item |
+| --- | --- | --- | --- | --- |
+| `L01.01.00` (3 seg, `.00`) | **Program root** | Initiative | `[L01.01.00] Cohesion - Foundation Libraries` (#7) | parent for an area epic |
+| `L01.01.NN` (3 seg) | **Area epic** | Epic | `[L01.01.11] Foundation - Http` (#314) | parent for a new **feature** |
+| `L01.01.NN.MM` (4 seg) | **Feature** | Feature | `[L01.01.11.14] …extended connect` | parent for a new **task** |
+| `L01.01.NN.MM.PP` (5 seg) | **Task** | Story | `[L01.01.11.18.01] …` (#713) | leaf |
 
 Your branch names the feature in flight: `feature/L01.01.11.14-extended-connect` → feature `L01.01.11.14`.
 
