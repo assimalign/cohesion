@@ -47,7 +47,12 @@ internal static class SqlCastConverter
             {
                 if (registered is not null)
                 {
-                    converted = registered.Apply(value);
+                    // The built-in text conversion needs the destination scale before reducing
+                    // its digits to Decimal. Application casts still own their conversions.
+                    converted = value is string text && cast.Target.Storage.Type == DatabaseType.Decimal
+                        && SqlStandardCasts.Contains(registered)
+                        ? ParseNumericText(text, cast.Target.Storage)
+                        : registered.Apply(value);
                 }
                 else if (source != DatabaseType.Null)
                 {
@@ -128,11 +133,7 @@ internal static class SqlCastConverter
             case byte[] bytes when target.MaxLength is int length && bytes.Length > length:
                 throw new InvalidCastException($"Binary length exceeds {length}; truncation is not supported.");
             case decimal number when target.Type == DatabaseType.Decimal:
-                int? scale = target.Scale ?? (target.Precision is null ? null : 0);
-                if (target.Precision is < 1 || scale is < 0 || scale > target.Precision)
-                {
-                    throw new DatabaseException("Invalid decimal precision or scale.");
-                }
+                int? scale = NumericScale(target);
                 // PostgreSQL numeric.c:7693-7750 rounds before checking the integer digits;
                 // round_var at numeric.c:11720-11748 rounds midpoint ties away from zero.
                 // System.Decimal cannot represent scale beyond 28, so larger scales are a no-op.
@@ -193,8 +194,38 @@ internal static class SqlCastConverter
     /// </summary>
     internal static decimal ParseNumericLiteral(string text) => ParseExactDecimal(text, allowLiteralSyntax: true);
 
-    /// <summary>Parses fixed-point text, optionally accepting SQL literal decimal-point and exponent forms.</summary>
-    internal static decimal ParseExactDecimal(string text, bool allowLiteralSyntax = false)
+    /// <summary>
+    /// Rounds numeric text directly to the destination scale before requiring an exact Decimal
+    /// representation. CAST, assignments and DEFAULTs share this conversion and its range error.
+    /// </summary>
+    internal static decimal ParseNumericText(string text, DatabaseTypeInfo target, bool allowLiteralSyntax = false)
+    {
+        try
+        {
+            return ParseExactDecimal(text, allowLiteralSyntax, NumericScale(target));
+        }
+        catch (OverflowException exception)
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange(exception.Message, exception);
+        }
+    }
+
+    private static int? NumericScale(DatabaseTypeInfo target)
+    {
+        int? scale = target.Scale ?? (target.Precision is null ? null : 0);
+        if (target.Precision is < 1 || scale is < 0 || scale > target.Precision)
+        {
+            throw new DatabaseException("Invalid decimal precision or scale.");
+        }
+        return scale;
+    }
+
+    /// <summary>Parses fixed-point text exactly, optionally rounding its digits to a declared scale first.</summary>
+    /// <param name="text">The original numeric text.</param>
+    /// <param name="allowLiteralSyntax">Whether SQL numeric literal decimal-point and exponent forms are allowed.</param>
+    /// <param name="targetScale">The declared scale, or null to require the original value to fit exactly.</param>
+    /// <returns>The exact value after any declared-scale rounding.</returns>
+    internal static decimal ParseExactDecimal(string text, bool allowLiteralSyntax = false, int? targetScale = null)
     {
         string source = text.Trim();
         bool negative = source.StartsWith('-');
@@ -224,6 +255,33 @@ internal static class SqlCastConverter
         string digits = point < 0 ? source : source.Remove(point, 1);
         digits = digits.TrimStart('0');
         if (digits.Length == 0) { return 0m; }
+
+        if (targetScale is int roundedScale && scale > roundedScale)
+        {
+            // PostgreSQL numeric.c:11703-11748 rounds the full digit sequence, carrying
+            // when the first discarded digit is at least five, independently of the sign.
+            // Work in the input's digits: a large exponent must not allocate padding.
+            long keep = digits.Length - (scale - roundedScale);
+            if (keep < 0) { return 0m; }
+            bool carry = digits[(int)keep] >= '5';
+            if (keep == 0)
+            {
+                if (!carry) { return 0m; }
+                digits = "1";
+            }
+            else
+            {
+                char[] rounded = digits[..(int)keep].ToCharArray();
+                for (int i = rounded.Length - 1; carry && i >= 0; i--)
+                {
+                    carry = rounded[i] == '9';
+                    rounded[i] = carry ? '0' : (char)(rounded[i] + 1);
+                }
+                digits = carry ? "1" + new string(rounded) : new string(rounded);
+            }
+            scale = roundedScale;
+        }
+
         string significant = digits.TrimEnd('0');
         scale -= digits.Length - significant.Length;
         digits = significant;

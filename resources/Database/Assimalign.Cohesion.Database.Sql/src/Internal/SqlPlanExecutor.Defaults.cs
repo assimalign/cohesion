@@ -195,7 +195,10 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             object? value = column.Type.Type == DatabaseType.Decimal
-                ? CoerceForColumn(SqlCastConverter.ParseNumericLiteral(defaultValue), column)
+                // Canonical DEFAULT text preserves quotes. Only an unquoted numeric literal
+                // accepts exponent/decimal-point forms; quoted text uses CAST's grammar.
+                ? CoerceForColumn(SqlCastConverter.ParseNumericText(defaultValue, column.Type,
+                    allowLiteralSyntax: column.DefaultLiteral is { } literal && !literal.StartsWith('\'')), column)
                 : CoerceForColumn(defaultValue, column);
             if (value is float single && !float.IsFinite(single) || value is double number && !double.IsFinite(number))
             {

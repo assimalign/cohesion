@@ -1450,7 +1450,9 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
                 DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
                 DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
-                DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
+                DatabaseType.Decimal => value is string numericText
+                    ? SqlCastConverter.ParseNumericText(numericText, column.Type)
+                    : Convert.ToDecimal(value, CultureInfo.InvariantCulture),
                 DatabaseType.String or DatabaseType.Json => value as string
                     ?? Convert.ToString(value, CultureInfo.InvariantCulture)!,
                 DatabaseType.Binary or DatabaseType.JsonBinary => value is byte[] bytes

@@ -886,7 +886,8 @@ flowchart LR
   type a target, so the planner owns the refusal.
 - **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
   throws is the value's fault: `CAST from X to T failed: ...`, with the original as its inner
-  exception, the only failures the built-ins throw. Anything else, other than a
+  exception. Built-in NUMERIC conversion reports `COHSQLE002` when text cannot fit Decimal
+  exactly after rounding to any declared scale, as do its modifier overflows. Anything else, other than a
   `DatabaseException`, an exhausted stack or memory, is a fault of the conversion's code:
   `COHSQLE007` (`Cast TEXT AS cents failed: ...`), the code decision 71 gives a function that
   throws, so the session and an explicit transaction stay usable. That includes an
@@ -930,8 +931,10 @@ E4.
 
 ## Declared column bounds (#1418)
 
-`SqlCastConverter.ApplyModifiers(value, target, isExplicit)` is the one internal routine for
-length, precision and scale after storage-type conversion. `CoerceForColumn` calls it for plain
+`SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:
+it rounds the digit string to the declared scale before constructing an exact Decimal.
+`SqlCastConverter.ApplyModifiers(value, target, isExplicit)` then applies the shared length,
+precision and scale bounds to values of the storage type. `CoerceForColumn` uses both for plain
 columns and domain base types; INSERT VALUES, INSERT ... SELECT, UPDATE, and ADD COLUMN
 validation all reach that path. A DEFAULT converts and bounds once when
 its table version binds, using the same assignment rule for an omitted INSERT value and the
@@ -964,10 +967,25 @@ character probes whole: a longer string can compare equal under the index's coll
   precision. `NUMERIC(p)` means scale zero; `NUMERIC(p,s)` requires the rounded value to have
   magnitude below `10^(p-s)`. Thus `1.235` becomes `1.24` in `NUMERIC(3,2)`, while `9.995`
   rounds to `10.00` and fails with `COHSQLE002` (SQLSTATE 22003, numeric field overflow).
+  Text is rounded directly from its digits before constructing a Decimal. The discarded
+  digit determines whether the retained magnitude increments, independently of the sign, so
+  negative ties round away from zero too. The rounded text alone must fit Decimal exactly;
+  parsing the original with `Convert.ToDecimal` can silently round first and change the answer.
+  For example, `'1.23499999999999999999999999995'` into NUMERIC(4,2) is `1.23`, and
+  `'9.94999999999999999999999999999'` into NUMERIC(2,1) is `9.9`, without a false overflow.
+  CAST, DEFAULT, domain and plain-column assignment, text-source INSERT ... SELECT,
+  string parameters and ADD COLUMN's missing-field backfill all use the shared conversion.
   PostgreSQL applies exactly that order in `apply_typmod`
   (`src/backend/utils/adt/numeric.c:7693-7750`); `round_var` carries a half digit at
-  `:11720-11748`. A bare NUMERIC/DECIMAL retains its value within the existing `System.Decimal`
-  representation, not an arbitrary-precision numeric. A declared scale of 28 or more requires
+  `:11720-11748`. A bare NUMERIC/DECIMAL requires text to fit the existing `System.Decimal`
+  representation exactly, without rounding. Text whose rounded value still does not fit, or
+  unscaled text that cannot fit exactly, fails with `COHSQLE002`. The grammar for quoted numeric
+  text is the existing CAST grammar: trim surrounding whitespace, accept an optional leading
+  sign, then digits with an optional decimal point followed by digits. Exponents, grouping and
+  leading/trailing decimal points are rejected in every text conversion path. An unquoted
+  numeric DEFAULT keeps SQL literal syntax, including exponent notation; its original numeric
+  text reaches the same exact rounding routine. This does not add arbitrary-precision storage.
+  A declared scale of 28 or more requires
   no rounding of a value Decimal can represent, and an integer-digit allowance of 29 or more
   adds no limit within that representation. Target-scale padding is not promised. The parser's
   explicit built-in CAST precision range remains 1..28; domains and column metadata can carry
@@ -976,8 +994,9 @@ character probes whole: a longer string can compare equal under the index's coll
   accepting valid scales of 28 or more.
 - **Errors.** `SqlEvaluationException` retains the existing message-prefix convention:
   `COHSQLE012` for character assignment overflow and the existing `COHSQLE002` for numeric
-  modifier overflow. DEFAULT and domain context is appended without hiding the leading code.
-  CAST's numeric modifier failure carries `COHSQLE002` too; invalid source text and an inexact
+  modifier overflow or an inexact Decimal representation after any target-scale rounding.
+  DEFAULT and domain context is appended without hiding the leading code.
+  CAST's built-in NUMERIC conversion carries `COHSQLE002` for both failures too; invalid source text and an inexact
   conversion to an integer keep their existing conversion failures. PostgreSQL lists 22001
   and 22003 in `src/backend/utils/errcodes.txt:200` and `:197`. The server sends
   `ExecutionFailure` with the same coded message, the SQL client keeps its connection usable,
@@ -3334,7 +3353,9 @@ with `COHSQLE007`, the function's exception inner (E2). A write that would evalu
 stored CHECK whose function the engine does not resolve throws it with `COHSQLE009`
 (E2 part 2). Character assignment overflow throws it with `COHSQLE012` (SQLSTATE 22001);
 numeric modifier overflow, after scale rounding, reuses `COHSQLE002` (SQLSTATE 22003),
-including under CAST and DEFAULT ([Declared column bounds](#declared-column-bounds-1418)).
+including under CAST and DEFAULT. A built-in NUMERIC conversion that cannot represent its
+text exactly as Decimal after any target-scale rounding uses the same code
+([Declared column bounds](#declared-column-bounds-1418)).
 The codes are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT that
 does not load fails the open with a `DatabaseException` naming the database, table
 and constraint or column; one whose call fails its signature carries the
