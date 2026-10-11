@@ -149,6 +149,78 @@ internal abstract class TransportHttpContext : HttpContext
     internal IReadOnlyList<IHttpExchangeInterceptor>? AddedResponseInterceptors { get; init; }
 
     /// <summary>
+    /// The request's parse context when request-parse interceptors ran, or <see langword="null"/> on the
+    /// zero-interceptor fast path. The response reads its minimum data rate from it (#1384).
+    /// </summary>
+    internal HttpExchangeInterceptorRequestContext? RequestInterception { get; init; }
+
+    // The gate that holds the response to its minimum data rate, resolved at the first response write
+    // (GetResponseDataRateGate); null when the response is held to no rate.
+    private MinDataRateGate? _responseDataRateGate;
+    private bool _responseDataRateResolved;
+
+    /// <summary>
+    /// Resolves, once, at the response's first write, the gate that holds it to its minimum data rate
+    /// (#1384): the rate the request's parse context holds, frozen here
+    /// (<see cref="HttpExchangeInterceptorRequestContext.FreezeMinResponseDataRate"/>), when request-parse
+    /// interceptors ran, else <paramref name="listenerRate"/>. A response write is single-writer by
+    /// contract, so the resolution needs no synchronization.
+    /// </summary>
+    /// <param name="listenerRate">The listener's <see cref="HttpConnectionListenerLimits.MinResponseDataRate"/>.</param>
+    /// <param name="timeProvider">The clock the gate measures on.</param>
+    /// <returns>The gate, or <see langword="null"/> when the response is held to no rate.</returns>
+    internal MinDataRateGate? GetResponseDataRateGate(HttpMinDataRate? listenerRate, TimeProvider timeProvider)
+    {
+        if (!_responseDataRateResolved)
+        {
+            _responseDataRateResolved = true;
+            HttpMinDataRate? rate = listenerRate;
+
+            if (RequestInterception is { } interception)
+            {
+                interception.FreezeMinResponseDataRate();
+                rate = interception.MinResponseDataRate;
+            }
+
+            _responseDataRateGate = rate is null ? null : new MinDataRateGate(rate, timeProvider);
+        }
+
+        return _responseDataRateGate;
+    }
+
+    /// <summary>
+    /// Ends the exchange for a peer that did not accept its response at the minimum data rate (#1384):
+    /// trips <see cref="RequestCancelled"/>, so the handler observes the cancellation, without recording
+    /// an application cancel (<see cref="CancelRequested"/>), and returns the exception the stalled write
+    /// throws. The transport has already put its version's signal on the wire (a connection close, a
+    /// stream reset, or a <c>GOAWAY</c>).
+    /// </summary>
+    /// <returns>
+    /// An <see cref="OperationCanceledException"/> carrying <see cref="RequestCancelled"/>, as Kestrel's
+    /// <c>ConnectionAbortedException</c> does, so a host treats the stall as a cancelled exchange rather
+    /// than an application fault.
+    /// </returns>
+    internal OperationCanceledException AbortSlowResponse()
+    {
+        CancellationToken token;
+
+        try
+        {
+            _abortedSource.Cancel();
+            token = _abortedSource.Token;
+        }
+        catch (ObjectDisposedException)
+        {
+            // The exchange already completed; there is nothing left to cancel.
+            token = default;
+        }
+
+        return new OperationCanceledException(
+            "The peer did not accept the response at the configured minimum data rate, so the exchange was aborted.",
+            token);
+    }
+
+    /// <summary>
     /// Resolves the response interceptors that take part in this exchange: the listener's
     /// <paramref name="registered"/> ones, then any a request-parse hook added to this exchange, in
     /// the order added, each at most once. Returns <paramref name="registered"/> itself, allocating

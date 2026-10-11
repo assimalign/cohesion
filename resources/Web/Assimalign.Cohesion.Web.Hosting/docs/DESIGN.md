@@ -865,7 +865,7 @@ server carries:
 
 | Feature | Installed by |
 | --- | --- |
-| `IHttpMaxRequestBodySizeFeature` and `IHttpMinRequestBodyDataRateFeature`, one object (#1383) | the first default interceptor, while the request is parsed |
+| `IHttpMaxRequestBodySizeFeature`, `IHttpMinRequestBodyDataRateFeature` and `IHttpMinResponseDataRateFeature`, one object (#1383, #1384) | the first default interceptor, while the request is parsed |
 | `IWebRequestIdFeature` | the server's exchange telemetry, before the pipeline runs |
 | `IWebResponseCompletionFeature` | the server, before the pipeline runs |
 | `IWebServerDrainFeature` | the server, before the pipeline runs |
@@ -1213,6 +1213,7 @@ command-line configuration providers; it adds no reflection binder or
     "KeepAliveTimeout": "00:02:10",
     "RequestHeadersTimeout": "00:00:30",
     "MinRequestBodyDataRate": { "BytesPerSecond": 240, "GracePeriod": "00:00:05" },
+    "MinResponseDataRate": { "BytesPerSecond": 240, "GracePeriod": "00:00:05" },
     "Http2": { "MaxStreamsPerConnection": 100, "MaxRequestHeaderListSize": 16384 }
   }
 }
@@ -1231,7 +1232,7 @@ through the registration verbs' configure overloads:
 | Endpoint protocol | Limits it receives |
 |---|---|
 | HTTP/1.1 (`Http1`, `Http1s`, and the HTTP/1.1 connections of `Https`) | every top-level key |
-| HTTP/2 (`Http2`, `Http2s`, and the HTTP/2 connections of `Https`) | the shared `HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout`, `MinRequestBodyDataRate`) and the `Limits:Http2` keys (`MaxStreamsPerConnection`, `MaxRequestHeaderListSize`, `MaxResetStreamsPerWindow`, `MaxSettingsFramesPerWindow`, `MaxPingFramesPerWindow`, `FloodDetectionWindow`) |
+| HTTP/2 (`Http2`, `Http2s`, and the HTTP/2 connections of `Https`) | the shared `HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout`, `MinRequestBodyDataRate`, `MinResponseDataRate`) and the `Limits:Http2` keys (`MaxStreamsPerConnection`, `MaxRequestHeaderListSize`, `MaxResetStreamsPerWindow`, `MaxSettingsFramesPerWindow`, `MaxPingFramesPerWindow`, `FloodDetectionWindow`) |
 | HTTP/3 (`Http3`) | the shared keys |
 
 The HTTP/1.1 wire-format keys have no HTTP/2 or HTTP/3 meaning. HTTP/3's stream
@@ -1261,6 +1262,17 @@ interceptor attaches (#1383), and every other request keeps the listener's rate.
 Without that, such a body fails with `408` (or a stream reset once the response
 has started) when an idle gap outlasts its allowance, about 5 seconds plus 1
 second per 240 octets already received.
+
+`Limits:MinResponseDataRate` binds the slow-read defence the same way (#1384):
+same shape, same `none`, onto every endpoint. Every version now holds every
+response to it, so a client that grants no flow-control credit or stops reading
+is reclaimed — the connection closed on HTTP/1.1, the stream reset (or the
+connection ended, when its whole window stalls) on HTTP/2, the request stream
+reset on HTTP/3 — and the exchange is cancelled. The server records that as a
+cancelled exchange, not an application fault, because the stalled write throws
+an `OperationCanceledException` carrying `RequestCancelled`. An endpoint whose
+reader legitimately pauses sets `context.MinResponseDataRate!.MinDataRate = null`
+before its response starts.
 
 `Limits:MaxConcurrentConnections` is not an endpoint limit: it caps the default
 server (see "Concurrency cap (`MaxConcurrentConnections`)"). The binder hands it to the

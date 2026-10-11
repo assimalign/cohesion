@@ -1,9 +1,9 @@
 # Assimalign.Cohesion.Http.RequestLimits — Design
 
-Per-request limit features for the Cohesion HTTP server: the typed max-request-body-size feature and
-the typed minimum request-body data-rate feature (#1383). The package owns the feature contracts and
-their implementation and references only core `Assimalign.Cohesion.Http` — the transport never
-references this package.
+Per-request limit features for the Cohesion HTTP server: the typed max-request-body-size feature, the
+typed minimum request-body data-rate feature (#1383), and the typed minimum response data-rate feature
+(#1384). The package owns the feature contracts and their implementation and references only core
+`Assimalign.Cohesion.Http` — the transport never references this package.
 
 ## Why this package exists (seams vs. features)
 
@@ -66,13 +66,24 @@ and then) sets it to `null` before it reads; an endpoint that needs a stricter r
 other request keeps the listener's rate, so the slow-body defence stays on for them. Kestrel's
 `IHttpMinRequestBodyDataRateFeature`, which gRPC disables on streaming calls, is the model.
 
-`HttpRequestLimits.CreateInterceptor()` attaches both contracts on **one** object
+### The minimum response data rate (#1384)
+
+`IHttpMinResponseDataRateFeature` views the context's `MinResponseDataRate`, the slow-read defence's
+knob: a peer that withholds flow-control credit or reads below it is reclaimed and the exchange
+cancelled. The transport freezes it at the response's first write, independently of the request-body
+knobs, so an endpoint whose reader legitimately pauses for long stretches sets it to `null` (or a
+lower rate) before it starts its response. Kestrel's `IHttpMinResponseDataRateFeature` is the model.
+
+### One object for every limit
+
+`HttpRequestLimits.CreateInterceptor()` attaches every contract on **one** object
 (`HttpRequestLimitsFeature`): the feature collection is keyed by name, and a typed lookup returns the
-first feature implementing the contract asked for, so `Get<IHttpMaxRequestBodySizeFeature>()` and
-`Get<IHttpMinRequestBodyDataRateFeature>()` both find it. An exchange pays one allocation and one slot
-for every limit, as it did for the body-size feature alone, so the web host's presized feature
-collection (#1381) does not grow. `CreateMaxRequestBodySizeInterceptor()` still attaches the body-size
-feature alone; the two register under the same name, so a host registers one or the other.
+first feature implementing the contract asked for, so `Get<IHttpMaxRequestBodySizeFeature>()`,
+`Get<IHttpMinRequestBodyDataRateFeature>()` and `Get<IHttpMinResponseDataRateFeature>()` all find it.
+An exchange pays one allocation and one slot for every limit, as it did for the body-size feature
+alone, so the web host's presized feature collection (#1381) does not grow.
+`CreateMaxRequestBodySizeInterceptor()` still attaches the body-size feature alone; the two register
+under the same name, so a host registers one or the other.
 
 ### Why a typed seam here, rather than an Items-key bridge
 
@@ -137,8 +148,8 @@ The migration from the original in-core placement is complete; the pieces sit as
    `TransportHttpContext` and the Connections `DESIGN.md` were replaced by the interceptor
    documentation.
 4. **Web.Hosting installs by default.** `WebApplicationServerBuilder` registers
-   `HttpRequestLimits.CreateInterceptor()` (the body-size cap and, since #1383, the request-body
-   rate) ahead of all user configuration, so it holds interceptor slot 0.
+   `HttpRequestLimits.CreateInterceptor()` (the body-size cap and, since #1383 and #1384, the
+   request-body and response rates) ahead of all user configuration, so it holds interceptor slot 0.
 5. **Tests.** The transport suite exercises the seam with local doubles on all three protocols
    (h1: attach / cap-raise / cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip
    / snapshot inertness; h2 + h3: attach / wrap / reject → RST_STREAM/stream-abort / freeze /
@@ -173,10 +184,12 @@ The migration from the original in-core placement is complete; the pieces sit as
   `MinResponseDataRate`) also landed with #810, but as transport-owned limits
   (`HttpConnectionListenerLimits`), not features surfaced by this package.
   `MinRequestBodyDataRate` is enforced on HTTP/1.1, HTTP/2 and HTTP/3 (#1085 added the last two);
-  `MinResponseDataRate` on the HTTP/1.1 streaming response only. Since #1383 the transport seeds the
-  request-body rate into the parse context too and freezes it at the first body read on all three
-  versions, and `IHttpMinRequestBodyDataRateFeature` is the typed view over it, with the
-  middleware-visible pre-read window on HTTP/2 as well (see "The minimum request-body data rate").
+  `MinResponseDataRate` on every response since #1384, which ended the HTTP/1.1-streaming-only
+  coverage. Since #1383 the transport seeds the request-body rate into the parse context too and
+  freezes it at the first body read on all three versions, and `IHttpMinRequestBodyDataRateFeature`
+  is the typed view over it, with the middleware-visible pre-read window on HTTP/2 as well (see "The
+  minimum request-body data rate"). #1384 does the same for the response rate, frozen at the
+  response's first write.
 
 ## AOT posture
 

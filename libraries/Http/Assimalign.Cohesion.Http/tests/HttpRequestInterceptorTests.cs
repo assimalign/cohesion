@@ -94,6 +94,27 @@ public class HttpRequestInterceptorTests
         context.MaxRequestBodySize = 2048;
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: The minimum response data rate is optional, adjustable, and frozen on its own")]
+    public void Context_MinResponseDataRate_ShouldRoundTripUntilFrozen()
+    {
+        // Arrange — a construction site that predates the member still compiles (#1384).
+        HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        context.MinResponseDataRate.ShouldBeNull();
+
+        // Act
+        context.MinResponseDataRate = seeded;
+        context.FreezeMinRequestBodyDataRate();
+        context.MinResponseDataRate = null;
+        context.FreezeMinResponseDataRate();
+        context.FreezeMinResponseDataRate();
+
+        // Assert — the request-body freeze leaves the response knob writable; its own freeze does not.
+        context.IsMinResponseDataRateReadOnly.ShouldBeTrue();
+        context.MinResponseDataRate.ShouldBeNull();
+        Should.Throw<InvalidOperationException>(() => context.MinResponseDataRate = seeded);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: No response interceptor is added to an exchange by default")]
     public void Context_ResponseInterceptors_ShouldStartEmpty()
     {

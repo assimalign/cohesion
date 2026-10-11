@@ -1,9 +1,9 @@
 # Assimalign.Cohesion.Http.RequestLimits — Overview
 
 Per-request limit features for the Cohesion HTTP server. Ships the typed
-`IHttpMaxRequestBodySizeFeature` and `IHttpMinRequestBodyDataRateFeature` (#1383) — per-exchange
-views over the request body-size cap and the minimum request-body data rate the server transport
-enforces — attached by a parse-time `IHttpExchangeInterceptor` to every request. All
+`IHttpMaxRequestBodySizeFeature`, `IHttpMinRequestBodyDataRateFeature` (#1383) and
+`IHttpMinResponseDataRateFeature` (#1384) — per-exchange views over the request body-size cap and the
+minimum request-body and response data rates the server transport enforces — attached by a parse-time `IHttpExchangeInterceptor` to every request. All
 three protocol parse paths (HTTP/1.1, HTTP/2, HTTP/3) invoke the interceptor seam (#819), so the
 feature is present regardless of protocol, and all three enforce the wire-level cap (see
 `docs/DESIGN.md`, "Protocol coverage").
@@ -21,6 +21,8 @@ feature is present regardless of protocol, and all three enforce the wire-level 
 - **Disabling the rate for one request:** an endpoint whose body legitimately idles (a
   client-streaming call) sets `context.MinRequestBodyDataRate!.MinDataRate = null` before it reads
   the body; every other request keeps the listener's rate.
+- **Disabling the slow-read check for one response:** an endpoint whose reader pauses for long
+  stretches sets `context.MinResponseDataRate!.MinDataRate = null` before its response starts.
 
 See `docs/DESIGN.md` for the seams-vs-features rationale, the write-through model, and how the
 transport integration is wired (including the move from the original in-core placement).

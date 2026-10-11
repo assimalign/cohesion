@@ -58,6 +58,12 @@ internal sealed class MinDataRateGate
     }
 
     /// <summary>
+    /// Gets the grace period, in <see cref="TimeProvider"/> ticks, during which the rate is not yet
+    /// enforced.
+    /// </summary>
+    public long GraceTicks => _graceTicks;
+
+    /// <summary>
     /// Gets the clock the caller should read timestamps from so its measured waits align with this
     /// gate's accounting and its cancellation deadline fires on the same clock.
     /// </summary>

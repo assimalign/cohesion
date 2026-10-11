@@ -9,10 +9,11 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The transport constructs one context per request and owns it for the duration of the
-/// exchange's body consumption — not merely until dispatch. Features that hold a reference to
-/// the context (for example a write-through view over <see cref="MaxRequestBodySize"/>) remain
-/// valid until the request body has been consumed or the exchange completes.
+/// The transport constructs one context per request and keeps it for the whole exchange — not merely
+/// until dispatch: the request body freezes and enforces its knobs at its first read, and the response
+/// reads <see cref="MinResponseDataRate"/> at its first write. Features that hold a reference to the
+/// context (for example a write-through view over <see cref="MaxRequestBodySize"/>) remain valid until
+/// the exchange completes.
 /// </para>
 /// <para>
 /// The context is not thread-safe; it must only be touched from the request's parse/dispatch
@@ -25,14 +26,16 @@ namespace Assimalign.Cohesion.Http;
 /// All required members are set by the transport at construction; every one is init-only except
 /// <see cref="MaxRequestBodySize"/>, whose continued mutability is the point of the knob.
 /// Members added in future versions are optional with sensible defaults so existing
-/// construction sites (including test fakes) keep compiling; the per-request rate knob
-/// (<see cref="MinRequestBodyDataRate"/>) is one, settable until the transport freezes it.
+/// construction sites (including test fakes) keep compiling; the per-request rate knobs
+/// (<see cref="MinRequestBodyDataRate"/>, <see cref="MinResponseDataRate"/>) are such members,
+/// settable until the transport freezes them.
 /// </para>
 /// </remarks>
 public sealed class HttpExchangeInterceptorRequestContext
 {
     private long? _maxRequestBodySize;
     private HttpMinDataRate? _minRequestBodyDataRate;
+    private HttpMinDataRate? _minResponseDataRate;
     private List<IHttpExchangeInterceptor>? _responseInterceptors;
 
     /// <summary>
@@ -201,6 +204,62 @@ public sealed class HttpExchangeInterceptorRequestContext
     public void FreezeMinRequestBodyDataRate()
     {
         IsMinRequestBodyDataRateReadOnly = true;
+    }
+
+    /// <summary>
+    /// Gets or sets the minimum rate at which the peer must accept this exchange's response, or
+    /// <see langword="null"/> to hold the response to no rate. Seeded by the transport from the
+    /// listener's configured rate; interceptors, middleware and endpoints may lower, raise, or disable it
+    /// until the transport freezes it at the first write of the response (see
+    /// <see cref="IsMinResponseDataRateReadOnly"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rate is the slow-read defence: a peer that withholds flow-control credit (HTTP/2
+    /// <c>WINDOW_UPDATE</c>, QUIC <c>MAX_STREAM_DATA</c>/<c>MAX_DATA</c>) or stops reading the connection
+    /// is reclaimed once it falls below the rate, and the exchange observes the cancellation. Disabling
+    /// it removes that defence for this response only, so decide it from the endpoint, never from
+    /// request-supplied values. A tunnel (an accepted <c>CONNECT</c> or protocol upgrade) is not a
+    /// response body, and no rate applies to it whatever this holds.
+    /// </para>
+    /// <para>
+    /// The property is optional: a context constructed outside a transport (a test fake) starts with
+    /// <see langword="null"/>, and every server transport seeds it.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when set after the transport has frozen the value
+    /// (<see cref="IsMinResponseDataRateReadOnly"/> is <see langword="true"/>).
+    /// </exception>
+    public HttpMinDataRate? MinResponseDataRate
+    {
+        get => _minResponseDataRate;
+        set
+        {
+            if (IsMinResponseDataRateReadOnly)
+            {
+                throw new InvalidOperationException(
+                    "The minimum response data rate cannot be modified after the transport has started writing the response.");
+            }
+
+            _minResponseDataRate = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="MinResponseDataRate"/> has been frozen by the
+    /// transport. The value freezes at the first write of the response on every protocol, after which
+    /// the rate that applies is fixed for the remainder of the exchange.
+    /// </summary>
+    public bool IsMinResponseDataRateReadOnly { get; private set; }
+
+    /// <summary>
+    /// Freezes <see cref="MinResponseDataRate"/> for the remainder of the exchange. Called by the
+    /// transport when it starts writing the response; idempotent.
+    /// </summary>
+    public void FreezeMinResponseDataRate()
+    {
+        IsMinResponseDataRateReadOnly = true;
     }
 
     /// <summary>

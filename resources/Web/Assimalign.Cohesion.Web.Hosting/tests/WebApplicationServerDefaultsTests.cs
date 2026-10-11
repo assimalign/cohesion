@@ -153,11 +153,12 @@ public class WebApplicationServerDefaultsTests
         feature.ShouldNotBeNull();
         feature!.MaxRequestBodySize.ShouldBe(2048);
 
-        // The same interceptor surfaces the per-request data rate (#1383), on the same feature object, so the
-        // host's feature count does not grow.
+        // The same interceptor surfaces the per-request data rates (#1383, #1384), on the same feature object,
+        // so the host's feature count does not grow.
         IHttpMinRequestBodyDataRateFeature? rateFeature = context.Features.Get<IHttpMinRequestBodyDataRateFeature>();
         rateFeature.ShouldBeSameAs(feature);
         rateFeature!.MinDataRate.ShouldBeSameAs(rate);
+        context.Features.Get<IHttpMinResponseDataRateFeature>().ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the HTTP/1.1 protocol-upgrade interceptor after request limits")]

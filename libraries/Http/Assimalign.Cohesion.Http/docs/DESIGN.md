@@ -993,6 +993,11 @@ out in #1367 (TLS) and #1368 (extended CONNECT).
   limits and the typed feature in `Http.RequestLimits` all name it, and core can name nothing in
   `Http.Connections`. Moving it from there was a source and binary break (the transport's DESIGN,
   "Per-request data rates (#1383)", records it).
+- **And the response rate cell (#1384).** `MinResponseDataRate` is the slow-read defence's knob: seeded
+  the same way, frozen at the response's first write (`FreezeMinResponseDataRate()` /
+  `IsMinResponseDataRateReadOnly`), independently of the request-body knobs. The context therefore
+  lives as long as the exchange that ran request hooks, not only until its body is consumed: the
+  transport hands it to the exchange so the response can read the knob when it starts.
 - **Interceptor instances are shared across all connections/requests** and must
   be stateless; per-request state goes in `Features`. Hooks are CPU-only.
 - **Rejection is typed.** `HttpRequestRejectedException` carries a 4xx/5xx
@@ -1003,8 +1008,9 @@ out in #1367 (TLS) and #1368 (extended CONNECT).
 - **Evolution rules:** v1 context members are `required` (init-only, except the
   deliberately-mutable body-size knob); all future members must be optional
   with defaults so existing construction sites (including test fakes — the
-  context is deliberately constructible in tests) keep compiling. `Protocol` and
-  `MinRequestBodyDataRate` are such members: a context built without them reads `null`.
+  context is deliberately constructible in tests) keep compiling. `Protocol`,
+  `MinRequestBodyDataRate` and `MinResponseDataRate` are such members: a context built without them
+  reads `null`.
 
 ### AOT posture
 

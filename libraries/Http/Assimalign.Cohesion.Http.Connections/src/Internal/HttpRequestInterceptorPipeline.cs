@@ -54,10 +54,10 @@ internal static class HttpRequestInterceptorPipeline
     /// the body hooks wrap (unless the request is a CONNECT).
     /// </param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
-    /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
-    /// <param name="minRequestBodyDataRate">
-    /// The registration's minimum request-body data rate seeded into the parse context, which a hook,
-    /// middleware or endpoint may change until the transport's body freezes it at its first read (#1383).
+    /// <param name="limits">
+    /// The registration's limits. Its body-size cap, minimum request-body data rate (#1383) and minimum
+    /// response data rate (#1384) are seeded into the parse context, where a hook, middleware or endpoint
+    /// may change each until the transport freezes it.
     /// </param>
     /// <param name="isConnect">
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
@@ -69,7 +69,8 @@ internal static class HttpRequestInterceptorPipeline
     /// </param>
     /// <returns>
     /// The hook-populated feature collection (<see langword="null"/> on the zero-interceptor fast
-    /// path), the effective cap (<paramref name="maxRequestBodySize"/> unchanged on the fast path),
+    /// path), the effective cap (the listener's <see cref="HttpConnectionListenerLimits.MaxRequestBodySize"/>
+    /// unchanged on the fast path),
     /// and the body the request exposes: the outermost wrapper the body hooks produced, or the head's
     /// own body on the fast path and for a CONNECT.
     /// </returns>
@@ -83,8 +84,7 @@ internal static class HttpRequestInterceptorPipeline
         HttpVersion version,
         TransportHttpRequestHead head,
         HttpConnectionInfo connectionInfo,
-        long? maxRequestBodySize,
-        HttpMinDataRate? minRequestBodyDataRate,
+        HttpConnectionListenerLimits limits,
         bool isConnect,
         int featureCapacity)
     {
@@ -93,7 +93,7 @@ internal static class HttpRequestInterceptorPipeline
         // the registration's configured limit, untouched by any hook.
         if (interceptors.Length == 0)
         {
-            return new HttpRequestInterceptionResult(null, maxRequestBodySize, head.Body);
+            return new HttpRequestInterceptionResult(null, limits.MaxRequestBodySize, head.Body);
         }
 
         HttpFeatureCollection features = new(featureCapacity);
@@ -111,8 +111,9 @@ internal static class HttpRequestInterceptorPipeline
             Headers = head.Headers.AsReadOnly(),
             Features = features,
             ConnectionInfo = connectionInfo,
-            MaxRequestBodySize = maxRequestBodySize,
-            MinRequestBodyDataRate = minRequestBodyDataRate,
+            MaxRequestBodySize = limits.MaxRequestBodySize,
+            MinRequestBodyDataRate = limits.MinRequestBodyDataRate,
+            MinResponseDataRate = limits.MinResponseDataRate,
         };
 
         // Tracks the outermost body stream produced so far so the failure path can tear down the
@@ -185,7 +186,8 @@ internal static class HttpRequestInterceptorPipeline
                 features,
                 context.MaxRequestBodySize,
                 body,
-                context.ResponseInterceptors.Count > 0 ? context.ResponseInterceptors : null);
+                context.ResponseInterceptors.Count > 0 ? context.ResponseInterceptors : null,
+                context);
         }
         catch
         {

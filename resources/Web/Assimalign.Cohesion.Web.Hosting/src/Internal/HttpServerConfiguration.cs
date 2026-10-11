@@ -51,6 +51,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 ///     "KeepAliveTimeout":          "00:02:10",
 ///     "RequestHeadersTimeout":     "00:00:30",
 ///     "MinRequestBodyDataRate":    { "BytesPerSecond": 240, "GracePeriod": "00:00:05" },
+///     "MinResponseDataRate":       { "BytesPerSecond": 240, "GracePeriod": "00:00:05" },
 ///     "Http2": { "MaxStreamsPerConnection": 100, "MaxRequestHeaderListSize": 16384 }
 ///   }
 /// }
@@ -76,7 +77,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// <see cref="HttpConnectionListenerLimits"/>), so the single <c>Limits</c> section is applied to
 /// every endpoint this binder registers: HTTP/1.1 endpoints receive the HTTP/1.1 keys; HTTP/2
 /// endpoints receive the shared keys (<c>MaxRequestBodySize</c>, <c>KeepAliveTimeout</c>,
-/// <c>RequestHeadersTimeout</c>, <c>MinRequestBodyDataRate</c>) and the <c>Limits:Http2</c> keys; HTTP/3 endpoints receive the
+/// <c>RequestHeadersTimeout</c>, <c>MinRequestBodyDataRate</c>, <c>MinResponseDataRate</c>) and the
+/// <c>Limits:Http2</c> keys; HTTP/3 endpoints receive the
 /// shared keys. An <c>Https</c> endpoint applies the HTTP/1.1 keys to the connections it serves
 /// HTTP/1.1 and the HTTP/2 keys to those it serves HTTP/2. <c>MaxConcurrentConnections</c> caps the
 /// default server rather than an endpoint. The section is parsed eagerly — before any endpoint is
@@ -240,6 +242,11 @@ internal static class HttpServerConfiguration
         if (TryGetDataRate(configuration, $"{sectionKey}:Limits:MinRequestBodyDataRate", limits.MinRequestBodyDataRate, out HttpMinDataRate? minRequestBodyDataRate))
         {
             limits.MinRequestBodyDataRate = minRequestBodyDataRate;
+        }
+
+        if (TryGetDataRate(configuration, $"{sectionKey}:Limits:MinResponseDataRate", limits.MinResponseDataRate, out HttpMinDataRate? minResponseDataRate))
+        {
+            limits.MinResponseDataRate = minResponseDataRate;
         }
     }
 
@@ -708,6 +715,7 @@ internal static class HttpServerConfiguration
         target.KeepAliveTimeout = source.KeepAliveTimeout;
         target.RequestHeadersTimeout = source.RequestHeadersTimeout;
         target.MinRequestBodyDataRate = source.MinRequestBodyDataRate;
+        target.MinResponseDataRate = source.MinResponseDataRate;
     }
 
     private static EndpointProtocol ParseProtocol(string endpointName, string? protocol)

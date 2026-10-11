@@ -223,6 +223,79 @@ public class HttpServerConfigurationTests
             () => HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind the minimum response data rate from configuration")]
+    public void BindLimits_OnMinResponseDataRateSection_ShouldBindRate()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinResponseDataRate:BytesPerSecond"] = "500",
+            ["Http:Limits:MinResponseDataRate:GracePeriod"] = "00:00:03",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert — the request-body rate keeps its default.
+        limits.MinResponseDataRate!.BytesPerSecond.ShouldBe(500);
+        limits.MinResponseDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(3));
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(240);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should treat 'none' as a disabled minimum response data rate")]
+    public void BindLimits_OnDisabledMinResponseDataRate_ShouldSetNull()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Limits:MinResponseDataRate"] = "none",
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
+
+        // Assert
+        limits.MinResponseDataRate.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should throw on an unusable minimum response data rate")]
+    [InlineData("Http:Limits:MinResponseDataRate", "slow")]
+    [InlineData("Http:Limits:MinResponseDataRate:BytesPerSecond", "0")]
+    [InlineData("Http:Limits:MinResponseDataRate:GracePeriod", "-00:00:01")]
+    public void BindLimits_OnUnusableMinResponseDataRate_ShouldThrow(string path, string value)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [path] = value,
+        });
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
+
+        // Act and assert
+        Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Every endpoint should receive the bound minimum response data rate")]
+    public void CopySharedLimits_OnBoundResponseRate_ShouldCopyRateToEndpointLimits()
+    {
+        // Arrange
+        HttpMinDataRate rate = new(500, TimeSpan.FromSeconds(3));
+        Http1ConnectionListenerOptions.Http1Limits template = new() { MinResponseDataRate = rate };
+        Http2ConnectionListenerOptions.Http2Limits http2 = new();
+        Http3ConnectionListenerOptions.Http3Limits http3 = new();
+
+        // Act
+        HttpServerConfiguration.CopySharedLimits(template, http2);
+        HttpServerConfiguration.CopySharedLimits(template, http3);
+
+        // Assert
+        http2.MinResponseDataRate.ShouldBeSameAs(rate);
+        http3.MinResponseDataRate.ShouldBeSameAs(rate);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Every endpoint should receive the bound minimum request-body data rate")]
     public void CopySharedLimits_OnBoundRate_ShouldCopyRateToEndpointLimits()
     {

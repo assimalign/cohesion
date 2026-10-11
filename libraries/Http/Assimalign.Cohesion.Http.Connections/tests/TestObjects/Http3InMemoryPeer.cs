@@ -57,16 +57,21 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     /// </summary>
     /// <param name="configure">Configures the HTTP/3 registration (limits, QPACK).</param>
     /// <param name="configureListener">Configures the listener options (interceptors).</param>
+    /// <param name="decorate">
+    /// Wraps the server end the listener serves (for example to stall its request streams' writes), or
+    /// <see langword="null"/> to serve it as is.
+    /// </param>
     /// <returns>The started peer.</returns>
     public static async Task<Http3InMemoryPeer> StartAsync(
         Action<Http3ConnectionListenerOptions>? configure = null,
-        Action<HttpConnectionListenerOptions>? configureListener = null)
+        Action<HttpConnectionListenerOptions>? configureListener = null,
+        Func<MultiplexedConnection, MultiplexedConnection>? decorate = null)
     {
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         HttpConnectionListenerOptions options = new();
         configureListener?.Invoke(options);
-        options.UseHttp3(new TestMultiplexedConnectionListener(server), configure ?? (static _ => { }));
+        options.UseHttp3(new TestMultiplexedConnectionListener(decorate?.Invoke(server) ?? server), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

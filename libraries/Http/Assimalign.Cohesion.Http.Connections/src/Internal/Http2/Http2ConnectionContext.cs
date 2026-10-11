@@ -107,6 +107,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // OnRequestBodyConsumedAsync), which is what applies real backpressure.
     private Http2FlowControlWindow _connectionSendWindow = new(Http2ConnectionSettings.InitialInitialWindowSize);
     private Http2FlowControlWindow _connectionReceiveWindow = new(Http2ConnectionSettings.InitialInitialWindowSize);
+    // #1384 — when the peer last credited the connection send window (a WINDOW_UPDATE on stream 0), in
+    // _timeProvider ticks; the connection's start until it first does. A response writer whose allowance
+    // runs out while the connection window is empty ends the connection only when no such credit arrived
+    // for a whole grace period: credit that keeps arriving, and goes to other streams, means the peer is
+    // reading, and only the starved stream is reset. Guarded by _syncRoot.
+    private long _connectionSendCreditAt;
     private CancellationTokenSource? _pumpCts;
     private Task? _pumpTask;
     private int _pumpStarted;
@@ -208,6 +214,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         _http2Limits = limits;
         _floodGuard = new Http2FloodGuard(limits);
         _altSvcHeaderValue = altSvcHeaderValue;
+        _connectionSendCreditAt = _timeProvider.GetTimestamp();
         // Created whether or not the listener configures a rate: a request may set one for itself (#1383).
         _requestBodyDataRate = new Http2RequestBodyDataRate(limits.MinRequestBodyDataRate, _timeProvider, IsReceiveWindowLow, GetReceiveWindowLowTicks, RejectSlowRequestBodyAsync);
         // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
@@ -1221,6 +1228,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                         $"HTTP/2 connection-level send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
                 }
 
+                _connectionSendCreditAt = _timeProvider.GetTimestamp();
                 SignalSendWindowReplenished();
             }
 
@@ -1313,17 +1321,35 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// returns 0: RFC 9113 §5.4.2 — no further frame may be sent on a reset stream, so no credit is
     /// ever reserved for one. The same holds once the application no longer owns a writable final
     /// response on the stream (see <see cref="Http2Stream.CanWriteResponse"/>).
+    /// <para>
+    /// A response writer passes its exchange, and the wait is held to the response's minimum data rate
+    /// (#1384): a peer that grants no credit, or grants it below the rate, is charged for the wait, and
+    /// once the allowance is spent the transport ends the stall (<see cref="FailSlowResponseAsync"/>) — a
+    /// <c>RST_STREAM(CANCEL)</c> when the stream window is what holds the writer, a <c>GOAWAY</c> and the
+    /// end of the connection when the connection window is and the peer has not credited it for a grace
+    /// period, since every stream is then stalled (<see cref="IsConnectionSendStalled"/>) — and the
+    /// wait throws. A tunnel passes none: its octets are not a response body.
+    /// </para>
     /// </remarks>
     /// <param name="stream">The stream whose send window is charged.</param>
     /// <param name="desired">The maximum number of octets the caller wants to send.</param>
     /// <param name="cancellationToken">A token that abandons the wait (exchange abort / shutdown).</param>
+    /// <param name="response">
+    /// The exchange whose response the credit is for, whose minimum response data rate bounds the wait, or
+    /// <see langword="null"/> for a tunnel, which waits unbounded.
+    /// </param>
     /// <returns>
     /// The number of octets granted — at least one — or 0 when the stream can no longer carry the
     /// response, in which case the caller abandons the rest of it.
     /// </returns>
     /// <exception cref="IOException">The frame pump exited, so no credit can ever arrive.</exception>
-    private async ValueTask<int> AcquireSendWindowAsync(Http2Stream stream, int desired, CancellationToken cancellationToken)
+    /// <exception cref="OperationCanceledException">
+    /// The peer withheld credit past the response's allowance; the exchange was aborted.
+    /// </exception>
+    private async ValueTask<int> AcquireSendWindowAsync(Http2Stream stream, int desired, CancellationToken cancellationToken, Http2Context? response = null)
     {
+        MinDataRateGate? gate = response?.GetResponseDataRateGate(_http2Limits.MinResponseDataRate, _timeProvider);
+
         while (true)
         {
             Task signal;
@@ -1348,9 +1374,204 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 signal = _sendWindowSignal.Task;
             }
 
-            await signal.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (gate is null)
+            {
+                await signal.WaitAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (!MinDataRateWait.TryBegin(gate, cancellationToken, out MinDataRateWait wait))
+            {
+                throw await FailSlowResponseAsync(response!, IsConnectionSendStalled(gate)).ConfigureAwait(false);
+            }
+
+            try
+            {
+                await signal.WaitAsync(wait.Token).ConfigureAwait(false);
+                wait.Complete();
+            }
+            catch (OperationCanceledException) when (wait.TimedOut)
+            {
+                // The allowance ran out with no credit. Charge the wait and look again: credit that arrived
+                // as the timeout fired is still taken, and otherwise the next pass ends the stall.
+                wait.Complete();
+            }
+            finally
+            {
+                wait.Dispose();
+            }
         }
     }
+
+    /// <summary>
+    /// Whether the whole connection is stalled for a writer whose allowance ran out: the connection-level
+    /// send window is exhausted, so no stream can send DATA (RFC 9113 §6.9), and the peer has not credited
+    /// it for at least the grace period of the writer's rate. Credit that keeps arriving, and goes to other
+    /// streams, means the peer is reading; the writer was starved, not the connection, and only its stream
+    /// is reset.
+    /// </summary>
+    /// <param name="gate">The stalled writer's gate, whose grace period bounds how long the connection may go uncredited.</param>
+    private bool IsConnectionSendStalled(MinDataRateGate gate)
+    {
+        lock (_syncRoot)
+        {
+            return _connectionSendWindow.Available <= 0
+                && _timeProvider.GetTimestamp() - _connectionSendCreditAt >= gate.GraceTicks;
+        }
+    }
+
+    /// <summary>
+    /// Ends a response whose peer did not accept it at the minimum response data rate (#1384), and
+    /// returns the exception the stalled writer throws. The exchange's <c>RequestCancelled</c> fires
+    /// either way.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description><b>The stream stalled</b> — its own send window holds the writer. The stream
+    /// alone is reset with <c>RST_STREAM(CANCEL)</c> (RFC 9113 §8.1: the response is no longer needed),
+    /// which releases its slot once the exchange ends, and the connection keeps serving its other
+    /// streams.</description></item>
+    /// <item><description><b>The connection window stalled</b> — the connection-level send window is
+    /// exhausted and the peer has not credited it for a grace period, so every stream is held. (Credit
+    /// that keeps arriving goes to other streams: the writer was starved, and only its stream is reset.)
+    /// The connection ends with <c>GOAWAY(ENHANCE_YOUR_CALM)</c>
+    /// (RFC 9113 §10.5: activity that ties up the server's resources, the code this connection's other
+    /// limits escalate to), and the frame pump stops, which aborts every exchange it carries and ends the
+    /// receive enumeration.</description></item>
+    /// <item><description><b>The output stalled</b> — the connection's transport stopped accepting octets,
+    /// so nothing more can be written, a <c>GOAWAY</c> included. The connection is aborted and the pump
+    /// stops.</description></item>
+    /// </list>
+    /// A reset or <c>GOAWAY</c> write is bounded by <see cref="_abandonedResetWriteWindow"/>, since the
+    /// peer that stalled the response may not read it either.
+    /// </remarks>
+    /// <param name="context">The exchange whose response stalled.</param>
+    /// <param name="connectionStalled">Whether the connection-level send window, rather than the stream's, holds the writer.</param>
+    /// <param name="outputStalled">Whether the connection's transport stopped accepting octets.</param>
+    /// <returns>The exception the stalled writer throws.</returns>
+    private async ValueTask<OperationCanceledException> FailSlowResponseAsync(Http2Context context, bool connectionStalled, bool outputStalled = false)
+    {
+        if (outputStalled)
+        {
+            Connection.Abort(new IOException("The peer stopped reading the connection below the configured minimum response data rate."));
+            StopPumpOnStall();
+            return context.AbortSlowResponse();
+        }
+
+        using CancellationTokenSource writeWindow = new(_abandonedResetWriteWindow);
+
+        if (!connectionStalled)
+        {
+            if (!context.Stream.IsReset)
+            {
+                await TryEmitRstStreamAsync(context.StreamId, Http2ErrorCode.Cancel, writeWindow.Token).ConfigureAwait(false);
+            }
+
+            return context.AbortSlowResponse();
+        }
+
+        await TryEmitGoAwayAsync(Http2ErrorCode.EnhanceYourCalm, writeWindow.Token).ConfigureAwait(false);
+        StopPumpOnStall();
+        return context.AbortSlowResponse();
+    }
+
+    /// <summary>
+    /// Stops the frame pump for a connection a stalled response ended: the pump aborts every exchange the
+    /// connection carries and ends the receive enumeration, so the host releases the connection.
+    /// </summary>
+    private void StopPumpOnStall()
+    {
+        try
+        {
+            _pumpCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The connection was already torn down.
+        }
+    }
+
+    /// <summary>
+    /// Runs one write of a response's frames to the connection's transport — a HEADERS block, a DATA
+    /// frame, or a flush — held to the response's minimum data rate (#1384). The octets are credited as
+    /// they are handed over, and the write must complete within what is left of the allowance: a peer
+    /// that stops reading the connection fills the transport, and the write would otherwise block the
+    /// whole connection behind the write gate for as long as the peer liked. When the allowance runs out
+    /// the connection is ended (<see cref="FailSlowResponseAsync"/>, an output stall) and the write throws.
+    /// A response held to no rate writes with the caller's token alone.
+    /// </summary>
+    /// <param name="context">The exchange whose response is written.</param>
+    /// <param name="octets">The octets the write hands to the transport; 0 for a flush.</param>
+    /// <param name="state">The write's arguments.</param>
+    /// <param name="write">The write, given its arguments and the token it observes.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that completes once the transport accepted the octets.</returns>
+    private Task WriteResponseOutputAsync<TState>(Http2Context context, int octets, TState state, Func<TState, CancellationToken, Task> write, CancellationToken cancellationToken)
+    {
+        MinDataRateGate? gate = context.GetResponseDataRateGate(_http2Limits.MinResponseDataRate, _timeProvider);
+
+        return gate is null
+            ? write(state, cancellationToken)
+            : WriteResponseOutputWithinRateAsync(context, gate, octets, state, write, cancellationToken);
+    }
+
+    private async Task WriteResponseOutputWithinRateAsync<TState>(Http2Context context, MinDataRateGate gate, int octets, TState state, Func<TState, CancellationToken, Task> write, CancellationToken cancellationToken)
+    {
+        gate.Record(ticksWaited: 0, bytesTransferred: octets);
+
+        if (!MinDataRateWait.TryBegin(gate, cancellationToken, out MinDataRateWait wait))
+        {
+            throw await FailSlowResponseAsync(context, connectionStalled: true, outputStalled: true).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await write(state, wait.Token).ConfigureAwait(false);
+            wait.Complete();
+        }
+        catch (OperationCanceledException) when (wait.TimedOut)
+        {
+            wait.Complete();
+            throw await FailSlowResponseAsync(context, connectionStalled: true, outputStalled: true).ConfigureAwait(false);
+        }
+        finally
+        {
+            wait.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Writes a response's HEADERS block within the response's minimum data rate.
+    /// </summary>
+    private Task WriteResponseHeaderBlockAsync(Http2Context context, byte[] headerBlock, bool endStream, CancellationToken cancellationToken)
+        => WriteResponseOutputAsync(
+            context,
+            headerBlock.Length,
+            (Connection: this, context.StreamId, HeaderBlock: headerBlock, EndStream: endStream),
+            static (state, token) => state.Connection.WriteHeaderBlockAsync(state.StreamId, state.HeaderBlock, state.EndStream, token),
+            cancellationToken);
+
+    /// <summary>
+    /// Writes one frame of a response, with its payload, within the response's minimum data rate.
+    /// </summary>
+    private Task WriteResponseFrameAsync(Http2Context context, Http2Frame frame, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+        => WriteResponseOutputAsync(
+            context,
+            payload.Length,
+            (Output: Stream, Frame: frame, Payload: payload),
+            static (state, token) => Http2FrameWriter.WriteAsync(state.Output, state.Frame, state.Payload, token),
+            cancellationToken);
+
+    /// <summary>
+    /// Flushes the connection's output for a response within the response's minimum data rate.
+    /// </summary>
+    private Task FlushResponseOutputAsync(Http2Context context, CancellationToken cancellationToken)
+        => WriteResponseOutputAsync(
+            context,
+            0,
+            Stream,
+            static (output, token) => output.FlushAsync(token),
+            cancellationToken);
 
     /// <summary>
     /// Reserves up to <paramref name="desired"/> octets of send credit without waiting — the fast path
@@ -2138,7 +2359,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 GetScheme(),
                 OnRequestBodyConsumedAsync,
                 _requestInterceptors,
-                _http2Limits.MaxRequestBodySize,
+                _http2Limits,
                 _featureCapacity,
                 _requestBodyDataRate).ConfigureAwait(false);
         }
@@ -2669,7 +2890,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 stream.CompleteResponse();
             }
 
-            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: headersEndStream, cancellationToken).ConfigureAwait(false);
+            await WriteResponseHeaderBlockAsync(context, headerBlock, endStream: headersEndStream, cancellationToken).ConfigureAwait(false);
 
             int offset = 0;
             while (offset < content.Length)
@@ -2682,11 +2903,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     // The send windows are exhausted (or the stream was just reset). Flush what is
                     // written so the peer can consume it and return credit, then give up the gate —
                     // parking while holding it would stall every other writer — and wait for credit.
-                    await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    await FlushResponseOutputAsync(context, cancellationToken).ConfigureAwait(false);
                     _writeScheduler.Release();
                     gateHeld = false;
 
-                    granted = await AcquireSendWindowAsync(stream, desired, cancellationToken).ConfigureAwait(false);
+                    granted = await AcquireSendWindowAsync(stream, desired, cancellationToken, context).ConfigureAwait(false);
                     if (granted == 0)
                     {
                         return false;
@@ -2723,7 +2944,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     stream.CompleteResponse();
                 }
 
-                await Http2FrameWriter.WriteAsync(Stream, frame, content.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
+                await WriteResponseFrameAsync(context, frame, content.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
                 offset += granted;
             }
 
@@ -2737,14 +2958,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 }
 
                 stream.CompleteResponse();
-                await WriteHeaderBlockAsync(context.StreamId, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
+                await WriteResponseHeaderBlockAsync(context, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
             }
 
             // RFC 9113 §6.8 / #686 — the caller MUST observe a guarantee that the response bytes
             // have been handed off to the transport pipe before SendAsync returns. Flush the pipe
             // writer here so the bytes are durably committed to the send side of the underlying
             // transport before the gate is released.
-            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await FlushResponseOutputAsync(context, cancellationToken).ConfigureAwait(false);
             return true;
         }
         finally
@@ -2820,8 +3041,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 return;
             }
 
-            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream, cancellationToken).ConfigureAwait(false);
-            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await WriteResponseHeaderBlockAsync(context, headerBlock, endStream, cancellationToken).ConfigureAwait(false);
+            await FlushResponseOutputAsync(context, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -2899,7 +3120,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         while (offset < data.Length)
         {
             int maxChunk = Math.Min((int)_remoteSettings.MaxFrameSize, data.Length - offset);
-            int granted = await AcquireSendWindowAsync(stream, maxChunk, cancellationToken).ConfigureAwait(false);
+            int granted = await AcquireSendWindowAsync(stream, maxChunk, cancellationToken, context).ConfigureAwait(false);
             if (granted == 0)
             {
                 return;
@@ -2937,8 +3158,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
                 Http2Frame frame = new();
                 frame.PrepareData(context.StreamId);
-                await Http2FrameWriter.WriteAsync(Stream, frame, chunk, cancellationToken).ConfigureAwait(false);
-                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await WriteResponseFrameAsync(context, frame, chunk, cancellationToken).ConfigureAwait(false);
+                await FlushResponseOutputAsync(context, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -3011,14 +3232,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     Http2Frame frame = new();
                     frame.PrepareData(context.StreamId);
                     frame.DataFlags |= Http2DataFrameFlags.EndStream;
-                    await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                    await WriteResponseFrameAsync(context, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    await WriteHeaderBlockAsync(context.StreamId, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
+                    await WriteResponseHeaderBlockAsync(context, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
                 }
 
-                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await FlushResponseOutputAsync(context, cancellationToken).ConfigureAwait(false);
             }
             finally
             {

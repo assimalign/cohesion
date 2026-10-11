@@ -85,7 +85,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             {
                 context.RunResponseInterceptors(
                     responseInterceptors,
-                    new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider, _altSvcHeaderValue),
+                    new Http1ResponseBodyStream(Stream, Connection, context, _limits.MinResponseDataRate, _timeProvider, _altSvcHeaderValue),
                     new Http1ExchangeControl(context, Stream));
             }
 
@@ -242,15 +242,40 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         (ReadOnlyMemory<byte> head, byte[] body) = await Http1MessageWriter.EncodeResponseAsync(http1Context, cancellationToken).ConfigureAwait(false);
 
         // Commit point: from here the final response is on the wire, so the exchange control's
-        // probes must report the response as started (no more interim writes or takeover).
+        // probes must report the response as started (no more interim writes or takeover). The response
+        // rate is resolved, and the request's knob frozen, here too (#1384): a reader that stops draining
+        // the connection closes it instead of holding this writer.
         http1Context.MarkFinalResponseStarted();
-        await Http1MessageWriter.WriteResponseAsync(
+        MinDataRateGate? gate = http1Context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
+
+        if (!await Http1MessageWriter.WriteResponseAsync(
             Stream,
             head,
             body,
             writeBody: http1Context.Request.Method != HttpMethod.Head,
-            cancellationToken).ConfigureAwait(false);
+            gate,
+            cancellationToken).ConfigureAwait(false))
+        {
+            throw FailSlowResponse(Connection, http1Context);
+        }
+
         await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ends an exchange whose reader fell below its minimum response data rate (#1384). HTTP/1.1 has no
+    /// reset finer than the connection, so the connection is aborted — a write the peer never drains
+    /// cannot be completed, and a graceful close would wait on it — and the receive loop ends after the
+    /// exchange. The exchange's <c>RequestCancelled</c> fires, so the handler observes the cancellation.
+    /// </summary>
+    /// <param name="connection">The connection to abort.</param>
+    /// <param name="context">The exchange whose response stalled.</param>
+    /// <returns>The exception the stalled write throws.</returns>
+    internal static OperationCanceledException FailSlowResponse(IConnection connection, Http1Context context)
+    {
+        context.KeepAlive = false;
+        connection.Abort(new IOException("The peer did not read the response at the configured minimum data rate."));
+        return context.AbortSlowResponse();
     }
 
     /// <summary>

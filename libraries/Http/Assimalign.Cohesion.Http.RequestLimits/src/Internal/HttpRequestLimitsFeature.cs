@@ -5,8 +5,9 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <summary>
 /// Write-through implementation of every per-request limit contract this package provides, on one
 /// object: a typed view over the parse context's knobs
-/// (<see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/> and
-/// <see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>). Reads and writes flow to
+/// (<see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/>,
+/// <see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/> and
+/// <see cref="HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>). Reads and writes flow to
 /// the context, the values the transport enforces, and each read-only lifecycle delegates to the
 /// transport-owned freeze flag of its knob.
 /// </summary>
@@ -14,8 +15,9 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <para>
 /// One object, one slot: the feature collection is keyed by <see cref="Name"/>, and a typed lookup
 /// returns the first feature implementing the requested contract, so
-/// <c>Features.Get&lt;IHttpMaxRequestBodySizeFeature&gt;()</c> and
-/// <c>Features.Get&lt;IHttpMinRequestBodyDataRateFeature&gt;()</c> both find this object. Every exchange
+/// <c>Features.Get&lt;IHttpMaxRequestBodySizeFeature&gt;()</c>,
+/// <c>Features.Get&lt;IHttpMinRequestBodyDataRateFeature&gt;()</c> and
+/// <c>Features.Get&lt;IHttpMinResponseDataRateFeature&gt;()</c> all find this object. Every exchange
 /// pays one allocation and one dictionary slot for all the limits, which keeps the web host's
 /// presized feature collection (#1381) the size it was with the body-size feature alone.
 /// </para>
@@ -25,7 +27,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// body-size feature before still finds it.
 /// </para>
 /// </remarks>
-internal sealed class HttpRequestLimitsFeature : IHttpMaxRequestBodySizeFeature, IHttpMinRequestBodyDataRateFeature
+internal sealed class HttpRequestLimitsFeature : IHttpMaxRequestBodySizeFeature, IHttpMinRequestBodyDataRateFeature, IHttpMinResponseDataRateFeature
 {
     private readonly HttpExchangeInterceptorRequestContext _context;
 
@@ -64,5 +66,16 @@ internal sealed class HttpRequestLimitsFeature : IHttpMaxRequestBodySizeFeature,
         get => _context.MinRequestBodyDataRate;
         // The context setter throws InvalidOperationException once the transport has frozen the value.
         set => _context.MinRequestBodyDataRate = value;
+    }
+
+    /// <inheritdoc />
+    bool IHttpMinResponseDataRateFeature.IsReadOnly => _context.IsMinResponseDataRateReadOnly;
+
+    /// <inheritdoc />
+    HttpMinDataRate? IHttpMinResponseDataRateFeature.MinDataRate
+    {
+        get => _context.MinResponseDataRate;
+        // The context setter throws InvalidOperationException once the transport has frozen the value.
+        set => _context.MinResponseDataRate = value;
     }
 }

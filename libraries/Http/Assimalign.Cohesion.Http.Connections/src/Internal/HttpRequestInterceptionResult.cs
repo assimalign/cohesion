@@ -31,8 +31,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see langword="null"/> when none was added; the transport hands them to the exchange
 /// (<see cref="TransportHttpContext.AddedResponseInterceptors"/>).
 /// </param>
+/// <param name="Context">
+/// The request's parse context, or <see langword="null"/> on the zero-interceptor fast path. The
+/// transport hands it to the exchange (<see cref="TransportHttpContext.RequestInterception"/>), whose
+/// response reads its minimum data rate from it at the first write (#1384).
+/// </param>
 internal readonly record struct HttpRequestInterceptionResult(
     HttpFeatureCollection? Features,
     long? MaxRequestBodySize,
     Stream Body,
-    IReadOnlyList<IHttpExchangeInterceptor>? ResponseInterceptors = null);
+    IReadOnlyList<IHttpExchangeInterceptor>? ResponseInterceptors = null,
+    HttpExchangeInterceptorRequestContext? Context = null);

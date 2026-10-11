@@ -47,7 +47,9 @@ public sealed class Http3ConnectionListenerOptions
     /// arrive within <see cref="HttpConnectionListenerLimits.RequestHeadersTimeout"/> is reset with
     /// <c>H3_REQUEST_REJECTED</c>; and a body that falls below
     /// <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/> is answered with
-    /// <c>408 Request Timeout</c>. Each property documents its HTTP/3 enforcement.
+    /// <c>408 Request Timeout</c>; and a response the peer does not accept at
+    /// <see cref="HttpConnectionListenerLimits.MinResponseDataRate"/> has its request stream reset with
+    /// <c>H3_REQUEST_CANCELLED</c> (#1384). Each property documents its HTTP/3 enforcement.
     /// </para>
     /// </remarks>
     public sealed class Http3Limits : HttpConnectionListenerLimits

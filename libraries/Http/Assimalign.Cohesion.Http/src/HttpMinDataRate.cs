@@ -21,7 +21,8 @@ namespace Assimalign.Cohesion.Http;
 /// The policy is an immutable value object; construct a new instance to change either dimension. Where
 /// a policy is optional, <see langword="null"/> disables the check. The server transport's listener
 /// limits carry the defaults, and each request's parse context carries the values that apply to it
-/// (<see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/>), which a request-parse
+/// (<see cref="HttpExchangeInterceptorRequestContext.MinRequestBodyDataRate"/> and
+/// <see cref="HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>), which a request-parse
 /// interceptor or a feature package can change for one request before the transport starts the
 /// transfer.
 /// </para>

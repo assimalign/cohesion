@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -17,9 +17,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <remarks>
 /// Chunked framing is self-delimiting, so the connection can stay keep-alive after a streamed
 /// response. The connection stream is owned by the connection, so this sink never disposes it — it
-/// only writes and flushes. When a minimum response data rate is configured, each body write and
-/// flush is bounded: a reader that fails to drain the response below that rate aborts the exchange
-/// (RFC 9110 §15.5.9 timeout semantics) instead of blocking the server indefinitely.
+/// only writes and flushes. When a minimum response data rate applies (the listener's, or the one the
+/// request set for itself, #1384), every write and flush of the head, the body and the terminator is
+/// bounded: a reader that fails to drain the response below that rate closes the connection, which is
+/// HTTP/1.1's only reset, and the exchange is cancelled (<see cref="Http1ConnectionContext.FailSlowResponse"/>)
+/// instead of blocking the server indefinitely.
 /// </remarks>
 internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 {
@@ -28,18 +30,34 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
     private static readonly byte[] _crlf = { (byte)'\r', (byte)'\n' };
 
     private readonly Stream _stream;
+    private readonly IConnection _connection;
     private readonly Http1Context _context;
-    private readonly MinDataRateGate? _gate;
+    private readonly HttpMinDataRate? _listenerRate;
+    private readonly TimeProvider _timeProvider;
     private readonly string? _altSvcHeaderValue;
+    // The gate the response is held to, resolved at the head commit: the request's own rate when a parse
+    // context carries one, else the listener's. Null when the response is held to no rate.
+    private MinDataRateGate? _gate;
     private bool _chunked;
     private bool _suppressBody;
 
-    public Http1ResponseBodyStream(Stream stream, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider, string? altSvcHeaderValue)
+    /// <summary>
+    /// Initializes the sink over the connection stream.
+    /// </summary>
+    /// <param name="stream">The connection stream the response is written to.</param>
+    /// <param name="connection">The connection, aborted when the reader falls below the minimum data rate.</param>
+    /// <param name="context">The exchange whose response this is.</param>
+    /// <param name="minResponseDataRate">The listener's minimum response data rate, used unless the request changed its own.</param>
+    /// <param name="timeProvider">The clock the rate is measured on.</param>
+    /// <param name="altSvcHeaderValue">The Alt-Svc value advertised on the response, or <see langword="null"/>.</param>
+    public Http1ResponseBodyStream(Stream stream, IConnection connection, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider, string? altSvcHeaderValue)
         : base(context)
     {
         _stream = stream;
+        _connection = connection;
         _context = context;
-        _gate = minResponseDataRate is not null ? new MinDataRateGate(minResponseDataRate, timeProvider) : null;
+        _listenerRate = minResponseDataRate;
+        _timeProvider = timeProvider;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -94,8 +112,13 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
             throw;
         }
 
-        await _stream.WriteAsync(head, cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        // The response starts here, so its rate is resolved, and the request's knob frozen, now (#1384).
+        // The head itself is held to it: a reader that never drains the connection can stall the head as
+        // well as the body.
+        _gate = _context.GetResponseDataRateGate(_listenerRate, _timeProvider);
+
+        await WriteToStreamAsync(head, cancellationToken).ConfigureAwait(false);
+        await FlushStreamAsync(cancellationToken).ConfigureAwait(false);
     }
 
     protected override async ValueTask WriteFramedAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
@@ -140,23 +163,28 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
             return;
         }
 
-        if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
+        // The octets count toward the allowance as they are handed over (MinDataRateWait), so a reader
+        // draining a large write at a healthy pace is not held to the bare grace period.
+        _gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
+
+        if (!MinDataRateWait.TryBegin(_gate, cancellationToken, out MinDataRateWait wait))
         {
-            throw ResponseTooSlow();
+            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
         }
 
-        using CancellationTokenSource timeoutSource = new(timeout, _gate.TimeProvider);
-        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
-
-        long start = _gate.TimeProvider.GetTimestamp();
         try
         {
-            await _stream.WriteAsync(data, linked.Token).ConfigureAwait(false);
-            _gate.Record(_gate.TimeProvider.GetTimestamp() - start, data.Length);
+            await _stream.WriteAsync(data, wait.Token).ConfigureAwait(false);
+            wait.Complete();
         }
-        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (wait.TimedOut)
         {
-            throw ResponseTooSlow();
+            wait.Complete();
+            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
+        }
+        finally
+        {
+            wait.Dispose();
         }
     }
 
@@ -168,31 +196,24 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
             return;
         }
 
-        if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
+        if (!MinDataRateWait.TryBegin(_gate, cancellationToken, out MinDataRateWait wait))
         {
-            throw ResponseTooSlow();
+            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
         }
 
-        using CancellationTokenSource timeoutSource = new(timeout, _gate.TimeProvider);
-        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
-
-        long start = _gate.TimeProvider.GetTimestamp();
         try
         {
-            await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
-            _gate.Record(_gate.TimeProvider.GetTimestamp() - start, 0);
+            await _stream.FlushAsync(wait.Token).ConfigureAwait(false);
+            wait.Complete();
         }
-        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (wait.TimedOut)
         {
-            throw ResponseTooSlow();
+            wait.Complete();
+            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
         }
-    }
-
-    private static IOException ResponseTooSlow()
-    {
-        // RFC 9110 §15.5.9 — a reader draining the response below the configured minimum data rate
-        // is abandoned. The response has already started, so the status cannot change; the exchange
-        // is aborted as a wire-level failure.
-        return new IOException("The response was written below the configured minimum data rate.");
+        finally
+        {
+            wait.Dispose();
+        }
     }
 }

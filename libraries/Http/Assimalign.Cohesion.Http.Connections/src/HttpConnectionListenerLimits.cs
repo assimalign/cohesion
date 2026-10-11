@@ -23,10 +23,10 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// Enforcement is per version. Every version enforces the body-size cap, the keep-alive and
 /// request-headers timeouts, and the minimum request-body data rate: HTTP/1.1 in its read path and
 /// connection loop, HTTP/2 in its frame pump and request-body pipe, and HTTP/3 in its accept loop,
-/// request-head read and lazily read request body. The minimum response data rate is enforced by the
-/// HTTP/1.1 streaming response sink only; HTTP/2 and HTTP/3 responses are paced by flow control. On
-/// every version <see cref="MaxRequestBodySize"/> and <see cref="MinRequestBodyDataRate"/> additionally seed
-/// each request's parse context, so request-parse interceptors observe and adjust the same knobs no matter
+/// request-head read and lazily read request body. Every version enforces the minimum response data
+/// rate on its response writes too (#1384). On every version <see cref="MaxRequestBodySize"/>,
+/// <see cref="MinRequestBodyDataRate"/> and <see cref="MinResponseDataRate"/> additionally seed each
+/// request's parse context, so request-parse interceptors observe and adjust the same knobs no matter
 /// which protocol served the request. Each property documents where, and with what signal, it is enforced so an operator never
 /// has to guess.
 /// </para>
@@ -197,26 +197,49 @@ public abstract class HttpConnectionListenerLimits
     }
 
     /// <summary>
-    /// Gets or sets the minimum rate, in octets per second (with a grace period), at which the
-    /// response body must be written to the peer once the grace period elapses, or
-    /// <see langword="null"/> to disable the check. A reader that fails to drain the response below
-    /// this rate stops blocking the server: the write fails and the exchange is aborted. Defaults to
-    /// 240 octets per second over a 5-second grace period (Kestrel's <c>MinResponseDataRate</c>
-    /// parity). Enforced by the HTTP/1.1 streaming response write path (the incremental chunked
-    /// sink) only; the HTTP/1.1 buffered response path and the HTTP/2 and HTTP/3 send paths, which
-    /// flow control paces, do not enforce it.
+    /// Gets or sets the minimum rate, in octets per second (with a grace period), at which the peer
+    /// must accept the response once the grace period elapses, or <see langword="null"/> to disable the
+    /// check. A peer that withholds flow-control credit or reads below this rate stops holding the
+    /// response writer: the transport releases the exchange's slot with its version's signal, the
+    /// exchange's <c>RequestCancelled</c> fires, and the stalled write throws an
+    /// <see cref="OperationCanceledException"/>. Defaults to 240 octets per second over a 5-second grace
+    /// period (Kestrel's <c>MinResponseDataRate</c> parity). Enforced on every version, for the buffered
+    /// and the streamed response alike (#1384).
     /// </summary>
     /// <remarks>
     /// <para>
     /// As with <see cref="MinRequestBodyDataRate"/>, the rate is an average measured only over time
-    /// spent waiting on the peer to accept bytes; see <see cref="HttpMinDataRate"/>.
+    /// spent waiting on the peer to accept octets; see <see cref="HttpMinDataRate"/>. The octets a write
+    /// hands to the transport count toward the allowance as they are handed over, so a reader draining a
+    /// large response at a healthy pace is never mistaken for a slow one. A buffered body is handed over
+    /// in pieces (16 KB on HTTP/1.1 and HTTP/3, a DATA frame within the flow-control windows on HTTP/2),
+    /// so a peer that reads none of it is reclaimed within the grace period plus the octets already
+    /// handed over, over the rate (about 73 seconds by default for one 16 KB piece), not plus the whole
+    /// body.
     /// </para>
+    /// <list type="bullet">
+    /// <item><description><b>HTTP/1.1</b> — every write and flush of the head, the body and the chunked
+    /// terminator. HTTP/1.1 has no reset finer than the connection, so the connection is closed.</description></item>
+    /// <item><description><b>HTTP/2</b> — the wait for send-window credit and every write of the
+    /// response's frames to the connection. A stream whose own window the peer leaves empty is reset
+    /// with <c>RST_STREAM(CANCEL)</c>, and the connection keeps serving its other streams; when the
+    /// connection-level window is empty and the peer has not credited it for a grace period, the whole
+    /// connection is stalled, so it ends with
+    /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>; and when the connection's output stops draining it is
+    /// aborted.</description></item>
+    /// <item><description><b>HTTP/3</b> — every write and flush of the response's frames to the request
+    /// stream, which QUIC stream and connection credit (<c>MAX_STREAM_DATA</c>, <c>MAX_DATA</c>) pace.
+    /// The request stream is reset with <c>H3_REQUEST_CANCELLED</c>, and the connection keeps serving its
+    /// other streams.</description></item>
+    /// </list>
     /// <para>
-    /// On HTTP/2 and HTTP/3 a peer that grants no flow-control credit (an HTTP/2
-    /// <c>SETTINGS_INITIAL_WINDOW_SIZE</c> of 0, or no QUIC stream credit) parks the response writer for
-    /// as long as it likes. The exchange never ends, so the connection stays busy: the
-    /// <see cref="KeepAliveTimeout"/> never arms, and one request to an endpoint with a non-empty
-    /// response holds the connection indefinitely.
+    /// This is the listener-wide default, seeded into each request's parse context
+    /// (<see cref="Assimalign.Cohesion.Http.HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>),
+    /// where a request-parse interceptor, middleware or an endpoint may lower, raise or disable it until
+    /// the response's first write freezes it (the <c>Assimalign.Cohesion.Http.RequestLimits</c> package
+    /// surfaces it as a typed <c>IHttpMinResponseDataRateFeature</c>). A tunnel (an accepted HTTP/1.1
+    /// upgrade or <c>CONNECT</c>, or an extended <c>CONNECT</c>) is not a response body and is never held
+    /// to it, and neither are interim (<c>1xx</c>) responses.
     /// </para>
     /// </remarks>
     public HttpMinDataRate? MinResponseDataRate

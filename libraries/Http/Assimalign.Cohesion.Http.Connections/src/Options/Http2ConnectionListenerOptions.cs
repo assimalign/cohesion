@@ -45,8 +45,10 @@ public sealed class Http2ConnectionListenerOptions
     /// <c>GOAWAY(NO_ERROR)</c>); <see cref="HttpConnectionListenerLimits.RequestHeadersTimeout"/> (a field
     /// block that does not end in time escalates like the limits above, to
     /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>); and <see cref="HttpConnectionListenerLimits.MinRequestBodyDataRate"/>
-    /// (<c>408</c>, or a reset once the response started, per stream). Each property documents its
-    /// HTTP/2 enforcement.
+    /// (<c>408</c>, or a reset once the response started, per stream); and
+    /// <see cref="HttpConnectionListenerLimits.MinResponseDataRate"/> (a stream whose window the peer
+    /// leaves empty is reset with <c>CANCEL</c>, and a connection whose window or output it stalls ends,
+    /// #1384). Each property documents its HTTP/2 enforcement.
     /// </para>
     /// <para>
     /// These limits are consumed entirely by the HTTP/2 frame machinery; there is no DI, logging,

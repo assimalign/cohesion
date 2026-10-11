@@ -134,6 +134,46 @@ public class HttpRequestLimitsTests
         Should.Throw<InvalidOperationException>(() => rate.MinDataRate = seeded);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Response rate feature: Should write through to the context knob and follow its freeze")]
+    public void MinResponseDataRate_OnWriteAndFreeze_ShouldWriteThroughAndBecomeReadOnly()
+    {
+        // Arrange
+        HttpMinDataRate seeded = new(240, TimeSpan.FromSeconds(5));
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        context.MinResponseDataRate = seeded;
+        HttpRequestLimits.CreateInterceptor().AfterRequestHead(context);
+        IHttpMinResponseDataRateFeature? feature = context.Features.Get<IHttpMinResponseDataRateFeature>();
+
+        // Act and assert — the same object as the other limits, viewing the response knob.
+        feature.ShouldNotBeNull();
+        feature.ShouldBeSameAs(context.Features.Get<IHttpMaxRequestBodySizeFeature>());
+        feature!.MinDataRate.ShouldBeSameAs(seeded);
+        feature.MinDataRate = null;
+        context.MinResponseDataRate.ShouldBeNull();
+
+        // The request-body freeze does not touch the response knob; the response's own freeze does.
+        context.FreezeMinRequestBodyDataRate();
+        feature.IsReadOnly.ShouldBeFalse();
+        context.FreezeMinResponseDataRate();
+        feature.IsReadOnly.ShouldBeTrue();
+        Should.Throw<InvalidOperationException>(() => feature.MinDataRate = seeded);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Context extension: Should surface the response data-rate feature")]
+    public void MinResponseDataRateExtension_OnLimitsInterceptor_ShouldReturnFeature()
+    {
+        // Arrange
+        HttpExchangeInterceptorRequestContext parse = CreateContext(maxRequestBodySize: null);
+        HttpRequestLimits.CreateInterceptor().AfterRequestHead(parse);
+        HttpContextDouble exchange = new(parse.Features);
+
+        // Act
+        IHttpMinResponseDataRateFeature? feature = exchange.MinResponseDataRate;
+
+        // Assert
+        feature.ShouldBeSameAs(parse.Features.Get<IHttpMinResponseDataRateFeature>());
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Context extension: Should surface the request-body data-rate feature")]
     public void MinRequestBodyDataRateExtension_OnLimitsInterceptor_ShouldReturnFeature()
     {

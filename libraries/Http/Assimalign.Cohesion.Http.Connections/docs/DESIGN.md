@@ -889,9 +889,12 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   writer too, which then discards the rest of its write (RFC 9113 §5.4.2), and credit
   reserved for a frame that never reached the wire is returned. The buffered
   `SendAsync` path uses the same mechanism — see "HTTP/2 response flow control, HEAD,
-  and the request-body cap".
+  and the request-body cap". A response writer's wait for credit, and its frame writes,
+  are held to `MinResponseDataRate`, so a peer that grants no credit cannot park it
+  for good (#1384; "Minimum response data rate (#1384)").
 - **HTTP/3** rides QUIC, whose per-stream flow control is applied by the transport on
   the underlying `Stream.WriteAsync`, so no software window accounting is needed here.
+  Each write is held to `MinResponseDataRate` (#1384).
 
 A completed streamed response performs the same cleanup as the buffered path: the
 fully-closed stream is removed from the stream table (reclaiming any undrained
@@ -906,10 +909,9 @@ HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
 
 ### Non-goals
 
-- **Data-rate (minimum-throughput) limits** on the *HTTP/2 / HTTP/3* streamed body — still
-  deferred (h2 paces via flow control, h3 via QUIC). The **HTTP/1.1** streaming write path *does*
-  now enforce `MinResponseDataRate` (a slow reader that fails to drain the response is abandoned) —
-  see "HTTP/1.1 request-body streaming and data rates" below.
+- **Data-rate (minimum-throughput) limits** — not a non-goal any more: every version holds the
+  streamed and the buffered response to `MinResponseDataRate` (#1384; see "Minimum response data
+  rate (#1384)" below).
 - **A streaming/SSE dependency in this library.** By design — the feature packages
   own it; this transport only exposes the sink and the interceptor seam.
 
@@ -1285,7 +1287,7 @@ of the box:
 | `MaxChunkFramingLineSize` | 8 KB | `Http1RequestBodyStream` chunk framing-line read; twice it bounds the body's unpaid chunk framing | `400` for a chunk-size line (extensions included) or a body over its framing budget, `431` for a trailer field line, after dispatch (#1375) |
 | `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1RequestBodyStream` (frozen at first read) | `413` Content Too Large (§15.5.14), after dispatch (#1339) |
 | `MinRequestBodyDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1RequestBodyStream` | `408` Request Timeout (§15.5.9), after dispatch (#1339) |
-| `MinResponseDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1ResponseBodyStream` (streaming sink) | exchange aborted (`IOException`) |
+| `MinResponseDataRate` | 240 B/s, 5 s grace (`null` = off) | `Http1MessageWriter.WriteResponseAsync` (buffered) and `Http1ResponseBodyStream` (streaming sink), from the response's first write (#1384) | connection aborted, exchange cancelled (`OperationCanceledException`) |
 | `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
 | `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
 
@@ -1769,12 +1771,14 @@ proportional slack while one that stalls exhausts it. Two design choices matter:
 
 On the request side, a read that would exceed the allowance is failed with an
 `Http1LimitExceededException(408)`, whose status the body stream latches so the
-transport answers `408` itself (#1339); on the response side (the streaming sink,
-`Http1ResponseBodyStream`), a write / flush that blocks too long on a slow reader
-is failed with an `IOException` (the response has already started, so its status
-cannot change — the exchange is aborted as a wire failure). Both are `IOException`
-subtypes, so an unhandled data-rate failure degrades to the wire-level-drop path
-rather than faulting the host.
+transport answers `408` itself (#1339). On the response side (the buffered path and
+the streaming sink), a write or flush that blocks too long on a slow reader aborts the
+connection, cancels the exchange, and fails with an `OperationCanceledException`
+carrying `RequestCancelled`: the response has already started, so its status cannot
+change, and a host records a cancelled exchange rather than an application fault
+(#1384; "Minimum response data rate (#1384)" has every version). A response credits
+the octets it hands over before it waits, so a large write a healthy reader drains is
+never held to the bare grace period.
 
 ### AOT posture
 
@@ -1810,7 +1814,7 @@ its HTTP/2 and HTTP/3 endpoints, so configuration needs no change.
 | `KeepAliveTimeout` | Idle while the stream table is empty and no exchange keeps a retired slot, measured from acceptance (the preface and the client's SETTINGS arrive under it) or the end of the last exchange, whichever is later. A stream that never became an exchange does not restart it. `GOAWAY(NO_ERROR)`, or no frame at all before the preface | Idle while no request stream is in flight, measured from the start of the receive loop or the end of the last exchange, whichever is later. Graceful close: `GOAWAY`, the receive enumeration ends, and the host closes the QUIC connection with `H3_NO_ERROR` |
 | `RequestHeadersTimeout` | From a HEADERS frame's header to END_HEADERS: request heads, trailer sections, and blocks on refused or reset streams. `GOAWAY(ENHANCE_YOUR_CALM)` | From the request stream's acceptance until its field section has decoded. That stream alone is reset with `H3_REQUEST_REJECTED` |
 | `MinRequestBodyDataRate` | The stream's body reader, from its first read, under the rate the request ended up with (#1383); a low connection receive window excuses at most the grace period of its waits. `408` and `RST_STREAM(NO_ERROR)` before the response starts; `RST_STREAM(CANCEL)` after | The lazy body, from its first read, under the rate the request ended up with (#1383). `STOP_SENDING(H3_NO_ERROR)` at the deadline, then `408` from the send path while the head is uncommitted |
-| `MinResponseDataRate` | Not enforced; flow control paces the writer | Not enforced; QUIC flow control paces the writer |
+| `MinResponseDataRate` | Not enforced by #1085; #1384 bounds the credit wait and the frame writes (see "Minimum response data rate (#1384)") | Not enforced by #1085; #1384 bounds the request stream's writes |
 
 Whichever deadline fires, the connection's receive enumeration ends or the stream is answered,
 so the host releases what it held: its connection slot, or the stream's exchange.
@@ -1954,14 +1958,9 @@ octets delivered extend the allowance. When the allowance runs out:
 
 ### Not covered
 
-- **`MinResponseDataRate` on HTTP/2 and HTTP/3.** A peer that grants no flow-control credit
-  holds a response writer for as long as its exchange runs. HTTP/1.1 enforces the response rate
-  on its streaming sink only, so the buffered paths of all three versions share the gap. The gap
-  pins the whole connection, not just the writer. A client that advertises
-  `SETTINGS_INITIAL_WINDOW_SIZE=0` on HTTP/2, or grants no QUIC stream credit on HTTP/3, parks
-  the response of a single GET to any endpoint with a non-empty body. The exchange never ends,
-  so the connection stays busy: the keep-alive deadline never arms, and the request-headers and
-  body-rate deadlines have nothing left to bound.
+- **`MinResponseDataRate` on HTTP/2 and HTTP/3.** Closed by #1384: a peer that grants no
+  flow-control credit, or reads below the rate, is reclaimed on every version and both response
+  paths (see "Minimum response data rate (#1384)").
 - **A per-request opt-out from `MinRequestBodyDataRate`.** Closed by #1383: a request can lower,
   raise or disable its own rate until the first read of its body, on all three versions (see
   "Per-request data rates (#1383)").
@@ -2066,6 +2065,111 @@ delegates once, configured or not. The zero-interceptor fast path is unchanged.
 
 No reflection or code generation: a nullable reference on the context, a freeze flag, and the existing
 `MinDataRateGate` arithmetic.
+
+## Minimum response data rate (#1384)
+
+### The hole this closes
+
+A client that never reads a response held the server's response writer for as long as it liked:
+
+- **HTTP/2.** A writer waits for send-window credit, and a peer that grants none (an initial window
+  of 0, or no `WINDOW_UPDATE` after the first 65,535 octets) parked it with no deadline. A peer that
+  stopped reading the TCP connection itself parked the writer that held the connection's write gate,
+  and every other writer behind it.
+- **HTTP/3.** QUIC paces a response with `MAX_STREAM_DATA` and `MAX_DATA`; a peer that grants no
+  credit blocked the response's flushes with no deadline. The frame headers were written octet by
+  octet through the stream adapter, whose synchronous writes flush, so a stalled write could block a
+  thread no token could reach.
+- **HTTP/1.1.** The streaming sink enforced `MinResponseDataRate`, but the buffered path, every
+  ordinary response, did not, and the sink did not bound its head write.
+
+Each blocked write kept its handler and buffers alive, up to `MaxStreamsPerConnection` per HTTP/2
+connection. The connection was never idle, so #1085's keep-alive never fired. An unauthenticated
+client could hold server resources indefinitely with ordinary requests (a slow-read denial of service,
+CWE-400). 10.0.0-preview.1 shipped every one of these paths unbounded, except the HTTP/1.1 sink.
+
+### What every version enforces now
+
+`HttpConnectionListenerLimits.MinResponseDataRate` (default 240 octets per second after a 5-second
+grace period) now holds every response body on every version, buffered and streamed. The rate, as on
+the request side, is an average measured with `MinDataRateGate` over the time the transport waits for
+the peer, and only that time: a handler that is slow to produce its response is never charged. When the
+allowance runs out, the transport releases the peer's slot with its version's signal, the exchange's
+`RequestCancelled` fires, and the stalled write throws an `OperationCanceledException` carrying that
+token (Kestrel's `ConnectionAbortedException` is one too), so a host records a cancelled exchange, not
+an application fault.
+
+| Version | What is bounded | Signal |
+|---|---|---|
+| HTTP/1.1 | Every write and flush of the head, the body and the chunked terminator, on the buffered path (`Http1MessageWriter.WriteResponseAsync`) and the streaming sink (`Http1ResponseBodyStream`) | The connection is aborted, the only reset HTTP/1.1 has, and the receive loop ends after the exchange |
+| HTTP/2 | The wait for send-window credit (`AcquireSendWindowAsync`), and every write and flush of the response's HEADERS and DATA frames | Stream window empty: `RST_STREAM(CANCEL)`, and the connection keeps serving. Connection window empty and uncredited for a grace period: `GOAWAY(ENHANCE_YOUR_CALM)` and the pump stops. Output not draining: the connection is aborted and the pump stops |
+| HTTP/3 | Every write and flush of the response's frames to the request stream, which QUIC credit paces | The request stream is reset with `H3_REQUEST_CANCELLED`, and the connection keeps serving |
+
+The HTTP/2 signal follows what holds the writer when its allowance runs out. RFC 9113 §8.1's `CANCEL`
+says the response is no longer needed, and the stream keeps its slot until the exchange ends, like
+every stream the server resets. When the connection-level window is what is empty and the peer has not
+credited it (a `WINDOW_UPDATE` on stream 0) for a whole grace period, every stream of the connection is
+stalled, so the connection ends with `GOAWAY(ENHANCE_YOUR_CALM)`: RFC 9113 §10.5 lets an endpoint treat
+activity that ties up its resources as that connection error, and it is the code this connection's other
+limits escalate to. Stopping the pump aborts every exchange the connection carries and ends the receive
+enumeration, so the host releases the connection. Connection credit that keeps arriving means the peer is
+reading and other streams took the credit: the writer was starved, not the connection, so only its stream
+is reset. A stream is held to the rate over the credit it actually gets, so a connection that shares its
+throughput among N streams keeps each above the rate while its throughput exceeds N times the rate (at the
+default 240 octets per second, 100 streams need 24 KB/s). When the connection's output
+itself stops draining, nothing more can be written, a `GOAWAY` included, so the connection is aborted.
+HTTP/3 has no shared window to tell apart: a peer that withholds `MAX_DATA` stalls every response, and
+each is reset as its own allowance runs out, with the code RFC 9114 §4.1.1 gives a request whose
+processing began.
+
+### Crediting octets as they are handed over
+
+A writer credits the octets it hands to the transport before it waits for the transport to accept them
+(`MinDataRateWait`), as Kestrel's write timing does: the peer must accept them within the grace period
+plus the octets over the rate. The HTTP/1.1 sink used to credit a write only after it completed, so one
+large write that a healthy reader drained above the rate, but for longer than the grace period, was
+reclaimed as a slow reader. Crediting first fixes that, and is what "unify" means for the sink: every
+version and both paths now share one accounting.
+
+Crediting a whole buffered body up front would hand a peer that reads nothing the body's size over the
+rate (a megabyte at the default rate is over an hour). So a buffered body is handed over in pieces of
+`MinDataRateWait.MaxWriteSize` (16 KB), each credited as it goes, and a peer that reads none of it is
+reclaimed within the grace period plus about one piece over the rate, some 73 seconds by default. On
+HTTP/2 the pieces are the DATA frames the flow-control windows admit, so a peer that grants no credit
+gets the grace period alone. The pieces cost an HTTP/1.1 or HTTP/3 response one flush per 16 KB, and
+only when a rate applies; a pipe flush that the reader keeps up with does not wait.
+
+### The per-request knob
+
+The rate is the listener's default, seeded into the request's parse context
+(`HttpExchangeInterceptorRequestContext.MinResponseDataRate`) like the request-body rate (#1383), and
+frozen at the response's first write (`TransportHttpContext.GetResponseDataRateGate`), which resolves the
+gate once per exchange. A request-parse hook, middleware or an endpoint may lower, raise or disable it
+until then; `Http.RequestLimits` surfaces it as `IHttpMinResponseDataRateFeature` on the same feature
+object as the other limits. The parse context reaches the exchange through
+`HttpRequestInterceptionResult.Context` and `TransportHttpContext.RequestInterception`, one reference
+per exchange that ran request hooks. Disabling the rate is for a response whose reader legitimately
+pauses for long stretches; it removes the slow-read defence for that response only.
+
+### Not covered
+
+- **Tunnels.** An accepted HTTP/1.1 upgrade or `CONNECT`, and an extended `CONNECT` on HTTP/2 and
+  HTTP/3, carry tunnel octets, not a response body, and are not held to the rate (as Kestrel exempts
+  upgraded connections). Their reads and writes are the tunnel's owner's to bound.
+- **Interim responses.** A `1xx` written through the exchange control is not bounded; it is small, and
+  the final response that follows is.
+- **HTTP/2 control frames.** The pump's own writes (`SETTINGS`, `PING` acknowledgements,
+  `WINDOW_UPDATE`, `RST_STREAM`, `GOAWAY`) are not held to a response's rate. A peer that floods `PING`
+  without reading the connection can stall the pump on a write while no response is in flight; the
+  flood limits bound the rate of such frames, not the time a write may block.
+- **Status-only answers.** The transport's own small answers (`408`, `413`, `431`, `400`) are not
+  bounded either; they fit in any transport buffer.
+
+### AOT posture
+
+No reflection or code generation. `MinDataRateWait` is a struct over two linked
+`CancellationTokenSource` instances, allocated only when a rate applies, and the HTTP/2 helpers pass
+their arguments through static lambdas and a value tuple, so the ungated path allocates nothing new.
 
 ## HTTP/2 request heads (RFC 9113 §8.3)
 

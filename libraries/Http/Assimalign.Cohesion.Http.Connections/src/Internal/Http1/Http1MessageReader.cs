@@ -214,6 +214,7 @@ internal static class Http1MessageReader
                 ConnectionInfo = connectionInfo,
                 MaxRequestBodySize = limits.MaxRequestBodySize,
                 MinRequestBodyDataRate = limits.MinRequestBodyDataRate,
+                MinResponseDataRate = limits.MinResponseDataRate,
             };
         }
 
@@ -324,6 +325,7 @@ internal static class Http1MessageReader
                 features)
             {
                 AddedResponseInterceptors = interception is { ResponseInterceptors.Count: > 0 } ? interception.ResponseInterceptors : null,
+                RequestInterception = interception,
             };
         }
         catch when (features is not null)

@@ -134,18 +134,90 @@ internal static class Http1MessageWriter
     /// <see langword="false"/> for a response to <c>HEAD</c>, which carries the head a <c>GET</c> would
     /// but never a body (RFC 9110 §9.3.2).
     /// </param>
+    /// <param name="gate">
+    /// The gate holding the response to its minimum data rate (#1384), or <see langword="null"/> when it is
+    /// held to none. With a gate, the head and each piece of the body (at most
+    /// <see cref="MinDataRateWait.MaxWriteSize"/> octets) are credited as they are handed over and must be
+    /// accepted within what is left of the allowance.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
-    /// <returns>A task that completes when the response has been flushed.</returns>
-    public static async ValueTask WriteResponseAsync(Stream stream, ReadOnlyMemory<byte> head, byte[] body, bool writeBody, CancellationToken cancellationToken)
+    /// <returns>
+    /// <see langword="true"/> once the response has been flushed; <see langword="false"/> when the peer
+    /// stopped accepting it below the rate, and the caller must close the connection.
+    /// </returns>
+    public static async ValueTask<bool> WriteResponseAsync(Stream stream, ReadOnlyMemory<byte> head, byte[] body, bool writeBody, MinDataRateGate? gate, CancellationToken cancellationToken)
     {
-        await stream.WriteAsync(head, cancellationToken).ConfigureAwait(false);
-
-        if (writeBody && body.Length > 0)
+        if (gate is null)
         {
-            await stream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(head, cancellationToken).ConfigureAwait(false);
+
+            if (writeBody && body.Length > 0)
+            {
+                await stream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+            }
+
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return true;
         }
 
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        if (!await TryWriteWithinRateAsync(stream, head, gate, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        if (writeBody)
+        {
+            for (int offset = 0; offset < body.Length; offset += MinDataRateWait.MaxWriteSize)
+            {
+                ReadOnlyMemory<byte> piece = body.AsMemory(offset, Math.Min(MinDataRateWait.MaxWriteSize, body.Length - offset));
+
+                if (!await TryWriteWithinRateAsync(stream, piece, gate, cancellationToken).ConfigureAwait(false))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return await TryWriteWithinRateAsync(stream, ReadOnlyMemory<byte>.Empty, gate, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Hands <paramref name="data"/> to the transport, or flushes when it is empty, crediting its octets to
+    /// <paramref name="gate"/> first and bounding the wait by what is left of the allowance.
+    /// </summary>
+    /// <returns><see langword="false"/> when the allowance ran out before the transport accepted the octets.</returns>
+    private static async ValueTask<bool> TryWriteWithinRateAsync(Stream stream, ReadOnlyMemory<byte> data, MinDataRateGate gate, CancellationToken cancellationToken)
+    {
+        gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
+
+        if (!MinDataRateWait.TryBegin(gate, cancellationToken, out MinDataRateWait wait))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (data.IsEmpty)
+            {
+                await stream.FlushAsync(wait.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                await stream.WriteAsync(data, wait.Token).ConfigureAwait(false);
+            }
+
+            wait.Complete();
+            return true;
+        }
+        catch (OperationCanceledException) when (wait.TimedOut)
+        {
+            wait.Complete();
+            return false;
+        }
+        finally
+        {
+            wait.Dispose();
+        }
     }
 
     /// <summary>

@@ -989,7 +989,9 @@ internal sealed class Http2Stream
     /// <param name="fallbackScheme">The connection scheme used when the request omits <c>:scheme</c>.</param>
     /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
-    /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
+    /// <param name="limits">
+    /// The registration's limits, whose body-size cap and data rates are seeded into the parse context.
+    /// </param>
     /// <param name="featureCapacity">The number of features the exchange is expected to carry; its feature collection is sized for it.</param>
     /// <param name="requestBodyDataRate">
     /// The connection's minimum request-body data rate policy. Its listener rate seeds the parse context,
@@ -1019,7 +1021,7 @@ internal sealed class Http2Stream
         HttpScheme fallbackScheme,
         Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
         IHttpExchangeInterceptor[] interceptors,
-        long? maxRequestBodySize,
+        HttpConnectionListenerLimits limits,
         int featureCapacity,
         Http2RequestBodyDataRate? requestBodyDataRate = null)
     {
@@ -1200,8 +1202,7 @@ internal sealed class Http2Stream
             HttpVersion.Http20,
             requestHead,
             connectionInfo,
-            maxRequestBodySize,
-            requestBodyDataRate?.Rate,
+            limits,
             isConnect,
             featureCapacity).ConfigureAwait(false);
 
@@ -1226,6 +1227,7 @@ internal sealed class Http2Stream
         {
             RequestBody = body,
             AddedResponseInterceptors = interception.ResponseInterceptors,
+            RequestInterception = interception.Context,
         };
 
         return context;

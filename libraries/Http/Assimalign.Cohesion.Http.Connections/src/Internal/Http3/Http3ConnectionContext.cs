@@ -1721,8 +1721,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 HttpVersion.Http30,
                 requestHead,
                 connectionInfo,
-                _limits.MaxRequestBodySize,
-                _limits.MinRequestBodyDataRate,
+                _limits,
                 isConnect,
                 _featureCapacity).ConfigureAwait(false);
         }
@@ -1761,6 +1760,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             interception.Features)
         {
             AddedResponseInterceptors = interception.ResponseInterceptors,
+            RequestInterception = interception.Context,
             Connection = this,
         };
         body.AttachOwner(context);
@@ -1786,7 +1786,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         {
             context.RunResponseInterceptors(
                 responseInterceptors,
-                new Http3ResponseBodyStream(context),
+                new Http3ResponseBodyStream(context, this),
                 new Http3ExchangeControl(this, context));
         }
 
@@ -2105,22 +2105,24 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             : Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
 
         // Commit point: from here the final response is on the wire, so the exchange control's
-        // probes must report the response as started (no more interim writes).
+        // probes must report the response as started (no more interim writes). Every write from here is
+        // held to the response's minimum data rate (#1384): a peer that grants no QUIC stream or connection
+        // credit, or reads below the rate, has the request stream reset instead of holding this writer.
         http3Context.MarkFinalResponseStarted();
 
-        await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
+        await WriteResponseFrameAsync(http3Context, stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
 
         if (bodyBytes.Length > 0 && !isHead)
         {
-            await WriteFrameAsync(stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
+            await WriteResponseFrameAsync(http3Context, stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
         }
 
         if (trailerBlock is not null)
         {
-            await WriteFrameAsync(stream, Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
+            await WriteResponseFrameAsync(http3Context, stream, Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
         }
 
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await FlushResponseAsync(http3Context, stream, cancellationToken).ConfigureAwait(false);
 
         // RFC 9114 §4.1 — the complete response is flushed, so the rest of an unread request is refused
         // with STOP_SENDING(H3_NO_ERROR). It goes out before the FIN: on the QUIC driver, ending the
@@ -2362,6 +2364,136 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes one frame of a response — its type and length, then its payload — to the request stream,
+    /// held to the response's minimum data rate (#1384). The frame header is encoded and written
+    /// asynchronously with the caller's token, never octet by octet: a synchronous write to the stream
+    /// adapter flushes, and a flush the peer withholds credit for would block the thread beyond any
+    /// token. With a rate, the payload is handed over in pieces of at most
+    /// <see cref="MinDataRateWait.MaxWriteSize"/> octets, each credited as it goes and accepted within
+    /// what is left of the allowance; when the allowance runs out the stream is reset
+    /// (<see cref="FailSlowResponse"/>) and the write throws.
+    /// </summary>
+    /// <param name="context">The exchange whose response is written.</param>
+    /// <param name="stream">The request stream, as a stream.</param>
+    /// <param name="frameType">The frame type.</param>
+    /// <param name="payload">The frame payload.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that completes once the request stream accepted the frame.</returns>
+    /// <exception cref="OperationCanceledException">The peer did not accept the frame at the rate; the exchange was aborted.</exception>
+    internal async ValueTask WriteResponseFrameAsync(Http3Context context, Stream stream, Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
+
+        // RFC 9114 §7.1 — frame = type (varint) + length (varint) + payload.
+        byte[] header = new byte[2 * QuicVariableLengthInteger.MaxLength];
+        int headerLength = QuicVariableLengthInteger.Write(header, (long)frameType);
+        headerLength += QuicVariableLengthInteger.Write(header.AsSpan(headerLength), payload.Length);
+
+        if (gate is null)
+        {
+            await stream.WriteAsync(header.AsMemory(0, headerLength), cancellationToken).ConfigureAwait(false);
+
+            if (!payload.IsEmpty)
+            {
+                await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        await WriteResponseOctetsWithinRateAsync(context, gate, stream, header.AsMemory(0, headerLength), cancellationToken).ConfigureAwait(false);
+
+        for (int offset = 0; offset < payload.Length; offset += MinDataRateWait.MaxWriteSize)
+        {
+            ReadOnlyMemory<byte> piece = payload.Slice(offset, Math.Min(MinDataRateWait.MaxWriteSize, payload.Length - offset));
+            await WriteResponseOctetsWithinRateAsync(context, gate, stream, piece, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Flushes a response's request stream, held to the response's minimum data rate (#1384).
+    /// </summary>
+    /// <param name="context">The exchange whose response is flushed.</param>
+    /// <param name="stream">The request stream, as a stream.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that completes once the request stream accepted every octet written.</returns>
+    /// <exception cref="OperationCanceledException">The peer did not accept the response at the rate; the exchange was aborted.</exception>
+    internal ValueTask FlushResponseAsync(Http3Context context, Stream stream, CancellationToken cancellationToken)
+    {
+        MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
+
+        return gate is null
+            ? new ValueTask(stream.FlushAsync(cancellationToken))
+            : WriteResponseOctetsWithinRateAsync(context, gate, stream, ReadOnlyMemory<byte>.Empty, cancellationToken);
+    }
+
+    /// <summary>
+    /// Hands <paramref name="data"/> to the request stream, or flushes it when <paramref name="data"/> is
+    /// empty, crediting the octets first and bounding the wait by what is left of the allowance.
+    /// </summary>
+    private async ValueTask WriteResponseOctetsWithinRateAsync(Http3Context context, MinDataRateGate gate, Stream stream, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    {
+        gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
+
+        if (!MinDataRateWait.TryBegin(gate, cancellationToken, out MinDataRateWait wait))
+        {
+            throw FailSlowResponse(context);
+        }
+
+        try
+        {
+            if (data.IsEmpty)
+            {
+                await stream.FlushAsync(wait.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                await stream.WriteAsync(data, wait.Token).ConfigureAwait(false);
+            }
+
+            wait.Complete();
+        }
+        catch (OperationCanceledException) when (wait.TimedOut)
+        {
+            wait.Complete();
+            throw FailSlowResponse(context);
+        }
+        finally
+        {
+            wait.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Ends an exchange whose peer did not accept its response at the minimum response data rate
+    /// (#1384): the request stream is reset in both directions with <c>H3_REQUEST_CANCELLED</c>
+    /// (RFC 9114 §4.1.1 — the request was processed, and its response is abandoned), which releases the
+    /// QUIC stream and leaves the connection and its other streams serving, and the exchange's
+    /// <c>RequestCancelled</c> fires. A peer that withholds connection-level credit (<c>MAX_DATA</c>)
+    /// stalls every response, and each is reset as its own allowance runs out.
+    /// </summary>
+    /// <param name="context">The exchange whose response stalled.</param>
+    /// <returns>The exception the stalled write throws.</returns>
+    internal OperationCanceledException FailSlowResponse(Http3Context context)
+    {
+        Http3RequestBodyStream requestBody = context.RequestBody;
+
+        if (!requestBody.IsReset)
+        {
+            bool abandonsReading = !requestBody.IsCompleted;
+            requestBody.MarkReset();
+
+            ResetRequestStream(
+                context.StreamConnection,
+                context.StreamId,
+                new Http3StreamException(Http3ErrorCode.RequestCancelled, "The peer did not read the response at the configured minimum data rate."),
+                abandonsReading);
+        }
+
+        return context.AbortSlowResponse();
     }
 
     private static async Task WriteFrameAsync(Stream stream, Http3FrameType frameType, byte[] payload, CancellationToken cancellationToken)

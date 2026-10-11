@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// as incremental <c>DATA</c> frames (RFC 9114 §7.2) flushed through to the QUIC request stream.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Backpressure is inherent: the QUIC transport applies per-stream flow control on the underlying
 /// <see cref="Stream"/> write, so a full window blocks the write until the peer grants more credit —
 /// no manual window accounting is needed here. The response body is delimited by the QUIC stream
@@ -21,17 +22,27 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>). Staged trailers go out as a
 /// HEADERS frame just before that end (RFC 9114 §4.1). A response to <c>HEAD</c> commits its HEADERS
 /// frame but no DATA frame and no trailers (RFC 9110 §9.3.2).
+/// </para>
+/// <para>
+/// Every write and flush is held to the response's minimum data rate (#1384), through the connection's
+/// <see cref="Http3ConnectionContext.WriteResponseFrameAsync"/> and
+/// <see cref="Http3ConnectionContext.FlushResponseAsync"/>: a peer that withholds QUIC credit, or reads
+/// below the rate, has the request stream reset with <c>H3_REQUEST_CANCELLED</c>, and the write throws an
+/// <see cref="OperationCanceledException"/> while the exchange's <c>RequestCancelled</c> fires.
+/// </para>
 /// </remarks>
 internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 {
     private readonly Http3Context _context;
+    private readonly Http3ConnectionContext _connection;
     private readonly Stream _stream;
     private bool _suppressBody;
 
-    public Http3ResponseBodyStream(Http3Context context)
+    public Http3ResponseBodyStream(Http3Context context, Http3ConnectionContext connection)
         : base(context)
     {
         _context = context;
+        _connection = connection;
         _stream = context.StreamConnection.AsStream();
     }
 
@@ -45,8 +56,8 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
         _suppressBody = _context.Request.Method == HttpMethod.Head;
 
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
-        await WriteFrameAsync(Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _connection.WriteResponseFrameAsync(_context, _stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
+        await _connection.FlushResponseAsync(_context, _stream, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async ValueTask WriteFramedAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
@@ -56,12 +67,12 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
             return;
         }
 
-        await WriteFrameAsync(Http3FrameType.Data, data, cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _connection.WriteResponseFrameAsync(_context, _stream, Http3FrameType.Data, data, cancellationToken).ConfigureAwait(false);
+        await _connection.FlushResponseAsync(_context, _stream, cancellationToken).ConfigureAwait(false);
     }
 
     protected override ValueTask FlushFramedAsync(CancellationToken cancellationToken)
-        => new(_stream.FlushAsync(cancellationToken));
+        => _connection.FlushResponseAsync(_context, _stream, cancellationToken);
 
     protected override async ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
     {
@@ -71,10 +82,10 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
         if (!_suppressBody && _context.Response.StagedTrailers is { } trailers)
         {
             byte[] trailerBlock = Http3HeaderCodec.EncodeTrailers(trailers);
-            await WriteFrameAsync(Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
+            await _connection.WriteResponseFrameAsync(_context, _stream, Http3FrameType.Headers, trailerBlock, cancellationToken).ConfigureAwait(false);
         }
 
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _connection.FlushResponseAsync(_context, _stream, cancellationToken).ConfigureAwait(false);
 
         // RFC 9114 §4.1 — the streamed body is delimited by the request stream's end. End the write
         // side (graceful QUIC FIN via the IConnection half-close contract) so the client sees the
@@ -94,18 +105,6 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
         {
             // QuicException is an IOException: the stream/connection is already gone, so the missed
             // FIN rides on the connection close instead.
-        }
-    }
-
-    private async ValueTask WriteFrameAsync(Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-    {
-        // RFC 9114 §7.1 — frame = type (varint) + length (varint) + payload.
-        QuicVariableLengthInteger.Write(_stream, (long)frameType);
-        QuicVariableLengthInteger.Write(_stream, payload.Length);
-
-        if (!payload.IsEmpty)
-        {
-            await _stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
         }
     }
 }

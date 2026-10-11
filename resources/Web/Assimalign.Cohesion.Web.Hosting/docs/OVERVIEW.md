@@ -28,9 +28,12 @@ disposes the service provider and every factory-created service.
 
 Every listener the default server composes gets four interceptors before any of the application's
 own: the request limits, the HTTP/1.1 protocol upgrade, the HTTP/2 and HTTP/3 extended
-CONNECT, and the client fault. The first surfaces the body-size cap and the minimum request-body data
-rate per request (`context.MaxRequestBodySize`, `context.MinRequestBodyDataRate`), so an endpoint
-whose body legitimately idles can disable the rate for its own requests before it reads (#1383). The
+CONNECT, and the client fault. The first surfaces the body-size cap and the minimum request-body and
+response data rates per request (`context.MaxRequestBodySize`, `context.MinRequestBodyDataRate`,
+`context.MinResponseDataRate`), so an endpoint whose body legitimately idles can disable the request
+rate before it reads (#1383), and one whose reader pauses can disable the slow-read check before its
+response starts (#1384). A client that grants no flow-control credit or stops reading is otherwise
+reclaimed on every protocol, and its exchange is recorded as cancelled. The
 next two make `context.Upgrade`, `context.ExtendedConnect` and a
 WebSocket handshake (`context.WebSockets`) work on every protocol without listener configuration. A
 request no handler accepts is served as before. The last publishes `IWebClientFaultFeature` on an
