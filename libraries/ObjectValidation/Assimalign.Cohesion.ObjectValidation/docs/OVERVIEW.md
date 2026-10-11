@@ -21,6 +21,9 @@ Implements a fluent validation engine built from validators, profiles, rules, an
   defaults, every failing member is reported, each with the errors of its first failing rule:
   `ValidationMode.Stop` stops at the first failing member, and `ContinueThroughValidationChain` runs every
   rule of a member (see [DESIGN.md](DESIGN.md), "Which Failures Are Reported").
+- `RuleForEach` error sources include zero-based element indices, including nested collections:
+  `model => model.Groups[1].Items[2].Quantity`. Explicit error source names remain as written
+  (see [DESIGN.md](DESIGN.md), "Error Sources").
 - The pattern rules bound what a request body can cost. `EmailAddress` runs in linear time and fails an
   address over the RFC 5321 sizes. `Matches` runs the caller's pattern in linear time when the non-backtracking
   engine supports it. Otherwise each match gets one second, per element under `RuleForEach`, so N strings can

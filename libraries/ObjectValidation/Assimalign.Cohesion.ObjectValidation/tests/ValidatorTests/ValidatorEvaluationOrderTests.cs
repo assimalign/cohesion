@@ -175,7 +175,7 @@ public class ValidatorEvaluationOrderTests
         ValidationResult result = validator.Validate(new Parcel { Stops = [new Address { Zip = "N1" }, new Address()] });
 
         // Assert
-        Sources(result).ShouldBe(["parcel => parcel.Stops.City", "parcel => parcel.Stops.City", "parcel => parcel.Stops.Zip"]);
+        Sources(result).ShouldBe(["parcel => parcel.Stops[0].City", "parcel => parcel.Stops[1].City", "parcel => parcel.Stops[1].Zip"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Order: a When block's members are evaluated where the block is declared")]

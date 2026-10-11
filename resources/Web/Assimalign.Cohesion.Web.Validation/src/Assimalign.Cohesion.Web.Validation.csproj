@@ -6,6 +6,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
 		<!-- The 400 a failed validation answers is the RFC 9457 payload binding failures use. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />

@@ -19,8 +19,9 @@ binding failures already use.
   validator, and a `null` body, are not validated.
 - **The failure payload.** `400` problem details with `detail` "One or more validation errors occurred."
   and an `errors` extension member mapping each failing member to its messages:
-  `{ "Name": ["..."], "Address.City": ["..."] }`. Keys are the member paths the profile declares; a nested
-  profile's errors are reported under their parent member.
+  `{ "name": ["..."], "address.city": ["..."], "items[2].quantity": ["..."] }`.
+  Keys use registered JSON contract names, with CLR names as a fallback, and zero-based collection indexes.
+  Explicit error sources are preserved. Throwing validators report their retained errors in the same format.
 - **Turning it off or on.** `validation.Options.Enabled = false` turns validation off by default;
   `DisableValidation()` turns it off for a route or a route group, and `RequireValidation()` turns it on,
   the most specific declaration winning.
@@ -33,6 +34,7 @@ binding failures already use.
 - `Assimalign.Cohesion.Web.Routing` — the endpoint metadata the decision reads and the convention-builder
   seam the verbs extend.
 - `Assimalign.Cohesion.Web.ProblemDetails` — the `application/problem+json` response.
+- `Assimalign.Cohesion.Web.Serialization` — registered JSON contracts through `TryGetJsonTypeInfo`.
 - `Assimalign.Cohesion.Http` — the HTTP context and status codes.
 - `Assimalign.Cohesion.ObjectValidation` — the validators and profiles.
 
@@ -41,6 +43,13 @@ It never references `Assimalign.Cohesion.Web.Hosting` or any `Assimalign.Cohesio
 calls it. The package and `ObjectValidation` are members of the `App.Web` shared framework.
 
 ## Usage
+
+`Sdk.Web` includes the Web source generator, which supplies reflection-free CLR member identities for
+source-declared partial `JsonSerializerContext` classes, including `[JsonPropertyName]` renames. When
+using individual packages, include `Assimalign.Cohesion.SourceGeneration.Web` as an analyzer. Custom
+resolvers that rename properties beyond policies and attributes implement `IValidationJsonPropertyResolver`
+to identify the final contract's properties. Precompiled contexts without that metadata fall back to CLR
+names for renamed mutable members; see [DESIGN.md](DESIGN.md), "The failure payload".
 
 ```csharp
 using Assimalign.Cohesion.ObjectValidation;
@@ -83,7 +92,7 @@ An invalid request:
 HTTP/1.1 400 Bad Request
 Content-Type: application/problem+json
 
-{"type":"about:blank","title":"Bad Request","status":400,"detail":"One or more validation errors occurred.","errors":{"Name":["The following expression: 'customer => customer.Name' was empty."],"Address.City":["The following expression: 'a => a.City' was empty."]}}
+{"type":"about:blank","title":"Bad Request","status":400,"detail":"One or more validation errors occurred.","errors":{"name":["The following expression: 'customer => customer.Name' was empty."],"address.city":["The following expression: 'a => a.City' was empty."]}}
 ```
 
 See [DESIGN.md](DESIGN.md) for how the generator detects the package, the decision order, the key format,

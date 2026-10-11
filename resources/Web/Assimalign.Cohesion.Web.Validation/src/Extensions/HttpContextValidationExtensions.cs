@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.ObjectValidation;
 using Assimalign.Cohesion.Web.Routing;
+using Assimalign.Cohesion.Web.Serialization;
 using Assimalign.Cohesion.Web.Validation.Internal;
 
 namespace Assimalign.Cohesion.Web.Validation;
@@ -25,8 +26,9 @@ namespace Assimalign.Cohesion.Web.Validation;
 /// The <c>400</c> carries the RFC 9457 <c>errors</c> extension member in the shape binding failures use:
 /// a map from the failing member to its messages, the members in the order the profile declares them and
 /// each member's messages in the order its rules are chained. A rule's default source, its member selector
-/// (<c>p =&gt; p.Address.City</c>), is reported as the member path (<c>Address.City</c>), the CLR member
-/// names as the profile declares them; a source the profile set is reported as written, and an error with
+/// (<c>p =&gt; p.Address.City</c>), is reported using the registered JSON contract's names
+/// (<c>address.city</c>), with CLR names as a fallback and zero-based collection indexes. A source the
+/// profile set is reported as written, and an error with
 /// no source under the empty key.
 /// </para>
 /// </remarks>
@@ -88,13 +90,11 @@ public static class HttpContextValidationExtensions
                     return true;
                 }
 
-                errors = ValidationErrorMap.Create(result.Errors);
+                errors = ValidationErrorMap.Create(result.Errors, typeof(T), context.Features.Get<IHttpContentSerializationFeature>());
             }
-            catch (ValidationFailureException)
+            catch (ValidationFailureException exception)
             {
-                // A validator built with ThrowExceptionOnFailure reports a failure by throwing, and the
-                // exception carries none of the errors: the value is still invalid.
-                errors = new Dictionary<string, object?>(StringComparer.Ordinal);
+                errors = ValidationErrorMap.Create(exception.Errors, typeof(T), context.Features.Get<IHttpContentSerializationFeature>());
             }
 
             ProblemDetails problem = ProblemDetails.FromStatus(HttpStatusCode.BadRequest, problemDetail);

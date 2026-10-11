@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections;
@@ -49,6 +50,7 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
 
                 if (value is not null && value is IEnumerable<TValue> enumerable)
                 {
+                    var index = 0;
                     foreach (var enumValue in enumerable)
                     {
                         // Each element's invocation is timed on its own, from a timestamp: nothing is kept on
@@ -59,7 +61,12 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
                         {
                             foreach (var error in ruleContext.Errors)
                             {
-                                context.AddFailure(error);
+                                // The rule and its error template are shared by every validation. Add the
+                                // index to a copy of the reported error, never to that shared state.
+                                context.AddFailure(new ValidationError(error)
+                                {
+                                    Source = IndexSource(error.Source, index)!
+                                });
                                 failed = true;
                             }
 
@@ -69,6 +76,8 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
                         {
                             context.AddInvocation(new ValidationInvocation(rule.Name, false, Stopwatch.GetElapsedTime(started).Ticks));
                         }
+
+                        index++;
                     }
                 }
                 else
@@ -80,6 +89,21 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
                 }
             }
         }
+    }
+
+    private string? IndexSource(string? source, int index)
+    {
+        string collectionSource = this.ToString();
+
+        // Only default selector sources rooted at this collection are indexed. Explicit source names
+        // stay as written, and a nested collection keeps the indices its own evaluation already added.
+        if (source is null || !source.StartsWith(collectionSource, StringComparison.Ordinal)
+            || (source.Length != collectionSource.Length && source[collectionSource.Length] != '.'))
+        {
+            return source;
+        }
+
+        return source.Insert(collectionSource.Length, "[" + index.ToString(CultureInfo.InvariantCulture) + "]");
     }
 }
 

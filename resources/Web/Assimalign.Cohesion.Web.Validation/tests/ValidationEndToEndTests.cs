@@ -108,10 +108,10 @@ public class ValidationEndToEndTests
 
         // Assert — each failing member, keyed by its path, with its messages as an array.
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.GetProperty("Name").GetArrayLength().ShouldBe(1);
-        errors.GetProperty("Name")[0].GetString().ShouldNotBeNullOrEmpty();
-        errors.GetProperty("Age")[0].GetString()!.ShouldContain("18", Case.Sensitive);
-        errors.TryGetProperty("Address.City", out _).ShouldBeFalse();
+        errors.GetProperty("name").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("name")[0].GetString().ShouldNotBeNullOrEmpty();
+        errors.GetProperty("age")[0].GetString()!.ShouldContain("18", Case.Sensitive);
+        errors.TryGetProperty("address.city", out _).ShouldBeFalse();
         invocations.ShouldBe(0);
     }
 
@@ -130,8 +130,8 @@ public class ValidationEndToEndTests
 
         // Assert
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
-        errors.TryGetProperty("Name", out _).ShouldBeFalse();
+        errors.GetProperty("address.city").GetArrayLength().ShouldBe(1);
+        errors.TryGetProperty("name", out _).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Typed: a body type with no registered validator is not validated")]
@@ -224,7 +224,7 @@ public class ValidationEndToEndTests
         using HttpResponseMessage lenient = await client.PostAsync("/lenient", Json(invalidCustomer), cancellation.Token);
 
         // Assert
-        (await ReadErrorsAsync(strict, cancellation.Token)).TryGetProperty("Name", out _).ShouldBeTrue();
+        (await ReadErrorsAsync(strict, cancellation.Token)).TryGetProperty("name", out _).ShouldBeTrue();
         lenient.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
@@ -304,12 +304,12 @@ public class ValidationEndToEndTests
         // Assert — every failing member in declaration order, and both of the user name's failing rules in
         // the order they are chained: NotEmpty, then MinLength.
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"]);
-        errors.GetProperty("UserName").GetArrayLength().ShouldBe(2);
-        errors.GetProperty("UserName")[0].GetString()!.ShouldEndWith("was empty.", Case.Sensitive);
-        errors.GetProperty("UserName")[1].GetString()!.ShouldContain("minimum length", Case.Sensitive);
-        errors.GetProperty("Age").GetArrayLength().ShouldBe(1);
-        errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["userName", "age", "address.city"]);
+        errors.GetProperty("userName").GetArrayLength().ShouldBe(2);
+        errors.GetProperty("userName")[0].GetString()!.ShouldEndWith("was empty.", Case.Sensitive);
+        errors.GetProperty("userName")[1].GetString()!.ShouldContain("minimum length", Case.Sensitive);
+        errors.GetProperty("age").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("address.city").GetArrayLength().ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Registration: a validator with default options from AddValidator reports every failing member, one message each")]
@@ -329,11 +329,11 @@ public class ValidationEndToEndTests
         // Assert — every failing member in declaration order; the user name's chain stops at its first
         // failing rule, NotEmpty.
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"]);
-        errors.GetProperty("UserName").GetArrayLength().ShouldBe(1);
-        errors.GetProperty("UserName")[0].GetString()!.ShouldEndWith("was empty.", Case.Sensitive);
-        errors.GetProperty("Age").GetArrayLength().ShouldBe(1);
-        errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["userName", "age", "address.city"]);
+        errors.GetProperty("userName").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("userName")[0].GetString()!.ShouldEndWith("was empty.", Case.Sensitive);
+        errors.GetProperty("age").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("address.city").GetArrayLength().ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Typed: the errors map lists members in declaration order, a nested profile's members in place")]
@@ -351,7 +351,7 @@ public class ValidationEndToEndTests
 
         // Assert
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["Label", "Destination.City", "Destination.Zip"]);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["label", "destination.city", "destination.zip"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Handlers: a handler validates a value it bound itself through context.ValidateAsync")]
@@ -380,14 +380,14 @@ public class ValidationEndToEndTests
 
         // Assert
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.TryGetProperty("Age", out _).ShouldBeTrue();
+        errors.TryGetProperty("age", out _).ShouldBeTrue();
         proceeded.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Handlers: a validator that throws on failure still answers 400")]
-    public async Task MapPost_ValidatorThrowingOnFailure_ShouldAnswer400WithEmptyErrors()
+    public async Task MapPost_ValidatorThrowingOnFailure_ShouldAnswer400WithErrors()
     {
-        // Arrange — ThrowExceptionOnFailure makes the validator throw an exception that carries no errors.
+        // Arrange — ThrowExceptionOnFailure retains the same errors as a returned validation result.
         using CancellationTokenSource cancellation = new(_testTimeout);
         IValidator throwing = Validator.Create(builder =>
         {
@@ -410,7 +410,7 @@ public class ValidationEndToEndTests
         // Assert
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
         errors.ValueKind.ShouldBe(JsonValueKind.Object);
-        errors.EnumerateObject().ShouldBeEmpty();
+        errors.EnumerateObject().Select(error => error.Name).ShouldBe(["name", "age"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Handlers: a validator whose rule throws faults the request instead of running the handler")]

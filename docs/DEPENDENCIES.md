@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 253 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 718 |
+| Declared project references | 719 |
 | Declared shared-source links | 14 |
 
 ## Ambiguous project names
@@ -1071,7 +1071,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web.Sessions` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Sessions`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web` | — | — | — |
 | `Assimalign.Cohesion.Web.StaticFiles` | `Assimalign.Cohesion.FileSystem`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
 | `Assimalign.Cohesion.Web.Testing` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.InMemory`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — | — |
-| `Assimalign.Cohesion.Web.Validation` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.ObjectValidation`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
+| `Assimalign.Cohesion.Web.Validation` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.ObjectValidation`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Serialization` | — | — | — |
 | `Assimalign.Cohesion.Web.WebSockets` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.WebSockets`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 
 ## Most-referenced assemblies

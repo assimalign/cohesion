@@ -309,6 +309,38 @@ Whether a given request is validated — the application's default, the endpoint
 a validator registered for the type — is `Web.Validation`'s decision at run time, as is the `400` it
 writes; see its DESIGN.
 
+## JSON Property Identity for Validation (#1209)
+
+`JsonValidationPropertyResolverGenerator` augments partial `JsonSerializerContext` classes annotated
+with `[JsonSerializable]` when the compilation can resolve Web.Validation's optional
+`IValidationJsonPropertyResolver`. Its explicit implementation maps each CLR member name to its
+`[JsonPropertyName]` spelling, including the empty name, or the registered contract's naming policy.
+It returns the matching `JsonPropertyInfo` from the actual contract supplied by Web.Serialization's
+`TryGetJsonTypeInfo` seam, so validation can walk property types and use the names the writer exposes.
+The graph includes nested object properties, inherited class and interface members, fields, arrays
+and generic collection arguments. Fields require `IncludeFields` unless `[JsonInclude]` names them;
+the same attribute admits nonpublic members, and `[JsonIgnore]` with its `Always` condition excludes
+members. Partial containing types are reopened for nested contexts, and attributes spread across
+partial declarations produce one resolver. Inaccessible model types and non-partial contexts are
+skipped. An application-provided implementation is authoritative, and the generator emits nothing
+for a context that already implements the interface.
+
+The extra identity metadata is needed because System.Text.Json exposes the JSON property name but
+not its CLR member name. Reading `JsonPropertyInfo.AttributeProvider` would invoke the generated
+reflection factory; comparing property values or guessing from property order would be ambiguous.
+The generated lookup inspects symbols at compile time and does neither at runtime.
+
+**Contract customization limit.** A modifier that replaces property names independently of
+`PropertyNamingPolicy` and `[JsonPropertyName]` must provide its own implementation of
+`IValidationJsonPropertyResolver` to identify those properties. An unknown name returns no property;
+the generator does not infer a new CLR identity from a replacement getter or another property's
+value. The runtime's CLR-name fallback and explicit resolver registration are documented in
+Web.Validation's DESIGN. A recursively expanding generic such as `Node<T>.Next: Node<List<T>>`
+records the first repeated generic definition on a traversal path but stops following its members;
+deeper constructed types require an explicit `[JsonSerializable]` root or a custom resolver. Ordinary
+self-references are visited once. This additive optional generator did not ship in `10.0.0-preview.1`;
+applications without Web.Validation keep their existing generated contexts unchanged.
+
 ## Delivery
 
 The generator is consumed exactly like the base `SourceGeneration` generator:

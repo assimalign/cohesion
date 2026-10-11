@@ -162,7 +162,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = CreateValidator().Validate(customer);
 
         // Assert
-        Sources(result).ShouldBe([ageSource, tagsSource]);
+        Sources(result).ShouldBe([ageSource, tagsSource + "[1]"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: a collection's chain stops after the rule that fails first, which reports every failing element")]
@@ -177,7 +177,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = CreateValidator().Validate(customer);
 
         // Assert — the age's error, then one per element from the rule that ran first, none from the rule after it.
-        Sources(result).ShouldBe([ageSource, tagsSource, tagsSource]);
+        Sources(result).ShouldBe([ageSource, tagsSource + "[0]", tagsSource + "[1]"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: ValidateAsync reports every failing member")]
