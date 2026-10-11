@@ -11,6 +11,16 @@ namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
 internal sealed class DefaultResourceControlPlane : IResourceControlPlane
 {
+    /// <summary>
+    /// The description of the unhealthy contribution recorded for a contributor that threw.
+    /// </summary>
+    /// <remarks>
+    /// The text is fixed and never derived from the exception: area hosts publish these reports
+    /// on the unauthenticated <c>/healthz</c>, <c>/readyz</c> and <c>/livez</c> probes, and a
+    /// dependency's exception message can carry host, database or user names (CWE-209).
+    /// </remarks>
+    internal const string ContributorThrewDescription = "The contributor threw an exception.";
+
     private readonly object _sync = new();
     private readonly IReadOnlyList<string> _acceptedCommandKinds;
     private readonly Dictionary<string, IHealthContributor> _contributors = new(StringComparer.Ordinal);
@@ -255,9 +265,10 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
             {
                 throw;
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                contribution = HealthContribution.Unhealthy(exception.Message);
+                // Fixed text, never exception.Message: the report reaches unauthenticated probes.
+                contribution = HealthContribution.Unhealthy(ContributorThrewDescription);
             }
 
             results.Add(contributor.Name, contribution);

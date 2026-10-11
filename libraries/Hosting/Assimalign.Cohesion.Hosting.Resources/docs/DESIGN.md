@@ -75,6 +75,17 @@ runs their asynchronous checks, and returns `ResourceHealthReport` with the leas
 an empty set is healthy. Commands outside the configured kind set are rejected before the attached
 host dispatcher is invoked.
 
+A contributor that throws, including with an `OperationCanceledException` the caller did not
+request, becomes an `Unhealthy` contribution described by the fixed text
+`The contributor threw an exception.`; caller cancellation propagates instead. The description is
+never the exception's message. Area hosts publish these reports on the bare `/healthz`, `/readyz`
+and `/livez` probes, which carry no credential check, and a dependency's exception message
+routinely names hosts, databases, users and ports (CWE-209). Through 10.0.0-preview.1 the control
+plane recorded the message as the description, so every area that exposes the probes published it
+(#1409). `HealthContribution` has no exception member, so the control plane does not keep the
+exception; a contributor that wants its failure diagnosed records it itself before throwing, or
+returns a contribution whose description it has chosen.
+
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
 

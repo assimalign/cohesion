@@ -91,7 +91,7 @@ public class ResourceControlPlaneTests
         Should.Throw<ArgumentException>(action).ParamName.ShouldBe("address");
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A contributor failure becomes a named unhealthy result without stopping aggregation")]
+    [Fact(DisplayName = DisplayPrefix + "A contributor failure becomes a named unhealthy result with fixed text, without stopping aggregation")]
     public async Task CheckHealthAsync_WhenContributorThrows_RecordsFailureAndContinues()
     {
         // Arrange
@@ -100,7 +100,7 @@ public class ResourceControlPlaneTests
         controlPlane.AddHealthContributor(new CallbackContributor(
             "database",
             _ => ValueTask.FromException<HealthContribution>(
-                new InvalidOperationException("database unavailable"))));
+                new InvalidOperationException("Failed to connect to db-primary.corp.internal:5432."))));
         controlPlane.AddHealthContributor(new CallbackContributor(
             "worker",
             _ =>
@@ -116,12 +116,12 @@ public class ResourceControlPlaneTests
         report.Status.ShouldBe(HealthStatus.Unhealthy);
         report.Contributions.Count.ShouldBe(2);
         report.Contributions["database"].ShouldBe(
-            HealthContribution.Unhealthy("database unavailable"));
+            HealthContribution.Unhealthy(DefaultResourceControlPlane.ContributorThrewDescription));
         report.Contributions["worker"].Status.ShouldBe(HealthStatus.Healthy);
         followingInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "An unrelated contributor cancellation becomes an unhealthy result")]
+    [Fact(DisplayName = DisplayPrefix + "An unrelated contributor cancellation becomes an unhealthy result with fixed text")]
     public async Task CheckHealthAsync_WhenContributorCancelsIndependently_RecordsFailure()
     {
         // Arrange
@@ -137,7 +137,7 @@ public class ResourceControlPlaneTests
         // Assert
         report.Status.ShouldBe(HealthStatus.Unhealthy);
         report.Contributions["queue"].ShouldBe(
-            HealthContribution.Unhealthy("queue probe canceled"));
+            HealthContribution.Unhealthy(DefaultResourceControlPlane.ContributorThrewDescription));
     }
 
     [Fact(DisplayName = DisplayPrefix + "Caller cancellation propagates and stops aggregation")]

@@ -125,6 +125,35 @@ public sealed class ResourceControlPlaneTests
         values.GetProperty("decimal").GetDecimal().ShouldBe(3.75M);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Health: a throwing contributor's exception message is absent from the unauthenticated probes")]
+    public async Task HealthProbes_WhenContributorThrows_ShouldNotPublishExceptionMessage()
+    {
+        // Arrange
+        const string hostName = "db-primary.corp.internal";
+        await using var factory = new WebApplicationTestFactory();
+        IResourceControlPlane plane = ResourceControlPlane.Create();
+        plane.AddHealthContributor(new ThrowingContributor(
+            "database",
+            new InvalidOperationException($"Failed to connect to {hostName}:5432.")));
+        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, new ResourceContext(), () => true);
+        using HttpClient client = factory.CreateClient();
+
+        foreach (string path in new[] { "/healthz", "/readyz", "/livez" })
+        {
+            // Act
+            using HttpResponseMessage response = await client.GetAsync(path, CancellationToken.None);
+            string body = await response.Content.ReadAsStringAsync();
+
+            // Assert
+            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, path);
+            body.ShouldNotContain(hostName, Case.Insensitive, path);
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement contribution = document.RootElement.GetProperty("contributions").GetProperty("database");
+            contribution.GetProperty("status").GetString().ShouldBe("Unhealthy", path);
+            contribution.GetProperty("description").GetString().ShouldBe("The contributor threw an exception.", path);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Bootstrap: verifies signature, identity, audience, lifetime, and rotation")]
     public async Task Authorization_WithManagedContext_ShouldVerifyJwtClaims()
     {
@@ -233,6 +262,26 @@ public sealed class ResourceControlPlaneTests
 
         public string Name => _name;
         public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(_contribution);
+    }
+
+    private sealed class ThrowingContributor : IHealthContributor
+    {
+        private readonly string _name;
+        private readonly Exception _exception;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ThrowingContributor"/> class.
+        /// </summary>
+        /// <param name="name">The contributor name reported in health output.</param>
+        /// <param name="exception">The exception thrown from every check.</param>
+        public ThrowingContributor(string name, Exception exception)
+        {
+            _name = name;
+            _exception = exception;
+        }
+
+        public string Name => _name;
+        public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) => ValueTask.FromException<HealthContribution>(_exception);
     }
 
     private sealed class EchoHandler : IResourceCommandHandler
