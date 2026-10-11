@@ -24,6 +24,16 @@ The builder captures `ResourceRuntime.Current`, resolves a registered area contr
 
 Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. A credential verifier registered for the resource (`ResourceRuntime.TryGetCredentialVerifier`) is consulted first; `NoResult` falls through to the default application-key verifier, and the mapped `ResourceCaller` must be a `Gateway` of the ambient application whose `Subject` is the ambient gateway (the mapped form of the default issuer and subject rules). The default verifier configures the shared ES256 `JsonWebTokenValidator` with `ResourceCredentialProfile` constants: it parses the application trust JWK, verifies the ES256 signature, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default control plane serves the declarative AddAudience and AddClient command kinds.
 
+Without a gateway identity, `/cohesion/v1` and every path below it, including namespaced probes,
+accept only transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. The check reads the
+exchange's connection `RemoteEndPoint`; forwarded headers never grant access, and a missing or
+non-IP peer fails closed. Other peers receive `403 Forbidden`, chosen to make the development-only
+access restriction clear. The same rule applies beneath an endpoint base path. Bare `/healthz`,
+`/readyz`, and `/livez` stay open for orchestrators and load balancers; the issuer's OAuth and
+discovery routes and gateway credential checks retain their existing behavior. This is a breaking
+security change from 10.0.0-preview.1, which admitted remote standalone management requests
+(#1431, owner decision 46; preview compatibility follows decision 15).
+
 ## AOT and dependency boundary
 
 Hosting privately composes Cohesion Web/HTTP/connection libraries and the shared IdentityModel JWT implementation. Routes use direct dispatch and `Utf8JsonWriter`; there is no reflection-based routing, serializer metadata discovery, or dynamic activation.

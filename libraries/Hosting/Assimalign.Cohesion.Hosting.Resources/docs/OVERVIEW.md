@@ -125,6 +125,13 @@ hosting module that mints or verifies the default credential already references 
 types are BCL-only, so the guarded ApplicationModel closure does not grow. See
 [DESIGN.md](DESIGN.md#resource-credential-verification).
 
+Standalone HTTP control planes (no gateway identity) accept `/cohesion/v1` and its descendants
+only from transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unknown peers
+receive 403. Forwarded headers cannot grant access. Bare `/healthz`, `/readyz`, and `/livez` probes
+stay public. Gateway-managed credential checks are unchanged. This restricts remote standalone
+management compared with 10.0.0-preview.1 (#1431); use loopback for standalone development and a
+gateway identity with credentials for remote management.
+
 ## Endpoint certificate contract (31t)
 
 `ResourceContext.TryGetEndpointCertificate(endpoint, out leaf, out chain)` reads one ordinary Secret mount. The full constructor accepts an optional endpoint-to-mount dictionary; generated Resource.g.cs registers the same immutable metadata by executable assembly through ResourceRuntime.RegisterEndpointCertificates. Control-plane creation applies it to the current invocation. Without a mapping, the conventional mount is `tls`; a normalized environment lookup also handles names containing punctuation. The explicit-mount overload supports manually configured Web endpoints.

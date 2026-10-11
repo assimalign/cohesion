@@ -19,5 +19,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>
 </Project>

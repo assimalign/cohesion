@@ -1299,7 +1299,11 @@ Gateway-managed contexts require an ES256 bootstrap JWT for every `/cohesion/v1/
 application issuer, gateway subject, resource audience, key id, signature, required claims,
 and at most 24 hours of lifetime. Invalid tokens return 401 with a Bearer challenge; a valid
 token for another audience returns 403 without a challenge. Bare probes remain public.
-No gateway name means unauthenticated routes, even when the context carries a credential.
+Without a gateway name, `/cohesion/v1` and every path beneath it accept only transport peers
+at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unknown peers receive 403. Forwarded
+headers cannot grant access. Bare probes stay public, and managed credential checks are unchanged.
+This is a behavioral break from 10.0.0-preview.1 (#1431, owner decision 46): standalone remote
+management previously worked. See the Web.Hosting.Resources DESIGN for the peer-check policy.
 
 Build validates managed identity and the public P-256 trust key only when an ambient http/https
 listener is bound. A managed control plane without a listener still builds. The pipeline factory

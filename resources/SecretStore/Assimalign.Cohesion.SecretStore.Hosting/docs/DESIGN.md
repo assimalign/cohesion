@@ -88,8 +88,18 @@ and `Subject` instead of raw claims.
 Missing, malformed, expired, untrusted, or incorrectly signed credentials return `401` and a
 `WWW-Authenticate: Bearer` challenge. A valid token for the wrong audience returns `403`.
 Trust commands must set `owner` to `<application>@<subject>` (`<iss>@<sub>`); declared secret and certificate commands use `<application>` (`<iss>`). Standalone hosts (no gateway name) do
-not require bearer authentication and therefore may bind only to loopback. Plaintext HTTP is
-allowed only on loopback in `Local`, regardless of hosting mode. This is bootstrap
+not require bearer authentication and therefore may bind only to loopback. Each standalone
+`/cohesion/v1` or `/cohesion/v1/*` request additionally requires the transport connection's remote
+endpoint to be `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. Every other peer, including an absent
+or non-IP endpoint, receives `403 Forbidden` before any route executes. The explicit `403` makes
+the development-only access boundary clear. Forwarded headers never establish loopback identity.
+Bare `/healthz`, `/readyz`, and `/livez` remain open for orchestrator and load-balancer probes;
+their namespaced forms are restricted. The endpoint URI's path prefix applies to these rules.
+
+This is a behavioral breaking change from 10.0.0-preview.1 (#1431, owner decision 46): the
+standalone listener was already loopback-bound, but request authorization accepted any transport
+peer reaching it. Gateway-managed credential authentication and authorization remain unchanged.
+Plaintext HTTP is allowed only on loopback in `Local`, regardless of hosting mode. This is bootstrap
 credential authentication, not a general user authorization or secret-policy engine.
 
 ## Protected persistence and certificate authority

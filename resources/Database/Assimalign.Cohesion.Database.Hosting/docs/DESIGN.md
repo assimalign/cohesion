@@ -57,3 +57,21 @@ The application permits one start lifecycle. Repeated Start while started is a h
 Health observes distinct engines, states and workers from the frozen runtime registry. Existing enabled-resource admin endpoints, telemetry order and health aggregation remain compatible; this phase does not extend those systems.
 
 The public static `CreateBuilder()` on each model engine provides deferred standalone composition and the bridge for hosting-aware engine factories that also need nested servers. It returns the model interface; its implementation remains internal. Configuration and service reads still occur in the hosting callback, outside the model package.
+
+## Standalone admin control plane (#1431)
+
+Without a gateway identity, the admin listener serves `/cohesion/v1` and every path below it only
+for transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. Other, absent, and non-IP
+remote endpoints receive 403; the status makes the development-only restriction explicit. Forwarded
+headers do not establish locality. The guard precedes Database's own namespaced health mappings,
+which otherwise short-circuit the shared Web.Hosting.Resources control-plane middleware.
+
+Bare `/healthz`, `/readyz`, and `/livez` remain open for orchestrators and load balancers. Loopback
+probes keep the Database health report and its server-accepting readiness gate. Gateway-managed
+behavior is unchanged, including its existing unauthenticated namespaced health aliases; other
+managed control-plane routes retain their credential checks.
+
+This is a behavioral breaking change from 10.0.0-preview.1 (owner decision 46, accepted on
+decision 15's preview terms): a reachable
+standalone admin listener previously accepted remote control-plane requests without credentials.
+Use a loopback connection for standalone development or a gateway identity for remote management.

@@ -40,9 +40,9 @@ internal sealed class ControlPlaneExchange : IHttpContext
         public int LocalPort { get; set; }
         public IPAddress? LocalIp => IPAddress.Loopback;
         public EndPoint? LocalEndPoint => new IPEndPoint(IPAddress.Loopback, LocalPort);
-        public int RemotePort => 0;
-        public IPAddress? RemoteIp => IPAddress.Loopback;
-        public EndPoint? RemoteEndPoint => null;
+        public int RemotePort => (RemoteEndPoint as IPEndPoint)?.Port ?? 0;
+        public IPAddress? RemoteIp => (RemoteEndPoint as IPEndPoint)?.Address;
+        public EndPoint? RemoteEndPoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 12345);
         public CancellationToken ConnectionAborted => CancellationToken.None;
         public void Abort() { }
         public ValueTask AbortAsync() => ValueTask.CompletedTask;

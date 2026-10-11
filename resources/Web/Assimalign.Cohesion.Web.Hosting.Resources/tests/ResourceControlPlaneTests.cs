@@ -305,11 +305,15 @@ public sealed class ResourceControlPlaneTests
     [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Commands: lists applied envelopes and returns conflict refusals")]
     public async Task Commands_WithHandler_ShouldExposeStateAndRejectConflictingOwnership()
     {
+        // The in-memory transport has no IP peer; exercise commands as an authenticated gateway.
+        using var identity = new TestBootstrapIdentity("tests", "gateway");
+        string credential = identity.Issue("resource");
         await using var factory = new WebApplicationTestFactory();
         IResourceControlPlane plane = ResourceControlPlane.Create(["kind"]);
         plane.RegisterCommandHandler(new EchoHandler());
-        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, new ResourceContext(), () => true);
+        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, CreateContext(identity, credential), () => true);
         using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credential);
         using HttpResponseMessage applied = await SendAsync(client, "POST", "/cohesion/v1/commands", Envelope("kind"), null, CancellationToken.None);
         applied.StatusCode.ShouldBe(HttpStatusCode.OK);
         using JsonDocument state = JsonDocument.Parse(await client.GetStringAsync("/cohesion/v1/commands", CancellationToken.None));

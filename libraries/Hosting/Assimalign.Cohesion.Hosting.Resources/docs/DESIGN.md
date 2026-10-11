@@ -101,6 +101,27 @@ contributor's own text and are reported as returned.
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
 
+### Standalone HTTP access (#1431)
+
+A missing `ResourceContext.GatewayName` enables standalone development, not remote management.
+Area HTTP adapters admit `/cohesion/v1` and every path beneath it only when the transport's remote
+endpoint is an IP endpoint at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. Every other peer,
+including an absent or non-IP endpoint, receives **403** before any management operation. The
+explicit status explains the restriction. Forwarded headers never establish this trust. The
+transport-neutral control-plane contract needs no HTTP dependency or new public member; enforcement
+belongs to Web.Hosting.Resources' shared middleware and the area endpoints that handle their own
+routes (ConfigurationStore, SecretStore, IdentityHub, LogSpace's log query, and Database's early
+namespaced health mappings). Scheduler already requires a gateway identity to install its
+control-plane listener.
+
+Bare `/healthz`, `/readyz`, and `/livez` remain open for unauthenticated orchestrator and load-balancer
+probes; their namespaced aliases are restricted. Existing listener gates still apply. A resource
+with a gateway identity retains its existing credential policy, on loopback and remote connections.
+This is a behavioral breaking change from 10.0.0-preview.1, accepted under owner decisions 46 and 15:
+previously an unauthenticated remote caller could use standalone management routes on a reachable
+listener. Standalone tools must connect over loopback; remote management requires gateway identity
+and credentials. SecretStore also retains its existing standalone loopback bind restriction.
+
 ## Resource run modes
 
 `ResourceRuntime.HostBuilt` selects one of two modes:

@@ -199,7 +199,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         }
     }
 
-    private async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
+    internal async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         string path = context.Request.Path.Value;
         bool namespaced = path == Route("/cohesion/v1") ||
@@ -793,7 +793,21 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     {
         if (!_requireAuthentication)
         {
-            return ResourceCredentialStatus.Authorized;
+            // The accepted transport peer is authoritative; forwarded headers cannot grant access.
+            if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint endpoint)
+            {
+                return ResourceCredentialStatus.Forbidden;
+            }
+
+            IPAddress address = endpoint.Address;
+            if (address.IsIPv4MappedToIPv6)
+            {
+                address = address.MapToIPv4();
+            }
+
+            return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
         }
 
         ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(

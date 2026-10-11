@@ -30,7 +30,11 @@ Endpoint precedence is registered-control-plane observation, ambient `api`, `--e
 `https://127.0.0.1:8443`. Data-path precedence is ambient `data` mount, `--data`, then
 `<content-root>/data`. Plaintext HTTP is permitted only on loopback in
 `Local`. A standalone host has no bootstrap credential and therefore may bind only to
-loopback, including when it uses HTTPS.
+loopback, including when it uses HTTPS. Its `/cohesion/v1` and `/cohesion/v1/*` routes accept only
+transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unknown peers receive
+`403`. Forwarded headers do not affect this check. Bare `/healthz`, `/readyz`, and `/livez` remain
+open for probes. This tightens standalone request authorization from 10.0.0-preview.1;
+gateway-managed authentication is unchanged.
 
 Builder-declared secrets seed missing durable entries. `AddCertificateAuthority` controls the
 standalone root common name, initial certificate/key material, pending Platform enrollment,

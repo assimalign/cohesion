@@ -15,6 +15,9 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting.Resources.Internal;
 
+using IPAddress = System.Net.IPAddress;
+using IPEndPoint = System.Net.IPEndPoint;
+
 namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
 /// <summary>Composes the resource management and probe protocol into a Web pipeline.</summary>
@@ -48,6 +51,8 @@ public static class ResourceControlPlaneMiddleware
     /// including bare probes. Namespaced paths of a gateway-managed resource consult the credential
     /// verifier registered for the resource (<see cref="ResourceRuntime.TryGetCredentialVerifier"/>)
     /// before the default application-key verification, and admit only this application's gateway.
+    /// Without a gateway identity, namespaced paths admit only loopback transport peers and refuse
+    /// other or unknown peers with 403. Bare probes remain public; forwarded headers grant no access.
     /// Stop is deferred until response completion when the server supplies
     /// <see cref="IWebResponseCompletionFeature"/>; custom servers without it use direct stop.
     /// </remarks>
@@ -73,6 +78,12 @@ public static class ResourceControlPlaneMiddleware
         bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
 
         bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path);
+        if (isNamespacedControlPlanePath && resourceContext.GatewayName is null &&
+            !IsLoopbackPeer(context))
+        {
+            context.Response.StatusCode = HttpStatusCode.Forbidden;
+            return;
+        }
         if (isNamespacedControlPlanePath && resourceContext.GatewayName is not null)
         {
             ResourceCredentialStatus status = await AuthorizeAsync(context, resourceContext).ConfigureAwait(false);
@@ -457,6 +468,20 @@ public static class ResourceControlPlaneMiddleware
         const string namespacePath = "/cohesion/v1";
         return path == namespacePath ||
             path.StartsWith(namespacePath + "/", StringComparison.Ordinal);
+    }
+
+    private static bool IsLoopbackPeer(IHttpContext context)
+    {
+        // Forwarded headers describe a claimed client, not the transport peer we trust here.
+        if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint remote)
+        {
+            return false;
+        }
+
+        IPAddress address = remote.Address.IsIPv4MappedToIPv6
+            ? remote.Address.MapToIPv4()
+            : remote.Address;
+        return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback);
     }
 
     private static async ValueTask<ResourceCredentialStatus> AuthorizeAsync(IHttpContext context, ResourceContext resource)

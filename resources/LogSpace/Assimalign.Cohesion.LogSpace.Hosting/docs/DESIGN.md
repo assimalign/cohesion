@@ -20,6 +20,17 @@ Both paths consult the resource's registered `IResourceCredentialVerifier` first
 
 The query middleware is registered BEFORE UseResourceControlPlane in LogSpaceControlPlaneEndpointService. ResourceControlPlaneMiddleware.InvokeAsync authenticates unknown /cohesion/v1/* paths then returns 404 (Web.Hosting.Resources/src/Internal/ResourceControlPlaneMiddleware.cs:44-59,185-191); it would swallow a later query handler. The earlier LogSpace middleware rejects telemetry-scoped credentials on every namespaced query/management request before forwarding other routes, protecting /stop and /commands despite the unchanged shared verifier. Query accepts only own-name audience with gateway subject and ordinary bootstrap/dev tokens. No cohesion-export audience was added.
 
+Without a gateway identity, the query middleware permits `/cohesion/v1` and every path below it
+only when the exchange's transport `RemoteEndPoint` is `127.0.0.1`, `::1`, or IPv4-mapped
+`127.0.0.1`. It performs this check before serving `/cohesion/v1/logs` or forwarding management
+and namespaced probes to the shared middleware. Missing and non-IP endpoints fail closed;
+forwarded headers never grant access. Other peers receive `403 Forbidden`, chosen to make the
+development-only access restriction clear. Bare `/healthz`, `/readyz`, and `/livez` stay open for
+orchestrators and load balancers. The OTLP listener and gateway credential checks retain their
+existing behavior. This is a breaking security change from 10.0.0-preview.1, which admitted remote
+standalone query and management requests (#1431, owner decision 46; preview compatibility follows
+decision 15).
+
 ## Storage, lifecycle and query
 
 ResourceContext.GetMount("data", ContentRootPath/logs) selects the filesystem store. Receiver threads enqueue immutable records to a channel bounded to 8192 entries and a conservative 64 MiB estimated record budget. SegmentFlushService owns synchronous writes and fsync on its dedicated thread, every 250 ms and on stop; receivers stop before the flush service. Files are append-only logs-YYYYMMDD-NNNN.ndjson, rotated daily or at 16 MiB; each restart opens a fresh lexically ordered segment. Records have t (nanosecond string), sev, sevText, svc, cat, body and attrs. A per-segment .index records first/last timestamps and count; the minimal query currently scans segments instead of relying on this sidecar. IOException/UnauthorizedAccess marks the store unavailable, retaining queued entries for a subsequent flush and yielding 503 rather than stopping the host. Retention and crash-tail repair remain future work.

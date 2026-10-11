@@ -146,7 +146,7 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         }
     }
 
-    private async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
+    internal async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         string path = context.Request.Path.Value;
         string healthPath = Route("/healthz");
@@ -549,7 +549,22 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
     {
         if (!_requireAuthentication)
         {
-            return new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, null, null);
+            // Standalone control planes trust only the transport peer, never forwarded headers.
+            if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint remoteEndPoint)
+            {
+                return new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, null);
+            }
+
+            IPAddress address = remoteEndPoint.Address;
+            if (address.IsIPv4MappedToIPv6)
+            {
+                address = address.MapToIPv4();
+            }
+
+            ResourceCredentialStatus status = address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
+            return new ResourceCredentialVerification(status, null, null);
         }
 
         ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
