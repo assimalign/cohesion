@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -61,6 +62,32 @@ public class HttpRequestBodyDataRateOverrideTests
 
         // Act and assert — RFC 9110 §15.5.9: the read fails once the allowance is spent.
         await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[4]).AsTask().WaitAsync(_timeout));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Data Rate Override: A body whose request kept the default rate should still be answered 408 when it trickles below the rate")]
+    public async Task Http1_OnDefaultRateKeptAndBodyTrickled_ShouldAnswer408()
+    {
+        // Arrange — the rate comes from the parse context, and the peer delivers octets, but one every
+        // 50 ms: 20 B/s against 100 B/s. Each octet extends the allowance by 10 ms; each gap spends 50.
+        TestConnection connection = new(Encoding.ASCII.GetBytes("POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 100\r\n\r\na"), completeInput: false);
+        await using HttpConnectionListener listener = CreateHttp1Listener(connection, _rate);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> receive = connectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await receive.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext context = receive.Current;
+        context.MinRequestBodyDataRate!.MinDataRate.ShouldBeSameAs(_rate);
+        using CancellationTokenSource trickle = new();
+        Task sending = TrickleAsync(() => connection.WriteInputAsync(Encoding.ASCII.GetBytes("a")), trickle.Token);
+
+        // Act
+        int delivered = await ReadUntilRejectedAsync(context.Request.Body);
+        await trickle.CancelAsync();
+        await sending;
+        await connectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+
+        // Assert — the octets were credited, and the trickle still fell below the rate: RFC 9110 §15.5.9.
+        delivered.ShouldBeGreaterThan(0);
+        Encoding.ASCII.GetString(await connection.ReadOutputAsync()).ShouldStartWith("HTTP/1.1 408");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Data Rate Override: A rate set by a request on a listener without one should reject a body that idles")]
@@ -139,6 +166,32 @@ public class HttpRequestBodyDataRateOverrideTests
         // Assert — RFC 9110 §15.5.9 and RFC 9113 §8.1: a 408, then RST_STREAM(NO_ERROR).
         await peer.Output.ReadUntilAsync(frames => frames.Any(frame => frame.IsRstStream && frame.StreamId == 1), "the reset of stream 1");
         HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(peer.Output.ForStream(1).Single(frame => frame.IsHeaders).Payload)[":status"].ShouldBe("408");
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Data Rate Override: A body whose request kept the default rate should still be answered 408 when it trickles below the rate")]
+    public async Task Http2_OnDefaultRateKeptAndBodyTrickled_ShouldAnswer408()
+    {
+        // Arrange — the rate comes from the parse context, and the peer delivers one-octet DATA frames every
+        // 50 ms: 20 B/s against 100 B/s.
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(CreateOptions(), http2 => http2.Limits.MinRequestBodyDataRate = _rate);
+        await peer.SendHeadersAsync(1, endStream: false, Http2TestPeer.Request("POST", "/upload"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        exchange.MinRequestBodyDataRate!.MinDataRate.ShouldBeSameAs(_rate);
+        await peer.SendDataAsync(1, Encoding.ASCII.GetBytes("a"), endStream: false);
+        using CancellationTokenSource trickle = new();
+        Task sending = TrickleAsync(() => peer.SendDataAsync(1, Encoding.ASCII.GetBytes("a"), endStream: false), trickle.Token);
+
+        // Act
+        int delivered = await ReadUntilRejectedAsync(exchange.Request.Body);
+        await trickle.CancelAsync();
+        await sending;
+
+        // Assert — RFC 9110 §15.5.9 and RFC 9113 §8.1: a 408, then RST_STREAM(NO_ERROR) to stop the body.
+        delivered.ShouldBeGreaterThan(0);
+        await peer.Output.ReadUntilAsync(frames => frames.Any(frame => frame.IsRstStream && frame.StreamId == 1), "the reset of stream 1");
+        HttpProtocolPayloadFactory.DecodeLiteralHttp2Headers(peer.Output.ForStream(1).Single(frame => frame.IsHeaders).Payload)[":status"].ShouldBe("408");
+        peer.Output.ForStream(1).Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.NoError);
         await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout);
     }
 
@@ -222,6 +275,38 @@ public class HttpRequestBodyDataRateOverrideTests
         HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload)[":status"].ShouldBe("408");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate Override: A body whose request kept the default rate should still be answered 408 when it trickles below the rate")]
+    public async Task Http3_OnDefaultRateKeptAndBodyTrickled_ShouldStopSendingAndAnswer408()
+    {
+        // Arrange — the rate comes from the parse context, and the peer delivers one-octet DATA frames every
+        // 50 ms: 20 B/s against 100 B/s.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(http3 => http3.Limits.MinRequestBodyDataRate = _rate, AddRequestLimits);
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("a")));
+        IHttpContext context = await peer.NextContextAsync();
+        context.MinRequestBodyDataRate!.MinDataRate.ShouldBeSameAs(_rate);
+        using CancellationTokenSource trickle = new();
+        Task sending = TrickleAsync(
+            async () => await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("a"))),
+            trickle.Token);
+
+        // Act
+        int delivered = await ReadUntilRejectedAsync(context.Request.Body);
+        await trickle.CancelAsync();
+        await sending;
+
+        // Assert — the peer is asked to stop sending with H3_NO_ERROR (RFC 9114 §4.1), and the exchange is
+        // answered 408.
+        delivered.ShouldBeGreaterThan(0);
+        ConnectionResetException stop = await Should.ThrowAsync<ConnectionResetException>(() => request.Output.WriteAsync(new byte[1]).AsTask());
+        stop.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.NoError);
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
+        HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames[0].Payload)[":status"].ShouldBe("408");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Data Rate Override: The rate should be frozen at the first body read")]
     public async Task Http3_OnRateChangedAfterFirstRead_ShouldThrow()
     {
@@ -266,5 +351,47 @@ public class HttpRequestBodyDataRateOverrideTests
         using MemoryStream received = new();
         await body.CopyToAsync(received);
         return received.ToArray();
+    }
+
+    /// <summary>
+    /// Reads the body until the transport rejects it, asserting the rejection is an <see cref="IOException"/>
+    /// within the test timeout, and returns the octets delivered before it.
+    /// </summary>
+    private static async Task<int> ReadUntilRejectedAsync(Stream body)
+    {
+        int delivered = 0;
+        byte[] buffer = new byte[16];
+
+        async Task ReadAsync()
+        {
+            int read;
+            while ((read = await body.ReadAsync(buffer)) > 0)
+            {
+                delivered += read;
+            }
+        }
+
+        await Should.ThrowAsync<IOException>(() => ReadAsync().WaitAsync(_timeout));
+        return delivered;
+    }
+
+    /// <summary>
+    /// Sends one more piece of the body every 50 ms until cancelled: a peer that keeps sending, but below
+    /// the rate. The peer stops once the server refuses the rest of the body.
+    /// </summary>
+    private static async Task TrickleAsync(Func<Task> send, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
+                await send();
+            }
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or ConnectionException or InvalidOperationException)
+        {
+            // Cancelled by the test, or the server refused the rest of the body.
+        }
     }
 }
