@@ -16,6 +16,8 @@ Protocol, Security), so one reference to the root delivers the whole base surfac
 child-owned vocabulary the contracts speak (`TransactionId` and `TransactionState` from
 `Database.Transactions`, `ProtocolVersion` from `Database.Protocol`).
 
+Database instances expose a nullable immutable `Provisioning` observation for model-owned deferred work: operation/object, step position, row progress and failure code. Hosting consumes it through the root. Application Build accepts a caller cancellation token, handed to engine factories through their application context (49a).
+
 ## Scope
 
 - **Root bases (concrete-types plan, phases 3 and 6, #1259 and #1262)** — `DatabaseEngine`,

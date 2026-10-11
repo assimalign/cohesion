@@ -1249,7 +1249,7 @@ production API or assembly-access change. The separate, uninstrumented full Q8 B
 The [benchmark README](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md)
 retains every campaign, all medians, exact commands, and the reproducible timing helper. Both
 NativeAOT harnesses publish without IL2xxx/IL3xxx warnings. **49a was accepted on 2026-10-11 and
-lands next on this branch**: its classification/scheduling attaches between plan rendering and statement execution,
+landed below**: its classification/scheduling attaches between plan rendering and statement execution,
 with the applied marker still withheld until all required steps finish.
 
 The review-fix campaign at `da23b378fbaf346ad02234299cf1e2d2fff5d906` repeated five alternating
@@ -1497,7 +1497,7 @@ Numbering continues the plan of record's table. Each line is the question, then 
     >My Decision: I'm fine with at `Build`/`BuildAsync`. However, this may be due to my ignorance, but I am concerned that when we start implementing the ability to run schema migrations. A database that could have a terabyte of data could take a while and I am wondering if the engine build could hang up the host at all.
 
     *Landed in B1 part 1:* the SQL engine's `Build`/`BuildAsync` provisions its declared databases;
-    49a below is not implemented.
+    49a below supersedes the inline execution of data-scaling steps; see its landed note.
 
     **49a (proposed 2026-10-09, accepted 2026-10-11; lands in B2 after its core).** The concern
     holds. [Certain]
@@ -1551,6 +1551,9 @@ Numbering continues the plan of record's table. Each line is the question, then 
     `Build(CancellationToken)` passes its caller's shutdown token through the root factory context;
     the host runtime has no shutdown lifecycle yet at Build. Physical recovery and logical scrub
     observe cancellation and retain the classification journal after interruption.
+
+    The Release NativeAOT Q8 best-of-five invocation medians remain **0.0090 ms** for reconciliation
+    and **0.0099 ms** for post-open provisioning; all five reconciliation medians were below 0.012 ms.
 
     **Escalations recorded with the implementation:** the root adds only the model-neutral
     observation and construction cancellation vocabulary, rather than restoring schema capability

@@ -315,3 +315,35 @@ the timestamp refresh above forced the successful recompilation used for every r
 Publication logs, sample smoke output, the twenty final per-process logs,
 `q8-phase-results.json`, `q8-whole-results.json`, executable hashes in `q8-binary-identity.json`,
 and harness hashes in `q8-harness-identity.json` are retained under `_out/b2-review`.
+
+## Decision 49a verification (2026-10-11)
+
+The production SQL sources at `ae1071a7e` retain B2's constant-time already-applied skip.
+Five fresh Release NativeAOT `win-arm64` processes, each with one warmup and five measured
+already-applied Builds of Q8's 50-table schema, produced these invocation medians in milliseconds:
+
+| Round | Reconciliation inside Build | Post-open provisioning | Complete provisioning including open/recovery |
+|---|---:|---:|---:|
+| 1 | 0.0107 | 0.0118 | 31.7906 |
+| 2 | 0.0101 | 0.0112 | 18.3410 |
+| 3 | 0.0094 | 0.0103 | 14.8417 |
+| 4 | 0.0090 | 0.0099 | 12.8321 |
+| 5 | 0.0113 | 0.0124 | 14.5347 |
+
+The best medians are **0.0090 ms** for reconciliation and **0.0099 ms** from open completion
+through provisioning/definition validation, both below the 1 ms gate. File open/recovery remains
+outside that gate, as in the B2 campaigns above. Tests were running concurrently on the host;
+no new before/after speedup claim is made. The executable reported NativeAOT, workstation GC,
+Windows 10.0.28000 and 12 processors, using .NET SDK 10.0.401. Publication emitted zero IL2xxx/IL3xxx
+diagnostics. This campaign uses the same benchmark-only source replacement and timing boundaries
+described above, updated to match 49a's internal provisioner call. The archive and generated timer
+are under `_out/q49`, with `publish.log`, `run-{1..5}.log`, `results.json` and
+`phase-timer/current/preparation.json`; the tracked helper refuses instrumenting a live worktree.
+
+Reproduce by archiving the revision beneath `_out/q49/src`, building its Release build tasks,
+running `Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot C:/cw/b2/_out/q49/src -Label current
+-OutputRoot C:/cw/b2/_out/q49`, then publishing the archived benchmark with
+`-p:CustomAfterMicrosoftCommonTargets=<Q8PhaseInstrumentation.targets>` and
+`-p:B2PhaseTimerSource=C:/cw/b2/_out/q49/phase-timer/current/SqlDeclaredDatabase.cs`.
+Run its native executable five times with `--cases Q8 --iterations 5 --rows 1`; retain the final
+five `already_applied=1` timing lines per invocation, as the helper's comments specify.

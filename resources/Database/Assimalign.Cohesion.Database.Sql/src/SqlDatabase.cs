@@ -27,10 +27,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>Schema provisioning</b> belongs to the SQL model (owner decisions 50 and 53 of 2026-10-09).
-/// The engine's builder provisions every database it declares before its build returns, through
-/// the same provisioner; <see cref="ApplySchemaAsync"/> applies a compiled schema imperatively,
-/// for tools, Studio and tests. The root <see cref="DatabaseInstance"/> base has no capability
-/// member any more.
+/// The engine's builder applies cheap schema steps before returning and reserves populated tables
+/// for its worker to finish persisted data-scaling steps. <see cref="ApplySchemaAsync"/> applies a
+/// compiled schema inline for tools, Studio and tests. The root <see cref="DatabaseInstance"/>
+/// exposes model-neutral progress without a schema capability API.
 /// </para>
 /// <para>
 /// <b>Closed by its holder.</b> Disposing the database closes it for every session. Once the

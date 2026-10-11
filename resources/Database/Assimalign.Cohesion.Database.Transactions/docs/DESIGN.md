@@ -64,9 +64,7 @@ interface since phase 2 of the concrete-types program
   `GetVisibleVersionAsync`. `PruneAsync` and `PurgeWriterAsync` check nothing in the base,
   because the two stores observe cancellation at different points.
 
-## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
-
-### Recovery cancellation (49a)
+## Recovery cancellation (49a)
 
 `TransactionRecovery.Analyze`, `TransactionCoordinator.AnalyzeAndScrub` and `CompleteRecovery`
 accept cancellation. Journal classification and the batched record scrub observe it between
@@ -75,6 +73,8 @@ cancellation. A caller must preserve the classification journal until all recove
 complete: SQL marks an interrupted open `RecoveryInterrupted` before closing the unpublished
 storage, preventing its normal shutdown checkpoint. The next open reclassifies and finishes
 scrubbing instead of treating the remaining abandoned stamps as committed.
+
+## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
 `TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. The split mirrors PostgreSQL's virtual-txid vs. xid distinction and keeps the public session surface free of MVCC mechanics.
 
