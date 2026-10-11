@@ -112,6 +112,9 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// </summary>
     internal const string CannotCastCode = "COHSQLE011";
 
+    /// <summary>A character assignment exceeds its declared length (ISO SQLSTATE 22001).</summary>
+    internal const string StringDataRightTruncationCode = "COHSQLE012";
+
     private readonly string _detail;
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
@@ -131,6 +134,13 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// </summary>
     /// <returns>The copy.</returns>
     internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException);
+
+    /// <summary>Adds assignment context while preserving the diagnostic code and original failure.</summary>
+    internal SqlEvaluationException WithContext(string context) => new(Code, $"{context}: {_detail}", this);
+
+    /// <summary>Creates the failure for a character assignment that would lose non-space content.</summary>
+    internal static SqlEvaluationException StringDataRightTruncation(int length)
+        => new(StringDataRightTruncationCode, $"value too long for type character varying({length}).", null);
 
     /// <summary>
     /// Whether an exception a function's core threw becomes <c>COHSQLE007</c>: anything but a

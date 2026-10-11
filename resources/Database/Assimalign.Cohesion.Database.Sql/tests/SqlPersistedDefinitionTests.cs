@@ -429,7 +429,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted definitions: CREATE TABLE rejects a DEFAULT its column cannot store")]
     [InlineData("CREATE TABLE t (id INT, amount INT DEFAULT 'abc')", "amount")]
     [InlineData("CREATE TABLE t (id INT, label VARCHAR(2) DEFAULT 'long')", "label")]
-    [InlineData("CREATE TABLE t (id INT, price DECIMAL(5, 2) DEFAULT 1.234)", "price")]
+    [InlineData("CREATE TABLE t (id INT, price DECIMAL(5, 2) DEFAULT 999.995)", "price")]
     public async Task CreateTable_DefaultTheColumnCannotStore_ShouldFailTheDdl(string ddl, string column)
     {
         // Arrange
@@ -441,7 +441,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(ddl));
 
         // Assert
-        failure.Message.ShouldStartWith($"Column '{column}': DEFAULT value cannot be stored as", Case.Sensitive);
+        failure.Message.ShouldContain($"Column '{column}': DEFAULT value cannot be stored as", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
         (await session.ExecuteAsync("CREATE TABLE t (id INT, amount INT DEFAULT '7')")).Status.ShouldBe(QueryResultStatus.Success);
     }

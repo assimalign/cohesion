@@ -426,37 +426,13 @@ internal sealed partial class SqlPlanExecutor
             throw SqlEvaluationException.UnregisteredDomain(unresolved);
         }
 
-        // The base type's length, precision and scale bound the domain's values on every write, as
-        // PostgreSQL's coerce_to_domain applies the base type's modifier before the check
-        // (src/backend/parser/parse_coerce.c); a CAST to the domain applies the same bound.
-        if (values[domain.Ordinal] is { } value)
-        {
-            var column = table.Columns[domain.Ordinal];
-            try
-            {
-                SqlCastConverter.ApplyModifiers(value, column.Type);
-            }
-            catch (OverflowException exception)
-            {
-                // ISO store assignment: a value the numeric column cannot hold is a numeric value out
-                // of range (SQLSTATE 22003), as CoerceForColumn codes it.
-                throw SqlEvaluationException.NumericValueOutOfRange(DomainBound(table, column, domain, exception), exception);
-            }
-            catch (InvalidCastException exception)
-            {
-                throw new DatabaseException(DomainBound(table, column, domain, exception), exception);
-            }
-        }
-
+        // CoerceForColumn (including bound DEFAULTs) has already applied the base type's
+        // assignment bounds. The domain check sees that rounded/truncated value (#1418).
         if (domain.Check is { } check && evaluator.Evaluate(check, values) is false)
         {
             throw new SqlConstraintViolationException(domain.Name, $"{table.Schema}.{table.Name}", "DOMAIN", SafeValue([values[domain.Ordinal]]));
         }
     }
-
-    private static string DomainBound(SqlCatalogTable table, SqlCatalogColumn column, SqlBoundDomain domain, Exception exception)
-        => $"Column '{column.Name}' of table '{table.Schema}.{table.Name}' (domain '{domain.Name}', " +
-           $"{SqlType.ForStorage(column.Type).Name}): {exception.Message}";
 
     /// <summary>
     /// Validates checks and outgoing references for a set of candidate rows.

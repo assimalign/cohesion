@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <remarks>
 /// <para>
 /// The pairs are the ones the engine converted before E3 (text, BOOLEAN, the integers and NUMERIC
-/// among themselves, and those to text), each with its former semantics: no rounding, truncation or
-/// grouping, and a value out of the target's range refused. E3 adds REAL and DOUBLE from text and the
+/// among themselves, and those to text), with no grouping and a value out of the target's range
+/// refused. Declared NUMERIC scales round before checking precision. E3 adds REAL and DOUBLE from text and the
 /// numeric types, and DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL and UUID from text (and DATE from
 /// TIMESTAMP), parsed as INSERT parses text for a column of the type, so a string reaches a typed
 /// function parameter through <c>CAST</c>. The contexts are PostgreSQL's for the same pairs
@@ -22,7 +22,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </para>
 /// <para>
 /// Each conversion maps storage type to storage type; the engine applies the target's length,
-/// precision and scale afterwards (<see cref="SqlCastConverter.ApplyModifiers"/>). Each fails only
+/// precision and scale afterwards (<see cref="SqlCastConverter.ApplyModifiers"/>). The built-in
+/// text-to-NUMERIC entry is target-aware in <see cref="SqlCastConverter.Convert"/>: it rounds the
+/// original digits to a declared scale before reducing them to Decimal, avoiding double rounding.
+/// Application casts retain their delegates and receive the usual modifiers afterwards. Each delegate fails only
 /// with a <see cref="FormatException"/>, an <see cref="OverflowException"/> or an
 /// <see cref="InvalidCastException"/>, the value's faults <c>CAST</c> reports as conversion failures;
 /// anything else a cast throws is a fault of its code (<c>COHSQLE007</c>), so a built-in that threw

@@ -54,6 +54,11 @@ public sealed class SqlCastTests
         yield return ["12.3400", "NUMERIC(4, 2)", DatabaseType.Decimal, 12.34m];
         yield return ["1.000", "DECIMAL(2, 0)", DatabaseType.Decimal, 1m];
         yield return ["0.001", "DECIMAL(3, 3)", DatabaseType.Decimal, .001m];
+        yield return ["1.234", "DECIMAL(4, 2)", DatabaseType.Decimal, 1.23m];
+        yield return ["0.001", "DECIMAL(2, 2)", DatabaseType.Decimal, 0m];
+        yield return [123, "VARCHAR(2)", DatabaseType.String, "12"];
+        yield return ["abc", "CHAR(2)", DatabaseType.String, "ab"];
+        yield return ["😀", "VARCHAR(1)", DatabaseType.String, "😀"];
         yield return ["79228162514264337593543950335", "DECIMAL", DatabaseType.Decimal, decimal.MaxValue];
         yield return [" TrUe ", "BOOL", DatabaseType.Boolean, true];
         yield return ["FALSE", "BOOLEAN", DatabaseType.Boolean, false];
@@ -107,7 +112,7 @@ public sealed class SqlCastTests
 
     /// <summary>Rejects lossy or invalid conversion instead of accepting the original value.</summary>
     /// <param name="expression">The conversion expression that must fail.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid text overflow scale and length fail explicitly")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid text and overflow fail explicitly")]
     [InlineData("CAST('abc' AS INT)")]
     [InlineData("CAST('invalid' AS INT)")]
     [InlineData("CAST('' AS INT)")]
@@ -128,12 +133,7 @@ public sealed class SqlCastTests
     [InlineData("CAST(0.00000000000000000000000000001 AS DECIMAL)")]
     [InlineData("CAST(1e-29 AS DECIMAL)")]
     [InlineData("CAST(1.00000000000000000000000000001 AS DECIMAL)")]
-    [InlineData("CAST('1.234' AS DECIMAL(4, 2))")]
     [InlineData("CAST('123.45' AS DECIMAL(4, 2))")]
-    [InlineData("CAST('0.001' AS DECIMAL(2, 2))")]
-    [InlineData("CAST(123 AS VARCHAR(2))")]
-    [InlineData("CAST('abc' AS CHAR(2))")]
-    [InlineData("CAST('😀' AS VARCHAR(1))")]
     [InlineData("CAST('yes' AS BOOLEAN)")]
     [InlineData("CAST(1 AS BOOLEAN)")]
     [InlineData("CAST(TRUE AS INT)")]

@@ -834,11 +834,11 @@ flowchart LR
   column, its default included; an UPDATE for the columns it sets; `ADD COLUMN` for the default
   each existing row takes. First the base type's length, precision and scale bound the value, as
   `coerce_to_domain` applies the base type's modifier before the check
-  (`src/backend/parser/parse_coerce.c`) and as a `CAST` to the domain does: a NUMERIC value out of
-  them is `COHSQLE002`, a string or binary too long, or a NUMERIC with more scale, a statement
-  failure naming the column, the table and the domain. (A plain `VARCHAR(n)` or `NUMERIC(p, s)`
-  column does not apply its bound on a write yet; that gap predates E3.) Then the check: only
-  FALSE refuses the value, so a strict check passes NULL without a call:
+  (`src/backend/parser/parse_coerce.c`) and as a `CAST` to the domain does. Since #1418 the
+  shared modifier routine rounds NUMERIC before testing precision (`COHSQLE002`) and applies
+  the assignment character-length rule (`COHSQLE012`); the check sees that bounded value.
+  Plain columns use the same routine ([Declared column bounds](#declared-column-bounds-1418)).
+  Then the check: only FALSE refuses the value, so a strict check passes NULL without a call:
   `SqlConstraintViolationException` of kind `DOMAIN`, naming the domain and the table.
 - **An unregistered domain at reopen** (decision 65's rule, applied to types). When the engine
   that opens a database registers no domain of a stored column's name, or one over another
@@ -886,7 +886,8 @@ flowchart LR
   type a target, so the planner owns the refusal.
 - **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
   throws is the value's fault: `CAST from X to T failed: ...`, with the original as its inner
-  exception, the only failures the built-ins throw. Anything else, other than a
+  exception. Built-in NUMERIC conversion reports `COHSQLE002` when text cannot fit Decimal
+  exactly after rounding to any declared scale, as do its modifier overflows. Anything else, other than a
   `DatabaseException`, an exhausted stack or memory, is a fault of the conversion's code:
   `COHSQLE007` (`Cast TEXT AS cents failed: ...`), the code decision 71 gives a function that
   throws, so the session and an explicit transaction stay usable. That includes an
@@ -927,6 +928,85 @@ in a CHECK, an index or a generated expression, or applies `Implicit` contexts, 
 PostgreSQL's text forms of INTERVAL (the engine reads .NET's `[d.]hh:mm:ss`, so `'12'` is twelve
 days, not seconds); `COHESION_SCHEMA` views of types and casts; and SQL `CREATE DOMAIN`, which is
 E4.
+
+## Declared column bounds (#1418)
+
+`SqlCastConverter.ParseNumericText(text, target)` is the shared text-to-NUMERIC conversion:
+it rounds the digit string to the declared scale before constructing an exact Decimal.
+`SqlCastConverter.ApplyModifiers(value, target, isExplicit)` then applies the shared length,
+precision and scale bounds to values of the storage type. `CoerceForColumn` uses both for plain
+columns and domain base types; INSERT VALUES, INSERT ... SELECT, UPDATE, and ADD COLUMN
+validation all reach that path. A DEFAULT converts and bounds once when
+its table version binds, using the same assignment rule for an omitted INSERT value and the
+missing-field backfill. CAST calls it with `isExplicit: true`, then evaluates a domain check;
+assignment evaluates its domain check after coercion too. Bounds therefore affect the values
+CHECK, foreign-key and unique-index enforcement sees, before any physical write. The helper
+uses ordinary BCL scalar and span operations, with no reflection or runtime code generation.
+
+The planner's `TryAddPredicate` call is comparison coercion for an access path. If bounding
+changes or rejects the comparand, it leaves the original comparison to residual evaluation
+instead of building a seek that could omit qualifying rows. `JoinProbeValues` preserves
+character probes whole: a longer string can compare equal under the index's collation, as
+`e` plus an ignored combining accent can compare equal to `e`.
+
+- **Characters.** A declared length counts Unicode scalar values, so a surrogate pair is one
+  character and truncation never splits it. Assignment to `VARCHAR(n)`, `CHAR(n)` or
+  `CHARACTER(n)` rejects an overlong value with `COHSQLE012` (SQLSTATE 22001), except when every
+  character past the limit is an ASCII space (U+0020): those spaces are discarded. An explicit
+  CAST truncates to the declared length even when the discarded characters are not spaces.
+  This is PostgreSQL's `varchar()` and `bpchar()` distinction
+  (`src/backend/utils/adt/varchar.c:264-268`, `:605-609`); its character-boundary clipping and
+  excess-space check are at `:633-647`. Bare string types have no declared length limit.
+- **CHAR remains an unpadded alias.** `SqlTypeNames` resolves CHAR, CHARACTER, VARCHAR and TEXT
+  to the same `DatabaseType.String`, and neither `DatabaseTypeInfo` nor the catalog preserves a
+  fixed-character identity. All aliases retain a short value as written: `CHAR(3)` stores `'a'`,
+  not `'a  '`. This deliberately differs from PostgreSQL's `bpchar()` padding
+  (`src/backend/utils/adt/varchar.c:330-343`). Distinguishing CHAR would require a type and
+  persisted-metadata change beyond the bounds fix; no new public or on-disk flag is introduced.
+- **NUMERIC/DECIMAL.** A declared scale rounds with midpoint ties away from zero before testing
+  precision. `NUMERIC(p)` means scale zero; `NUMERIC(p,s)` requires the rounded value to have
+  magnitude below `10^(p-s)`. Thus `1.235` becomes `1.24` in `NUMERIC(3,2)`, while `9.995`
+  rounds to `10.00` and fails with `COHSQLE002` (SQLSTATE 22003, numeric field overflow).
+  Text is rounded directly from its digits before constructing a Decimal. The discarded
+  digit determines whether the retained magnitude increments, independently of the sign, so
+  negative ties round away from zero too. The rounded text alone must fit Decimal exactly;
+  parsing the original with `Convert.ToDecimal` can silently round first and change the answer.
+  For example, `'1.23499999999999999999999999995'` into NUMERIC(4,2) is `1.23`, and
+  `'9.94999999999999999999999999999'` into NUMERIC(2,1) is `9.9`, without a false overflow.
+  CAST, DEFAULT, domain and plain-column assignment, text-source INSERT ... SELECT,
+  string parameters and ADD COLUMN's missing-field backfill all use the shared conversion.
+  PostgreSQL applies exactly that order in `apply_typmod`
+  (`src/backend/utils/adt/numeric.c:7693-7750`); `round_var` carries a half digit at
+  `:11720-11748`. A bare NUMERIC/DECIMAL requires text to fit the existing `System.Decimal`
+  representation exactly, without rounding. Text whose rounded value still does not fit, or
+  unscaled text that cannot fit exactly, fails with `COHSQLE002`. The grammar for quoted numeric
+  text is the existing CAST grammar: trim surrounding whitespace, accept an optional leading
+  sign, then digits with an optional decimal point followed by digits. Exponents, grouping and
+  leading/trailing decimal points are rejected in every text conversion path. An unquoted
+  numeric DEFAULT keeps SQL literal syntax, including exponent notation; its original numeric
+  text reaches the same exact rounding routine. This does not add arbitrary-precision storage.
+  A declared scale of 28 or more requires
+  no rounding of a value Decimal can represent, and an integer-digit allowance of 29 or more
+  adds no limit within that representation. Target-scale padding is not promised. The parser's
+  explicit built-in CAST precision range remains 1..28; domains and column metadata can carry
+  wider bounds without expanding Decimal's storage range. The shared routine rejects precision
+  below 1 or scale outside 0..precision, preserving DEFAULT's modifier validation while
+  accepting valid scales of 28 or more.
+- **Errors.** `SqlEvaluationException` retains the existing message-prefix convention:
+  `COHSQLE012` for character assignment overflow and the existing `COHSQLE002` for numeric
+  modifier overflow or an inexact Decimal representation after any target-scale rounding.
+  DEFAULT and domain context is appended without hiding the leading code.
+  CAST's built-in NUMERIC conversion carries `COHSQLE002` for both failures too; invalid source text and an inexact
+  conversion to an integer keep their existing conversion failures. PostgreSQL lists 22001
+  and 22003 in `src/backend/utils/errcodes.txt:200` and `:197`. The server sends
+  `ExecutionFailure` with the same coded message, the SQL client keeps its connection usable,
+  and the existing statement-atomic rule leaves an explicit transaction active.
+
+This closes the plain-column gap and removes the separate DEFAULT and domain bound checks.
+It also corrects the earlier CAST, DEFAULT and domain behavior: all rejected extra numeric
+scale instead of rounding, and CAST rejected overlong strings instead of truncating. Binary
+lengths keep their existing rejection rule; explicit character truncation does not apply to
+binary values. Stored row bytes and canonical DEFAULT text retain their existing formats.
 
 ## Compiled-schema provisioning
 
@@ -1470,9 +1550,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   MVCC stamps are changed. `SqlRowCodec` reports how many fields were physically
   present, and the executor resolves only the missing tail, on both scans and
   index seeks. Explicit NULLs remain NULL. Default conversion is shared with
-  omitted-column INSERT values and rejects overflow, nonfinite floats, string
-  truncation, and decimal rounding or precision loss. Validation scans are
-  O(table); there is no physical backfill or cross-storage row/catalog commit.
+  omitted-column INSERT values, applies the assignment length and numeric bounds
+  ([Declared column bounds](#declared-column-bounds-1418)), and rejects overflow and
+  nonfinite floats. Validation scans are O(table); there is no physical backfill or
+  cross-storage row/catalog commit.
   A crash before catalog publication leaves the old definition; after publication
   the same persisted default resolves old rows on reopen. Constrained additions
   still build enforcing indexes durably before publication; a crash can leave
@@ -3270,8 +3351,12 @@ equally well with `COHSQLE008`, all while planning. Whatever a function throws, 
 than a `DatabaseException`, a cancellation or an exhausted stack or memory, throws it
 with `COHSQLE007`, the function's exception inner (E2). A write that would evaluate a
 stored CHECK whose function the engine does not resolve throws it with `COHSQLE009`
-(E2 part 2). The codes
-are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT that
+(E2 part 2). Character assignment overflow throws it with `COHSQLE012` (SQLSTATE 22001);
+numeric modifier overflow, after scale rounding, reuses `COHSQLE002` (SQLSTATE 22003),
+including under CAST and DEFAULT. A built-in NUMERIC conversion that cannot represent its
+text exactly as Decimal after any target-scale rounding uses the same code
+([Declared column bounds](#declared-column-bounds-1418)).
+The codes are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT that
 does not load fails the open with a `DatabaseException` naming the database, table
 and constraint or column; one whose call fails its signature carries the
 `COHSQLE006` error in its message and as its inner exception; one whose call names an

@@ -23,7 +23,9 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <b>What a cast does and what the engine does.</b> The conversion maps a value of the source's
 /// storage type to the target's; NULL converts to NULL without a call. The engine then applies the
 /// target's length, precision and scale (PostgreSQL's separate length coercion), and a domain
-/// target's check, so a conversion never has to. A cast whose source or target is a domain is
+/// target's check, so a conversion never has to. An explicit character cast truncates to its
+/// declared character count; NUMERIC rounds to its scale, with midpoint ties away from zero,
+/// before checking precision. A cast whose source or target is a domain is
 /// preferred to the cast of the domain's base type, which applies otherwise; between two types of
 /// the same storage type no cast is needed (PostgreSQL's binary-coercible pair), unless one is
 /// registered. A value of a domain cast to that same domain is never converted, as PostgreSQL
