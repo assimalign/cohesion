@@ -55,6 +55,15 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         }
     }
 
+    /// <summary>
+    /// Adds a middleware component to the pipeline.
+    /// </summary>
+    /// <param name="middleware">The middleware invoked for each request.</param>
+    /// <returns>The same application for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="middleware"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Middleware cannot be registered after the pipeline is built.
+    /// </exception>
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);

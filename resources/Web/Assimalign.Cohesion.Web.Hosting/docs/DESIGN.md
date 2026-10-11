@@ -989,7 +989,8 @@ observe cancellation through `RequestCancelled`.
 
 **Late middleware registration fails (#1078).** Once the pipeline has been built, every
 `WebApplication.Use` / `IWebApplicationPipelineBuilder.Use` overload throws
-`InvalidOperationException` explaining that the pipeline is already built. Register middleware
+`InvalidOperationException` explaining that the pipeline is already built. Each public `Use`
+contract documents this exception in its XML reference. Register middleware
 before starting the application (or explicitly building its pipeline). This is a behavioral
 break from 10.0.0-preview.1, which accepted the registration but never executed it.
 

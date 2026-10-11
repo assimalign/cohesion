@@ -12,6 +12,9 @@ public interface IWebApplicationPipelineBuilder
     /// </summary>
     /// <param name="middleware">The middleware invoked for each request.</param>
     /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Middleware cannot be registered after the pipeline is built.
+    /// </exception>
     IWebApplicationPipelineBuilder Use(IWebApplicationMiddleware middleware);
 
     /// <summary>
@@ -26,6 +29,9 @@ public interface IWebApplicationPipelineBuilder
     /// </remarks>
     /// <param name="middleware">The factory that creates the request delegate from the next middleware.</param>
     /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Middleware cannot be registered after the pipeline is built.
+    /// </exception>
     IWebApplicationPipelineBuilder Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware);
 
     /// <summary>
@@ -39,6 +45,9 @@ public interface IWebApplicationPipelineBuilder
     /// The factory that creates the request delegate from the application context and the next middleware.
     /// </param>
     /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Middleware cannot be registered after the pipeline is built.
+    /// </exception>
     IWebApplicationPipelineBuilder Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware);
 
     /// <summary>

@@ -100,6 +100,11 @@ pipeline, and the delegate it returns runs for each request. The factory body is
 composition-time seam for work that must fail at startup rather than on a request, without a
 dependency on the hosting runtime: `UseRouting` builds the application's route table there (#1051).
 
+The `Use` contracts document `InvalidOperationException` when middleware registration occurs after
+the pipeline is built (#1078). Register middleware before starting the application or explicitly
+building its pipeline. Web.Hosting enforces this boundary; compared with 10.0.0-preview.1, late
+registration now throws instead of accepting middleware that never executes.
+
 ## Segments and terminal middleware (#1056)
 
 | Verb | Runs when | Rejoins the main pipeline |
