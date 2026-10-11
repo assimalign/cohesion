@@ -1246,6 +1246,15 @@ NativeAOT harnesses publish without IL2xxx/IL3xxx warnings. **49a was accepted o
 lands next on this branch**: its classification/scheduling attaches between plan rendering and statement execution,
 with the applied marker still withheld until all required steps finish.
 
+The review-fix campaign at `da23b378fbaf346ad02234299cf1e2d2fff5d906` repeated five alternating
+Release NativeAOT runs against the same base, with other verification work on the host. Its best
+medians are **0.4077 → 0.0085 ms** for reconciliation inside Build (gate still met),
+**10.2540 → 10.9840 ms** for complete phase 6 including opening and recovery (separate budget),
+and **13.8179 → 12.0604 ms** for uninstrumented full Build. The
+[review campaign](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md#review-fix-verification-2026-10-11)
+retains all medians, shared-host conditions, commands and the interlock's constant allocation cost;
+both NativeAOT harnesses again publish without IL2xxx/IL3xxx diagnostics.
+
 **B3: the other four models' seams.** `Options`, `AddDatabase(name)` through the shared builder
 state, `AddServer(Action<XServerOptions>)` for KeyValue, Graph and Blob; `EngineName` leaves all five
 options types (`Create(name, options)`, 286 SQL call sites and the other models', mechanical);
