@@ -47,9 +47,10 @@ public class AntiforgeryRegistrationTests
 
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(
-            () => services.AddAntiforgery(options => options.CookiePath = "/tenant;x"));
+            () => services.AddAntiforgery(antiforgery => antiforgery.Options.CookiePath = "/tenant;x"));
 
-        // Assert — the verb composes the service eagerly, so nothing is registered that would fail per request.
+        // Assert — the verb runs AntiforgeryBuilder.Build, which creates the service over its options
+        // snapshot, before it registers, so nothing is registered that would fail per request.
         exception.Message.ShouldContain("HttpAntiforgeryOptions.CookiePath");
         services.Container.Count.ShouldBe(0);
     }

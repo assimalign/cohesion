@@ -279,9 +279,10 @@ package keeps the engine's in-memory key and says plainly that it is for develop
 - **`UseAntiforgery` without `AddAntiforgery` fails the start.** The middleware resolves the registration
   from the application context when the pipeline is built, so a missing registration is an
   `InvalidOperationException` at startup, not a 500 on the first protected post.
-- **A malformed cookie path fails the registration.** `AddAntiforgery` creates the service when it
-  registers, and `Http.Antiforgery` checks `HttpAntiforgeryOptions.CookiePath` against the RFC 6265
-  `path-value` grammar when the service is created (#1153). A path such as `/tenant;x` is an
+- **A malformed cookie path fails the registration.** `AddAntiforgery` runs `AntiforgeryBuilder.Build`,
+  which creates the service over its options snapshot, before it registers, and `Http.Antiforgery`
+  checks `HttpAntiforgeryOptions.CookiePath` against the RFC 6265 `path-value` grammar when the service
+  is created (#1153). A path such as `/tenant;x` set through `antiforgery.Options.CookiePath` is an
   `ArgumentException` from `AddAntiforgery`, and nothing is registered, instead of a 500 on every token
   issue.
 
