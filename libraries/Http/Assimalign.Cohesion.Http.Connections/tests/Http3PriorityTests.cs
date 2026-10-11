@@ -141,6 +141,92 @@ public class Http3PriorityTests
         connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.IdError);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: PRIORITY_UPDATE frames for unopened streams should be buffered for a bounded number of streams")]
+    public async Task Http3_OnPriorityUpdateFlood_ShouldBoundTheBufferedUpdates()
+    {
+        // Arrange — RFC 9218 §7: an update for a stream not yet opened is buffered, which costs the server
+        // memory, so how many streams it buffers for is local policy. The client names 1,000 distinct future
+        // streams in roughly 9-octet frames, then updates stream 0 again, which marks the end of the flood.
+        List<(long FrameType, byte[] Payload)> frames = new();
+        for (long index = 0; index < 1000; index++)
+        {
+            frames.Add(((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(4 * index, "u=5")));
+        }
+
+        frames.Add(((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1")));
+
+        TestConnection control = new(
+            HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(new (long, long)[] { (0x01, 0) }, frames.ToArray()),
+            ConnectionDirection.ReadOnly,
+            completeInput: false);
+        TestMultiplexedConnection connection = new(control);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        Http3ConnectionContext context = httpConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
+
+        // Act
+        await WaitForUrgencyAsync(context, streamId: 0, urgency: 1);
+
+        // Assert — the first 128 streams named are buffered, the rest dropped without closing the connection.
+        context.TrackedRequestStreamPriorityCount.ShouldBe(128);
+        context.TryGetRequestStreamPriority(4 * 127, out _).ShouldBeTrue();
+        context.TryGetRequestStreamPriority(4 * 128, out _).ShouldBeFalse();
+        connection.AbortReason.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A PRIORITY_UPDATE for a request stream that has ended should be discarded")]
+    public async Task Http3_OnPriorityUpdateAfterStreamEnded_ShouldDiscardIt()
+    {
+        // Arrange — request stream 0 is answered, and its exchange ends.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        Task<IHttpContext> dispatch = peer.NextContextAsync();
+
+        Connection control = await peer.OpenUnidirectionalStreamAsync();
+        await control.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 0)));
+
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/ended", "https", "a"));
+        request.Output.Complete();
+        IHttpContext exchange = await dispatch;
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await Http3InMemoryPeer.ReadToEndAsync(request);
+        Http3ConnectionContext context = peer.ConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
+
+        // Act — an update for the ended stream 0, then one for stream 4, not yet opened, which shows the first
+        // was read.
+        byte[] updates =
+        [
+            .. HttpProtocolPayloadFactory.CreateHttp3Frame((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1")),
+            .. HttpProtocolPayloadFactory.CreateHttp3Frame((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(4, "u=2")),
+        ];
+        await control.Output.WriteAsync(updates);
+        await WaitForUrgencyAsync(context, streamId: 4, urgency: 2);
+
+        // Assert — the ended stream holds no entry, so the state stays bounded by the live and unopened streams.
+        context.TryGetRequestStreamPriority(0, out _).ShouldBeFalse();
+        context.TrackedRequestStreamPriorityCount.ShouldBe(1);
+    }
+
+    private static async Task WaitForUrgencyAsync(Http3ConnectionContext context, long streamId, int urgency)
+    {
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+
+        while (!context.TryGetRequestStreamPriority(streamId, out HttpPriority recorded) || recorded.Urgency != urgency)
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"No PRIORITY_UPDATE with urgency {urgency} was recorded for stream {streamId}.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
     private static async Task<IHttpContext> ReadSingleContextAsync(IHttpConnectionContext context)
     {
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();

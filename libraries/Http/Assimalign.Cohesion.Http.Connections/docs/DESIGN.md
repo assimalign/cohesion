@@ -3669,9 +3669,10 @@ the connection — so it ends only when the connection closes, or with one of:
 | Carries a request `PRIORITY_UPDATE` cut short inside its element ID | `H3_FRAME_ERROR` | §7.1 |
 
 A request `PRIORITY_UPDATE` otherwise sets the referenced stream's effective
-priority (see "RFC 9218 extensible priorities"); one whose Priority Field Value does
-not parse, or whose payload is over the 16 KiB the drain buffers, is skipped
-and has no effect. Other post-SETTINGS frames are read and discarded — a peer
+priority, or is buffered for a stream not yet opened, within a bound (see "RFC
+9218 extensible priorities"); one whose Priority Field Value does not parse,
+whose payload is over the 16 KiB the drain buffers, or that names a stream that
+has ended, is skipped and has no effect. Other post-SETTINGS frames are read and discarded — a peer
 `GOAWAY` (§7.2.6) is not acted on (the server does not implement the *client*
 role of graceful shutdown — reacting to a peer's `GOAWAY` — only the server
 role of *emitting* one, see "Graceful GOAWAY on the control stream"),
@@ -4918,6 +4919,18 @@ state**:
   bidirectional stream. Until #1083 the push frame was only recorded and the drain
   stopped, leaving the rest of the control stream unread (see "The peer control
   stream and SETTINGS").
+- **The priority map is bounded.** It holds an entry for each live request
+  stream — accepted, its head or exchange not yet ended — and for updates
+  buffered for streams not yet opened, the most recent per stream, for at most
+  128 streams (RFC 9218 §7 leaves that bound to local policy); an update past
+  the bound is dropped. A stream's entry goes when the stream ends, and an update
+  naming a stream that has ended is discarded: it has nothing left to prioritize.
+  Before, every update naming a fresh ID added an entry for the connection's
+  lifetime, so a client could grow the map without limit with frames of about
+  nine octets. RFC 9218 §7.2 also says an ID beyond the stream limits SHOULD be
+  `H3_ID_ERROR`; the HTTP/3 layer does not see QUIC's concurrent-stream limit,
+  which the RFC names as the reason that error is not mandatory, so it relies on
+  the bound instead.
 
 ### AOT posture
 

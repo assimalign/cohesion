@@ -96,8 +96,19 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     // engine's observable priority state; response ordering across streams is
     // otherwise delegated to the QUIC transport (see docs/DESIGN.md). Guarded
     // because the control-stream drain runs on a background task.
-    private readonly Dictionary<long, HttpPriority> _requestStreamPriorities = new();
+    //
+    // Bounded, because every PRIORITY_UPDATE naming a fresh ID would otherwise add an entry for the
+    // connection's lifetime. A key is either a live request stream — accepted, its head or exchange not
+    // yet ended — whose value stays null until an update names it, or an update buffered for a stream not
+    // yet opened (at or above _priorityAcceptBoundary), at most maxBufferedPriorityUpdates of them. A
+    // stream's entry goes when it ends, and an update for a stream that has ended is discarded.
+    private const int maxBufferedPriorityUpdates = 128;
+    private readonly Dictionary<long, HttpPriority?> _requestStreamPriorities = new();
     private readonly object _priorityLock = new();
+    // The ID of the next request stream the accept loop takes: every ID below it was opened.
+    private long _priorityAcceptBoundary;
+    // How many keys of _requestStreamPriorities are updates buffered for streams not yet opened.
+    private int _bufferedPriorityUpdates;
 
     // #1085 — the keep-alive deadline. The connection is idle while no request stream is in flight: none
     // is having its head read, and no exchange built from one is still running. _activeRequestStreams
@@ -162,15 +173,81 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         lock (_priorityLock)
         {
-            return _requestStreamPriorities.TryGetValue(streamId, out priority);
+            if (_requestStreamPriorities.TryGetValue(streamId, out HttpPriority? recorded) && recorded is { } value)
+            {
+                priority = value;
+                return true;
+            }
+        }
+
+        priority = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets how many request streams the priority state holds an entry for: the live ones and the updates
+    /// buffered for streams not yet opened. Exposes the state's bound to tests.
+    /// </summary>
+    internal int TrackedRequestStreamPriorityCount
+    {
+        get
+        {
+            lock (_priorityLock)
+            {
+                return _requestStreamPriorities.Count;
+            }
         }
     }
 
+    /// <summary>
+    /// Records a request <c>PRIORITY_UPDATE</c> (RFC 9218 §7.2). An update for a live stream sets its
+    /// priority, and one for a stream that has ended is discarded: it has nothing left to prioritize. An
+    /// update for a stream not yet opened is buffered, the most recent per stream, for at most
+    /// <see cref="maxBufferedPriorityUpdates"/> streams — the local bound RFC 9218 §7 allows — and dropped
+    /// beyond it.
+    /// </summary>
     private void RecordRequestStreamPriority(long streamId, HttpPriority priority)
     {
         lock (_priorityLock)
         {
-            _requestStreamPriorities[streamId] = priority;
+            if (_requestStreamPriorities.ContainsKey(streamId))
+            {
+                _requestStreamPriorities[streamId] = priority;
+            }
+            else if (streamId >= _priorityAcceptBoundary && _bufferedPriorityUpdates < maxBufferedPriorityUpdates)
+            {
+                _requestStreamPriorities.Add(streamId, priority);
+                _bufferedPriorityUpdates++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The accept loop took request stream <paramref name="streamId"/>: it is live until it ends, and an update
+    /// buffered for it now applies to it.
+    /// </summary>
+    private void OpenRequestStreamPriority(long streamId)
+    {
+        lock (_priorityLock)
+        {
+            _priorityAcceptBoundary = streamId + 4;
+
+            if (!_requestStreamPriorities.TryAdd(streamId, null))
+            {
+                _bufferedPriorityUpdates--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Request stream <paramref name="streamId"/> ended — its head yielded no exchange, or its exchange ended — so
+    /// its priority is forgotten, and a later update for it is discarded.
+    /// </summary>
+    private void CloseRequestStreamPriority(long streamId)
+    {
+        lock (_priorityLock)
+        {
+            _requestStreamPriorities.Remove(streamId);
         }
     }
 
@@ -320,6 +397,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                     // instructions (RFC 9204 §4.4); capturing it off the same
                     // increment keeps the two derivations from ever drifting apart.
                     long requestStreamId = 4L * (Interlocked.Increment(ref _processedRequestStreamCount) - 1);
+
+                    // RFC 9218 §7.2 — the stream is live for PRIORITY_UPDATE until it ends.
+                    OpenRequestStreamPriority(requestStreamId);
 
                     // #1085 — the connection is busy until this stream's head yields no exchange, or
                     // the exchange it yields ends.
@@ -808,6 +888,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     {
         if (context.TryEndExchange())
         {
+            CloseRequestStreamPriority(context.StreamId);
             EndRequestStream(exchangeEnded: true);
         }
     }
@@ -1208,9 +1289,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// is truncated: <c>H3_FRAME_ERROR</c>.</description></item>
     /// </list>
     /// <para>
-    /// A request <c>PRIORITY_UPDATE</c> records the referenced stream's effective priority; one whose
-    /// Priority Field Value cannot be parsed, or whose payload exceeds the 16 KiB this drain buffers,
-    /// has no effect. <c>GOAWAY</c> (§7.2.6), <c>MAX_PUSH_ID</c> (§7.2.7), and frames of unknown or
+    /// A request <c>PRIORITY_UPDATE</c> records the referenced stream's effective priority, within the
+    /// priority state's bound (<see cref="RecordRequestStreamPriority"/>); one whose Priority Field Value
+    /// cannot be parsed, or whose payload exceeds the 16 KiB this drain buffers, has no effect. <c>GOAWAY</c> (§7.2.6), <c>MAX_PUSH_ID</c> (§7.2.7), and frames of unknown or
     /// reserved type (§9) are read and discarded.
     /// </para>
     /// </remarks>
@@ -1316,7 +1397,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Reads a request <c>PRIORITY_UPDATE</c> payload (RFC 9218 §7.2) and records the referenced
-    /// stream's effective priority. Returns the connection error when the Prioritized Element ID is
+    /// stream's effective priority (<see cref="RecordRequestStreamPriority"/>, which bounds what it keeps).
+    /// Returns the connection error when the Prioritized Element ID is
     /// truncated (<c>H3_FRAME_ERROR</c>) or names no client-initiated bidirectional stream
     /// (<c>H3_ID_ERROR</c>); otherwise <see langword="null"/>. A payload beyond the 16 KiB bound is
     /// skipped unread, and one whose Priority Field Value does not parse is ignored: neither has effect.
@@ -1802,6 +1884,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // keep-alive deadline.
             if (context is null)
             {
+                CloseRequestStreamPriority(requestStreamId);
                 EndRequestStream(exchangeEnded: false);
             }
 
