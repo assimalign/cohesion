@@ -110,6 +110,27 @@ internal static class PathHelper
 
         return false;
     }
+    /// <summary>
+    /// Checks for a Win32 extended-length ("\\?\") or device ("\\.\") prefix, with either separator.
+    /// </summary>
+    internal static bool HasDevicePrefix(ReadOnlySpan<char> value)
+    {
+        return value.Length >= 4
+            && IsPathSeparator(value[0])
+            && IsPathSeparator(value[1])
+            && (value[2] == '?' || IsDot(value[2]))
+            && IsPathSeparator(value[3]);
+    }
+    /// <summary>
+    /// Checks whether the text after a device prefix is "UNC\" followed by a non-empty server name.
+    /// </summary>
+    internal static bool HasDeviceUncTarget(ReadOnlySpan<char> target)
+    {
+        return target.Length > 4
+            && target.Slice(0, 3).Equals("UNC", StringComparison.OrdinalIgnoreCase)
+            && IsPathSeparator(target[3])
+            && !IsPathSeparator(target[4]);
+    }
     internal static int GetRootLength(ReadOnlySpan<char> path)
     {
         int length = path.Length;
