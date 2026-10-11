@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -233,8 +233,11 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     private async Task ReportStartFailureAsync(Exception startFailure)
     {
         var reportingCancellation = new CancellationTokenSource();
-        // Queue invocation itself: an override can block before it returns its Task.
-        Task reporting = Task.Run(() => OnStartFailedAsync(startFailure, reportingCancellation.Token));
+        // An override can block before returning its Task. Use a dedicated thread so it
+        // cannot hold the pool worker needed to expire its own reporting budget.
+        Task reporting = Task.Factory.StartNew(
+            () => OnStartFailedAsync(startFailure, reportingCancellation.Token),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
         try
         {
             await reporting.WaitAsync(_startFailureReportingTimeout).ConfigureAwait(false);
@@ -579,7 +582,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// <remarks>
     /// The default implementation does nothing. Acceptance means OnStartingAsync completed.
     /// Caller cancellation and OnStartingAsync rejection do not invoke this hook. The coordinator
-    /// invokes it on a worker after resetting run state and waits at most one second, independent
+    /// invokes it on a dedicated thread after resetting run state and waits at most one second, independent
     /// of startup and shutdown budgets. A hook failure or reporting timeout never replaces the startup failure; it is attached
     /// to <see cref="Exception.Data"/> under
     /// <c>Assimalign.Cohesion.Hosting.StartFailureHookException</c> when that dictionary permits it.

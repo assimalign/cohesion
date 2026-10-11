@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,6 +14,45 @@ namespace Assimalign.Cohesion.Hosting.Tests;
 public class HostStartFailureTests
 {
     private const string displayPrefix = "Cohesion Test [Hosting] - Start failure: ";
+
+    [Fact(DisplayName = displayPrefix + "A synchronous hook cannot monopolize the reporting budget's pool worker")]
+    public async Task StartAsync_WhenBlockingHookHasOnePoolWorker_ShouldPropagateBeforeHookRelease()
+    {
+        // Arrange: the process owns the worker constraint, so no other test inherits it.
+        string fixture = Path.Combine(AppContext.BaseDirectory, "StartFailureFixture",
+            "Assimalign.Cohesion.Hosting.StartFailureFixture.dll");
+        File.Exists(fixture).ShouldBeTrue();
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add(fixture);
+        startInfo.Environment["DOTNET_ThreadPool_UseWindowsThreadPool"] = "0";
+        using var process = Process.Start(startInfo).ShouldNotBeNull();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        Task<string> output = process.StandardOutput.ReadToEndAsync(deadline.Token);
+        Task<string> error = process.StandardError.ReadToEndAsync(deadline.Token);
+
+        try
+        {
+            // Act
+            await process.WaitForExitAsync(deadline.Token);
+
+            // Assert
+            process.ExitCode.ShouldBe(0, await output + await error);
+            (await output).ShouldContain("workers=1; reports=1; completed-before-release=true; dedicated-thread=true", Case.Sensitive);
+        }
+        finally
+        {
+            if (!process.HasExited) { process.Kill(entireProcessTree: true); }
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(cleanup.Token);
+        }
+    }
 
     [Theory(DisplayName = displayPrefix + "Every startup phase reports once after compensation")]
     [InlineData("Starting", "OnStarting,Starting,Stop,OnStartFailed")]

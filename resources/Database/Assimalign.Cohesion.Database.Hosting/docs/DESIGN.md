@@ -144,7 +144,7 @@ after rollback and the host's transition to `Failed`, on direct start and comple
 hook receives the failure the caller receives, including a normalized startup timeout; it preserves
 that failure. Caller cancellation and rejection by `OnStartingAsync` (including a second lifecycle)
 write no event 10. An already-cancelled start writes neither event 8 nor 10 and consumes no lifecycle;
-a later uncancelled start is still allowed. Reporting runs on a worker with the shared host's fixed
+a later uncancelled start is still allowed. Reporting runs on a dedicated background thread with the shared host's fixed
 one-second budget and independent cancellation token. A late hook fault is observed without changing
 the propagated failure or a later start's record. A hook failure or reporting timeout is attached by the shared host to the original exception's
 `Data` when writable (see the [Hosting DESIGN](../../../../libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md)), so diagnostics cannot replace the startup failure. Start and stop

@@ -39,8 +39,15 @@ A successful start, repeated start while running, lifecycle rejection, later sto
 does not call it. Hosts that permit retries keep that behavior; each accepted failed retry reports once.
 
 Reporting has a fixed **one-second budget**, starting when the invocation is queued after rollback.
-Invocation runs on the thread pool, so an override that blocks before returning its task cannot
-hold the caller. The private `_startFailureReportingTimeout` constant deliberately does not reuse
+Invocation runs on a dedicated background thread (`LongRunning` on the default task scheduler,
+then `Unwrap`), so an override that blocks before returning its task cannot occupy the pool worker
+needed to expire its own budget, even when the pool has only one worker. The returned asynchronous
+task remains bounded and observed; its continuations use their normal scheduling. This costs one
+thread per reported failed start, including hosts using the default no-op hook. No override detection
+or reflection is used. Skipping the default hook would require explicit opt-in through another
+protected contract or constructor registration; that extra surface is not justified for this failure
+path. A synchronously blocked override retains its background thread until it returns.
+The private `_startFailureReportingTimeout` constant deliberately does not reuse
 `ShutdownTimeout`: service drain can be infinite, while diagnostics must never indefinitely withhold
 the startup failure. A completed report is awaited; expiry propagates the original startup failure
 and requests cancellation asynchronously, so even blocking or throwing cancellation callbacks cannot

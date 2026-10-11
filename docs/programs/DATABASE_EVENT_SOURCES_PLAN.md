@@ -450,8 +450,10 @@ Server startup/shutdown remains root events 18-20; the server host service adds 
 for an accepted failed start (successful `OnStartingAsync`), excluding caller cancellation and
 lifecycle rejection. It receives the failure returned to the caller and an independent token.
 Its default does nothing. The startup timer and registration are disarmed/drained before rollback.
-Reporting runs on a worker with a fixed one-second budget, even for synchronous blocking overrides
-or infinite shutdown timeouts. Expiry propagates the original failure and requests cancellation;
+Reporting invocation runs on a dedicated background thread with a fixed one-second budget, even
+for synchronous blocking overrides, a one-worker pool or infinite shutdown timeouts. This costs
+one thread per reported failed start, including the default no-op hook; there is no reflection-based
+override detection or new opt-in surface. Expiry propagates the original failure and requests cancellation;
 late hook/cancellation faults are observed without modifying the returned exception or a newer attempt.
 Database.Hosting overrides it to write event 10. Direct start and complete-run paths share the
 same hook; ordinary failures retain identity and stack, and existing startup-timeout translation
