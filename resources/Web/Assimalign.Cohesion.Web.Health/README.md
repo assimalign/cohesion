@@ -33,6 +33,11 @@ contract. Contributors participate in readiness and liveness by default. Supply 
 select a different slice, or an empty collection to include a contributor only in aggregate
 health.
 
+The JSON writer publishes no exception text: a check that throws or times out reports its status
+and a fixed description, and its exception stays on the in-process report. Set
+`HealthEndpointOptions.IncludeDeveloperDetails` in development to add each exception's message
+to the response.
+
 See [`docs/OVERVIEW.md`](docs/OVERVIEW.md) and [`docs/DESIGN.md`](docs/DESIGN.md).
 
 Hosting contributor integration is supplied by `Assimalign.Cohesion.Web.Hosting.Health`.

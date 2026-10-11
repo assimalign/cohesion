@@ -48,6 +48,9 @@ healthy, allowing `/livez` or `/readyz` to remain meaningful when their tag slic
 
 Checks run sequentially. A thrown or timed-out check becomes an entry with the registration's
 `FailureStatus`; caller cancellation propagates instead of being converted into a health result.
+The entry's description is fixed text, `The check threw an exception.` or `The check timed out.`,
+never the exception's message. The entry keeps the exception: the one the check threw, or the
+`OperationCanceledException` that ended a timed-out check (see "Exception detail" below).
 
 ## Request handling
 
@@ -71,6 +74,49 @@ fallback. Custom behavior is available through `IHealthResponseWriter`.
 
 The registration, evaluation, and default response path remains trim- and NativeAOT-compatible.
 The optional contributor adapter has its own hosting-family package and tests.
+
+## Exception detail
+
+Health endpoints are typically unauthenticated: orchestrators, load balancers and anyone who can
+reach the listener probe them. A dependency's exception message routinely names hosts, databases,
+users and ports, so publishing it is information exposure (CWE-209). In 10.0.0-preview.1 the
+default writer published it twice: as the entry's `exception` member, and as its `description`,
+which the service set to the same message when a check threw (#1409).
+
+**What the default writer publishes.** The report's `status` and `totalDurationMs`, and per entry
+`status`, `durationMs`, `description`, `tags` and `data`. It writes no exception text:
+
+- It never writes the entry's `Exception`.
+- A thrown or timed-out check carries the service's fixed description (above).
+- A description the check returned is written as returned, unless it contains the message of the
+  result's exception or of any exception in that exception's `InnerException` chain. Then the
+  writer writes `The check reported an exception.` instead. That covers the common
+  `HealthCheckResult.Unhealthy(exception.Message, exception)` idiom and a message formatted into
+  a longer description. A description that paraphrases the exception, or the check's `data`, is
+  the check author's text and is published as returned, so a check must not put connection detail
+  there.
+
+**The opt-in.** `HealthEndpointOptions.IncludeDeveloperDetails`, `false` by default, is meant for a
+development environment. It selects the writer's developer instance, which exposes exactly two
+more things per entry:
+
+- the description exactly as the entry carries it, including one that repeats an exception message;
+- an `exception` member holding the `Message` of the entry's `Exception`: the exception the check
+  threw, the `OperationCanceledException` of a timed-out check, or the exception the check
+  returned in its result.
+
+It never writes the exception's type, stack trace, inner exceptions or `Data`. The output matches
+10.0.0-preview.1's, so a client that read the `exception` member can be restored by opting in.
+The option governs the default writer only; a custom `ResponseWriter` ignores it, as
+`Web.ErrorHandling`'s `IncludeDeveloperDetails` governs only that boundary's own fallback. The
+endpoint resolves its writer once, when the pipeline is composed.
+
+**Server-side detail.** The exception object stays on the in-process report. An application reads
+it through `IHttpHealthFeature.Report` on the exchange, from `IHealthCheckService.CheckHealthAsync`
+directly, or in its own `IHealthResponseWriter`, which receives the whole report and decides what
+to publish. A `HealthCheckEventSource` that reports failed checks with their exception type and
+message arrives with #1406 (the Web event-source lane, Stage 14); it is not built yet, so until then
+the report is the server-side channel.
 
 ## Framework packaging
 

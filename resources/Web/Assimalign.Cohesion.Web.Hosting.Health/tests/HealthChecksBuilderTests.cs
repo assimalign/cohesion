@@ -69,7 +69,8 @@ public class HealthChecksBuilderTests
         registration.HasTag(HealthTags.Ready).ShouldBeFalse();
         registration.HasTag(HealthTags.Live).ShouldBeFalse();
         report.Entries["cache"].Status.ShouldBe(WebHealthStatus.Degraded);
-        report.Entries["cache"].Description.ShouldBe("cache offline");
+        report.Entries["cache"].Description.ShouldBe("The check threw an exception.");
+        report.Entries["cache"].Exception.ShouldNotBeNull().Message.ShouldBe("cache offline");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting.Health] - Builder: contributor receives caller cancellation")]

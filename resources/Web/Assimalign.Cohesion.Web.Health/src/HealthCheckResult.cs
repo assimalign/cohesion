@@ -46,11 +46,22 @@ public readonly struct HealthCheckResult
     /// <summary>
     /// Gets an optional human-readable description of the outcome.
     /// </summary>
+    /// <remarks>
+    /// The default JSON writer publishes the description to every caller of the health endpoint,
+    /// so it should say what failed without naming hosts, databases, users or credentials. The
+    /// writer withholds a description that contains the message of <see cref="Exception"/> or of
+    /// an exception in its inner chain.
+    /// </remarks>
     public string? Description { get; }
 
     /// <summary>
     /// Gets an optional exception captured when the check failed.
     /// </summary>
+    /// <remarks>
+    /// The exception stays on the report entry for in-process readers. The default JSON writer
+    /// does not publish it unless <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/> is
+    /// set.
+    /// </remarks>
     public Exception? Exception { get; }
 
     /// <summary>

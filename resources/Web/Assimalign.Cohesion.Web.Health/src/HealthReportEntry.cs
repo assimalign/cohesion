@@ -49,7 +49,8 @@ public readonly struct HealthReportEntry
     public HealthStatus Status { get; }
 
     /// <summary>
-    /// Gets an optional human-readable description of the outcome.
+    /// Gets an optional human-readable description of the outcome. For a check that threw or timed
+    /// out, the health service sets a fixed description that carries no exception text.
     /// </summary>
     public string? Description { get; }
 
@@ -59,8 +60,15 @@ public readonly struct HealthReportEntry
     public TimeSpan Duration { get; }
 
     /// <summary>
-    /// Gets an optional exception captured when the check failed.
+    /// Gets an optional exception captured when the check failed: the exception the check threw,
+    /// the <see cref="OperationCanceledException"/> that ended a timed-out check, or the exception
+    /// the check returned in its <see cref="HealthCheckResult"/>.
     /// </summary>
+    /// <remarks>
+    /// The exception is for in-process readers, such as a custom <see cref="IHealthResponseWriter"/>
+    /// or a reader of <see cref="IHttpHealthFeature.Report"/>. The default JSON writer does not
+    /// publish it unless <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/> is set.
+    /// </remarks>
     public Exception? Exception { get; }
 
     /// <summary>

@@ -14,6 +14,12 @@ using Assimalign.Cohesion.Http;
 /// The middleware sets the response status code before invoking the writer, so a writer is
 /// responsible only for the response body and any content headers (such as <c>Content-Type</c>).
 /// Implementations must be AOT-safe — no reflection-based serializers.
+/// <para>
+/// The report carries each failed check's <see cref="HealthReportEntry.Exception"/>. Health
+/// endpoints are typically unauthenticated, so a writer should not publish exception text to
+/// callers it does not trust; the default writer publishes none unless
+/// <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/> is set.
+/// </para>
 /// </remarks>
 public interface IHealthResponseWriter
 {

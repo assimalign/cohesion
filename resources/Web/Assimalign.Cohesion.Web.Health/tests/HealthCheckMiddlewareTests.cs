@@ -209,6 +209,170 @@ public class HealthCheckMiddlewareTests
         context.ReadResponseBody().ShouldBe("Healthy");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should not publish a thrown check's exception message")]
+    public async Task MapHealthChecks_WhenCheckThrowsWithHostName_ShouldOmitHostNameFromResponse()
+    {
+        // Arrange
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck("db", StubCheck.Throwing(new InvalidOperationException(ThrownHostMessage)))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(503);
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        JsonElement entry = document.RootElement.GetProperty("entries").GetProperty("db");
+        entry.GetProperty("status").GetString().ShouldBe("Unhealthy");
+        entry.GetProperty("description").GetString().ShouldBe(Internal.HealthCheckService.ThrewDescription);
+        entry.TryGetProperty("exception", out _).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should not publish a timed-out check's exception message")]
+    public async Task MapHealthChecks_WhenCheckTimesOutWithHostName_ShouldOmitHostNameFromResponse()
+    {
+        // Arrange
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck(
+                "db",
+                StubCheck.BlockingThenCancelledWith(TimedOutHostMessage),
+                timeout: TimeSpan.FromMilliseconds(50))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(503);
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        JsonElement entry = document.RootElement.GetProperty("entries").GetProperty("db");
+        entry.GetProperty("description").GetString().ShouldBe(Internal.HealthCheckService.TimedOutDescription);
+        entry.TryGetProperty("exception", out _).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should not publish a returned result's exception message")]
+    public async Task MapHealthChecks_WhenCheckReturnsExceptionMessage_ShouldOmitHostNameFromResponse()
+    {
+        // Arrange
+        var exception = new InvalidOperationException(ThrownHostMessage);
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck("db", () => HealthCheckResult.Unhealthy(exception.Message, exception))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        context.ReadResponseBody().ShouldNotContain(HostName, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should publish a thrown check's exception message with developer details")]
+    public async Task MapHealthChecks_WhenDeveloperDetailsAndCheckThrows_ShouldPublishExceptionMessage()
+    {
+        // Arrange
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck("db", StubCheck.Throwing(new InvalidOperationException(ThrownHostMessage)))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service, options => options.IncludeDeveloperDetails = true);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        using JsonDocument document = JsonDocument.Parse(context.ReadResponseBody());
+        JsonElement entry = document.RootElement.GetProperty("entries").GetProperty("db");
+        entry.GetProperty("exception").GetString().ShouldBe(ThrownHostMessage);
+        entry.GetProperty("description").GetString().ShouldBe(Internal.HealthCheckService.ThrewDescription);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should publish a timed-out check's exception message with developer details")]
+    public async Task MapHealthChecks_WhenDeveloperDetailsAndCheckTimesOut_ShouldPublishExceptionMessage()
+    {
+        // Arrange
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck(
+                "db",
+                StubCheck.BlockingThenCancelledWith(TimedOutHostMessage),
+                timeout: TimeSpan.FromMilliseconds(50))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service, options => options.IncludeDeveloperDetails = true);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        using JsonDocument document = JsonDocument.Parse(context.ReadResponseBody());
+        document.RootElement.GetProperty("entries").GetProperty("db")
+            .GetProperty("exception").GetString().ShouldBe(TimedOutHostMessage);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should leave a custom writer in place when developer details are on")]
+    public async Task MapHealthChecks_WhenDeveloperDetailsAndCustomWriter_ShouldUseCustomWriter()
+    {
+        // Arrange
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck("db", StubCheck.Throwing(new InvalidOperationException(ThrownHostMessage)))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service, options =>
+        {
+            options.IncludeDeveloperDetails = true;
+            options.ResponseWriter = new TextResponseWriter();
+        });
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        context.ReadResponseBody().ShouldBe("Unhealthy");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - MapHealthChecks: Should keep a thrown check's exception on the health feature's report")]
+    public async Task MapHealthChecks_WhenCheckThrows_ShouldKeepExceptionOnHealthFeature()
+    {
+        // Arrange
+        var exception = new InvalidOperationException(ThrownHostMessage);
+        IHealthCheckService service = HealthChecks.CreateBuilder()
+            .AddCheck("db", StubCheck.Throwing(exception))
+            .Build();
+        TestPipelineBuilder builder = new();
+        builder.MapHealthChecks(service);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        IHttpHealthFeature? feature = context.Features.Get<IHttpHealthFeature>();
+        feature.ShouldNotBeNull();
+        feature!.Report.Entries["db"].Exception.ShouldBeSameAs(exception);
+    }
+
+    private const string HostName = "db-primary.corp.internal";
+
+    private const string ThrownHostMessage = "Failed to connect to db-primary.corp.internal:5432 as svc_orders.";
+
+    private const string TimedOutHostMessage = "Connect to db-primary.corp.internal:5432 timed out.";
+
     private sealed class TextResponseWriter : IHealthResponseWriter
     {
         public async ValueTask WriteAsync(IHttpContext context, HealthReport report, System.Threading.CancellationToken cancellationToken = default)

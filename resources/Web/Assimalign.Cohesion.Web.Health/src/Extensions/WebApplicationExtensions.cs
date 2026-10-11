@@ -53,6 +53,7 @@ public static class WebApplicationExtensions
             var options = new HealthEndpointOptions();
             configure?.Invoke(options);
             ArgumentNullException.ThrowIfNull(options.ResponseWriter);
+            IHealthResponseWriter responseWriter = options.ResolveResponseWriter();
 
             return builder.Use(async (context, next) =>
             {
@@ -72,7 +73,7 @@ public static class WebApplicationExtensions
                     context.Response.Headers[HttpHeaderKey.CacheControl] = "no-store, no-cache";
                 }
 
-                await options.ResponseWriter.WriteAsync(context, report, context.RequestCancelled);
+                await responseWriter.WriteAsync(context, report, context.RequestCancelled);
 
                 // Short-circuit: a health endpoint is terminal — do not invoke downstream middleware.
             });

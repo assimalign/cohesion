@@ -17,9 +17,25 @@ namespace Assimalign.Cohesion.Web.Health.Internal;
 /// shared dependencies. Caller cancellation (host shutdown / request abort) propagates out;
 /// a per-check timeout does not — it is folded into that check's entry so one slow dependency
 /// never fails the whole report with an exception.
+/// <para>
+/// A thrown or timed-out check gets a fixed description, never one derived from the exception:
+/// health endpoints are typically unauthenticated, and a dependency's exception message can carry
+/// host, database or user names (CWE-209). The exception itself stays on the entry, for in-process
+/// readers only.
+/// </para>
 /// </remarks>
 internal sealed class HealthCheckService : IHealthCheckService
 {
+    /// <summary>
+    /// The description of an entry whose check threw.
+    /// </summary>
+    internal const string ThrewDescription = "The check threw an exception.";
+
+    /// <summary>
+    /// The description of an entry whose check exceeded its timeout.
+    /// </summary>
+    internal const string TimedOutDescription = "The check timed out.";
+
     private static readonly IReadOnlyDictionary<string, object> _emptyData =
         new Dictionary<string, object>(0);
 
@@ -82,15 +98,16 @@ internal sealed class HealthCheckService : IHealthCheckService
                 result.Data,
                 registration.Tags);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // The per-check timeout tripped (the caller's token is still live): fold the timeout
-            // into this check's entry rather than failing the whole report.
+            // into this check's entry rather than failing the whole report. The cancellation
+            // exception stays on the entry so an in-process reader can see where the check stopped.
             return new HealthReportEntry(
                 registration.FailureStatus,
-                $"The health check '{registration.Name}' timed out after {registration.Timeout}.",
+                TimedOutDescription,
                 Stopwatch.GetElapsedTime(start),
-                exception: null,
+                exception,
                 _emptyData,
                 registration.Tags);
         }
@@ -98,7 +115,7 @@ internal sealed class HealthCheckService : IHealthCheckService
         {
             return new HealthReportEntry(
                 registration.FailureStatus,
-                exception.Message,
+                ThrewDescription,
                 Stopwatch.GetElapsedTime(start),
                 exception,
                 _emptyData,
