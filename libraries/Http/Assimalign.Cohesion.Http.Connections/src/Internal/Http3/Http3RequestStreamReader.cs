@@ -1,8 +1,11 @@
 using System;
 using System.Buffers;
+using System.IO;
 using System.IO.Pipelines;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -170,6 +173,42 @@ internal sealed class Http3RequestStreamReader
         }
 
         return ReadPayloadAsync((int)frame.Length, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reports, without reading the stream or waiting, whether its end has already arrived with nothing
+    /// left to read: the peer's FIN follows the octets consumed so far. Nothing is consumed, so the next
+    /// read sees exactly what it would have seen.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="false"/> means only that the end is not known yet: octets follow, the FIN has not
+    /// arrived, or the input learns of it only when it reads again. A <see cref="PipeReader"/> over a
+    /// <see cref="System.IO.Stream"/> — the QUIC driver's — reports the end only after a read returns no
+    /// octets, so over it a request whose HEADERS frame was the last thing read reports
+    /// <see langword="false"/> even when its FIN came with it.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the stream is known to end at the current position.</returns>
+    public bool IsEndBuffered()
+    {
+        ReadResult result;
+
+        try
+        {
+            if (!_input.TryRead(out result))
+            {
+                return false;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or ConnectionException or InvalidOperationException or OperationCanceledException)
+        {
+            // The input failed or was aborted underneath: the stream did not end cleanly, and the next read
+            // reports how it failed.
+            return false;
+        }
+
+        bool ended = result.IsCompleted && !result.IsCanceled && result.Buffer.IsEmpty;
+        _input.AdvanceTo(result.Buffer.Start);
+        return ended;
     }
 
     /// <summary>

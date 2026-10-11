@@ -201,7 +201,8 @@ public class Http2RequestBodyDataRateTests
                 return ValueTask.CompletedTask;
             });
         Channel<Http2DataChunk> pipe = Channel.CreateUnbounded<Http2DataChunk>();
-        using Http2RequestBodyStream body = new(pipe.Reader, (_, _, _) => ValueTask.CompletedTask, 1, CancellationToken.None, () => { }, dataRate);
+        Http2Stream owner = new(streamId: 1, initialSendWindow: 65535, initialReceiveWindow: 65535, maxHeaderBlockSize: 16384);
+        using Http2RequestBodyStream body = new(owner, pipe.Reader, (_, _, _) => ValueTask.CompletedTask, dataRate);
         long start = clock.GetTimestamp();
 
         Task<int> read = body.ReadAsync(new byte[16]).AsTask();

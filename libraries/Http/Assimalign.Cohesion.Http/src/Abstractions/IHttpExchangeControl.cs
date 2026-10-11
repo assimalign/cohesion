@@ -71,9 +71,18 @@ public interface IHttpExchangeControl
     /// body, an <see cref="IOException"/> for a broken limit, and an
     /// <see cref="System.IO.EndOfStreamException"/> for a body cut short. The transport also latches the
     /// <c>4xx</c> status it answers the exchange with (<c>400</c>, <c>408</c>, <c>413</c> or
-    /// <c>431</c>), which replaces any response that has not started, and it closes the connection
-    /// after the exchange. A response that had already started is finished or reset as the host
-    /// decides; the status then does not reach the wire, and this member still reports it.
+    /// <c>431</c>), which replaces any response that has not started, and on HTTP/1.1 it closes the
+    /// connection after the exchange. A response that had already started is finished or reset as the
+    /// host decides; the status then does not reach the wire, and this member still reports it.
+    /// </para>
+    /// <para>
+    /// HTTP/2 and HTTP/3 frame the request themselves, so a body that breaks the framing — content that
+    /// contradicts its <c>content-length</c>, or a malformed trailer section — makes the request malformed,
+    /// and the transport resets the stream rather than answering it (RFC 9113 §8.1.1, RFC 9114 §4.1.2).
+    /// No status reaches the wire then, and this member reports <c>400</c>, the status HTTP/1.1 answers a
+    /// malformed body with. A body over a limit is answered with its status on every version. On these
+    /// versions every read of the body after the fault throws the fault's exception, an
+    /// <see cref="IOException"/>, rather than the cancellation the reset also fires.
     /// </para>
     /// <para>
     /// This member reports that latched status. Code that observes the body read's exception, such as
@@ -85,7 +94,7 @@ public interface IHttpExchangeControl
     /// The default implementation returns <see langword="null"/>, which a caller reads as "no client
     /// fault reported": an implementation that predates this member, or a protocol version whose
     /// transport does not report client faults, keeps compiling and is classified as before. The
-    /// server transport reports it for HTTP/1.1 exchanges.
+    /// server transport reports it for HTTP/1.1, HTTP/2 and HTTP/3 exchanges.
     /// </para>
     /// </remarks>
     HttpStatusCode? ClientFaultStatusCode => null;

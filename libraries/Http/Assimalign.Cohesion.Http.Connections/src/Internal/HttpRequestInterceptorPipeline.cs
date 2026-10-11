@@ -63,6 +63,10 @@ internal static class HttpRequestInterceptorPipeline
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
     /// message body; body hooks are skipped when <see langword="true"/>.
     /// </param>
+    /// <param name="canHaveBody">
+    /// Whether content may follow the request's head (<see cref="HttpExchangeInterceptorRequestContext.CanHaveBody"/>):
+    /// the transport decides it from the framing it parsed.
+    /// </param>
     /// <param name="featureCapacity">
     /// The number of features each exchange is expected to carry. The collection the hooks fill
     /// becomes the exchange's own, so it is sized for all of them, not just the hooks'.
@@ -86,6 +90,7 @@ internal static class HttpRequestInterceptorPipeline
         HttpConnectionInfo connectionInfo,
         HttpConnectionListenerLimits limits,
         bool isConnect,
+        bool canHaveBody,
         int featureCapacity)
     {
         // Zero registered interceptors keeps the exact pre-seam fast path: no context, no feature
@@ -107,6 +112,9 @@ internal static class HttpRequestInterceptorPipeline
             // The validated :protocol of an extended CONNECT (null otherwise): the one signal that tells
             // a hook an extended CONNECT from a classic one.
             Protocol = head.Protocol,
+            // Whether content may follow the head, from the framing only the transport sees: the signal a hook
+            // that cares about body faults reads, since an HTTP/2 or HTTP/3 request need not declare its body.
+            CanHaveBody = canHaveBody,
             // Hooks observe headers through a read-only view; derived values belong in Features.
             Headers = head.Headers.AsReadOnly(),
             Features = features,

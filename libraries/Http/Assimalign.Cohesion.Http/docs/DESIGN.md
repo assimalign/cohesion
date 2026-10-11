@@ -887,6 +887,16 @@ transport answers the exchange itself, replacing a response that has not started
 connection (`Http.Connections` DESIGN, "Reporting the client fault"). The member tells the code that
 observes the exception that it was the client's fault, without inspecting the exception.
 
+HTTP/2 and HTTP/3 report it too (#1378). Those versions frame the request themselves, so a body that
+breaks the framing — content that contradicts its `content-length`, or a malformed trailer section —
+makes the request malformed, and the transport resets the stream instead of answering it (RFC 9113
+§8.1.1, RFC 9114 §4.1.2). No status reaches the wire, and the member reports `400`, the status
+HTTP/1.1 answers a malformed body with, so a host classifies the exchange the same on every version.
+A body over a limit (`413`, `408`, and on HTTP/3 `431` for its trailer section) is answered with its
+status, as on HTTP/1.1. The reset also fires the exchange's cancellation, so a read on these versions
+reports the fault's `IOException` rather than the cancellation (`Http.Connections` DESIGN, "Client
+faults on HTTP/2 and HTTP/3").
+
 ### Why a probe on the control, not a typed exception or a feature contract
 
 Owner decision 28 (2026-10-09) chose the seam for #1340, under decision 20's rule that the core holds
@@ -909,7 +919,34 @@ Unlike `CanAcceptTunnel` and `AcceptTunnelAsync`, the member has a default imple
 `null` means "no client fault reported", which is exactly what an implementation that predates the
 member, or a protocol version whose transport does not report faults yet, can honestly say. Nothing is
 hidden behind a runtime failure, so adding it is not a source break. The server transport overrides it
-for HTTP/1.1; HTTP/2 and HTTP/3 keep the default until #1378.
+on every version: HTTP/1.1 since #1340, HTTP/2 and HTTP/3 since #1378.
+
+### The body signal: `HttpExchangeInterceptorRequestContext.CanHaveBody` (#1378)
+
+The control exists only in an exchange's response phase, which costs a response sink and the control
+itself, so a host that publishes the report joins the response phase only of an exchange whose body
+can fault. On HTTP/1.1 the head shows that: a `Transfer-Encoding`, or a `Content-Length` other than
+zero. An HTTP/2 or HTTP/3 request need not declare its body at all: content follows a HEADERS frame
+that did not end the stream, or a request stream that has not ended. Only the transport sees that, so
+the request context carries it as a generic fact, as it carries `Protocol` for an extended CONNECT:
+
+- **HTTP/1.1** — the framing declares a body: a `Transfer-Encoding`, or a `Content-Length` other than
+  zero. The transport decides the framing before the head hooks run, so they see it.
+- **HTTP/2** — the HEADERS frame did not carry `END_STREAM`, whatever `content-length` it declares:
+  DATA or a trailer section may still follow, and either can make the request malformed.
+- **HTTP/3** — the request stream had not visibly ended with its HEADERS frame. The transport looks
+  for a FIN already buffered behind the frame, without reading or waiting. Over the QUIC driver, whose
+  input is a `PipeReader` over the `QuicStream`, the end is seen only when a read returns no octets,
+  so a request whose FIN came with its HEADERS frame still reports `true` there: a host gate on it
+  takes the response phase for most HTTP/3 exchanges until the driver reports a FIN it has already
+  received. The in-memory driver reports it.
+- **CONNECT** never has one: the octets after its head are tunnel traffic, not content.
+
+The alternative #1378 weighed — a host that joins every HTTP/2 and HTTP/3 exchange — gives up the fast
+path for every one of them, a `GET` included, to learn what the transport already knows. The property
+is optional and defaults to `true`: a context built outside a transport, a test fake, can have a body
+until it says it cannot, which errs toward taking the response phase rather than toward missing a
+fault.
 
 ## The exchange interceptor seam
 
@@ -1039,7 +1076,7 @@ offered through `IHttpExchangeControl`, which a feature package wraps
 (`context.Upgrade` over `TakeOver`, `context.ExtendedConnect` over
 `AcceptTunnelAsync`). A request fact a hook needs that the parsed head cannot
 show is a member of the request context (`Protocol`, the validated `:protocol`
-of an extended CONNECT). Either way the feature package owns the
+of an extended CONNECT; `CanHaveBody`, whether content may follow the head). Either way the feature package owns the
 application-facing contract, and the transport references no feature package.
 The rule has no exceptions left: the last two transport-produced contracts moved
 out in #1367 (TLS) and #1368 (extended CONNECT).

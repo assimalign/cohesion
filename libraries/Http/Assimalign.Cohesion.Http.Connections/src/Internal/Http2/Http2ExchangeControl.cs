@@ -47,6 +47,18 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     public bool HasResponseStarted => _context.HasFinalResponseStarted || _context.Stream.IsResponseClaimed;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The status the stream latched when it rejected the request body for the client's fault (#1378,
+    /// <see cref="Http2Stream.ClientFaultStatusCode"/>): <c>413</c> over the body-size cap and <c>408</c>
+    /// below the minimum data rate, which the transport answers while no response has started, and
+    /// <c>400</c> for a malformed body — content that contradicts its <c>content-length</c>, or a malformed
+    /// trailer section — which resets the stream with <c>PROTOCOL_ERROR</c> instead (RFC 9113 §8.1.1), so
+    /// no status reaches the wire. It is reported whether or not the transport could still answer the
+    /// stream, and before the stream is answered or reset.
+    /// </remarks>
+    public HttpStatusCode? ClientFaultStatusCode => _context.Stream.ClientFaultStatusCode;
+
+    /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;
 
     /// <inheritdoc />

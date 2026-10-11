@@ -132,6 +132,12 @@ internal sealed class Http2Stream
     // malformed. Null when the request declared none, and for a CONNECT, whose DATA is tunnel traffic.
     // Pump-only state, set at dispatch.
     private long? _declaredContentLength;
+    // The client fault the request body was rejected for (#1378), or null: the status the transport
+    // answers the exchange with, or reports for it when it resets the stream instead, and the failure every
+    // later read of the body throws. Latched once, before the body pipe fails and before the stream is
+    // answered or reset, so whoever observes either finds it. The frame pump (413, a malformed body) and
+    // the body reader (408) race for it, so it is taken with Interlocked.
+    private ClientFault? _clientFault;
 
     // RFC 9113 §8.1 — the request's trailer section: a second field block, opened by a HEADERS frame
     // that carries END_STREAM once the head is in, and closed by END_HEADERS. It accumulates in
@@ -380,6 +386,39 @@ internal sealed class Http2Stream
     }
 
     /// <summary>
+    /// The status the request body was rejected with because the client was at fault (#1378), or
+    /// <see langword="null"/> while it was not: <c>413</c> over the body-size cap, <c>408</c> below the
+    /// minimum data rate, or <c>400</c> for a malformed body — content that contradicts its content-length,
+    /// or a malformed trailer section — which resets the stream rather than answering it. Unlike
+    /// <see cref="TransportResponseStatusCode"/>, it is reported whether or not the transport could still
+    /// answer the stream with it.
+    /// </summary>
+    public HttpStatusCode? ClientFaultStatusCode => Volatile.Read(ref _clientFault)?.StatusCode;
+
+    /// <summary>
+    /// The failure a read of the request body throws once the body was rejected for a client fault
+    /// (<see cref="ClientFaultStatusCode"/>), or <see langword="null"/> while it was not. The reader throws
+    /// it in place of the cancellation the stream's reset fires, so the exchange learns the client's
+    /// fault however its read meets the end of the request.
+    /// </summary>
+    public IOException? ClientFaultFailure => Volatile.Read(ref _clientFault)?.Failure;
+
+    /// <summary>
+    /// Latches the client fault the request body is rejected for, unless one already is: the first fault
+    /// stands for the rest of the exchange. Called before the body pipe fails and before the stream is
+    /// answered or reset.
+    /// </summary>
+    /// <param name="statusCode">The status the fault is answered or reported with.</param>
+    /// <param name="failure">The failure a read of the body throws for it.</param>
+    /// <returns>The failure of the fault that stands: <paramref name="failure"/>, or an earlier one's.</returns>
+    public IOException LatchClientFault(HttpStatusCode statusCode, IOException failure)
+    {
+        ClientFault fault = new(statusCode, failure);
+
+        return (Interlocked.CompareExchange(ref _clientFault, fault, null) ?? fault).Failure;
+    }
+
+    /// <summary>
     /// Whether the <c>END_STREAM</c> completing the application's final response has been written.
     /// </summary>
     public bool IsResponseCompleted => _responseCompleted;
@@ -623,7 +662,9 @@ internal sealed class Http2Stream
         }
         catch (InvalidDataException exception)
         {
-            FailBody(new IOException(exception.Message, exception));
+            // A malformed request is the client's fault (#1378), reported as the 400 HTTP/1.1 answers a
+            // malformed trailer section with; the stream is reset instead (RFC 9113 §8.1.1).
+            FailBody(LatchClientFault(HttpStatusCode.BadRequest, new IOException(exception.Message, exception)));
             throw new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, exception.Message);
         }
 
@@ -641,7 +682,8 @@ internal sealed class Http2Stream
     /// <summary>
     /// Rejects a request whose content contradicts its declared content-length (RFC 9113 §8.1.1): the
     /// body pipe fails, so a reader never mistakes the request for a complete one, and the returned stream
-    /// error of type <c>PROTOCOL_ERROR</c> has the frame pump reset this stream alone.
+    /// error of type <c>PROTOCOL_ERROR</c> has the frame pump reset this stream alone. The malformed body
+    /// is the client's fault (#1378), reported as the <c>400</c> HTTP/1.1 answers one with.
     /// </summary>
     /// <param name="declared">The content-length the request declared.</param>
     /// <returns>The stream error for the caller to throw.</returns>
@@ -653,7 +695,7 @@ internal sealed class Http2Stream
             ? $"The HTTP/2 request on stream {StreamId} is malformed: its DATA frames exceed its content-length of {declared} octets (RFC 9113 §8.1.1)."
             : $"The HTTP/2 request on stream {StreamId} is malformed: the stream ended after {_requestBodyReceived} of the {declared} octets its content-length declared (RFC 9113 §8.1.1).";
 
-        FailBody(new IOException(message));
+        FailBody(LatchClientFault(HttpStatusCode.BadRequest, new IOException(message)));
         return new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, message);
     }
 
@@ -675,7 +717,7 @@ internal sealed class Http2Stream
     /// surface trailers too — so the collection is filled on the reader's own thread, after the frame
     /// pump completed the body pipe.
     /// </summary>
-    private void PublishTrailers()
+    public void PublishTrailers()
     {
         if (Volatile.Read(ref _receivedTrailers) is not { } received || _requestTrailers is null)
         {
@@ -775,8 +817,9 @@ internal sealed class Http2Stream
         if (_maxRequestBodySize is { } limit && _requestBodyReceived > limit)
         {
             _requestBodyRejected = true;
-            FailBody(new IOException(
-                $"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large)."));
+            FailBody(LatchClientFault(
+                HttpStatusCode.RequestEntityTooLarge,
+                new IOException($"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large).")));
             return false;
         }
 
@@ -1242,11 +1285,9 @@ internal sealed class Http2Stream
         // to the minimum data rate; a CONNECT's DATA is tunnel traffic, which may idle.
         _requestTrailers = new HttpTrailerCollection(isSupported: true);
         Http2RequestBodyStream body = new(
+            this,
             _bodyChannel.Reader,
             onBodyConsumed,
-            StreamId,
-            requestAborted,
-            PublishTrailers,
             isConnect ? null : requestBodyDataRate);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
@@ -1301,6 +1342,9 @@ internal sealed class Http2Stream
             connectionInfo,
             limits,
             isConnect,
+            // RFC 9113 §8.1 — content may follow only a head that did not end the stream; a CONNECT's DATA is
+            // tunnel traffic, not content.
+            canHaveBody: !isConnect && !InputCompleted,
             featureCapacity).ConfigureAwait(false);
 
         // RFC 9110 §15.5.14 — arm the request-body cap. The pipeline froze the knob after the head
@@ -1355,5 +1399,22 @@ internal sealed class Http2Stream
 
         path = HttpPath.FromUriComponent(requestTarget);
         return new HttpQueryCollection();
+    }
+
+    /// <summary>
+    /// A latched client fault (<see cref="LatchClientFault"/>): its status and the failure a body read
+    /// throws for it, published together in one reference.
+    /// </summary>
+    private sealed class ClientFault
+    {
+        public ClientFault(HttpStatusCode statusCode, IOException failure)
+        {
+            StatusCode = statusCode;
+            Failure = failure;
+        }
+
+        public HttpStatusCode StatusCode { get; }
+
+        public IOException Failure { get; }
     }
 }

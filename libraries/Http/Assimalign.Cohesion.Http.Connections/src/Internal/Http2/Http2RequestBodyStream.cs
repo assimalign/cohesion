@@ -34,6 +34,15 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// with a 0-octet read (RFC 9113 §8.1, #1327).
 /// </para>
 /// <para>
+/// <b>Client faults (#1378).</b> When the transport rejects the body for the client's fault — over the
+/// size cap, below the minimum data rate, or malformed — the stream latches the fault
+/// (<see cref="Http2Stream.LatchClientFault"/>) before it fails the pipe and before the stream is
+/// answered or reset. From then on every read throws the fault's <see cref="IOException"/>, never the
+/// cancellation the reset fires, so the exchange learns the client's fault however its read meets the
+/// end of the request, and its control reports the status
+/// (<see cref="Http2ExchangeControl.ClientFaultStatusCode"/>).
+/// </para>
+/// <para>
 /// Reaching the clean end of the body is also when the request's trailer section, if
 /// it carried one, appears on <c>Request.Trailers</c>: the frame pump decodes the
 /// section before it completes the pipe, and this stream publishes it at the end.
@@ -59,6 +68,10 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     // rest of the wait charged without spinning.
     private static readonly TimeSpan _backpressureRecheckInterval = TimeSpan.FromSeconds(1);
 
+    // The stream this body belongs to: its abort token, its trailer section, which it publishes when the
+    // reader reaches the clean end of the body (RFC 9110 §6.5, as HTTP/1.1 and HTTP/3 do), and its
+    // client-fault latch (#1378).
+    private readonly Http2Stream _owner;
     private readonly ChannelReader<Http2DataChunk> _reader;
     // Invoked as each chunk is fully consumed to credit its flow-control cost
     // back to the peer — (streamId, flowControlLength, cancellationToken).
@@ -66,9 +79,6 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     // is the only implementer, matching how the HTTP/1.1 reader takes its
     // timeout-phase signals as delegates.
     private readonly Func<int, int, CancellationToken, ValueTask> _onConsumed;
-    // Invoked once, when the reader reaches the clean end of the body: the stream publishes the
-    // request's trailer section there (RFC 9110 §6.5), as HTTP/1.1 and HTTP/3 do.
-    private readonly Action _onEndOfBody;
     private readonly int _streamId;
     private readonly CancellationToken _requestAborted;
     // The connection's minimum request-body data rate policy, or null when the stream is a CONNECT tunnel.
@@ -96,29 +106,28 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     /// <summary>
     /// Initializes the body over a stream's DATA pipe.
     /// </summary>
+    /// <param name="owner">
+    /// The stream the body belongs to: its abort token fires when it is reset, it publishes the trailer
+    /// section at the clean end of the body, and it latches the client fault the body is rejected for.
+    /// </param>
     /// <param name="reader">The pipe the frame pump writes the stream's DATA to.</param>
     /// <param name="onConsumed">Credits a consumed chunk's flow-control cost back to the peer.</param>
-    /// <param name="streamId">The stream identifier.</param>
-    /// <param name="requestAborted">The stream's abort token, fired when it is reset.</param>
-    /// <param name="onEndOfBody">Publishes the trailer section at the clean end of the body.</param>
     /// <param name="dataRate">
     /// The connection's minimum request-body data rate policy, or <see langword="null"/> to leave the body
     /// unbounded in time (a CONNECT tunnel). With a policy, the body is held to the listener's rate unless
     /// its request changed its own before the first read (<see cref="AttachInterception"/>).
     /// </param>
     public Http2RequestBodyStream(
+        Http2Stream owner,
         ChannelReader<Http2DataChunk> reader,
         Func<int, int, CancellationToken, ValueTask> onConsumed,
-        int streamId,
-        CancellationToken requestAborted,
-        Action onEndOfBody,
         Http2RequestBodyDataRate? dataRate = null)
     {
+        _owner = owner;
         _reader = reader;
         _onConsumed = onConsumed;
-        _streamId = streamId;
-        _requestAborted = requestAborted;
-        _onEndOfBody = onEndOfBody;
+        _streamId = owner.StreamId;
+        _requestAborted = owner.RequestAborted;
         _dataRate = dataRate;
     }
 
@@ -170,8 +179,14 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
         {
             // RFC 9113 §5.4.2 — a reset stream aborts the application's view of the
             // request. Surface it as cancellation before delivering any further
-            // bytes so a handler mid-read unwinds rather than seeing a clean EOF.
-            _requestAborted.ThrowIfCancellationRequested();
+            // bytes so a handler mid-read unwinds rather than seeing a clean EOF —
+            // unless the transport ended the exchange for the client's fault (#1378),
+            // whose failure the read reports instead.
+            if (_requestAborted.IsCancellationRequested)
+            {
+                throw CreateAbortFailure();
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             if (_rateFailure is not null)
@@ -295,7 +310,7 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
                 // The pipe completed cleanly. A trailer section, when the request carried one, was
                 // decoded and validated before the pump completed the pipe, so it is complete now.
                 _completed = true;
-                _onEndOfBody();
+                _owner.PublishTrailers();
                 return false;
             }
         }
@@ -322,12 +337,25 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
         {
             return await _reader.WaitToReadAsync(linked.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested
+            && (!cancellationToken.IsCancellationRequested || _owner.ClientFaultFailure is not null))
         {
             // The stream was reset while we waited — re-throw against the abort
-            // token so callers observe the request-abort, not a caller cancel.
-            throw new OperationCanceledException(_requestAborted);
+            // token so callers observe the request-abort, not a caller cancel, or
+            // the client's fault when that is what ended the exchange (#1378).
+            throw CreateAbortFailure();
         }
+    }
+
+    /// <summary>
+    /// The failure a read reports once the stream's abort has fired: the client fault the transport ended
+    /// the exchange for (#1378), when it did — a body over the cap, below the minimum data rate, or
+    /// malformed — so the read surfaces that fault, as HTTP/1.1 and HTTP/3 do, whichever of the fault and
+    /// the reset that followed it the read meets first; otherwise the request abort itself.
+    /// </summary>
+    private Exception CreateAbortFailure()
+    {
+        return (Exception?)_owner.ClientFaultFailure ?? new OperationCanceledException(_requestAborted);
     }
 
     /// <summary>
@@ -385,9 +413,10 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
                 // wait and look again: the next pass rejects the body if the allowance is spent.
                 Charge(gate, dataRate, start, backpressuredAtStart);
             }
-            catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested
+                && (!cancellationToken.IsCancellationRequested || _owner.ClientFaultFailure is not null))
             {
-                throw new OperationCanceledException(_requestAborted);
+                throw CreateAbortFailure();
             }
         }
     }
@@ -409,14 +438,16 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     }
 
     /// <summary>
-    /// Latches the rejection of a body that fell below the minimum data rate, has the connection answer
-    /// the stream (RFC 9110 §15.5.9 — <c>408</c> while no response has started), and returns the failure
-    /// the read throws. Every later read throws it too, unless the stream's reset surfaces first.
+    /// Latches the rejection of a body that fell below the minimum data rate — as the client fault the
+    /// exchange reports (#1378), before the connection answers or resets the stream — has the connection
+    /// answer the stream (RFC 9110 §15.5.9 — <c>408</c> while no response has started), and returns the
+    /// failure the read throws. Every later read throws it too, the stream's reset notwithstanding.
     /// </summary>
     private async ValueTask<IOException> RejectTooSlowAsync(Http2RequestBodyDataRate dataRate)
     {
-        _rateFailure = new IOException(
-            $"The HTTP/2 request body on stream {_streamId} was received below the configured minimum data rate of {_rate!.BytesPerSecond} octets per second (408 Request Timeout).");
+        _rateFailure = _owner.LatchClientFault(
+            HttpStatusCode.RequestTimeout,
+            new IOException($"The HTTP/2 request body on stream {_streamId} was received below the configured minimum data rate of {_rate!.BytesPerSecond} octets per second (408 Request Timeout)."));
 
         await dataRate.RejectTooSlowAsync(_streamId).ConfigureAwait(false);
         return _rateFailure;

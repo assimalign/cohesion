@@ -236,6 +236,17 @@ internal static class Http1MessageReader
             ? target.Scheme
             : scheme;
 
+        // RFC 9112 §6 / §7 — decide the body framing from the headers, rejecting ambiguous
+        // combinations and malformed Content-Length / chunked encodings up front (before
+        // dispatch, and before any hook runs, so a hook never sees a request whose framing cannot be
+        // read). CONNECT carries no framed body (RFC 9110 §9.3.6 — post-header octets are
+        // tunnel traffic). The body-size cap is NOT enforced here: an endpoint or middleware may
+        // still adjust it after dispatch, before the body is read, so Http1RequestBodyStream
+        // freezes and enforces it at the first read.
+        Http1RequestBodyFraming framing = isConnectTunnel
+            ? Http1RequestBodyFraming.None
+            : Http1MessageBodyReader.DetermineFraming(headers);
+
         // Interceptor phase (head hooks). Zero registered interceptors is the fast path: no
         // interception context, no feature collection, no per-request interception allocations —
         // the transport enforces the listener-wide limits exactly as before the seam existed. The
@@ -255,6 +266,9 @@ internal static class Http1MessageReader
                 Path = requestPath,
                 Scheme = requestScheme,
                 Host = host,
+                // RFC 9112 §6 — a body follows the head only when its framing declares one.
+                CanHaveBody = framing.Mode == Http1RequestBodyMode.Chunked
+                    || (framing.Mode == Http1RequestBodyMode.ContentLength && framing.ContentLength > 0),
                 Headers = headers.AsReadOnly(),
                 Features = features,
                 ConnectionInfo = connectionInfo,
@@ -276,16 +290,6 @@ internal static class Http1MessageReader
                     interceptor.AfterRequestHead(interception);
                 }
             }
-
-            // RFC 9112 §6 / §7 — decide the body framing from the headers, rejecting ambiguous
-            // combinations and malformed Content-Length / chunked encodings up front (before
-            // dispatch). CONNECT carries no framed body (RFC 9110 §9.3.6 — post-header octets are
-            // tunnel traffic). The body-size cap is NOT enforced here: an endpoint or middleware may
-            // still adjust it after dispatch, before the body is read, so Http1RequestBodyStream
-            // freezes and enforces it at the first read.
-            Http1RequestBodyFraming framing = isConnectTunnel
-                ? Http1RequestBodyFraming.None
-                : Http1MessageBodyReader.DetermineFraming(headers);
 
             // Hook: the request is about to be dispatched with its lazy body — head hooks done,
             // framing decided, no body octet consumed. Runs before any Expect: 100-continue

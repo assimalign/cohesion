@@ -887,11 +887,21 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// a host's fault boundary staged never reaches the wire then, so a host that reports the exchange
     /// (its telemetry, its access log) reads the status that did, as on HTTP/1.1 and HTTP/3.
     /// </summary>
+    /// <remarks>
+    /// A stream the transport reset for a malformed body, before any response started, carries no status
+    /// at all; the exchange then records the client fault's <c>400</c> (#1378), the status its control
+    /// reports and HTTP/1.1 answers a malformed body with, so the host classifies it as the client's fault
+    /// rather than by the <c>500</c> its fault boundary staged.
+    /// </remarks>
     private static void AdoptTransportResponseStatus(Http2Context context)
     {
         if (context.Stream.TransportResponseStatusCode is { } answeredStatus)
         {
             context.Response.StatusCode = answeredStatus;
+        }
+        else if (!context.HasFinalResponseStarted && context.Stream.ClientFaultStatusCode is { } faultStatus)
+        {
+            context.Response.StatusCode = faultStatus;
         }
     }
 

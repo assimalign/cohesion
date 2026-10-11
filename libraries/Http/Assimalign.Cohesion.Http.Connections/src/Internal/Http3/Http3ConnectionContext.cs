@@ -2278,6 +2278,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 connectionInfo,
                 _limits,
                 isConnect,
+                // RFC 9114 §4.1 — content may follow the HEADERS frame until the stream ends. Only an end
+                // that already arrived rules it out; a CONNECT's DATA is tunnel traffic, not content. Probed
+                // only when a hook can read the answer.
+                canHaveBody: !isConnect && (_requestInterceptors.Length == 0 || !reader.IsEndBuffered()),
                 _featureCapacity).ConfigureAwait(false);
         }
         catch (HttpRequestRejectedException)
@@ -2564,9 +2568,17 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         Http3RequestBodyStream requestBody = http3Context.RequestBody;
 
         // The transport already reset this request stream — a stream error surfaced while the request
-        // body was read — so there is no stream left to answer on.
+        // body was read — so there is no stream left to answer on. A malformed body reset it before any
+        // response started carries no status at all; the exchange then records the client fault's 400
+        // (#1378), the status its control reports and HTTP/1.1 answers a malformed body with, so the host
+        // classifies it as the client's fault rather than by the 500 its fault boundary staged.
         if (requestBody.IsReset)
         {
+            if (!http3Context.HasFinalResponseStarted && requestBody.ClientFaultStatusCode is { } faultStatus)
+            {
+                http3Context.Response.StatusCode = faultStatus;
+            }
+
             return;
         }
 

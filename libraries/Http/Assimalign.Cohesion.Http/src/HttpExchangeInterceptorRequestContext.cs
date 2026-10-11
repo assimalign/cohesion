@@ -28,7 +28,7 @@ namespace Assimalign.Cohesion.Http;
 /// Members added in future versions are optional with sensible defaults so existing
 /// construction sites (including test fakes) keep compiling; the per-request rate knobs
 /// (<see cref="MinRequestBodyDataRate"/>, <see cref="MinResponseDataRate"/>) are such members,
-/// settable until the transport freezes them.
+/// settable until the transport freezes them, and <see cref="CanHaveBody"/> is another.
 /// </para>
 /// </remarks>
 public sealed class HttpExchangeInterceptorRequestContext
@@ -76,6 +76,41 @@ public sealed class HttpExchangeInterceptorRequestContext
     /// <see cref="Method"/> alone cannot tell apart from a classic <c>CONNECT</c>.
     /// </remarks>
     public string? Protocol { get; init; }
+
+    /// <summary>
+    /// Gets whether the request can have a body: content may follow its head, so reading it can still
+    /// fail on the client's side once the request is dispatched. <see langword="false"/> only when the
+    /// transport knows nothing follows the head.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The transport decides it from the request's framing, which only it sees:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><b>HTTP/1.1</b> — the framing declares a body: a <c>Transfer-Encoding</c>, or a
+    /// <c>Content-Length</c> other than zero (RFC 9112 §6). Without either the request has no body, and a
+    /// <c>Content-Length: 0</c> declares an empty one.</description></item>
+    /// <item><description><b>HTTP/2</b> — the HEADERS frame that carried the head did not end the stream
+    /// (no <c>END_STREAM</c>, RFC 9113 §8.1), whatever <c>content-length</c> it declares: DATA or a trailer
+    /// section may still follow, and either can make the request malformed.</description></item>
+    /// <item><description><b>HTTP/3</b> — the request stream had not visibly ended with its HEADERS frame
+    /// when the request was dispatched (RFC 9114 §4.1). The end of a QUIC stream can arrive after its
+    /// HEADERS frame, or be seen by the transport only when it reads again, so a request whose end the
+    /// transport has not yet seen can have a body.</description></item>
+    /// </list>
+    /// <para>
+    /// A <c>CONNECT</c> never has one: the octets after its head are tunnel traffic, not content (RFC 9110
+    /// §9.3.6). The body may still turn out to be empty. An interceptor that needs an exchange's response
+    /// phase only for a request that can fail while its body is read reads this instead of the framing
+    /// fields, which an HTTP/2 or HTTP/3 request need not carry.
+    /// </para>
+    /// <para>
+    /// The property is optional: a context constructed outside a transport (a test fake) reports
+    /// <see langword="true"/> unless it says otherwise, since a request can have a body until its framing
+    /// shows it cannot.
+    /// </para>
+    /// </remarks>
+    public bool CanHaveBody { get; init; } = true;
 
     /// <summary>
     /// Gets a read-only view of the parsed request headers. Mutation throws

@@ -57,7 +57,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// (<see cref="IsReset"/>). A truncated frame or an invalid frame sequence is a connection error
 /// (RFC 9114 §7.1 / §4.1) signalled to the connection context. The first failure is recorded and
 /// rethrown by every later read. All failures surface as <see cref="IOException"/> subtypes, so an
-/// application observes them as ordinary body-read failures.
+/// application observes them as ordinary body-read failures. A rejection and a stream error are the
+/// client's fault, latched as <see cref="ClientFaultStatusCode"/> before the stream is answered or reset,
+/// which the exchange control reports (#1378).
 /// </para>
 /// <para>
 /// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
@@ -112,6 +114,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private bool _trailersReceived;
     private bool _endDelivered;
     private ExceptionDispatchInfo? _failure;
+    // The client fault's status (#1378, ClientFaultStatusCode), 0 while there is none. Written once by the
+    // read path, before the stream is answered or reset; read by the exchange control from the handler.
+    private int _clientFaultStatusCode;
 
     // Guarded by _gate. _reading marks an in-flight application read; _probing the transport's end-of-stream
     // probe (RefuseRemainder), the only other reader of the input pipe; _closed bars any further application
@@ -188,6 +193,22 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// <see langword="null"/> when it was not rejected.
     /// </summary>
     public HttpStatusCode? RejectedStatusCode { get; private set; }
+
+    /// <summary>
+    /// Gets the status the request body was rejected with because the client was at fault (#1378), or
+    /// <see langword="null"/> while it was not: the <see cref="RejectedStatusCode"/> the send path answers
+    /// with, or, for a body the transport found malformed — content that contradicts its Content-Length, a
+    /// malformed trailer section — and so reset the stream for (RFC 9114 §4.1.2), the <c>400</c> HTTP/1.1
+    /// answers a malformed body with; a trailer section over <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c> found
+    /// after the response started reports <c>431</c>. Set before the stream is reset, and not changed after.
+    /// </summary>
+    /// <remarks>
+    /// A connection error found in the body (an invalid frame sequence, a truncated frame, a trailer section
+    /// that corrupts the QPACK state) is not reported: it ends every exchange on the connection, and each
+    /// observes the loss of the connection.
+    /// </remarks>
+    public HttpStatusCode? ClientFaultStatusCode =>
+        Volatile.Read(ref _clientFaultStatusCode) is var statusCode and not 0 ? new HttpStatusCode(statusCode) : null;
 
     /// <summary>
     /// Gets a value indicating whether the transport has reset this request stream — a stream error found
@@ -684,6 +705,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // H3_MESSAGE_ERROR stream error.
             if (_owner is { HasFinalResponseStarted: true })
             {
+                // Still the client's fault, reported as the 431 it would have been answered with (#1378).
+                LatchClientFault(exception.StatusCode);
                 throw new Http3StreamException(Http3ErrorCode.MessageError, exception.Message, exception);
             }
 
@@ -765,12 +788,17 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private Http3LimitExceededException Reject(Http3LimitExceededException rejection)
     {
         RejectedStatusCode = rejection.StatusCode;
+        LatchClientFault(rejection.StatusCode);
         Fail(rejection);
         return rejection;
     }
 
     private void ResetStream(Http3StreamException error)
     {
+        // RFC 9114 §4.1.2 — every stream error the body finds is in the client's octets: a malformed
+        // request, reported as the 400 HTTP/1.1 answers one with (#1378), latched before the reset fires
+        // the exchange's cancellation.
+        LatchClientFault(HttpStatusCode.BadRequest);
         Fail(error);
 
         lock (_gate)
@@ -788,6 +816,15 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     private void Fail(Exception failure)
     {
         _failure ??= ExceptionDispatchInfo.Capture(failure);
+    }
+
+    /// <summary>
+    /// Latches the client fault's status (<see cref="ClientFaultStatusCode"/>) unless one already is: the
+    /// first fault stands for the rest of the exchange.
+    /// </summary>
+    private void LatchClientFault(HttpStatusCode statusCode)
+    {
+        Interlocked.CompareExchange(ref _clientFaultStatusCode, statusCode.Value, 0);
     }
 
     private void EndRead()

@@ -1723,14 +1723,14 @@ catches `InvalidDataException` or `IOException` keeps working.
   client fault and reports nothing. A body the application never read is found
   malformed, over its limit or cut short only by the drain, after the response, so
   its report comes too late for the pipeline; the connection still closes.
-- **Where it does not report.** `Http2ExchangeControl` and `Http3ExchangeControl`
-  keep the interface's default, `null`, until #1378 (Stage 12) reports their
-  rejections.
+- **The other versions.** `Http2ExchangeControl` and `Http3ExchangeControl` report
+  it too since #1378: see "Client faults on HTTP/2 and HTTP/3".
 - **Who reads it.** `Web.Hosting` installs a request-scoped interceptor that adds
-  itself to the response phase of an HTTP/1.1 request declaring a body and
-  publishes the report as `IWebClientFaultFeature` (`Web.Server`). Every other
-  exchange keeps this transport's fast path. Web.Hosting's DESIGN carries the
-  consumers.
+  itself to the response phase of a request that can have a body
+  (`HttpExchangeInterceptorRequestContext.CanHaveBody`, which this transport sets
+  from the framing it decides before the head hooks run) and publishes the report
+  as `IWebClientFaultFeature` (`Web.Server`). Every other exchange keeps this
+  transport's fast path. Web.Hosting's DESIGN carries the consumers.
 
 ### Keep-alive realignment (draining)
 
@@ -2442,6 +2442,92 @@ declaration binds nothing.
 - *Observable by clients.* An HTTP/2 request whose content contradicts its `content-length`, whose
   `content-length` is not a valid length, or whose head ends the stream while declaring content is
   reset with `PROTOCOL_ERROR`. It used to be dispatched, and its body read as whatever arrived.
+
+## Client faults on HTTP/2 and HTTP/3 (#1378)
+
+### The defect this closes
+
+#1340 gave `IHttpExchangeControl` its client-fault report and filled it on HTTP/1.1. HTTP/2 and
+HTTP/3 kept the interface's `null`, yet both reject a request body while the application reads it: over
+the size cap (`413`), below the minimum data rate (`408`, #1085), with an HTTP/3 trailer section over
+`SETTINGS_MAX_FIELD_SECTION_SIZE` (`431`), or malformed. A host that saw the read's exception could not
+tell any of these from an application defect, so a Web host logged them at `Error`, ran the
+application's fault observer, and recorded a `500` on the server span for a stream that carried a
+`4xx` or a reset. Any client could cause it at will.
+
+### What each control reports
+
+| Fault | HTTP/2 | HTTP/3 | Reported |
+|---|---|---|---|
+| Body over the size cap | `413`, or `RST_STREAM(CANCEL)` once the response is under way | `413`, or a reset with `H3_REQUEST_CANCELLED` once the head is committed | `413` |
+| Body below the minimum data rate | `408`, or `RST_STREAM(CANCEL)` | `408`, or a reset | `408` |
+| Trailer section over the field-section limit | (a connection error: `ENHANCE_YOUR_CALM`) | `431`, or a reset with `H3_MESSAGE_ERROR` once the head is committed | `431` on HTTP/3 |
+| Content that contradicts its `content-length` | `RST_STREAM(PROTOCOL_ERROR)` | reset with `H3_MESSAGE_ERROR` | `400` |
+| A malformed trailer section | `RST_STREAM(PROTOCOL_ERROR)` | reset with `H3_MESSAGE_ERROR` (`H3_FRAME_ERROR` for a frame over its limit) | `400` |
+
+- **HTTP/2.** `Http2Stream` latches the fault (`LatchClientFault`, status and failure in one
+  compare-exchange, the first fault standing) before the body pipe fails and before the stream is
+  answered or reset: the frame pump for the cap and a malformed body, the body reader for the rate.
+  `Http2ExchangeControl.ClientFaultStatusCode` reads it. Unlike `TransportResponseStatusCode`, it is
+  reported whether or not the transport could still claim the stream's response.
+- **HTTP/3.** `Http3RequestBodyStream` latches `ClientFaultStatusCode` where it records a rejection
+  (`RejectedStatusCode`) and where it resets the stream for a stream error the body found. Every stream
+  error the body can find is in the client's octets. `Http3ExchangeControl.ClientFaultStatusCode` reads
+  it.
+- **A malformed body is reported as `400`.** These versions frame the request themselves, so the
+  transport resets the stream rather than answering it (RFC 9113 §8.1.1, RFC 9114 §4.1.2), and no status
+  reaches the wire. `400` is what HTTP/1.1 answers a malformed body with, so a host classifies the
+  exchange the same on every version.
+- **Not reported:** a connection error found in the body — on HTTP/3 an invalid frame sequence, a
+  truncated frame, or a trailer section that corrupts the QPACK state; on HTTP/2 a trailer block HPACK
+  cannot decode or over `SETTINGS_MAX_HEADER_LIST_SIZE`. It ends every exchange on the connection, and
+  each observes the loss of the connection, as for a peer that resets its own stream.
+
+### The read reports the fault, not the reset
+
+A fault that resets the stream also fires the exchange's cancellation, and on HTTP/2 the transport's
+`413` or `408` is followed by `RST_STREAM(NO_ERROR)`, which fires it too. `Http2RequestBodyStream`
+checked the abort first, so a read that met the end of the request after the reset threw an
+`OperationCanceledException`, and one that met it before threw the `IOException`: the same fault
+surfaced either way, by timing. The reader now throws the latched fault's `IOException` whenever the
+abort fired after a client fault, at a read's start and from a wait, so the exchange always learns the
+client's fault from its read; a peer reset with no fault still surfaces as the cancellation. HTTP/3
+already rethrew its recorded failure from every read.
+
+### The exchange's status after a reset
+
+A stream the transport reset for a malformed body before any response started carries no status. The
+send path finds it reset and writes nothing; it now sets the exchange's status to the reported `400`, as
+it already set the transport's own `413` or `408` (HTTP/2's `AdoptTransportResponseStatus`, HTTP/3's
+`SendCoreAsync`). A host's fault boundary stages a `500` for the failed read, and its telemetry and
+access log read the exchange's status after the send, so without it they recorded a `500` for a request
+the client got wrong.
+
+### The body signal for a host's gate
+
+The control exists only in the response phase. `HttpExchangeInterceptorRequestContext.CanHaveBody`
+(core Http DESIGN, "The body signal") lets a request-scoped interceptor join it only for a request whose
+body can fault, which an HTTP/2 or HTTP/3 request need not declare:
+
+- **HTTP/1.1** sets it from the framing: chunked, or a `Content-Length` above zero. The framing is now
+  decided before the head hooks run, so a request whose framing cannot be read is refused before any
+  hook sees it; it used to be refused after them.
+- **HTTP/2** sets it when the head's HEADERS frame did not carry `END_STREAM`, whatever `content-length`
+  it declares, since DATA or a trailer section may still follow. A CONNECT never has one.
+- **HTTP/3** sets it unless the request stream's FIN is already buffered behind its HEADERS frame
+  (`Http3RequestStreamReader.IsEndBuffered`, a `TryRead` that consumes nothing), and only when a
+  request hook is registered. Over the QUIC driver the end is seen only by a read that returns no
+  octets, so there a request without a body usually reports `true`; see the core DESIGN.
+
+### Behavior changes
+
+- *Observable by applications.* On HTTP/2, a read of a body the transport rejected now throws the
+  rejection's `IOException` even after the stream's reset fired `RequestCancelled`; it used to throw
+  `OperationCanceledException` when the reset came first.
+- *Observable by hosts.* After a malformed HTTP/2 or HTTP/3 body reset the stream, `SendAsync` leaves
+  the exchange's status at `400` instead of whatever was staged.
+- *Internal.* `Http2RequestBodyStream` takes its `Http2Stream` instead of a stream id, an abort token and
+  a trailer-publishing delegate, which also saves the delegate it allocated per request.
 
 ## HTTP/2 abuse limits
 

@@ -40,6 +40,19 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
     public bool HasResponseStarted => _context.HasFinalResponseStarted;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The status the request body latched when it was rejected for the client's fault (#1378,
+    /// <see cref="Http3RequestBodyStream.ClientFaultStatusCode"/>): <c>413</c> over the body-size cap,
+    /// <c>408</c> below the minimum data rate and <c>431</c> for a trailer section over
+    /// <c>SETTINGS_MAX_FIELD_SECTION_SIZE</c>, which the send path answers while the response head is
+    /// uncommitted, and <c>400</c> for a malformed body — content that contradicts its Content-Length, or a
+    /// malformed trailer section — which resets the request stream instead (<c>H3_MESSAGE_ERROR</c>, RFC 9114
+    /// §4.1.2; <c>H3_FRAME_ERROR</c> for a trailer HEADERS frame over its limit), so no status reaches the
+    /// wire.
+    /// </remarks>
+    public HttpStatusCode? ClientFaultStatusCode => _context.RequestBody.ClientFaultStatusCode;
+
+    /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;
 
     /// <inheritdoc />
