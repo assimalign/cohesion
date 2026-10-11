@@ -13,6 +13,7 @@ internal sealed class RecordingControlPlane : IResourceControlPlane
 {
     private readonly IResourceControlPlane _inner = ResourceControlPlane.Create();
     internal List<CancellationToken> StopTokens { get; } = [];
+    internal TaskCompletionSource StopRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public IReadOnlyList<string> AcceptedCommandKinds => _inner.AcceptedCommandKinds;
     public IReadOnlyDictionary<string, Uri> ObservedEndpoints => _inner.ObservedEndpoints;
     public void AddHealthContributor(IHealthContributor contributor) => _inner.AddHealthContributor(contributor);
@@ -24,6 +25,7 @@ internal sealed class RecordingControlPlane : IResourceControlPlane
     public ValueTask RequestStopAsync(CancellationToken cancellationToken = default)
     {
         StopTokens.Add(cancellationToken);
+        StopRequested.TrySetResult();
         return ValueTask.CompletedTask;
     }
     public ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) => _inner.ExecuteCommandAsync(command, cancellationToken);

@@ -39,9 +39,24 @@ internal sealed class ResponseCompletionFeature : IWebResponseCompletionFeature
 
         _isCompleted = true;
 
+        List<Exception>? failures = null;
         foreach (Func<ValueTask> callback in _callbacks)
         {
-            await callback().ConfigureAwait(false);
+            try
+            {
+                await callback().ConfigureAwait(false);
+            }
+            // Deviates from the repo "catch specific exceptions" rule: arbitrary application
+            // callbacks are isolated, including synchronous throws and asynchronous cancellation.
+            catch (Exception exception)
+            {
+                (failures ??= new()).Add(exception);
+            }
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException("One or more response completion callbacks failed.", failures);
         }
     }
 }

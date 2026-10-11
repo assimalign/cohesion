@@ -15,13 +15,59 @@ using Xunit;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Testing;
 using Assimalign.Cohesion.Web.Testing.TestHost;
+
+using HttpMethod = System.Net.Http.HttpMethod;
+using HttpStatusCode = System.Net.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 
 public sealed class ResourceControlPlaneTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Stop: an earlier throwing completion callback cannot prevent deferred stop")]
+    public async Task Stop_WhenEarlierCompletionCallbackThrows_ShouldStillRequestStop()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var plane = new RecordingControlPlane();
+        await using var factory = new WebApplicationTestFactory();
+        factory.Application.Use(async (context, next) =>
+        {
+            IWebResponseCompletionFeature completion = context.Features.Get<IWebResponseCompletionFeature>().ShouldNotBeNull();
+            completion.Register(async () =>
+            {
+                callbackEntered.TrySetResult();
+                await releaseCallback.Task.WaitAsync(timeout.Token);
+                throw new InvalidOperationException("The earlier completion callback failed.");
+            });
+            await next(context);
+        });
+        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, new ResourceContext(), () => true);
+        using HttpClient client = factory.CreateClient();
+
+        try
+        {
+            // Act: the response reaches the client while the first callback still holds completion.
+            using HttpResponseMessage response = await client.PostAsync("/cohesion/v1/stop", null, timeout.Token);
+            await callbackEntered.Task.WaitAsync(timeout.Token);
+
+            // Assert
+            response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+            plane.StopRequested.Task.IsCompleted.ShouldBeFalse();
+            releaseCallback.TrySetResult();
+            await plane.StopRequested.Task.WaitAsync(timeout.Token);
+            plane.StopTokens.ShouldBe(new[] { CancellationToken.None });
+        }
+        finally
+        {
+            releaseCallback.TrySetResult();
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Composition regression: Web wrapper and direct verb serve the same protocol")]
     public async Task Routes_ThroughWebWrapperAndDirectVerb_ShouldMatch()
     {

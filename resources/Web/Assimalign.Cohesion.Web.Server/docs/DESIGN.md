@@ -69,7 +69,9 @@ is a server concern and the protocol core models only the wire.
 
 **`IWebResponseCompletionFeature`** is the response-transmission seam. The default server installs
 it on every exchange and invokes callbacks in registration order after writing the response to the
-transport. Registration after completion throws `InvalidOperationException`. This lets a terminal
+transport. Callback failures are isolated: every callback runs even if a preceding one throws,
+and the default server retains and reports each failure (#1410). This changes the preview.1
+behavior, which skipped later callbacks after the first failure. Registration after completion throws `InvalidOperationException`. This lets a terminal
 defer lifecycle signals until its acknowledgement has been sent: the resource control plane's stop
 route answers `202` and stops the application only once the `202` is on the wire.
 

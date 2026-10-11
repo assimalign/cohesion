@@ -86,6 +86,12 @@ internal sealed class WebApplicationServerLog
         _logger = logger;
     }
 
+    /// <summary>Reports one callback failure after every response-completion callback ran.</summary>
+    public void CompletionCallbackFailed(Exception exception)
+    {
+        Write(LogLevel.Error, "A response completion callback failed.", exception, attributes: null);
+    }
+
     /// <summary>
     /// The listener could not be bound, so the server, and the application, cannot start.
     /// </summary>

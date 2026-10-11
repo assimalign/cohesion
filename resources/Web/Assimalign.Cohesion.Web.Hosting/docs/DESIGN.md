@@ -329,7 +329,11 @@ once, in one of three ways, chosen by how its pipeline ended:
 - **Post-response work is contained.** A throwing response-completion callback or a
   throwing exchange disposal costs nothing but its own exchange. Completion callbacks
   run only after the application's own response was sent — never after a replacement
-  `500` or a reset.
+  `500` or a reset. Each callback runs in registration order even if a previous one throws
+  (#1410). Completion collects all failures in an `AggregateException`; the server reports each
+  callback's exception separately through its existing logger, without changing the sent response.
+  This is a behavioral break from 10.0.0-preview.1, which skipped the remaining callbacks; in
+  particular, an earlier failure can no longer suppress the control plane's deferred stop.
 - **The connection-level catch remains** for what is left: a receive-side failure the
   transport surfaced and an HTTP/1.1 send failure. Either way the connection cannot
   carry another request, so it is logged (see "Diagnostics"), `Abort`-ed, and the
@@ -835,6 +839,7 @@ events an operator acts on, while counters and traces are the telemetry work (#1
 | Accept-loop fault | `Critical` | accepting faults; the server keeps running but accepts nothing more. Only the drain's own cancellation ends the loop quietly; a cancellation the server did not request is the listener's fault and is logged here (#1310) | the exception |
 | Connection fault, a defect | `Error` | the connection-level isolation boundary caught a failure not attributable to the peer: an unexpected receive-side failure, an HTTP/1.1 response that could not be framed, a teardown failure | the exception; `connection.id`, `network.local.address`/`.port`, `network.peer.address`/`.port`, `network.protocol.version` |
 | Connection fault, the peer or the network | `Debug` | the same boundary, for an `IOException`, `SocketException`, or `ConnectionException`, or any fault after the server aborted its drain | as above |
+| Completion callback failure | `Error` | after every callback has been attempted; one entry per failing callback (#1410) | the callback's exception |
 | Drain cut short | `Warning` | a stop's budget ran out with work in flight; logged before the abort | `http.server.drain.connections`, `.exchanges`, `.duration` |
 
 Why these levels:

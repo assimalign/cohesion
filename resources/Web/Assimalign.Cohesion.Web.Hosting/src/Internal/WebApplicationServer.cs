@@ -761,17 +761,20 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         }
     }
 
-    private static async Task RunCompletionCallbacksAsync(ResponseCompletionFeature responseCompletion)
+    private async Task RunCompletionCallbacksAsync(ResponseCompletionFeature responseCompletion)
     {
         try
         {
             await responseCompletion.CompleteAsync().ConfigureAwait(false);
         }
-        // Deviates from the repo "catch specific exceptions" rule per design decision: callbacks
-        // are application code that runs after the response is already delivered, so their failure
-        // is contained to the exchange and never costs the connection.
-        catch (Exception)
+        catch (AggregateException failures)
         {
+            // CompleteAsync has attempted every callback. Keep one report per callback, even
+            // when that callback itself threw an aggregate, without changing the sent response.
+            foreach (Exception failure in failures.InnerExceptions)
+            {
+                _log.CompletionCallbackFailed(failure);
+            }
         }
     }
 

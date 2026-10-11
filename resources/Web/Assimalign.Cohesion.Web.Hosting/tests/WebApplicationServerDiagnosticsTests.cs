@@ -14,6 +14,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -22,6 +23,7 @@ using Assimalign.Cohesion.Web.Testing;
 
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 using HttpVersion = Assimalign.Cohesion.Http.HttpVersion;
+using HttpMethod = System.Net.Http.HttpMethod;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
@@ -33,6 +35,45 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 public class WebApplicationServerDiagnosticsTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: Each completion callback failure is reported without skipping later callbacks")]
+    public async Task ServeExchange_WhenCompletionCallbacksThrow_ShouldReportEveryFailure()
+    {
+        // Arrange
+        RecordingLoggerProvider recorded = new();
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        InvalidOperationException first = new("first callback");
+        AggregateException second = new("second callback", new InvalidOperationException("nested"));
+        bool lastRan = false;
+        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[] { new FakeHttpContext() }));
+        FakePipeline pipeline = new((context, _) =>
+        {
+            IWebResponseCompletionFeature completion = context.Features.Get<IWebResponseCompletionFeature>()!;
+            completion.Register(() => throw first);
+            completion.Register(() => ValueTask.FromException(second));
+            completion.Register(() => { lastRan = true; return ValueTask.CompletedTask; });
+            return Task.CompletedTask;
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection), loggerFactory);
+
+        // Act
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            await connection.Disposed.Task.WaitAsync(_timeout);
+
+            // Assert
+            lastRan.ShouldBeTrue();
+            recorded.Entries.Select(entry => entry.Exception).ShouldBe(new Exception[] { first, second });
+            recorded.Entries.ShouldAllBe(entry => entry.Level == LogLevel.Error &&
+                entry.Category == WebApplicationServerLog.Category);
+            connection.AbortCount.ShouldBe(0);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
 
     [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A bind failure is logged as Critical with its cause before startup fails")]
     public async Task StartAsync_WhenBindFails_ShouldLogCriticalWithTheCause()

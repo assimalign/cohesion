@@ -7,7 +7,9 @@ namespace Assimalign.Cohesion.Web;
 
 /// <summary>Registers work to run after the response has been written to the transport.</summary>
 /// <remarks>
-/// Callbacks run in registration order. The default Web server installs this feature on every
+/// Callbacks run in registration order and are isolated: a failure in one callback does not skip
+/// later callbacks. The server retains and reports each failure after attempting every callback.
+/// The default Web server installs this feature on every
 /// exchange. A custom <see cref="IWebApplicationServer"/> may omit it, so consumers must handle
 /// an absent feature.
 /// </remarks>
