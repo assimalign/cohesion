@@ -15,8 +15,81 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlLockWaitCollection.Name)]
 public sealed class SqlProvisioningIsolationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: table writers wait through an apply while unrelated readers and writers progress")]
-    public async Task ApplySchemaAsync_ConcurrentWriters_ShouldLockOnlyTheAffectedTableUntilCompletion()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: canceling behind a prior writer compensates only its own work and releases admission")]
+    public async Task ApplySchemaAsync_CanceledBehindPriorWriter_ShouldPreserveWriterAndAllowRetry()
+    {
+        // Arrange: an existing transaction owns the target before the migration starts.
+        var builder = SqlDatabaseEngine.CreateBuilder("provisioning-cancellation");
+        builder.Options.StorageStrategy = new CrashCaptureSqlStorageStrategy();
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("orders", CancellationToken.None);
+        var existing = new CompiledSchemaTable("z_existing", "Existing", [new("id", DatabaseType.Int32, false)], null, [], []);
+        var initial = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", false, [], [existing], []);
+        await database.ApplySchemaAsync(initial, TestTimeout.Token());
+        await using var holder = await database.CreateSessionAsync(CancellationToken.None);
+        await using var unrelated = await database.CreateSessionAsync(CancellationToken.None);
+        await unrelated.ExecuteAsync("CREATE TABLE other (id INT)", cancellationToken: TestTimeout.Token());
+        await using var transaction = await holder.BeginTransactionAsync(TestTimeout.Token());
+        await holder.ExecuteAsync("INSERT INTO z_existing (id) VALUES (42)", cancellationToken: TestTimeout.Token());
+        var desired = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", false, [],
+            [new CompiledSchemaTable("a_first", "First", [new("id", DatabaseType.Int32, false)], null, [], []),
+                new CompiledSchemaTable("z_existing", "Existing", [new("id", DatabaseType.Int32, false),
+                    new("note", DatabaseType.String, true)], null, [], [])], []);
+        int steps = 0;
+        database.SchemaProvisioner.StepApplied = step =>
+        {
+            step.Operation.Kind.ShouldBe(SqlSchemaMigrationOperationKind.AddTable);
+            Interlocked.Increment(ref steps);
+        };
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        // Act: exercise unrelated writes while the apply waits for the existing writer.
+        Task<SqlSchemaMigrationResult> applying = database.ApplySchemaAsync(desired, cancellation.Token).AsTask();
+        var elapsed = Stopwatch.StartNew();
+        int writes = 0;
+        try
+        {
+            do
+            {
+                await unrelated.ExecuteAsync("INSERT INTO other (id) VALUES (1)", cancellationToken: TestTimeout.Token());
+                writes++;
+                applying.IsCompleted.ShouldBeFalse();
+                elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+            }
+            while (elapsed.Elapsed < TimeSpan.FromMilliseconds(150) || Volatile.Read(ref steps) == 0 || writes < 10);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            await Should.ThrowAsync<OperationCanceledException>(async () => await applying);
+        }
+        await transaction.CommitAsync(TestTimeout.Token());
+
+        // Assert: only the migration's new table disappeared. Admission and locks are usable.
+        steps.ShouldBe(1);
+        writes.ShouldBeGreaterThanOrEqualTo(10);
+        database.Catalog.TryGetTable("dbo", "a_first", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "z_existing", out var preserved).ShouldBeTrue();
+        preserved.FindColumn("note").ShouldBeNull();
+        await holder.ExecuteAsync("CREATE INDEX ix_preserved ON z_existing (id)", cancellationToken: TestTimeout.Token());
+        database.SchemaProvisioner.StepApplied = null;
+        await database.ApplySchemaAsync(desired, TestTimeout.Token());
+        database.Catalog.TryGetIndex(preserved.ObjectId, "ix_preserved", out var index).ShouldBeTrue();
+        index.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
+        await using var result = (Execution.QueryResultSet)await holder.ExecuteAsync("SELECT id FROM z_existing", cancellationToken: TestTimeout.Token());
+        int rows = 0;
+        await foreach (var row in result.GetRowsAsync(TestTimeout.Token()))
+        {
+            row.GetValue(0).ShouldBe(42);
+            rows++;
+        }
+        rows.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: table writers wait through completion or compensation while unrelated traffic progresses")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplySchemaAsync_ConcurrentWriters_ShouldLockOnlyTheAffectedTableUntilCompletion(bool failApply)
     {
         // Arrange: pause after publication, when the original statement has committed.
         var builder = SqlDatabaseEngine.CreateBuilder("provisioning-concurrency");
@@ -40,6 +113,10 @@ public sealed class SqlProvisioningIsolationTests
                 Interlocked.Increment(ref hooks);
                 entered.SetResult();
                 release.Wait(timeout.Token);
+                if (failApply)
+                {
+                    throw new InvalidOperationException("Injected failure after table publication.");
+                }
             }
         };
         Task<SqlSchemaMigrationResult> applying = Task.Run(async () => await database.ApplySchemaAsync(schema, timeout.Token));
@@ -74,17 +151,41 @@ public sealed class SqlProvisioningIsolationTests
         finally
         {
             release.Set();
-            await applying;
-            if (writing is not null)
+            if (failApply)
             {
-                await writing;
+                var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await applying);
+                failure.Message.ShouldContain("Every completed step was compensated.");
+                if (writing is not null)
+                {
+                    await Should.ThrowAsync<DatabaseException>(async () => await writing);
+                }
+            }
+            else
+            {
+                await applying;
+                if (writing is not null)
+                {
+                    await writing;
+                }
             }
         }
 
-        // Assert: the waiting writer commits after publication of the complete schema.
+        // Assert: compensation released admission and table locks without admitting a write
+        // to its temporary table. Subsequent ad-hoc commits survive a refused schema retry.
         hooks.ShouldBe(1);
         writes.ShouldBeGreaterThanOrEqualTo(10);
         reads.ShouldBeGreaterThanOrEqualTo(10);
+        if (failApply)
+        {
+            database.Catalog.TryGetTable("dbo", "orders", out _).ShouldBeFalse();
+            await writer.ExecuteAsync("CREATE TABLE orders (id INT)", cancellationToken: timeout.Token);
+            await writer.ExecuteAsync("INSERT INTO orders (id) VALUES (42)", cancellationToken: timeout.Token);
+            await writer.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id)", cancellationToken: timeout.Token);
+            await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(schema, timeout.Token));
+            database.Catalog.TryGetTable("dbo", "orders", out var preserved).ShouldBeTrue();
+            database.Catalog.TryGetIndex(preserved.ObjectId, "ix_orders_id", out var index).ShouldBeTrue();
+            index.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
+        }
         await using var rows = (Execution.QueryResultSet)await writer.ExecuteAsync("SELECT id FROM orders", cancellationToken: timeout.Token);
         int count = 0;
         await foreach (var row in rows.GetRowsAsync(timeout.Token))
