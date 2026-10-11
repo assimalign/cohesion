@@ -118,10 +118,9 @@ All five paired invocation medians, in milliseconds, from `_out/b2/q8-phase-resu
 | 4 | 0.7069 | 0.0089 | 0.7308 | 0.0107 | 21.6820 | 7.3962 |
 | 5 | 0.4754 | 0.0065 | 0.4893 | 0.0079 | 7.6384 | 8.7716 |
 
-The reconciliation and post-open spans are under 1 ms. The complete provisioning phase, including
-database opening, recovery, and binding, exceeds 1 ms, so the gate read literally as that whole
-phase is unmet. The owner/main session must resolve which span the design's "provisioning phase"
-gate requires; these measurements do not claim an unconditional pass.
+The reconciliation and post-open spans are under 1 ms. The owner clarified on 2026-10-11 that
+B2's Q8 gate is provisioning reconciliation, so it is met. The complete phase, including database
+opening, recovery, and binding, is measured above as a separate budget.
 
 The instrumentation stops all three timers before printing its `B2_PHASE6` line. That printing
 still occurs inside the harness's surrounding Q8 Build timer, so instrumented Q8 totals include

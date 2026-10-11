@@ -114,8 +114,9 @@ flowchart LR
 ```
 
 `Sql.Schema` keeps its root reference for `DatabaseException` and `DatabaseObjectOwner` only
-(`CompiledSchemaTable.Owner`, `Sql.Schema/src/SqlCompiledSchema.cs:149`). The SDK task still
-references only `Sql.Schema` (the COHLIB001 precedent).
+(`CompiledSchemaTable.Owner`, `Sql.Schema/src/SqlCompiledSchema.cs:149`). The SDK task references
+`Sql.Schema` and, for validated migration DEFAULT literals, `Sql.Language` (the same-area
+COHLIB001 exception); it takes no engine or storage dependency.
 
 ## 3. Developer-facing API
 
@@ -1057,7 +1058,8 @@ The catalog is the single meeting point, and one DDL executor writes it.
   One anchor is added by metadata name:
   `Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder.Schema(System.Action<SqlSchemaBuilder>)`.
   Its database name is the constant first argument of the enclosing
-  `SqlDatabaseEngineBuilder.AddDatabase(string, …)`. The SDK still references only `Sql.Schema`.
+  `SqlDatabaseEngineBuilder.AddDatabase(string, …)`. The SDK references `Sql.Schema` and
+  `Sql.Language` for migration DEFAULT validation, with no engine or storage dependency.
 - **One artifact per declared database.** The "exactly one declaration" error `COHDBSDK101`
   (`CSharpSchemaExtractor.cs:123`) becomes "one declaration per database name".
   `$(IntermediateOutputPath)cohesion/database.schema.json`
@@ -1234,14 +1236,14 @@ Release NativeAOT `win-arm64`, best-of-five medians in alternating runs of the b
 `2bf42d94b3a200662fb7e22c54f55607d9af4b94` and B2: timers inside Q8 Build measure the apply call
 **0.3881 → 0.0065 ms** and all reconciliation after open **0.4004 → 0.0079 ms**, below **1 ms**.
 The complete phase 6, including database open and recovery, measures **7.6384 → 6.4633 ms**:
-the literal whole-phase interpretation of the gate is **not met**; the owner must resolve whether
-its intended scope is reconciliation. Benchmark-only source copies add the timers without a
+B2's Q8 gate is provisioning reconciliation and is **met**; opening and recovery have a separate
+budget (owner decision 2026-10-11). Benchmark-only source copies add the timers without a
 production API or assembly-access change. The separate, uninstrumented full Q8 Build measures
 **10.2314 → 9.7064 ms**; the already-warmed apply proxy Q8P measures **0.1063 → 0.0027 ms**.
 The [benchmark README](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md)
 retains every campaign, all medians, exact commands, and the reproducible timing helper. Both
-NativeAOT harnesses publish without IL2xxx/IL3xxx warnings. **49a remains unaccepted and unimplemented**: a future
-classification/scheduling decision would attach between plan rendering and statement execution,
+NativeAOT harnesses publish without IL2xxx/IL3xxx warnings. **49a was accepted on 2026-10-11 and
+lands next on this branch**: its classification/scheduling attaches between plan rendering and statement execution,
 with the applied marker still withheld until all required steps finish.
 
 **B3: the other four models' seams.** `Options`, `AddDatabase(name)` through the shared builder
