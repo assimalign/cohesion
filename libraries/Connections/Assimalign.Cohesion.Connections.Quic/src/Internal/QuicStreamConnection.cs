@@ -252,6 +252,8 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         // Completing the last open half has started the release; a half whose completion threw has not,
         // so the release is started here too. Either way this waits for it, as the owning connection's
         // disposal needs: a bidirectional stream's FIN and data are delivered before the connection closes.
+        // The wait ends once the peer has the data, or once the stream ends otherwise, the connection's close
+        // included; the connection bounds how long its own disposal waits (CloseDeliveryTimeout).
         await ReleaseStream().ConfigureAwait(false);
 
         CancelConnectionClosedToken();

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Quic;
 using System.Net.Security;
@@ -23,7 +24,8 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// The connection owns a single shared set of stream pipe options — one memory pool per
 /// connection, not per stream — from which every accepted or opened stream creates its pipes.
 /// Disposing the connection completes live bidirectional streams (delivering any in-flight
-/// application data), then closes the underlying QUIC connection, and only then releases the
+/// application data, for at most the options' <c>CloseDeliveryTimeout</c>, after which the close
+/// ends a stream still delivering), then closes the underlying QUIC connection, and only then releases the
 /// remaining unidirectional streams and the shared pool. Unidirectional streams are long-lived
 /// control channels in multiplexed protocols — HTTP/3 treats its control and QPACK streams as
 /// critical (RFC 9114 §6.2.1) — so the connection close must reach the peer before any
@@ -46,6 +48,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     private readonly QuicConnection _connection;
     private readonly long _defaultStreamErrorCode;
     private readonly long _defaultCloseErrorCode;
+    private readonly TimeSpan _closeDeliveryTimeout;
     private readonly StreamPipeOptionsContext _streamOptions;
     private readonly ConcurrentDictionary<ConnectionId, QuicStreamConnection> _streams = new();
     private readonly CancellationTokenSource _connectionClosedSource = new();
@@ -60,6 +63,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         ListenerId listenerId,
         long defaultStreamErrorCode,
         long defaultCloseErrorCode,
+        TimeSpan closeDeliveryTimeout,
         StreamPipeOptionsContext streamOptions)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -68,6 +72,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         _connection = connection;
         _defaultStreamErrorCode = defaultStreamErrorCode;
         _defaultCloseErrorCode = defaultCloseErrorCode;
+        _closeDeliveryTimeout = closeDeliveryTimeout;
         _streamOptions = streamOptions;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
@@ -202,15 +207,26 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         // connection close must be the first teardown signal the peer sees for them.
         // ConcurrentDictionary.Values is a point-in-time snapshot; each stream untracks itself
         // through its dispose callback.
-        foreach (QuicStreamConnection stream in _streams.Values)
+        //
+        // A stream's disposal waits for the peer to acknowledge its data and FIN, which a peer that
+        // withholds stream credit while keeping the connection alive never does. So every bidirectional
+        // stream is disposed at once and the waits share one bound, CloseDeliveryTimeout; a stream still
+        // delivering when it runs out is ended by the close below, which completes its disposal.
+        Task? deliveries = DisposeBidirectionalStreams();
+
+        if (deliveries is not null)
         {
-            if (stream.Direction == ConnectionDirection.Bidirectional)
-            {
-                await stream.DisposeAsync().ConfigureAwait(false);
-            }
+            await WaitForDeliveryAsync(deliveries).ConfigureAwait(false);
         }
 
         await CloseConnectionAsync(_defaultCloseErrorCode).ConfigureAwait(false);
+
+        // The close ended any stream still delivering; let its disposal finish before the rest is released.
+        // Bounded too, so a stream that never reports its end cannot hold the teardown.
+        if (deliveries is not null)
+        {
+            await WaitForDeliveryAsync(deliveries).ConfigureAwait(false);
+        }
 
         // The connection is closed; disposing the remaining (unidirectional) streams releases
         // their pipes and handles without putting stream-level frames on the wire.
@@ -296,6 +312,44 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     private void OnStreamDisposed(QuicStreamConnection stream)
     {
         _streams.TryRemove(stream.Id, out _);
+    }
+
+    // Starts the disposal of every tracked bidirectional stream without waiting for any, so their deliveries
+    // run concurrently; returns the task that completes once all of them are disposed, or null when there is
+    // none.
+    private Task? DisposeBidirectionalStreams()
+    {
+        List<Task>? disposals = null;
+
+        foreach (QuicStreamConnection stream in _streams.Values)
+        {
+            if (stream.Direction == ConnectionDirection.Bidirectional)
+            {
+                (disposals ??= []).Add(stream.DisposeAsync().AsTask());
+            }
+        }
+
+        return disposals is null ? null : Task.WhenAll(disposals);
+    }
+
+    // Waits for the bidirectional streams' disposal for at most CloseDeliveryTimeout. Running out of time is
+    // not a failure: the caller closes the connection, which ends every stream still delivering.
+    private async Task WaitForDeliveryAsync(Task deliveries)
+    {
+        if (deliveries.IsCompleted)
+        {
+            await deliveries.ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            await deliveries.WaitAsync(_closeDeliveryTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // The peer has not taken delivery in time; the connection close supersedes the rest.
+        }
     }
 
     // The first abort or disposal decides the close: QuicConnection.CloseAsync sends CONNECTION_CLOSE once,

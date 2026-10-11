@@ -21,8 +21,10 @@ as every other transport.
   `IMultiplexedConnectionAbort` (`CONNECTION_CLOSE`) and
   `IMultiplexedStreamAbort` (`STOP_SENDING`, `RESET_STREAM`).
 - Options types covering endpoint, TLS/ALPN, stream limits, pipe buffer
-  sizes, and default QUIC application error codes (defaulting to the
-  HTTP/3 codes, matching the default ALPN).
+  sizes, default QUIC application error codes (defaulting to the
+  HTTP/3 codes, matching the default ALPN), and how long disposing a
+  connection waits for its streams to deliver what they sent
+  (`CloseDeliveryTimeout`).
 
 Protocol semantics (stream typing, SETTINGS, GOAWAY) are out of scope —
 they belong to the protocol layer above. See `DESIGN.md` for the
@@ -46,6 +48,10 @@ unidirectional streams.
 QuicConnectionListenerOptions options = new();
 options.EndPoint = new IPEndPoint(IPAddress.Loopback, 4433);
 options.ServerAuthenticationOptions.ServerCertificate = certificate;
+
+// Disposing a connection waits this long, at most, for its streams' data and FINs to be
+// acknowledged before it closes the connection (five seconds by default).
+options.CloseDeliveryTimeout = TimeSpan.FromSeconds(2);
 
 await using QuicConnectionListener listener = new(options);
 await listener.BindAsync(cancellationToken);

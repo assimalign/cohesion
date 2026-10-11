@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Connections.Quic;
 
@@ -22,6 +23,7 @@ public sealed class QuicConnectionFactoryOptions
     // ApplicationProtocols.
     private long _defaultStreamErrorCode = 0x10c;
     private long _defaultCloseErrorCode = 0x100;
+    private TimeSpan _closeDeliveryTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Creates a new set of QUIC client transport options.
@@ -128,6 +130,39 @@ public sealed class QuicConnectionFactoryOptions
         {
             QuicConnectionListenerOptions.ValidateErrorCode(value);
             _defaultStreamErrorCode = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the longest a connection's disposal waits for its bidirectional streams to deliver what
+    /// they sent before it closes the connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Disposing a connection ends every bidirectional stream gracefully, then waits for the peer to
+    /// acknowledge each stream's data and FIN, so a request's tail is not lost to the
+    /// <c>CONNECTION_CLOSE</c> that follows. The waits run concurrently, and this bounds them all: a peer
+    /// that withholds stream credit, or stops acknowledging, could otherwise hold the disposal, and the
+    /// connection, open for as long as it keeps the connection alive. When the time runs out the connection
+    /// closes with <see cref="DefaultCloseErrorCode"/>, which ends every stream still delivering, so its tail
+    /// is lost.
+    /// </para>
+    /// <para>
+    /// Defaults to five seconds. <see cref="TimeSpan.Zero"/> closes without waiting for any stream, and
+    /// <see cref="Timeout.InfiniteTimeSpan"/> waits without a bound.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the value is negative (other than <see cref="Timeout.InfiniteTimeSpan"/>) or
+    /// longer than <see cref="int.MaxValue"/> milliseconds.
+    /// </exception>
+    public TimeSpan CloseDeliveryTimeout
+    {
+        get => _closeDeliveryTimeout;
+        set
+        {
+            QuicConnectionListenerOptions.ValidateCloseDeliveryTimeout(value);
+            _closeDeliveryTimeout = value;
         }
     }
 

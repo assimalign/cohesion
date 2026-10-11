@@ -185,6 +185,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 _listenerId,
                 _options.DefaultStreamErrorCode,
                 _options.DefaultCloseErrorCode,
+                _options.CloseDeliveryTimeout,
                 streamOptions);
         }
         catch

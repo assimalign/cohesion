@@ -23,7 +23,7 @@ correct for the protocols that run over it.
 | --- | --- | --- |
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
-| `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes. Both default ALPN to HTTP/3 (see "Error model"). |
+| `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes, and the bound on disposal's wait for stream delivery (`CloseDeliveryTimeout`, see "Lifecycle and teardown"). Both default ALPN to HTTP/3 (see "Error model"). |
 | `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts") and `IMultiplexedConnectionAbort` (see "Application error codes"). |
 | `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. Implements `IMultiplexedStreamAbort`. |
 
@@ -66,7 +66,8 @@ it, then immediately fall back to the `IMultiplexedConnection` /
   shutdown, which a graceful FIN reaches once the peer has the data — and
   the stream's `DisposeAsync` waits for that same disposal. That keeps the
   connection-first teardown below intact: a bidirectional stream disposed by
-  its connection still delivers its FIN before the `CONNECTION_CLOSE`.
+  its connection still delivers its FIN before the `CONNECTION_CLOSE`, for
+  as long as the connection's `CloseDeliveryTimeout` allows.
   Neither completion signals the stream's `ConnectionClosed` or changes its
   `State`: a half the holder ends is a half-close, not an abort. Before
   #1330 the pipes were created with `leaveOpen: false`, so completing either
@@ -101,7 +102,20 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
   1. **Bidirectional streams complete first.** Their write halves carry
      application data (an HTTP/3 response, for example) whose FIN and
      delivery acknowledgement must precede the connection close, or the
-     tail of the data could be lost.
+     tail of the data could be lost. The streams are disposed together,
+     and their waits for delivery share one bound, `CloseDeliveryTimeout`
+     (five seconds by default, on both options types). A peer that
+     withholds stream credit for a response's tail while it keeps the
+     connection alive with PINGs never acknowledges the FIN, and MsQuic's
+     send buffering has already completed every write, so nothing above
+     the driver sees a stall; without the bound the disposal, and the
+     host's connection slot, would wait for as long as the peer chose.
+     When the bound runs out the close in step 2 ends every stream still
+     delivering, which completes its disposal, and the tail is lost. An
+     abort of the connection during the wait closes it at once too.
+     (Before #1330 the wait happened on the exchange's own thread, inside
+     the blocking disposal of the `QuicStream`; the bound was added with
+     the half-close, which moved it into this phase.)
   2. **The connection closes** (`CONNECTION_CLOSE` carrying
      `DefaultCloseErrorCode`).
   3. **Unidirectional streams are released only after the close.** In

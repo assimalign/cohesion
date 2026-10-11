@@ -364,6 +364,61 @@ public class QuicMultiplexedConnectionTests
         endOfStream.Buffer.IsEmpty.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - DisposeAsync: A peer withholding stream credit should not hold the disposal beyond CloseDeliveryTimeout")]
+    public async Task DisposeAsync_WhenPeerWithholdsStreamCredit_ShouldCloseWithinCloseDeliveryTimeout()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the server finished its stream, but the client never reads, so the response's tail and its
+        // FIN wait for credit the client never grants while it keeps the connection alive.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using WithheldCreditPair pair = await WithheldCreditPair.CreateAsync(
+            certificate,
+            options => options.CloseDeliveryTimeout = TimeSpan.FromMilliseconds(250),
+            cancellation.Token);
+        await pair.ServerStream.Output.CompleteAsync();
+        await pair.ServerStream.Input.CompleteAsync();
+
+        // Act
+        Task disposal = pair.Server.DisposeAsync().AsTask();
+
+        // Assert — the disposal gives up on the delivery and closes the connection, instead of waiting for as long
+        // as the client keeps the connection alive.
+        try
+        {
+            await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (TimeoutException)
+        {
+            throw new ShouldAssertException("The connection's disposal still waited on a stream the peer withheld credit for.");
+        }
+
+        pair.Server.State.ShouldBe(ConnectionState.Closed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - DisposeAsync: CloseDeliveryTimeout should be validated")]
+    public void CloseDeliveryTimeout_OutOfRange_ShouldThrowArgumentOutOfRange()
+    {
+        // Arrange
+        QuicConnectionListenerOptions listenerOptions = new();
+        QuicConnectionFactoryOptions factoryOptions = new();
+
+        // Act / Assert — zero and infinite are meaningful; any other negative value is not.
+        Should.Throw<ArgumentOutOfRangeException>(() => listenerOptions.CloseDeliveryTimeout = TimeSpan.FromMilliseconds(-2));
+        Should.Throw<ArgumentOutOfRangeException>(() => factoryOptions.CloseDeliveryTimeout = TimeSpan.FromMilliseconds(-2));
+        listenerOptions.CloseDeliveryTimeout = TimeSpan.Zero;
+        factoryOptions.CloseDeliveryTimeout = Timeout.InfiniteTimeSpan;
+        listenerOptions.CloseDeliveryTimeout.ShouldBe(TimeSpan.Zero);
+        factoryOptions.CloseDeliveryTimeout.ShouldBe(Timeout.InfiniteTimeSpan);
+        new QuicConnectionListenerOptions().CloseDeliveryTimeout.ShouldBe(TimeSpan.FromSeconds(5));
+        new QuicConnectionFactoryOptions().CloseDeliveryTimeout.ShouldBe(TimeSpan.FromSeconds(5));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream ConnectionClosed: A peer aborting the stream should signal the other end without a read or write")]
     public async Task StreamConnectionClosed_OnPeerAbort_ShouldFire()
     {
@@ -906,6 +961,153 @@ public class QuicMultiplexedConnectionTests
             }
 
             reader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+        }
+    }
+
+    /// <summary>
+    /// A server stream whose peer withholds credit: a raw <see cref="QuicConnection"/> client with small receive
+    /// windows opens a bidirectional stream, sends one octet and its FIN, and never reads. The server has read
+    /// the octet and written <see cref="ResponseLength"/> octets, more than the client absorbs, so the tail of
+    /// the response, and a FIN after it, stay undelivered until the client reads.
+    /// </summary>
+    private sealed class WithheldCreditPair : IAsyncDisposable
+    {
+        // The client absorbs its connection window plus what System.Net.Quic buffers for a stream it does not
+        // read (64 KiB); the rest stays queued at the server, well inside what MsQuic buffers for its writes.
+        public const int ResponseLength = 160 * 1024;
+
+        private WithheldCreditPair(QuicConnectionListener listener, QuicConnection client, QuicStream clientStream, MultiplexedConnection server, Connection serverStream)
+        {
+            Listener = listener;
+            Client = client;
+            ClientStream = clientStream;
+            Server = server;
+            ServerStream = serverStream;
+        }
+
+        public QuicConnectionListener Listener { get; }
+
+        public QuicConnection Client { get; }
+
+        public QuicStream ClientStream { get; }
+
+        public MultiplexedConnection Server { get; }
+
+        public Connection ServerStream { get; }
+
+        public static async Task<WithheldCreditPair> CreateAsync(
+            X509Certificate2 certificate,
+            Action<QuicConnectionListenerOptions> configureListener,
+            CancellationToken cancellationToken)
+        {
+            SslApplicationProtocol applicationProtocol = new("cohesion-test");
+
+            QuicConnectionListener listener = await QuicConnectionListener.CreateAsync(options =>
+            {
+                options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+                options.ServerAuthenticationOptions = new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = certificate,
+                    ApplicationProtocols = [applicationProtocol],
+                    EnabledSslProtocols = SslProtocols.Tls13
+                };
+                options.DefaultStreamErrorCode = sentinelStreamErrorCode;
+                options.DefaultCloseErrorCode = sentinelCloseErrorCode;
+
+                configureListener(options);
+            }, cancellationToken);
+
+            QuicConnection? client = null;
+
+            try
+            {
+                ValueTask<MultiplexedConnection> accepting = listener.AcceptAsync(cancellationToken);
+
+                client = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
+                {
+                    RemoteEndPoint = listener.EndPoint,
+                    DefaultStreamErrorCode = sentinelStreamErrorCode,
+                    DefaultCloseErrorCode = sentinelCloseErrorCode,
+                    InitialReceiveWindowSizes = new QuicReceiveWindowSizes
+                    {
+                        Connection = 16 * 1024,
+                        LocallyInitiatedBidirectionalStream = 16 * 1024
+                    },
+                    ClientAuthenticationOptions = new SslClientAuthenticationOptions
+                    {
+                        TargetHost = "localhost",
+                        ApplicationProtocols = [applicationProtocol],
+                        EnabledSslProtocols = SslProtocols.Tls13,
+                        RemoteCertificateValidationCallback = static (_, _, _, _) => true
+                    }
+                }, cancellationToken);
+
+                MultiplexedConnection server = await accepting;
+
+                QuicStream clientStream = await client.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
+                await clientStream.WriteAsync(new byte[] { 1 }, completeWrites: true, cancellationToken);
+
+                Connection serverStream = await server.AcceptStreamAsync(cancellationToken);
+                await ReadBytesAsync(serverStream.Input, 1, cancellationToken);
+
+                byte[] response = new byte[ResponseLength];
+                Random.Shared.NextBytes(response);
+                await SendAsync(serverStream, response, cancellationToken);
+
+                return new WithheldCreditPair(listener, client, clientStream, server, serverStream);
+            }
+            catch
+            {
+                if (client is not null)
+                {
+                    await client.DisposeAsync();
+                }
+
+                await listener.DisposeAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Reads the client's side of the stream to its end, returning the number of octets read.
+        /// </summary>
+        public async Task<int> ReadToEndAsync(CancellationToken cancellationToken)
+        {
+            byte[] buffer = new byte[16 * 1024];
+            int total = 0;
+
+            while (true)
+            {
+                int read = await ClientStream.ReadAsync(buffer, cancellationToken);
+
+                if (read == 0)
+                {
+                    return total;
+                }
+
+                total += read;
+            }
+        }
+
+        // The client goes first: closing it ends whatever the server still has to deliver, so the server's
+        // stream and connection never wait on it.
+        public async ValueTask DisposeAsync()
+        {
+            await ClientStream.DisposeAsync();
+            await Client.DisposeAsync();
+            await ServerStream.DisposeAsync();
+            await Server.DisposeAsync();
+            await Listener.DisposeAsync();
+        }
+
+        private static async Task SendAsync(Connection stream, byte[] payload, CancellationToken cancellationToken)
+        {
+            const int piece = 16 * 1024;
+
+            for (int offset = 0; offset < payload.Length; offset += piece)
+            {
+                await stream.Output.WriteAsync(payload.AsMemory(offset, Math.Min(piece, payload.Length - offset)), cancellationToken);
+            }
         }
     }
 
