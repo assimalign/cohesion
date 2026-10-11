@@ -19,7 +19,8 @@ namespace Assimalign.Cohesion.Web.Antiforgery.Tests;
 /// selects: a data-protection provider makes tokens survive a
 /// restart and validate across instances that share a key repository, sealed under the antiforgery purpose
 /// alone; without one the per-process random key is the (development-only) default; an explicit protector
-/// wins; and the last registration is the one exchanges carry and the middleware validates with. Each
+/// wins; the last registration is the one exchanges carry and the middleware validates with; and
+/// <c>AntiforgeryBuilder.Build</c> snapshots the options, so a later change reaches only a later build. Each
 /// "instance" is a separate registration, as a restarted or second application would make.
 /// </summary>
 public class AntiforgeryRegistrationTests
@@ -224,6 +225,54 @@ public class AntiforgeryRegistrationTests
         // Assert
         tokens.HeaderName.ShouldBe("X-XSRF-TOKEN");
         tokens.FormFieldName.ShouldBe("csrf");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AntiforgeryBuilder.Build: Options changed afterward should not reach the built service")]
+    public async Task Build_OptionsChangedAfterBuild_ShouldKeepTheBuiltSnapshot()
+    {
+        // Arrange — the service reads the token names and the cookie name on every request, and the
+        // built-in protector signs with the key bytes on every token.
+        AntiforgeryBuilder builder = new();
+        IHttpAntiforgery built = builder.Build().Antiforgery;
+        HttpAntiforgeryTokenSet issued = built.GetAndStoreTokens(new AntiforgeryTestContext(HttpMethod.Get));
+
+        // Act
+        builder.Options.HeaderName = "X-Changed";
+        builder.Options.FormFieldName = "changed";
+        builder.Options.CookieName = "changed-cookie";
+        Array.Clear(builder.Options.Key);
+        HttpAntiforgeryTokenSet tokens = built.GetTokens(new AntiforgeryTestContext(HttpMethod.Get));
+        bool valid = await built.IsRequestValidAsync(Post(issued));
+
+        // Assert
+        tokens.HeaderName.ShouldBe(headerName);
+        tokens.FormFieldName.ShouldBe("__RequestVerificationToken");
+        valid.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AntiforgeryBuilder.Build: A later Build should protect with a later data-protection provider")]
+    public async Task Build_UseDataProtectionAfterBuild_ShouldProtectWithTheLaterProvider()
+    {
+        // Arrange — the first Build must not pin its derived protector onto the builder's options.
+        InMemoryKeyRepository keys = new();
+        AntiforgeryBuilder builder = new AntiforgeryBuilder()
+            .UseDataProtection(DataProtectionProvider.Create(new InMemoryKeyRepository()));
+        builder.Build();
+        builder.UseDataProtection(DataProtectionProvider.Create(keys));
+        IHttpAntiforgery rebuilt = builder.Build().Antiforgery;
+
+        IHttpAntiforgery sameKeys = new AntiforgeryBuilder()
+            .UseDataProtection(DataProtectionProvider.Create(keys))
+            .Build()
+            .Antiforgery;
+        HttpAntiforgeryTokenSet tokens = sameKeys.GetAndStoreTokens(new AntiforgeryTestContext(HttpMethod.Get));
+
+        // Act
+        bool valid = await rebuilt.IsRequestValidAsync(Post(tokens));
+
+        // Assert
+        valid.ShouldBeTrue();
+        builder.Options.Protector.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AddAntiforgery: The last registration should be the one the middleware validates with")]

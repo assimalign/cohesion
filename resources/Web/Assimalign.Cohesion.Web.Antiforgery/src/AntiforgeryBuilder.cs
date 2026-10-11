@@ -54,8 +54,8 @@ public sealed class AntiforgeryBuilder
     /// Gets the antiforgery options being composed: the token names, cookie attributes, and protector.
     /// </summary>
     /// <remarks>
-    /// The service <see cref="Build"/> creates reads these options as they stand, so configure them before
-    /// it runs and do not reuse the builder for another registration.
+    /// <see cref="Build"/> copies these options into the service it creates, so a change made after it runs
+    /// reaches only a later <see cref="Build"/>, never the service already registered.
     /// </remarks>
     public HttpAntiforgeryOptions Options => _options;
 
@@ -90,20 +90,48 @@ public sealed class AntiforgeryBuilder
     /// Builds the antiforgery feature over <see cref="Options"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// An explicitly configured <see cref="HttpAntiforgeryOptions.Protector"/> wins. Otherwise a provider
     /// supplied through <see cref="UseDataProtection"/> protects tokens, and only without one does the
     /// engine fall back to its per-process random key.
+    /// </para>
+    /// <para>
+    /// The service reads its options on every request, so it gets a snapshot: a copy of
+    /// <see cref="Options"/>, key bytes included, that carries the selected protector. <see cref="Options"/>
+    /// itself is left as configured, so a change made afterward, or a later <see cref="UseDataProtection"/>
+    /// call, reaches only a later <see cref="Build"/>.
+    /// </para>
     /// </remarks>
     /// <returns>The antiforgery feature, an <see cref="IHttpFeature"/> for the application to register.</returns>
     public IHttpAntiforgeryFeature Build()
     {
-        if (_options.Protector is null && _dataProtectionProvider is not null)
+        HttpAntiforgeryOptions snapshot = Snapshot(_options);
+
+        if (snapshot.Protector is null && _dataProtectionProvider is not null)
         {
-            _options.Protector = new DataProtectionAntiforgeryProtector(
+            snapshot.Protector = new DataProtectionAntiforgeryProtector(
                 _dataProtectionProvider.CreateProtector(purpose, purposeVersion));
         }
 
-        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(_options);
-        return new AntiforgeryFeature(antiforgery, _options);
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(snapshot);
+        return new AntiforgeryFeature(antiforgery, snapshot);
     }
+
+    // Copies every HttpAntiforgeryOptions member; an option added there needs a line here, or it reaches
+    // the service only at its default.
+    private static HttpAntiforgeryOptions Snapshot(HttpAntiforgeryOptions options) => new()
+    {
+        CookieName = options.CookieName,
+        FormFieldName = options.FormFieldName,
+        HeaderName = options.HeaderName,
+        // The built-in HMAC protector keeps the array it is given, so the snapshot owns its own copy. A null
+        // key stays null: it is legal while a protector is set, and the engine rejects it otherwise.
+        Key = options.Key is null ? null! : (byte[])options.Key.Clone(),
+        Protector = options.Protector,
+        CookieHttpOnly = options.CookieHttpOnly,
+        CookieSecure = options.CookieSecure,
+        CookieSameSite = options.CookieSameSite,
+        CookiePath = options.CookiePath,
+        CookieIsEssential = options.CookieIsEssential,
+    };
 }

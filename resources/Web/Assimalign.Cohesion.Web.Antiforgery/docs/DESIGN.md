@@ -209,8 +209,12 @@ hidden `AntiforgeryComponents` type.
 `AntiforgeryBuilder` owns the `HttpAntiforgeryOptions` and exposes them as `Options`, as
 `AuthenticationBuilder` does. `Build` selects the protector, creates the service with
 `HttpAntiforgery.Create(options)`, and the verb registers it as an `IHttpFeature` singleton (an
-`IHttpAntiforgeryFeature`), the only lifetime `Web.Hosting` accepts (decision 35). The service reads the
-options as they stand, so a builder is configured before `Build` and not reused. A composition surface
+`IHttpAntiforgeryFeature`), the only lifetime `Web.Hosting` accepts (decision 35). The service reads its
+options on every request, so `Build` hands it a snapshot, as `ValidationBuilder` does: a copy of `Options`,
+the key bytes included, carrying the selected protector. `Build` never writes to `Options`, so a change
+made afterward, or a later `UseDataProtection` call, reaches only a later `Build`, never a registered
+service. Every `HttpAntiforgeryOptions` member is copied by hand, so a new option needs a line in the
+snapshot. A composition surface
 without a container registers `Build`'s result through `IWebApplicationBuilder.AddFeature`. The host seeds application features onto every exchange, so the
 render path mints with `context.RequireAntiforgery.GetAndStoreTokens(context)` on any route, protected or
 not, and with or without `UseAntiforgery`.
