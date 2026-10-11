@@ -521,7 +521,7 @@ project's `docs/DESIGN.md`, "Diagnostics", linked), and the batch that added or 
 | `Assimalign.Cohesion.Database.Graph` | `GraphDatabaseEventSource` | [Database.Graph](../../../resources/Database/Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, index recovery on open, wire-path parse failures |
 | `Assimalign.Cohesion.Database.Blob` | `BlobDatabaseEventSource` | [Database.Blob](../../../resources/Database/Assimalign.Cohesion.Database.Blob/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, per-database and engine-wide refusals, transfer failures |
 | `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | [Database.Documents](../../../resources/Database/Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#diagnostics) | B5 | Index recovery on open |
-| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | [Database.Hosting](../../../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) | existed; D | Reopening offline databases; the application's build, start, stop, disposal failures, commands and admin endpoint (D part 1); health ids 16-17 reserved |
+| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | [Database.Hosting](../../../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) | existed; D | Reopening offline databases; the application's build, start, post-rollback startup failure, stop, disposal failures, commands and admin endpoint (D part 1); health ids 16-17 reserved |
 
 The integration pass after B5 applied the failure and ending rules above to every source, and the
 root's activity-nesting test (`DatabaseActivityNestingTests`) checks the plan's section 8 claim: an
@@ -530,8 +530,9 @@ in-process Sql INSERT under activity tracking writes the kernel's `TransactionBe
 under the statement's activity id.
 
 `D` follows the Hosting and engine-extensibility redesign. Part 1 adds the non-provisioning
-traces; Hosting startup-failure id 10 awaits the shared-host boundary decision, and the
-health/provisioning events remain reserved for decision 49a's hardening run. The projects that get
+traces; Hosting startup-failure id 10 is written after rollback through the owner-approved
+shared Host failure hook (#1441). Hosting health ids 16-17 and Sql provisioning ids 13-15
+remain reserved for decision 49a's hardening run. The projects that get
 no source, and why, are listed in [`docs/EVENT_SOURCES.md`](../../EVENT_SOURCES.md). A NativeAOT
 application receives these events only with `<EventSourceSupport>true</EventSourceSupport>`.
 

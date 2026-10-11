@@ -110,9 +110,13 @@ and disposes engines, whose lifecycle the root reports); `Database.Testing` (a t
 `Database.ApplicationModel` (a declarative planner a gateway runs at build, with no run-time work);
 and `Sdk.Database.Tasks` (MSBuild tasks log through `TaskLoggingHelper` into the build log, inside a
 node no application tool attaches to). `Database.Sql.Schema` also remains uninstrumented after
-the redesign: compilation can run in application composition as well as in MSBuild, and its
-serialization, validation and migration planning are runtime-callable pure transformations,
-with no I/O or lifecycle; failures reach the caller and Database.Sql owns schema application.
+the redesign: compilation, validation and migration planning transform in-memory values during
+application composition as well as in MSBuild. `SqlCompiledSchemaSerializer.Read`/`ReadAsync`
+and `Write`/`WriteAsync` also read and write files and create write directories. Their I/O and
+cancellation failures propagate unchanged, and malformed JSON retains its original inner
+exception when translated to a validation failure. The caller owns reporting; these helpers
+have no service or background lifecycle and swallow no operational failure. Database.Sql owns
+schema application, so no Sql.Schema source is added.
 
 ## Not yet conforming
 
