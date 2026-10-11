@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Web;
 /// exclusive with body binding on the same handler. An <c>IHttpFormFile</c> parameter, a sequence of
 /// them, or an <c>IHttpFormFileCollection</c> binds from the uploaded files with or without this
 /// attribute; on a file, <see cref="Name"/> only sets the field name.
+/// A scalar field binds its first submitted value, including an empty string, for either form
+/// encoding. The parsed form collection preserves every occurrence in order.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
 public sealed class FromFormAttribute : Attribute

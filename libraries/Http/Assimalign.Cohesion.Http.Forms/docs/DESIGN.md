@@ -66,7 +66,7 @@ never buffered in memory just to parse it.
   applies `ValueCountLimit`, `KeyLengthLimit`, and `ValueLengthLimit`,
   un-swaps `+` → space (HTML 4.01 §17.13.4.1), and percent-decodes.
   Repeated keys are accumulated (`Internal/KeyValueAccumulator`) and then
-  comma-joined into the single-value collection (see constraint below).
+  appended individually to the multi-value collection.
 - **multipart** uses `Internal/HttpMultipartFormReader` (ported from
   `Microsoft.AspNetCore.WebUtilities.MultipartReader`) over a
   `BufferedReadStream`, yielding one section at a time with its own header
@@ -85,7 +85,54 @@ multiple-file field (`<input type="file" multiple>`) as separate parts with the 
 are not unique: enumerating the collection yields them all, and `TryGetValue(name, ...)` returns the
 first with that name (names compare case-insensitively). Before #1061 the collection was keyed by name
 and each part replaced the previous one, so only the last file of such a field survived. Repeated
-scalar values are unaffected (see the non-goals).
+scalar values use the same first-read and per-name ordering rule below.
+
+### Repeated scalar fields (#1211, decision 31)
+
+Both encodings retain every value for each field name, including empty values,
+in arrival order. `HttpFormCollection.Add` appends the complete
+`HttpQueryValue` list to any existing list. Collection `Count` counts distinct
+keys; each value has its own `Count`, integer indexer and enumeration. The
+indexer and `TryGetValue` expose the whole list. Its `Value`, `ToString`,
+string conversion and typed scalar getters read the **first** occurrence.
+Existing case-insensitive name matching and the separate file collection stay
+unchanged. No public interface gains a member.
+
+The urlencoded reader's lists are copied into the collection one occurrence at
+a time, without joining or splitting on commas. A literal comma stays part of
+its value. Multipart scalar sections take the same append path as they arrive.
+The value object reuses core Http's immutable amortized append storage, so
+retaining a long sequence does not repeatedly copy all earlier occurrences.
+The urlencoded accumulator marks a key with `null` after its third occurrence;
+checking that marker before accessing the list fixes the fourth occurrence's
+previous `NullReferenceException`.
+
+This follows the [WHATWG urlencoded parser](https://url.spec.whatwg.org/#urlencoded-parsing)'s
+ordered name/value tuples and [RFC 7578 §5.2](https://www.rfc-editor.org/rfc/rfc7578#section-5.2)'s
+preservation of repeated field names. [RFC 7578 §4.3](https://www.rfc-editor.org/rfc/rfc7578#section-4.3)
+expresses the corresponding separate-part rule for multiple files. HTTP
+header comma-combining rules do not apply to form values.
+
+**Breaking changes from 10.0.0-preview.1**, accepted during previews on decision
+15's terms: multipart scalar reads select the first value instead of the last;
+urlencoded scalar reads select the first instead of a comma-joined string;
+repeated `HttpFormCollection.Add` calls append instead of replacing. Enumerate
+the returned value when every occurrence is needed. Four or more urlencoded
+occurrences now parse successfully instead of throwing.
+
+**Consumer audit.** Generated `[FromForm]` scalar bindings read the first value.
+`HttpAntiforgeryService` uses the first form token and retains its existing
+header fallback when that first value is empty. IdentityHub's
+`IdentityEndpointService` selects the first `grant_type`, `client_id`,
+`client_secret`, `audience`/`resource`, `user_code`, `device_code`, and
+`scope`; scope parsing splits that first string on spaces. No caller explicitly
+requires multipart last-wins or urlencoded comma joining. Forms middleware and
+extensions retain the complete collection, and file binding is unaffected.
+
+Tests encode identical interleaved fields with the BCL's urlencoded and
+multipart writers, compare every returned value and scalar read, and include
+empty occurrences, commas, plus signs, Unicode, and five repeats. Consumer
+regressions cover generated scalar binding and antiforgery token order.
 
 ### Spill-to-disk for file uploads
 
@@ -207,10 +254,6 @@ types are Cohesion-native.
 
 ## Non-goals
 
-- **Multi-value form fields.** `IHttpFormCollection` is one
-  `HttpQueryValue` per key by design; repeated keys are comma-joined. A
-  multi-value indexer is a separate, larger API change and a distinct work
-  item, not something to bolt on here.
 - **Per-part multipart charset.** Section text is decoded as UTF-8.
 - **Whole-body buffering / rewind (`BufferBody`).** That is a request-stream
   concern for the protocol/runtime layer, not the form parser.

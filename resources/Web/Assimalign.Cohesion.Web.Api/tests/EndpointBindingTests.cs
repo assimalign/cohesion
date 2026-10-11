@@ -573,6 +573,45 @@ public class EndpointBindingTests
         (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("boxes:5");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Api] - Binding: repeated form scalars bind their first values in either encoding")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Binding_RepeatedFormScalars_ShouldBindFirstValuesForEitherEncoding(bool useMultipart)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseRouting();
+        factory.Application.MapPost("/repeated-form", ([FromForm] string title,
+            [FromForm(Name = "qty")] int quantity) => $"{title}:{quantity}");
+        KeyValuePair<string, string>[] fields =
+        [
+            new("title", "first"),
+            new("qty", "5"),
+            new("title", ""),
+            new("qty", "7"),
+            new("title", "last")
+        ];
+        using HttpContent content = useMultipart ? new MultipartFormDataContent() : new FormUrlEncodedContent(fields);
+        if (content is MultipartFormDataContent multipart)
+        {
+            foreach (KeyValuePair<string, string> field in fields)
+            {
+                multipart.Add(new StringContent(field.Value), field.Key);
+            }
+        }
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/repeated-form", content, cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("first:5");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: CancellationToken and IHttpContext inject directly")]
     public async Task Binding_Injections_ShouldBindContextAndToken()
     {

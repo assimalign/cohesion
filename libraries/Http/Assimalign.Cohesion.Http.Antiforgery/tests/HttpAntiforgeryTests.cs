@@ -46,6 +46,51 @@ public class HttpAntiforgeryTests
         valid.ShouldBeTrue();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Repeated form tokens use the first value")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ValidateRequest_OnRepeatedFormToken_ShouldValidateOnlyFirstValue(bool firstIsValid)
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        HttpAntiforgeryTokenSet tokens = antiforgery.GetTokens(new TestHttpContext(HttpMethod.Get));
+        TestHttpContext post = new(HttpMethod.Post);
+        post.SetRequestCookie(options.CookieName, tokens.CookieToken!);
+        HttpFormCollection form = new();
+        form.Add(options.FormFieldName, firstIsValid ? tokens.RequestToken! : "invalid-token");
+        form.Add(options.FormFieldName, firstIsValid ? "invalid-token" : tokens.RequestToken!);
+        post.Request.Form = form;
+
+        // Act
+        bool valid = await antiforgery.IsRequestValidAsync(post);
+
+        // Assert
+        valid.ShouldBe(firstIsValid);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: An empty first form token falls back to the header")]
+    public async Task ValidateRequest_OnEmptyFirstFormToken_ShouldUseHeaderToken()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        HttpAntiforgeryTokenSet tokens = antiforgery.GetTokens(new TestHttpContext(HttpMethod.Get));
+        TestHttpContext post = new(HttpMethod.Post);
+        post.SetRequestCookie(options.CookieName, tokens.CookieToken!);
+        post.SetRequestHeader(options.HeaderName, tokens.RequestToken!);
+        HttpFormCollection form = new();
+        form.Add(options.FormFieldName, string.Empty);
+        form.Add(options.FormFieldName, "invalid-token");
+        post.Request.Form = form;
+
+        // Act
+        bool valid = await antiforgery.IsRequestValidAsync(post);
+
+        // Assert
+        valid.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Should skip validation for safe methods")]
     public async Task ValidateRequest_OnSafeMethod_ShouldPassWithoutTokens()
     {

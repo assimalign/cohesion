@@ -33,12 +33,10 @@ namespace Assimalign.Cohesion.Http;
 /// decoded as UTF-8.
 /// </para>
 /// <para>
-/// Cohesion's <see cref="IHttpFormCollection"/> stores one value per key
-/// (single <see cref="HttpQueryValue"/>); when a urlencoded body sends the
-/// same key multiple times, the values are comma-joined per RFC 7230 §3.2.2
-/// before being added to the collection. Multi-value-aware form access is a
-/// future enhancement once the form-collection API grows a multi-value
-/// indexer.
+/// Both encodings preserve every occurrence of a field in arrival order.
+/// Each <see cref="HttpQueryValue"/> exposes the ordered values; its scalar
+/// <see cref="HttpQueryValue.Value"/> returns the first occurrence, including
+/// an empty one. Form values are never comma-joined.
 /// </para>
 /// </remarks>
 // Deviates from AGENTS.md interface-first rule per design decision:
@@ -189,17 +187,10 @@ public sealed class HttpFormFeature : IHttpFormFeature
         Dictionary<string, List<string>> parsed = await reader.ReadFormAsync(cancellationToken).ConfigureAwait(false);
         foreach (KeyValuePair<string, List<string>> pair in parsed)
         {
-            // RFC 7230 §3.2.2 — comma-join repeated values into a single
-            // representation. Cohesion's HttpFormCollection stores one
-            // HttpQueryValue per key; a multi-value indexer is a future
-            // enhancement.
-            string value = pair.Value.Count switch
+            foreach (string value in pair.Value)
             {
-                0 => string.Empty,
-                1 => pair.Value[0],
-                _ => string.Join(",", pair.Value),
-            };
-            form.Add(pair.Key, new HttpQueryValue(value));
+                form.Add(pair.Key, new HttpQueryValue(value));
+            }
         }
     }
 

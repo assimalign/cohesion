@@ -138,7 +138,14 @@ thunk uses the core `HttpQueryValue` multi-value view.
 
 **The form is read once**, through `context.ReadFormAsync`, for every form field and file a handler
 binds, so fields and files come from the same parse — the one `UseAntiforgery` or `UseForms` already
-cached, when either ran. The read honors the Http.Forms limits (`HttpFormOptions`) of the exchange's
+cached, when either ran. A repeated scalar `[FromForm]` field binds its first submitted value,
+including an empty string, for both multipart and urlencoded bodies (#1211, owner decision 31).
+The parsed form collection retains every occurrence; generated scalar binding reads its `.Value`.
+This breaks preview.1 behavior: multipart selected the last value, while urlencoded comma-joined
+values (so a repeated numeric field could fail parsing). The same submitted values now bind the
+same way regardless of encoding.
+
+The read honors the Http.Forms limits (`HttpFormOptions`) of the exchange's
 `IHttpFormFeature`: the defaults (a 128 MB multipart section, 4 MB values, 1,024 entries), or the limits
 an application sets by installing `new HttpFormFeature(context.Request, options)` ahead of the
 endpoint. A form over a limit is answered `413 Content Too Large` (RFC 9110 §15.5.14), recognized by

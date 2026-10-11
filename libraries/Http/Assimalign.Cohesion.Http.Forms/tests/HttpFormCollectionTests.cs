@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 
 using Shouldly;
 
@@ -8,6 +9,27 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 public class HttpFormCollectionTests
 {
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - HttpFormCollection: repeated Add preserves all values and reads first")]
+    public void Add_RepeatedField_ShouldAppendEveryValueAndKeepFirst()
+    {
+        // Arrange
+        HttpFormCollection form = new();
+        form.Add("tag", "first");
+        HttpQueryValue earlier = form["tag"];
+
+        // Act
+        form.Add("TAG", HttpQueryValue.Concat("", "last"));
+        bool found = form.TryGetValue("tag", out HttpQueryValue values);
+
+        // Assert
+        found.ShouldBeTrue();
+        form.Count.ShouldBe(1);
+        values.ToArray().ShouldBe(new[] { "first", "", "last" });
+        values.Value.ShouldBe("first");
+        earlier.ToArray().ShouldBe(new[] { "first" });
+        form.Single().Value.ShouldBe(values);
+    }
+
     [Fact]
     public void Add_ValueAndFile_ShouldBeRetrievableFromCollection()
     {

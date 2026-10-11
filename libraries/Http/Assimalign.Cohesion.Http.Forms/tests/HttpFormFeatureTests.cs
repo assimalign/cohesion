@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +15,65 @@ namespace Assimalign.Cohesion.Http.Forms.Tests;
 
 public class HttpFormFeatureTests
 {
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: both encodings preserve repeated fields and read first")]
+    [InlineData("first", "second")]
+    [InlineData("first", "", "last")]
+    [InlineData("", "second", "last")]
+    [InlineData("x,y", "a+b", "café", "x&y=z", "")]
+    public async Task ReadFormAsync_RepeatedFieldsInBothEncodings_ShouldKeepIdenticalOrderedValues(params string[] expected)
+    {
+        // Arrange — encode the same interleaved fields using the BCL's two form writers.
+        List<KeyValuePair<string, string>> fields = new();
+        for (int index = 0; index < expected.Length; index++)
+        {
+            fields.Add(new KeyValuePair<string, string>("tag", expected[index]));
+            if (index == 0)
+            {
+                fields.Add(new KeyValuePair<string, string>("other", "kept"));
+            }
+        }
+        fields.Add(new KeyValuePair<string, string>("other", "again"));
+        using FormUrlEncodedContent urlencoded = new(fields);
+        using MultipartFormDataContent multipart = new("cohesion-repeated-fields");
+        foreach (KeyValuePair<string, string> field in fields)
+        {
+            multipart.Add(new StringContent(field.Value, Encoding.UTF8), field.Key);
+        }
+        using Stream urlencodedBody = await urlencoded.ReadAsStreamAsync(CancellationToken.None);
+        using Stream multipartBody = await multipart.ReadAsStreamAsync(CancellationToken.None);
+        IHttpRequest urlencodedRequest = new BareHttpRequest
+        {
+            ContentType = urlencoded.Headers.ContentType!.ToString(),
+            Body = urlencodedBody,
+        };
+        IHttpRequest multipartRequest = new BareHttpRequest
+        {
+            ContentType = multipart.Headers.ContentType!.ToString(),
+            Body = multipartBody,
+        };
+
+        // Act
+        IHttpFormCollection first = await new HttpFormFeature(urlencodedRequest).ReadFormAsync(CancellationToken.None);
+        IHttpFormCollection second = await new HttpFormFeature(multipartRequest).ReadFormAsync(CancellationToken.None);
+
+        // Assert — compare complete collections as well as the specified per-key values.
+        first.Count.ShouldBe(2);
+        second.Count.ShouldBe(first.Count);
+        foreach (IHttpFormCollection form in new[] { first, second })
+        {
+            form["tag"].ToArray().ShouldBe(expected);
+            form["tag"].Value.ShouldBe(expected[0]);
+            form["other"].ToArray().ShouldBe(new[] { "kept", "again" });
+            form.Files.Count.ShouldBe(0);
+        }
+        foreach (KeyValuePair<string, HttpQueryValue> entry in first)
+        {
+            second.TryGetValue(entry.Key, out HttpQueryValue values).ShouldBeTrue();
+            values.ShouldBe(entry.Value);
+        }
+        second.Select(entry => entry.Key).ShouldBe(first.Select(entry => entry.Key));
+    }
+
     [Fact]
     public async Task ReadFormAsync_NoRequest_ShouldReturnEmptyCollection()
     {

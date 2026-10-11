@@ -162,6 +162,14 @@ not been parsed, the form-token path yields nothing and the header path is
 used. The header path is therefore always available; the form path requires
 the body to have been parsed first.
 
+Repeated form-token fields use the **first** value, in the same order as the
+Forms collection (#1211, decision 31). Later values are not tried if that
+first value fails validation. When the first value is empty, the existing
+header fallback still applies; a later nonempty form value does not suppress
+it. This is a breaking change from 10.0.0-preview.1: multipart previously
+selected the last token field, while urlencoded parsing comma-joined the
+values into one token string. Both encodings now follow the same scalar rule.
+
 ## Safe-method skip
 
 `IsRequestValidAsync` returns `true` for GET, HEAD, OPTIONS, and TRACE
