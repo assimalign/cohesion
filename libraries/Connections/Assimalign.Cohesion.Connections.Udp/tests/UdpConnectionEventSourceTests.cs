@@ -12,6 +12,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.Udp.Internal;
+using Assimalign.Cohesion.DependencyInjection.Tests;
 
 namespace Assimalign.Cohesion.Connections.Udp.Tests;
 

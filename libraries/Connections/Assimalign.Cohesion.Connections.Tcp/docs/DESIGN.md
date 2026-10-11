@@ -183,6 +183,10 @@ transport security) are identical for both families — only the protocol identi
 
 ## Diagnostics
 
+The diagnostics tests link the canonical test-only `EventSourceRecorder` through
+`CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests"`; it records
+events and counter publication without adding a shipped dependency.
+
 The driver reports through its own internal event source, named for the assembly:
 `Assimalign.Cohesion.Connections.Tcp` (`Internal/EventSource/TcpConnectionEventSource.cs`), per the
 repository EventSource convention (`.claude/rules/event-source.md`). Nothing about it is public: tools

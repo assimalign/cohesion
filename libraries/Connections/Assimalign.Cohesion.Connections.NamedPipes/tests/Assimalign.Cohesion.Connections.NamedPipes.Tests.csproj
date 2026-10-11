@@ -18,4 +18,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests" />
+	</ItemGroup>
 </Project>

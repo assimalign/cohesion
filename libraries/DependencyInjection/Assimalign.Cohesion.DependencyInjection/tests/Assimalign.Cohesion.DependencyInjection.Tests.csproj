@@ -21,4 +21,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 	</ItemGroup>
 	
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests" />
+	</ItemGroup>
 </Project>

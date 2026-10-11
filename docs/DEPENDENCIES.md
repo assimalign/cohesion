@@ -34,7 +34,7 @@ not an edge.
 | Library areas | 21 |
 | Resource areas | 18 |
 | Declared project references | 719 |
-| Declared shared-source links | 14 |
+| Declared shared-source links | 20 |
 
 ## Ambiguous project names
 

@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections.NamedPipes.Internal;
+using Assimalign.Cohesion.DependencyInjection.Tests;
 
 namespace Assimalign.Cohesion.Connections.NamedPipes.Tests;
 

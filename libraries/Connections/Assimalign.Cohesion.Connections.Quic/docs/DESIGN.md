@@ -280,6 +280,10 @@ The driver implements the contracts library's two code-carrying facets
 
 ## Diagnostics
 
+The diagnostics tests link the canonical test-only `EventSourceRecorder` through
+`CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests"`; it records
+events and counter publication without adding a shipped dependency.
+
 The driver reports through its own internal event source, named for the assembly:
 `Assimalign.Cohesion.Connections.Quic` (`Internal/EventSource/QuicConnectionEventSource.cs`), per the
 repository EventSource convention (`.claude/rules/event-source.md`). Tools enable it by name

@@ -67,6 +67,23 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/tests/
 └── {Feature}Tests.cs
 ```
 
+## Shared EventSource recorder
+
+Event-source tests link the canonical test-only
+`libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/shared/EventSourceRecorder.cs`
+instead of copying it. Add this item to each consuming test csproj:
+
+```xml
+<CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests" />
+```
+
+Use `Assimalign.Cohesion.DependencyInjection.Tests` to resolve the recorder. The existing shared-source
+resolver indexes test projects and links their sibling `shared/` folder; no assembly reference is
+needed. Keep this folder test-only. The recorder is an `EventListener`, not an `EventSource`, and its
+instances stay inside each test assembly, so it does not duplicate a process-global provider.
+Event-source tests still use a collection with `DisableParallelization = true` and assert counters by
+delta and events by identifier, because background work can outlive an earlier test.
+
 ## Running tests — pass the project, not the folder
 
 `dotnet test <dir>` works only while a `tests/` folder holds exactly one project. Where it holds

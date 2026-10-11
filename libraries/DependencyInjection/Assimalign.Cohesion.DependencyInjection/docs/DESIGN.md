@@ -179,6 +179,17 @@ raises. Events 7 and 8 carry the `ServiceProviderInitialized` keyword (`0x1`).
   the convention (issue #1037). The descriptor dump moved from `Informational` to `Verbose` at the
   same time, so forwarding at `Information` does not log every registration.
 
+### Shared diagnostic test recorder
+
+`shared/EventSourceRecorder.cs` is the canonical test-only `EventListener` used by this
+project and the Connections root, Tcp, Quic, NamedPipes and Udp test projects. Each names
+`Assimalign.Cohesion.DependencyInjection.Tests` in its own `CohesionSharedSource` item;
+the existing resolver supports test project names and links the sibling `shared/` folder.
+The recorder preserves event payloads and optionally waits for named counters to publish.
+Its state belongs to each listener instance and never crosses an assembly boundary. No
+shipped project compiles this folder or references the test assembly. Keeping one file
+prevents the event and counter helpers from drifting across source test suites.
+
 ## NativeAOT compatibility checks
 
 The Web NativeAOT guard (`resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`,
@@ -213,6 +224,8 @@ Assimalign.Cohesion.DependencyInjection/
     Properties/
     Scopes/
     Utilities/
+  shared/
+    EventSourceRecorder.cs  # compiled into test projects only
   tests/
   docs/
     OVERVIEW.md

@@ -14,6 +14,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections.Tcp.Internal;
 using Assimalign.Cohesion.Connections.Tcp.Tests.TestObjects;
+using Assimalign.Cohesion.DependencyInjection.Tests;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 

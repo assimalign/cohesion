@@ -11,4 +11,7 @@
         <CohesionPackageReference Include="xunit.runner.visualstudio" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Udp" />
     </ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests" />
+    </ItemGroup>
 </Project>

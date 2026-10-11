@@ -549,6 +549,10 @@ listener.
 
 ### The layered listener's event source
 
+The diagnostics tests link the canonical test-only `EventSourceRecorder` through
+`CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests"`; it records
+events and counter publication without adding a shipped dependency.
+
 `Assimalign.Cohesion.Connections` (`Internal/EventSource/ConnectionLayerEventSource.cs`) is internal,
 follows the same convention, and reports only what a layered listener decides (see "Layered Listeners",
 above); the connection itself is still reported by the driver that carries it, under the same

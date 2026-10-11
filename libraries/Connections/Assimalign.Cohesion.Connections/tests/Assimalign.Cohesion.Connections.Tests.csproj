@@ -18,4 +18,7 @@
 		     therefore links the same files the drivers do. -->
 		<CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.DependencyInjection.Tests" />
+	</ItemGroup>
 </Project>

@@ -81,6 +81,33 @@ listener that closes the connection), and
 counted by the drivers above; its empty placeholder source was deleted, see its
 [DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics)).
 
+### Web assemblies deliberately left uninstrumented
+
+The Web scope deliberately leaves these 16 Web assemblies without an event source, plus the
+framework producer shells. Each row records the reason from
+[Web event-source scope §6](programs/WEB_EVENT_SOURCES_SCOPE.md#6-no-source-and-why); assemblies
+scheduled to gain sources are not part of this list.
+
+| Assembly or framework project | Why it has no source |
+| --- | --- |
+| `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
+| `Assimalign.Cohesion.Web.Server` | Contracts only; Web.Hosting implements and reports them, and #1300 owns the client-fault latch. |
+| `Assimalign.Cohesion.Web.Hosting.Health` | A stateless adapter whose runtime failure throws; Web.Health reports contributor faults and timeouts. |
+| `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
+| `Assimalign.Cohesion.Web.ApplicationModel` | Invalid declarative plans throw; runtime control-plane outcomes belong to Hosting.Resources. |
+| `Assimalign.Cohesion.Web.Routing` | Failures throw at startup or reach the exception boundary; 404/405 are statuses and the matched template is already the span's `http.route`. |
+| `Assimalign.Cohesion.Web.Api` | Binding failures are visible client-driven 400s in access logs and request metrics; the signal does not justify a new public rejection API. |
+| `Assimalign.Cohesion.Web.OpenApi` | Build failures reach the boundary and are not cached; first-route-wins is documented and the package is development-facing. |
+| `Assimalign.Cohesion.Web.Validation` | A 400 is the intended client outcome, and validation errors echo user input. |
+| `Assimalign.Cohesion.Web.Serialization` | A registry without lifecycle: faults throw and failed negotiation returns false for the caller's 406. |
+| `Assimalign.Cohesion.Web.Query` | Outcomes are visible client-driven protocol statuses (400, 415, 406, 304, 412), with nothing swallowed. |
+| `Assimalign.Cohesion.Web.ProblemDetails` | A payload library without lifecycle; deterministic degradation serves last-chance error handling. |
+| `Assimalign.Cohesion.Web.Authentication` | Handlers own failure decisions and their sources; dispatcher counts would be inexact because Authorization re-enters per scheme. |
+| `Assimalign.Cohesion.Web.Rewrite` | Loops and regex timeouts throw to the boundary, while redirects are configured answers. |
+| `Assimalign.Cohesion.Web.HttpsPolicy` | Redirect rates are visible by route in request metrics; a source cannot reliably diagnose loops caused by absent forwarded-header middleware. |
+| `Assimalign.Cohesion.Web.CookiePolicy` | Applications observe drops through `OnRejected`; consent drops and default `Upgrade` repairs are intended policy outcomes. |
+| `Assimalign.Cohesion.Web.Refs` / `Assimalign.Cohesion.Web.Runtime` | Framework producer shells that compile nothing. |
+
 ## Traces and metrics
 
 Where a library emits OpenTelemetry traces and metrics, it does so through the BCL's
