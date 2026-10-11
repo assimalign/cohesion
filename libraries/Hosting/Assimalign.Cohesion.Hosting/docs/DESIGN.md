@@ -18,23 +18,47 @@ Startup is dependency-sensitive: serial startup stops at the first failure, whil
 concurrent startup collects failures. Either path performs best-effort reverse-order compensation,
 marks the host `Failed`, completes its run signals, and preserves the original startup exception.
 
-After compensation and run-state reset, the coordinator awaits
+On failure, the coordinator disarms the startup timer and drains its shutdown registration before
+compensation can dispose run state or clear the shutdown callback. Reporting therefore cannot
+leave a startup timer targeting a rolled-back host, even when the hook outlasts the startup deadline.
+
+After compensation and run-state reset, the coordinator invokes
 `OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)` exactly
-once for each failed startup attempt. This protected virtual hook defaults to a completed task;
+once for each accepted startup that fails, except caller cancellation. A start is accepted when
+`OnStartingAsync` completes successfully; a rejection from that hook has performed no service
+startup and is not reported. An already-cancelled caller token is rejected before initialization
+or `OnStartingAsync`, without consuming a derived host's lifecycle. Cancellation during accepted
+startup still rolls back, but an `OperationCanceledException` with the caller token cancelled is
+not reported. A genuine non-cancellation failure is still reported if caller cancellation races it.
+This protected virtual hook defaults to a completed task;
 derived hosts may report the failure without reimplementing startup or rollback. The supplied
-token is `CancellationToken.None`, because cancelled startup must still be reported. The hook
+token is independent of startup and is signaled on reporting-budget expiry. The hook
 receives the exception that the caller will observe, including the existing `HostStartupException`
 translation when the readiness budget expires. Ordinary failures retain their identity and stack.
-A rejected `OnStartingAsync` also reaches this hook, after the coordinator marks the attempt failed
-without entering service compensation. A successful start, later stop, or disposal does not call it.
+A successful start, repeated start while running, lifecycle rejection, later stop, or disposal
+does not call it. Hosts that permit retries keep that behavior; each accepted failed retry reports once.
 
-A hook failure does not replace the startup exception. It is attached as the exception object in
+Reporting has a fixed **one-second budget**, starting when the invocation is queued after rollback.
+Invocation runs on the thread pool, so an override that blocks before returning its task cannot
+hold the caller. The private `_startFailureReportingTimeout` constant deliberately does not reuse
+`ShutdownTimeout`: service drain can be infinite, while diagnostics must never indefinitely withhold
+the startup failure. A completed report is awaited; expiry propagates the original startup failure
+and requests cancellation asynchronously, so even blocking or throwing cancellation callbacks cannot
+hold the caller. This bounds reporting only, not service compensation.
+
+A hook failure or reporting-budget `TimeoutException` does not replace the startup exception. It is attached as the exception object in
 `exception.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"]`. Attachment is best-effort:
 if a custom exception's `Data` implementation rejects it, the original startup failure still
 propagates. The host always retains the hook failure in its private `_startFailureHookException`
 field for debugger inspection, including when attachment is unavailable, and clears that record
 when the next start is accepted. This avoids introducing a second public failure result or coupling
 the general host to one application's diagnostics transport.
+
+An abandoned hook cannot be forcibly stopped. Its task and any asynchronous cancellation callback
+faults are observed when they settle; the cancellation source is disposed after both settle. A late
+fault does not mutate the exception already returned or the diagnostic record of a later start.
+Overrides should cooperate with cancellation and avoid touching resources that the caller may
+dispose after `StartAsync` returns. Reporting is best-effort; the original failure remains authoritative.
 
 Known cleanup gap: `Host<TContext>.RollbackStartAsync` suppresses exceptions from compensating
 service `StopAsync` calls without recording them. Preserving the startup failure is intentional,

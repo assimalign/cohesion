@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Hosting;
 /// <typeparam name="TContext">The type of the host context used by the host. Must derive from HostContext.</typeparam>
 public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext : HostContext
 {
+    // Diagnostics must remain bounded even when the service drain budget is infinite.
+    private static readonly TimeSpan _startFailureReportingTimeout = TimeSpan.FromSeconds(1);
     private readonly HostOptions<TContext> _options;
 
     // Execution Context Info
@@ -65,6 +67,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             return;
         }
 
+        callerCancellationToken.ThrowIfCancellationRequested();
         Init(callerCancellationToken);
 
         CancellationTokenSource runCancellationTokenSource = _cancellationTokenSource!;
@@ -84,7 +87,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         // observe Starting, Shutdown must be accepted for this run and must not be erased by
         // a later state transition.
         Context.BeginStart(shutdownCallback);
-        _startFailureHookException = null;
 
         using var startupTimeoutSource = new CancellationTokenSource();
 
@@ -109,6 +111,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         try
         {
             await OnStartingAsync(cancellationToken).ConfigureAwait(false);
+            _startFailureHookException = null;
             serviceStartupEntered = true;
 
             List<Exception> exceptions = new();
@@ -193,6 +196,15 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
                 !callerCancellationToken.IsCancellationRequested &&
                 startupTimeoutSource.IsCancellationRequested &&
                 _options.StartupTimeout != Timeout.InfiniteTimeSpan;
+            bool callerCancelled = exception is OperationCanceledException &&
+                callerCancellationToken.IsCancellationRequested;
+
+            // Stop new timer edges and join any Shutdown callback already in flight before
+            // rollback disposes the run source and clears the callback it targets.
+            startupTimeoutSource.CancelAfter(Timeout.InfiniteTimeSpan);
+            await startupCancellationRegistration.DisposeAsync().ConfigureAwait(false);
+            cancellationTokenSource.Dispose();
+            startupTimeoutSource.Dispose();
 
             // A failed or cancelled start must not wedge the host in Starting with
             // partially-started services leaked: compensate, mark Failed, rethrow.
@@ -204,25 +216,9 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
                     exception)
                 : exception;
 
-            try
+            if (serviceStartupEntered && !callerCancelled)
             {
-                // Failure reporting must still run when the startup token has expired.
-                await OnStartFailedAsync(startFailure, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception hookException)
-            {
-                _startFailureHookException = hookException;
-
-                // A reporting failure must never replace the failed start, even if a
-                // custom exception does not allow additional diagnostic data.
-                try
-                {
-                    startFailure.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"] = _startFailureHookException;
-                }
-                catch (Exception)
-                {
-                    // The host field retains the reporting failure for debugger inspection.
-                }
+                await ReportStartFailureAsync(startFailure).ConfigureAwait(false);
             }
 
             if (startupTimedOut)
@@ -231,6 +227,43 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             }
 
             throw;
+        }
+    }
+
+    private async Task ReportStartFailureAsync(Exception startFailure)
+    {
+        var reportingCancellation = new CancellationTokenSource();
+        // Queue invocation itself: an override can block before it returns its Task.
+        Task reporting = Task.Run(() => OnStartFailedAsync(startFailure, reportingCancellation.Token));
+        try
+        {
+            await reporting.WaitAsync(_startFailureReportingTimeout).ConfigureAwait(false);
+        }
+        catch (Exception hookException)
+        {
+            // Includes budget expiry. A reporting failure never replaces the start failure.
+            _startFailureHookException = hookException;
+            try
+            {
+                startFailure.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"] = hookException;
+            }
+            catch (Exception)
+            {
+                // The host field retains the reporting failure for debugger inspection.
+            }
+        }
+        finally
+        {
+            // CancelAsync isolates even a blocking/throwing cancellation callback. WhenAll
+            // observes each task's fault as it settles, including a late reporting fault.
+            // Its continuation observes the aggregate and owns disposal; no late completion
+            // mutates the returned exception or a newer attempt's diagnostic record.
+            Task cancellation = reporting.IsCompleted ? Task.CompletedTask : reportingCancellation.CancelAsync();
+            _ = Task.WhenAll(reporting, cancellation).ContinueWith(static (completed, state) =>
+            {
+                _ = completed.Exception;
+                ((CancellationTokenSource)state!).Dispose();
+            }, reportingCancellation, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
     }
 
@@ -531,20 +564,24 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     }
 
     /// <summary>
-    /// A lifecycle hook invoked once after a failed startup has been rolled back and the
+    /// A lifecycle hook invoked once after an accepted, failed startup has been rolled back and the
     /// host has entered <see cref="HostState.Failed"/>.
     /// </summary>
     /// <param name="exception">The startup failure that will propagate to the caller.</param>
-    /// <param name="cancellationToken">An uncancelled token so startup cancellation does not suppress reporting.</param>
+    /// <param name="cancellationToken">An independent token signaled when the one-second reporting budget expires.</param>
     /// <returns>A task that completes when failure reporting has finished.</returns>
     /// <remarks>
-    /// The default implementation does nothing. The coordinator awaits this hook after
-    /// resetting run state. A hook failure never replaces the startup failure; it is attached
+    /// The default implementation does nothing. Acceptance means OnStartingAsync completed.
+    /// Caller cancellation and OnStartingAsync rejection do not invoke this hook. The coordinator
+    /// invokes it on a worker after resetting run state and waits at most one second, independent
+    /// of startup and shutdown budgets. A hook failure or reporting timeout never replaces the startup failure; it is attached
     /// to <see cref="Exception.Data"/> under
     /// <c>Assimalign.Cohesion.Hosting.StartFailureHookException</c> when that dictionary permits it.
     /// The host also retains the hook failure privately for debugger inspection until the
     /// next accepted start, including when diagnostic attachment is unavailable.
-    /// Existing startup-timeout translation to <see cref="HostStartupException"/> still applies.
+    /// An abandoned hook may continue; its late fault is observed without changing the returned
+    /// exception or a later attempt's record. Overrides should honor the reporting token and avoid
+    /// accessing disposed resources. Existing startup-timeout translation to <see cref="HostStartupException"/> still applies.
     /// </remarks>
     protected virtual Task OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)
     {
