@@ -667,8 +667,24 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             try
             {
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
-                var catalog = SqlCatalog.Open(catalogStorage);
-                SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog);
+                SqlCatalog catalog;
+                try
+                {
+                    catalog = SqlCatalog.Open(catalogStorage);
+                }
+                catch (SqlCatalogException)
+                {
+                    // Older catalog shapes can fail decoding before Load reaches their
+                    // format marker. Preserve the existing actionable format refusal,
+                    // without decoding old objects or mistaking current-format damage
+                    // for a database written by another engine.
+                    if (ReadFormatVersionAfterCatalogFailure(catalogStorage) is { } version)
+                    {
+                        SqlDatabase.ThrowIfFormatIsNotCurrent(name, version);
+                    }
+                    throw;
+                }
+                SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
 
                 try
                 {
@@ -704,6 +720,39 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             {
                 RebuildStorageSnapshotLocked();
             }
+        }
+    }
+
+    // The format marker's tuple has remained (kind, version), using kind 4 before
+    // format 4 and the downgrade-fenced kind 8 thereafter. Read only that stable
+    // metadata on a failed open: no compatibility decoder and no extra successful-open
+    // catalog traversal. An ambiguous or damaged marker leaves the original error intact.
+    private static int? ReadFormatVersionAfterCatalogFailure(SqlStorage storage)
+    {
+        try
+        {
+            int? version = null;
+            using var iterator = storage.GetUnitIterator();
+            while (iterator.MoveNext())
+            {
+                var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
+                if (reader.ReadInt32() is not (4 or 8))
+                {
+                    continue;
+                }
+
+                int found = reader.ReadInt32();
+                if (version is not null || found < 1 || !reader.IsAtEnd)
+                {
+                    return null;
+                }
+                version = found;
+            }
+            return version;
+        }
+        catch (DatabaseTypeException)
+        {
+            return null;
         }
     }
 

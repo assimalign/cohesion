@@ -130,6 +130,9 @@ internal sealed class SqlDeclaredDatabase
                 var environment = new SqlFunctionEnvironment(functions, declaration.Name, types);
                 SqlSchemaProvisioner.BindDeclaredTypes(compiled, types);
                 SqlSchemaProvisioner.BindDeclaredChecks(compiled, collation, environment, parserOptions);
+                // Identity belongs to compilation, before any I/O. The provisioning
+                // phase reads the cached hash and never serializes or hashes a declaration.
+                _ = compiled.Hash;
             }
             catch (DatabaseException invalid)
             {

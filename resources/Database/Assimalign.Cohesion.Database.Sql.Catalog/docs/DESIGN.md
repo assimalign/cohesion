@@ -172,10 +172,10 @@ codec, the key encoding and every comparison read, so they do not consult the do
   the table records' physical layout, #1241) is a property of these records
   themselves — so the database-grain marker is catalog
   metadata. (`Database.Indexing` also stamps and checks its own page format on
-  each tree, behind this marker.) The engine writes its version (6) when it
+  each tree, behind this marker.) The engine writes its version (8) when it
   creates a database and refuses to open one whose marker reads anything else; it
   has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
-  #1152). Versions 5 and 6 are stored as a kind-8 record like version 4. Absent marker
+  #1152). Versions 5 through 8 are stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
@@ -190,12 +190,55 @@ codec, the key encoding and every comparison read, so they do not consult the do
   with "Malformed catalog record of kind 8" instead of corrupting the indexes;
   downgrade is unsupported.
 - **The applied compiled-schema state lives here** (kind-6 records). The catalog
-  stores the lowercase content hash together with the complete canonical schema
-  document. Documents are strict UTF-8 and chunked into bounded records; replacing
+  stores the lowercase content hash and DDL generation together with the complete
+  canonical schema document. Documents are strict UTF-8 and chunked into bounded records; replacing
   all old chunks with all new chunks is one self-committing storage transaction,
-  so reopen observes either complete state. The SQL provisioner verifies both the
-  document/hash pair and the live table/index catalog before treating a repeated
-  apply as a no-op; the marker is never an authority over detected drift.
+  so reopen observes either complete state. Equal declared hash and unchanged DDL
+  generation let the SQL provisioner skip in constant time. Any later DDL invalidates
+  that proof and the provisioner reconciles from live schema-owned metadata.
+
+## DDL generation and crash convergence (B2)
+
+The kind-2 identity counter also persists `SqlCatalog.DdlGeneration`, a monotonically
+increasing `ulong`. Every committed metadata change writes the next generation in the
+same storage transaction: table identity reservation and publication, direct table
+creation and drop, column and constraint changes, index creation and drop, changed
+physical registrations, default-collation initialization and format-marker changes.
+Schema-owned and ad-hoc objects follow the same path. `CommitCatalogChange` stages the
+counter with the change and publishes the generation, identity and record locations
+only after commit succeeds. Failed transactions preserve the committed generation;
+recovery replays or discards the metadata and its counter together. Exhaustion refuses
+the mutation rather than wrapping.
+
+Saving an unchanged registration directory or format marker is a no-op. In particular,
+checkpoint and shutdown persistence do not invalidate a fully applied schema. Recording
+`SqlCatalogSchemaState` is bookkeeping, not DDL: its `{hash, generation}` describes the
+catalog after every provisioning step succeeded and does not advance the counter.
+`SaveSchemaStateAsync` requires that supplied generation to equal the live generation
+under the metadata lock, so intervening DDL cannot be acknowledged accidentally. Every
+state chunk carries the same hash and generation; load refuses mixed generations.
+
+This changes the on-disk catalog shape and advances the SQL database's existing
+record-space format gate from 7 to 8. Counter and schema-state records require the
+generation suffix; older records fail with an explicit unsupported-format error before
+they can be trusted. There is no upgrade or compatibility reader. After such a load
+failure, the SQL engine reads only the unchanged format-marker tuple and sends a
+different recorded version through its existing format gate, preserving its actionable
+refusal over the wire. A current, missing, malformed or ambiguous marker preserves
+the original catalog error; successful opens require no additional traversal.
+
+There is no transaction across provisioning statements. A crash after a committed step
+leaves the previous recorded generation behind the live counter. The SQL provisioner
+then takes a complete snapshot of owned objects and plans only the remaining work;
+the state is recorded last. The catalog keeps types and their bounds, domain names,
+nullability, canonical defaults, primary keys, unique and foreign-key constraints,
+checks and indexes so that reconciliation can represent each provisionable kind.
+Engine-registered domains remain code and are represented by their column references.
+
+Owner proposal 49a is not implemented. If accepted later, its pending-step record would
+attach between planning and step execution in the SQL provisioner; successful deferred
+DDL would use the same catalog commit path, and the applied state would be recorded only
+after all steps completed. No worker, pending state or progress surface exists here.
 
 ## Object ownership
 
@@ -215,9 +258,9 @@ suffix load as `Adhoc`, preserving their existing mutability rather than guessin
 an owner from a database-wide schema marker. Invalid owner/name combinations are
 rejected. The tuple encoding is positional and never persisted CLR property
 identifiers; renaming the ownership property to `OwningSchema` therefore does not
-change the on-disk format, and catalogs written by the contract-freeze build load
-without a compatibility alias. The schema hash/document record remains unchanged
-and continues to support drift detection independently of per-object ownership.
+change the on-disk format and needed no compatibility alias. B2's format gate now
+refuses those older files. The schema hash/document record now also carries the
+B2 generation and continues to support drift detection independently of per-object ownership.
 
 The engine enforces the live-session DDL lock; the catalog remains the durable
 metadata component used by sanctioned schema application as well. Ownership

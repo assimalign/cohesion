@@ -22,6 +22,13 @@ internal sealed class SqlSchemaProvisioner
     private readonly SqlDatabase _database;
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private string? _validatedHash;
+
+    // Instance-local test hooks, reached only by this assembly's tests. A skip must not
+    // enter any catalog traversal; crash tests capture durable storage after each step.
+    internal int CatalogWalkCount { get; private set; }
+    internal SqlSchemaMigrationPlan? LastPlan { get; private set; }
+    internal Action<SqlMigrationScriptStep>? StepApplied { get; set; }
 
     internal SqlSchemaProvisioner(SqlDatabase database, SqlCatalog catalog)
     {
@@ -34,20 +41,18 @@ internal sealed class SqlSchemaProvisioner
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(schema);
-        ValidateSupportedSchema(schema);
-
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ValidateCatalogOwnership(schema);
+            ValidateSupportedSchema(schema);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             string targetHash = schema.Hash;
-            string canonicalDocument = schema.CanonicalDocument;
             if (IsApplied(recorded, schema))
             {
                 return new SqlSchemaMigrationResult(recorded!.ContentHash, targetHash, 0, WasAlreadyApplied: true);
             }
 
+            ValidateCatalogOwnership(schema);
             SqlCompiledSchema? current = ReadCurrentSchema(recorded, schema);
             SqlSchemaMigrationPlan plan;
             try
@@ -62,6 +67,7 @@ internal sealed class SqlSchemaProvisioner
                     refused);
             }
 
+            LastPlan = plan;
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
 
@@ -72,10 +78,20 @@ internal sealed class SqlSchemaProvisioner
                 {
                     await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
                     applied.Add(step);
+                    StepApplied?.Invoke(step);
+                }
+
+                // IF NOT EXISTS and concurrent ad-hoc DDL must not turn an unowned or
+                // mismatched object into a trusted marker. Capture before validation;
+                // SaveSchemaState checks the generation again under the catalog lock.
+                ulong generation = _catalog.DdlGeneration;
+                if (FirstCatalogDifference(schema) is { } difference)
+                {
+                    throw new SqlSchemaMigrationException($"{Describe()}: the applied catalog differs: {difference}.");
                 }
 
                 await _catalog.SaveSchemaStateAsync(
-                    new SqlCatalogSchemaState(targetHash, canonicalDocument),
+                    new SqlCatalogSchemaState(targetHash, schema.CanonicalDocument, generation),
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception failure)
@@ -128,7 +144,7 @@ internal sealed class SqlSchemaProvisioner
 
     /// <summary>
     /// Verifies, without running any DDL, that the database holds exactly the schema: the recorded
-    /// hash and canonical document are the schema's, and the live schema-owned catalog matches it.
+    /// hash and generation match the declaration and the current catalog generation.
     /// </summary>
     /// <param name="schema">The declared schema.</param>
     /// <param name="cancellationToken">Observed while the apply gate is awaited.</param>
@@ -139,11 +155,10 @@ internal sealed class SqlSchemaProvisioner
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(schema);
-        ValidateSupportedSchema(schema);
-
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ValidateSupportedSchema(schema);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             if (IsApplied(recorded, schema))
             {
@@ -154,7 +169,7 @@ internal sealed class SqlSchemaProvisioner
                 ? "the database records no applied schema"
                 : !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal)
                     ? $"the database records schema hash {recorded.ContentHash}"
-                    : "the live catalog no longer matches the recorded schema";
+                    : $"the catalog DDL generation changed from {recorded.Generation} to {_catalog.DdlGeneration}";
 
             // Name the first object that differs, so the developer need not diff the catalog by hand.
             if (FirstCatalogDifference(schema) is { } difference)
@@ -292,6 +307,18 @@ internal sealed class SqlSchemaProvisioner
     {
         foreach (CompiledSchemaTable table in schema.Tables)
         {
+            foreach (CompiledSchemaColumn column in table.Columns)
+            {
+                try
+                {
+                    _ = CanonicalDefault(column.DefaultLiteral);
+                }
+                catch (DatabaseException exception)
+                {
+                    throw new DatabaseException($"DEFAULT on column '{table.Name}.{column.Name}' does not bind: {exception.Message}", exception);
+                }
+            }
+
             SqlCatalogTable? shape = null;
             foreach (CompiledSchemaConstraint constraint in table.Constraints)
             {
@@ -321,12 +348,12 @@ internal sealed class SqlSchemaProvisioner
         }
     }
 
-    // The recorded hash, the recorded canonical document and the live catalog all agree with the schema.
+    // The identity is cached on the immutable declaration. Generation equality proves that
+    // no committed catalog change happened since that identity was recorded.
     private bool IsApplied(SqlCatalogSchemaState? recorded, SqlCompiledSchema schema)
         => recorded is not null &&
             string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) &&
-            string.Equals(recorded.CanonicalDocument, schema.CanonicalDocument, StringComparison.Ordinal) &&
-            FirstCatalogDifference(schema) is null;
+            recorded.Generation == _catalog.DdlGeneration;
 
     // Names where a provisioning message happened: the engine and the database.
     private string Describe() => $"SQL engine '{_database.Engine.Name}', database '{_database.Name}'";
@@ -340,13 +367,12 @@ internal sealed class SqlSchemaProvisioner
         SqlCatalogSchemaState? recorded,
         SqlCompiledSchema desired)
     {
-        if (recorded is not null)
+        if (recorded is not null && recorded.Generation == _catalog.DdlGeneration)
         {
             try
             {
                 SqlCompiledSchema persisted = SqlCompiledSchemaSerializer.Deserialize(recorded.CanonicalDocument);
-                if (string.Equals(recorded.ContentHash, persisted.Hash, StringComparison.Ordinal) &&
-                    FirstCatalogDifference(persisted) is null)
+                if (string.Equals(recorded.ContentHash, persisted.Hash, StringComparison.Ordinal))
                 {
                     return persisted;
                 }
@@ -364,10 +390,11 @@ internal sealed class SqlSchemaProvisioner
 
     private SqlCompiledSchema? SnapshotCatalog(SqlCompiledSchema desired)
     {
+        CatalogWalkCount++;
         IReadOnlyList<SqlCatalogTable> catalogTables = _catalog.Tables
             .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, desired.Name))
             .ToList();
-        if (catalogTables.Count == 0)
+        if (catalogTables.Count == 0 && desired.Types.Count == 0)
         {
             return null;
         }
@@ -388,13 +415,6 @@ internal sealed class SqlSchemaProvisioner
             var columns = new List<CompiledSchemaColumn>(catalogTable.Columns.Count);
             foreach (SqlCatalogColumn column in catalogTable.Columns)
             {
-                if (column.DefaultLiteral is not null)
-                {
-                    throw new SqlSchemaMigrationException(
-                        $"{Describe()}: the live SQL catalog column '{catalogTable.Name}.{column.Name}' has a default literal, " +
-                        "which the compiled schema contract cannot represent yet.");
-                }
-
                 columns.Add(SnapshotColumn(column, desiredTable));
             }
             CompiledSchemaKey? primaryKey = null;
@@ -431,7 +451,9 @@ internal sealed class SqlSchemaProvisioner
             SqlCompiledSchema.CurrentFormat,
             desired.Name,
             allowsDestructiveChanges: false,
-            Array.Empty<CompiledSchemaType>(),
+            // E3 domains are already registered on the engine before provisioning. They
+            // have no database DDL or durable catalog record to replay after a crash.
+            desired.Types,
             tables,
             Array.Empty<CompiledSchemaPrincipal>());
     }
@@ -444,26 +466,33 @@ internal sealed class SqlSchemaProvisioner
     private CompiledSchemaColumn SnapshotColumn(SqlCatalogColumn column, CompiledSchemaTable? desiredTable)
     {
         CompiledSchemaColumn? declared = desiredTable?.Columns.FirstOrDefault(candidate =>
-            candidate.CustomType is not null && string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(candidate.Name, column.Name, StringComparison.OrdinalIgnoreCase));
+        string? defaultLiteral = declared is not null &&
+            string.Equals(CanonicalDefault(declared.DefaultLiteral), column.DefaultLiteral, StringComparison.Ordinal)
+                ? declared.DefaultLiteral : column.DefaultLiteral;
+        bool nullable = declared is not null &&
+            column.IsNullable == (declared.IsNullable && !IsPrimaryKeyColumn(desiredTable!.PrimaryKey, column.Name))
+                ? declared.IsNullable : column.IsNullable;
         if (declared is not null && DescribeTypeDifference(declared, column) is null)
         {
-            return new CompiledSchemaColumn(column.Name, declared.Type, column.IsNullable, declared.MaxLength, declared.Precision,
-                declared.Scale, declared.CustomType);
+            return new CompiledSchemaColumn(column.Name, declared.Type, nullable, declared.MaxLength, declared.Precision,
+                declared.Scale, declared.CustomType, defaultLiteral);
         }
 
         return new CompiledSchemaColumn(column.Name, column.Type.Type, column.IsNullable, column.Type.MaxLength, column.Type.Precision,
-            column.Type.Scale, column.DomainName);
+            column.Type.Scale, column.DomainName, defaultLiteral);
     }
 
     /// <summary>
     /// Compares the live schema-owned catalog with a schema and describes the first object that
-    /// differs, or returns null when the catalog matches it: the skip test of an apply and the
+    /// differs, or returns null when the catalog matches it: final apply validation and the
     /// reason a Verify drift names, so the developer need not diff the catalog by hand.
     /// </summary>
     /// <param name="schema">The schema the catalog should hold.</param>
     /// <returns>The first difference, described for a message, or null.</returns>
     private string? FirstCatalogDifference(SqlCompiledSchema schema)
     {
+        CatalogWalkCount++;
         var ownedTables = _catalog.Tables
             .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name))
             .ToList();
@@ -603,9 +632,9 @@ internal sealed class SqlSchemaProvisioner
                     $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
             }
 
-            if (actualColumn.DefaultLiteral is not null)
+            if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a default the declaration does not have";
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a different default from its declaration";
             }
         }
 
@@ -674,6 +703,26 @@ internal sealed class SqlSchemaProvisioner
         }
     }
 
+    // DEFAULT NULL is stored as absence by the DDL planner. Every other supported
+    // DEFAULT is one literal, rendered from its parsed node rather than pasted SQL.
+    internal static string? CanonicalDefault(string? declared)
+    {
+        if (declared is null)
+        {
+            return null;
+        }
+
+        var expression = SqlPersistedExpression.ParseDeclaration(declared, new SqlQueryParserOptions());
+        if (expression is not SqlLiteralExpression literal)
+        {
+            throw new DatabaseException("Only literal DEFAULT values are supported.");
+        }
+
+        return literal.LiteralType == SqlLiteralType.Null
+            ? null
+            : SqlPersistedExpression.Canonicalize(literal, "Compiled column DEFAULT");
+    }
+
     /// <summary>
     /// Reconstructs a live CHECK's compiled text: the desired schema's own spelling when it is
     /// the same predicate, so reconciliation plans no change for it, and otherwise the canonical
@@ -691,6 +740,7 @@ internal sealed class SqlSchemaProvisioner
 
     private void ValidateCatalogOwnership(SqlCompiledSchema schema)
     {
+        CatalogWalkCount++;
         foreach (CompiledSchemaTable table in schema.Tables)
         {
             if (!_catalog.TryGetTable("dbo", table.Name, out SqlCatalogTable actual))
@@ -742,6 +792,11 @@ internal sealed class SqlSchemaProvisioner
 
     private void ValidateSupportedSchema(SqlCompiledSchema schema)
     {
+        if (string.Equals(_validatedHash, schema.Hash, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         if (!string.Equals(schema.Name, _database.Name.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             throw new SqlSchemaMigrationException(
@@ -762,6 +817,7 @@ internal sealed class SqlSchemaProvisioner
         if (_database.Engine.FindDeclaration(_database.Name) is { Schema: { } declared } &&
             string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
         {
+            _validatedHash = schema.Hash;
             return;
         }
 
@@ -769,6 +825,7 @@ internal sealed class SqlSchemaProvisioner
         {
             BindDeclaredTypes(schema, _database.Definitions.Functions.Types);
             BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions);
+            _validatedHash = schema.Hash;
         }
         catch (DatabaseException invalid)
         {

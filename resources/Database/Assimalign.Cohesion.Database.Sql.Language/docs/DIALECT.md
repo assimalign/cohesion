@@ -1567,3 +1567,10 @@ completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function
 under Builtin functions when `COHSQLE007` and `COHSQLE009` are, and the type and cast rules under Explicit conversion when `COHSQLE010` and `COHSQLE011` are. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
 code, `COHSQLT005`, are documented in the SQL engine design.
+
+## Code-first literal defaults (B2)
+
+The typed schema's `table.Default(selector, literal)` emits the existing literal `DEFAULT` clause.
+It accepts the same SQL literals as DDL, with quoted text for string values; functions and other
+expressions remain unsupported. `DEFAULT NULL` has the same stored meaning as no default.
+This adds no SQL grammar or new default-expression semantics.

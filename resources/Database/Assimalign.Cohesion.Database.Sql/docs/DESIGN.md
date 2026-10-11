@@ -953,9 +953,74 @@ allow) and a schema that would adopt a table or index it did not create lead wit
 before any step runs; a failed step leads with `COHSQLP004` and names "step k of n" and its
 operation. A failed apply whose token was canceled throws `OperationCanceledException` once its
 completed steps are compensated: a canceled commit surfaces as the aborted transaction of the step
-it interrupted, so the token decides, not the failure's type. The skip test and a `Verify` drift
-share one catalog comparison, which describes the first object that differs (a missing table,
-column, constraint or index, an undeclared one, or a column's type or nullability).
+it interrupted, so the token decides, not the failure's type. The skip checks the cached declaration hash and catalog DDL generation. When either differs,
+`Verify` describes the first live object that differs (a missing table, column, constraint or
+index, an undeclared one, or a column's type, nullability or default).
+
+### Provisioning hardening (B2)
+
+The database format is **8**: format 7's rows and index pages are unchanged, but the catalog
+counter now persists its DDL generation, and every chunk of the applied-schema document carries
+the generation it describes. The counter advances in the same storage transaction as each catalog
+change, regardless of ownership. A table reservation and its publication are separate commits and
+advance it separately. Unchanged maintenance writes do nothing; recording the applied-schema
+marker does not advance it. An older database is refused by the existing format gate, with no
+upgrade or legacy counter reader. If catalog decoding fails before reaching an older database's
+format marker, the engine reads only the unchanged marker tuple and invokes that same gate. This
+failure-only read adds no traversal to a successful open and preserves the actionable `Unavailable`
+wire refusal. A current, missing, malformed or ambiguous marker leaves the catalog error intact.
+
+The marker retains the canonical document for migration history, alongside `{hash, generation}`.
+Equal declared hash and current generation return immediately: no ownership scan, snapshot,
+document deserialization, serialization or SHA-256 in the provisioning phase. Declaration identity
+is computed before I/O in Build phase 3; immutable retained `SqlSchema` declarations cache their
+compiled schema, and compiled schemas cache their document and hash. A fresh declaration still has
+to be compiled and hashed once. The instance-local `CatalogWalkCount` hook covers every provisioner
+catalog traversal; its own assembly's tests assert zero on the second Build. Schema's own tests
+assert its identity computation counters stay at one on repeated reads and compilation.
+The required open-time binding pass also retains its first unresolved CHECK and domain at that
+generation. Post-provisioning declaration validation reuses those results until DDL changes the
+generation, avoiding two further table walks on an unchanged Build. Its internal
+`ValidationWalkCount` stays zero after reopen; an ad-hoc DDL invalidates the cached validation.
+
+A different hash with the same generation can use the recorded document after validating its
+hash. A moved generation never trusts that document: planning starts from the live schema-owned
+objects. Ad-hoc objects survive reconciliation and still cannot be adopted. Even unrelated ad-hoc
+DDL forces this path; a zero-step plan refreshes the marker. Verify mode reports the changed state
+without writing it. After all statements, the live catalog is checked once more against the
+declaration, so a concurrent name collision cannot be recorded as convergence. The marker is
+saved last with the generation captured before that check, which the catalog checks
+under its metadata lock. A failed or crashed multi-statement apply leaves earlier committed steps
+visible; recovery restores their counter atomically with their DDL, and the next Build plans only
+the uncommitted tail. There is no multi-statement atomicity claim.
+
+The snapshot covers ordered columns, storage types and bounds, named SQL types/domains, effective
+primary-key nullability, literal DEFAULTs, composite primary keys, ordinary and unique indexes,
+foreign keys with delete actions, and CHECK predicates. Equivalent DEFAULT and CHECK text retains
+the desired spelling so the planner does not invent changes. The desired CLR row identity and
+primary-key name are retained when the catalog's corresponding structure matches; neither is SQL
+catalog metadata. E3 domains are engine registrations made before provisioning, so registered
+declared domains are included in the snapshot even when no table exists; their planner operations
+emit no DDL. Principals/grants and ALTER metadata remain explicitly refused, as before B2.
+
+`table.Default(selector, literal)` and `CompiledSchemaColumn.DefaultLiteral` express the existing
+SQL literal DEFAULT capability. The engine validates one literal before writing anything and
+renders its canonical SQL; expressions/functions are refused, and `DEFAULT NULL` has the same live
+meaning as absence. Null defaults are omitted from canonical JSON, preserving existing defaultless
+v3 identities. A non-null literal can backfill an added required column, subject to the planner's
+existing destructive-change opt-in. SDK extraction preserves the same text and hash.
+
+`SqlProvisioningHardeningTests` captures Sql's crash-storage strategy after every committed step of
+a migration containing all eight executable add/drop operation kinds, including a unique-index
+drop, DEFAULT columns, domains with bounds, primary keys, CHECKs and foreign keys. Every recovered
+engine Build's plan must equal the remaining suffix and its final marker must equal the declared
+hash and current generation. A separate compiled-schema test covers unique-index creation and a
+composite primary key, which the retained builder does not declare.
+
+**49a remains unimplemented.** If accepted later, its classification/scheduling point belongs
+between plan rendering and the statement loop in `SqlSchemaProvisioner.ApplyAsync`; the final
+marker must still be withheld until every required step completes. B2 adds no deferred worker,
+pending-step records or Degraded progress.
 
 ### Declared databases: the engine builder's build phases
 
@@ -1015,8 +1080,8 @@ stateDiagram-v2
 6. **Provisioning**, in declaration order. Open, or create (`DefaultCollation ?? Collation.Binary`)
    when the database does not exist; an existing database whose collation is not the declared one
    (an unset declaration meaning `Binary`) is refused with `COHSQLP002`, because a key's collation id
-   cannot change (decision 56). Then `Apply` skips a schema whose recorded hash, recorded document
-   and live catalog all match, and otherwise plans and applies it with compensation; `Verify` runs
+   cannot change (decision 56). Then `Apply` skips a schema whose cached hash and catalog DDL generation match its marker,
+   and otherwise plans and applies it with compensation; `Verify` runs
    no DDL and creates nothing, and refuses a missing database or any difference with `COHSQLP003`.
    A declaration without a schema only ensures the database exists. Last, every stored
    definition must bind to the catalog (decision 65): a CHECK, declared or ad hoc, that calls a
@@ -1052,10 +1117,14 @@ those identifier forms. The mapper uses the same retained names, so its quoted
 DML binds the objects deployed by this renderer without another naming convention.
 
 Each DDL request remains self-committing under the catalog's established rule.
+Provisioning refuses a table or index that appears after planning, even when its
+generated CREATE uses `IF NOT EXISTS`: an operation that created nothing must not
+enter the compensation list and later delete an independently created object.
+Ordinary ad-hoc `IF NOT EXISTS` keeps its no-op behavior.
 On a later failure, completed reversible steps run their compensating requests
 in reverse order and the applied-schema marker remains unchanged. The marker is
 written only after all steps succeed, and a repeated apply is a no-op only when
-the stored canonical document/hash and live catalog all agree. Full atomicity
+the stored hash and DDL generation match the declaration and current catalog. Full atomicity
 for a destructive multi-statement migration is deliberately not claimed: the
 current catalog has no transaction spanning DDL statements, and irreversible
 data loss cannot be compensated. That kernel seam is recorded as the remaining
@@ -1354,7 +1423,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 6).**
+  chains (since record-space format version 3; the current format is 8).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one

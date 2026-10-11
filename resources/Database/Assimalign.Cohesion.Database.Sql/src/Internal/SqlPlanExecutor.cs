@@ -832,6 +832,13 @@ internal sealed partial class SqlPlanExecutor
     {
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
         {
+            // A provisioner compensates every successful step. An object created
+            // after it planned is not its work and must never enter that list.
+            if (statement.ProvisioningSchema is not null)
+            {
+                throw new DatabaseException($"Table '{plan.Schema}.{plan.Name}' already exists; schema provisioning cannot adopt it.");
+            }
+
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
 
@@ -990,6 +997,11 @@ internal sealed partial class SqlPlanExecutor
     {
         if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out _))
         {
+            if (statement.ProvisioningSchema is not null)
+            {
+                throw new DatabaseException($"Index '{plan.IndexName}' already exists on '{plan.Table.Schema}.{plan.Table.Name}'; schema provisioning cannot adopt it.");
+            }
+
             if (plan.IfNotExists)
             {
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);

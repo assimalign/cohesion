@@ -175,7 +175,7 @@ public class SqlCatalogTests
         // Arrange
         var (catalog, harness) = OpenFresh();
         string largeDocument = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
-        var first = new SqlCatalogSchemaState("sha256:first", largeDocument);
+        var first = new SqlCatalogSchemaState("sha256:first", largeDocument, catalog.DdlGeneration);
 
         // Act / Assert: the canonical document spans catalog records and reassembles on open.
         await catalog.SaveSchemaStateAsync(first);
@@ -186,7 +186,7 @@ public class SqlCatalogTests
 
         // Act / Assert: replacement removes every old chunk and persists hash + document together.
         const string replacementDocument = "{\"schema\":\"replacement\"}";
-        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument));
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument, catalog.DdlGeneration));
         var replacementReopen = Reopen(harness);
         replacementReopen.SchemaState.ShouldNotBeNull();
         replacementReopen.SchemaState.ContentHash.ShouldBe("sha256:replacement");
@@ -197,8 +197,8 @@ public class SqlCatalogTests
     public void CreateSchemaState_InvalidValues_ShouldThrow()
     {
         // Act / Assert
-        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}"));
-        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", ""));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}", 0));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", "", 0));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - CreateTable: assigns object ids and exposes the table")]

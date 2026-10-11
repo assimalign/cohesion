@@ -163,6 +163,10 @@ internal static class SqlSchemaStatementRenderer
         }
 
         builder.Append(column.IsNullable && !isPrimaryKey ? " NULL" : " NOT NULL");
+        if (column.DefaultLiteral is not null)
+        {
+            builder.Append(" DEFAULT ").Append(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) ?? "NULL");
+        }
     }
 
     private static bool IsPrimaryKeyColumn(CompiledSchemaKey? key, string columnName)

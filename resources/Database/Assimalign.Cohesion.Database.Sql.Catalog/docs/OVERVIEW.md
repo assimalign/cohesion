@@ -21,8 +21,10 @@ physical index registrations exported by `Database.Indexing`.
   `GetIndexRegistrations` store the `BTreeIndexRegistration` set so indexes
   re-attach when the database reopens.
 - **Applied-schema state** — `SchemaState` / `SaveSchemaStateAsync` atomically
-  retain the canonical `SqlCompiledSchema` document and deterministic hash used for
-  idempotent provisioning and live-catalog reconciliation.
+  retain the canonical `SqlCompiledSchema` document, deterministic hash and DDL
+  generation used for constant-time already-applied checks. Every committed catalog
+  change advances `DdlGeneration` in its own transaction, so interrupted provisioning
+  and later DDL trigger live-catalog reconciliation.
 
 ## Dependencies
 

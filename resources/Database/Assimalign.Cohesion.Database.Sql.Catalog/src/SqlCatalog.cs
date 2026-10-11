@@ -85,6 +85,7 @@ public sealed class SqlCatalog
     private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
+    private ulong _ddlGeneration;
     private int _recordSpaceFormatVersion = 1;
     private Collation _defaultCollation = Collation.Binary;
     private (PageId PageId, int SlotIndex)? _counterLocation;
@@ -199,7 +200,7 @@ public sealed class SqlCatalog
             writer.AppendInt32(defaultCollationRecordKind).AppendInt8((sbyte)collation.Id);
             using var transaction = _storage.BeginTransaction();
             var location = UpsertRecord(transaction, _defaultCollationLocation, writer.ToArray());
-            transaction.Commit();
+            CommitCatalogChange(transaction);
             _defaultCollationLocation = location;
             _defaultCollation = collation;
         }
@@ -216,6 +217,25 @@ public sealed class SqlCatalog
             lock (_sync)
             {
                 return _schemaState;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the durable generation of committed catalog changes. Schema application state
+    /// records this value to detect later DDL, including changes to ad-hoc objects.
+    /// </summary>
+    /// <remarks>
+    /// The counter and the metadata change share one transaction. Recording applied-schema
+    /// state or saving an unchanged index directory does not advance the generation.
+    /// </remarks>
+    public ulong DdlGeneration
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _ddlGeneration;
             }
         }
     }
@@ -302,14 +322,13 @@ public sealed class SqlCatalog
 
             ValidateColumns(schema, name, columns, primaryKeyColumns);
 
-            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
+            var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
 
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
-                PersistCounter(transaction);
-                transaction.Commit();
+                CommitCatalogChange(transaction, checked(_nextObjectId + 1));
                 _tables[(schema, name)] = new TableSlot(table, location);
             }
 
@@ -378,12 +397,14 @@ public sealed class SqlCatalog
                     _storage.DeleteRow(transaction, indexSlot.Location.PageId, indexSlot.Location.SlotIndex);
                 }
 
+                var registrationsLocation = _registrationsLocation;
                 if (droppedIndexes.Count > 0)
                 {
-                    _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
+                    registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(remainingRegistrations));
                 }
 
-                transaction.Commit();
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
             }
 
             _tables.Remove((schema, name));
@@ -623,8 +644,9 @@ public sealed class SqlCatalog
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeIndex(index));
-                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
-                transaction.Commit();
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
                 _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
             }
 
@@ -661,8 +683,9 @@ public sealed class SqlCatalog
             using (var transaction = _storage.BeginTransaction())
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
-                transaction.Commit();
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
             }
 
             _indexes.Remove((tableObjectId, name));
@@ -687,12 +710,18 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            if (_registrations.SequenceEqual(registrations))
+            {
+                return default;
+            }
+
             byte[] record = EncodeRegistrations(registrations);
 
             using (var transaction = _storage.BeginTransaction())
             {
-                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, record);
-                transaction.Commit();
+                var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, record);
+                CommitCatalogChange(transaction);
+                _registrationsLocation = registrationsLocation;
             }
 
             _registrations = registrations.ToList();
@@ -753,6 +782,11 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            if (_formatLocation is not null && version == _recordSpaceFormatVersion)
+            {
+                return default;
+            }
+
             int kind = version >= firstFencedRecordSpaceFormatVersion
                 ? fencedRecordSpaceFormatKind
                 : recordSpaceFormatKind;
@@ -762,8 +796,9 @@ public sealed class SqlCatalog
 
             using (var transaction = _storage.BeginTransaction())
             {
-                _formatLocation = UpsertRecord(transaction, _formatLocation, record);
-                transaction.Commit();
+                var formatLocation = UpsertRecord(transaction, _formatLocation, record);
+                CommitCatalogChange(transaction);
+                _formatLocation = formatLocation;
             }
 
             _recordSpaceFormatVersion = version;
@@ -779,6 +814,7 @@ public sealed class SqlCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the state is durable.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="state"/> is null.</exception>
+    /// <exception cref="SqlCatalogException">The state's generation differs from the current catalog generation.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default)
     {
@@ -797,6 +833,7 @@ public sealed class SqlCatalog
             int length = Math.Min(schemaStateChunkSize, document.Length - offset);
             records.Add(EncodeSchemaStateChunk(
                 state.ContentHash,
+                state.Generation,
                 index,
                 chunkCount,
                 document.AsSpan(offset, length)));
@@ -804,6 +841,11 @@ public sealed class SqlCatalog
 
         lock (_sync)
         {
+            if (state.Generation != _ddlGeneration)
+            {
+                throw new SqlCatalogException("The applied-schema state does not describe the current DDL generation.");
+            }
+
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
 
             using (var transaction = _storage.BeginTransaction())
@@ -861,6 +903,17 @@ public sealed class SqlCatalog
                         _nextObjectId = persisted;
                     }
 
+                    if (reader.IsAtEnd)
+                    {
+                        throw new SqlCatalogException(
+                            "Unsupported catalog counter format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
+                    }
+                    _ddlGeneration = (ulong)reader.ReadInt64();
+                    if (!reader.IsAtEnd || _counterLocation is not null)
+                    {
+                        throw new SqlCatalogException("Malformed catalog counter record.");
+                    }
+
                     _counterLocation = (unit.PageId, unit.SlotIndex);
                     break;
 
@@ -884,6 +937,7 @@ public sealed class SqlCatalog
                     var chunk = DecodeSchemaStateChunk(ref reader);
                     schemaStateChunks.Add(new SchemaStateChunk(
                         chunk.ContentHash,
+                        chunk.Generation,
                         chunk.Index,
                         chunk.Count,
                         chunk.Document,
@@ -941,7 +995,7 @@ public sealed class SqlCatalog
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
-            transaction.Commit();
+            CommitCatalogChange(transaction);
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
         }
     }
@@ -971,11 +1025,28 @@ public sealed class SqlCatalog
         }
     }
 
-    private void PersistCounter(StorageTransaction transaction)
+    private void CommitCatalogChange(StorageTransaction transaction, ulong? nextObjectId = null)
+    {
+        if (_ddlGeneration == ulong.MaxValue)
+        {
+            throw new SqlCatalogException("The catalog DDL generation is exhausted.");
+        }
+
+        ulong generation = _ddlGeneration + 1;
+        ulong identity = nextObjectId ?? _nextObjectId;
+        var location = PersistCounter(transaction, identity, generation);
+        transaction.Commit();
+        _counterLocation = location;
+        _nextObjectId = identity;
+        _ddlGeneration = generation;
+    }
+
+    private (PageId PageId, int SlotIndex) PersistCounter(
+        StorageTransaction transaction, ulong nextObjectId, ulong generation)
     {
         var writer = new DatabaseKeyWriter();
-        writer.AppendInt32(counterRecordKind).AppendInt64((long)_nextObjectId);
-        _counterLocation = UpsertRecord(transaction, _counterLocation, writer.ToArray());
+        writer.AppendInt32(counterRecordKind).AppendInt64((long)nextObjectId).AppendInt64((long)generation);
+        return UpsertRecord(transaction, _counterLocation, writer.ToArray());
     }
 
     private static void ValidateColumns(
@@ -1416,13 +1487,12 @@ public sealed class SqlCatalog
                 throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
             }
             ValidateColumns(schema, name, columns, primaryKeyColumns);
-            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
+            var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
             ValidateConstraints(table);
             // Persist the identity before physical trees are created. A crash can
             // leave unused trees, but can never reuse their identity for a table.
             using var transaction = _storage.BeginTransaction();
-            PersistCounter(transaction);
-            transaction.Commit();
+            CommitCatalogChange(transaction, checked(_nextObjectId + 1));
             return new ValueTask<SqlCatalogTable>(table);
         }
     }
@@ -1502,7 +1572,7 @@ public sealed class SqlCatalog
             var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
             var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
             var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
-            transaction.Commit();
+            CommitCatalogChange(transaction);
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {
@@ -1697,6 +1767,7 @@ public sealed class SqlCatalog
 
     private static byte[] EncodeSchemaStateChunk(
         string contentHash,
+        ulong generation,
         int index,
         int count,
         ReadOnlySpan<byte> document)
@@ -1706,17 +1777,29 @@ public sealed class SqlCatalog
               .AppendString(contentHash, Collation.Binary)
               .AppendInt32(index)
               .AppendInt32(count)
-              .AppendBinary(document);
+              .AppendBinary(document)
+              .AppendInt64((long)generation);
         return writer.ToArray();
     }
 
     private static SchemaStateChunk DecodeSchemaStateChunk(ref DatabaseKeyReader reader)
-        => new(
-            reader.ReadString(out _),
-            reader.ReadInt32(),
-            reader.ReadInt32(),
-            reader.ReadBinary(),
-            default);
+    {
+        string contentHash = reader.ReadString(out _);
+        int index = reader.ReadInt32();
+        int count = reader.ReadInt32();
+        byte[] document = reader.ReadBinary();
+        if (reader.IsAtEnd)
+        {
+            throw new SqlCatalogException(
+                "Unsupported applied-schema state format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
+        }
+        ulong generation = (ulong)reader.ReadInt64();
+        if (!reader.IsAtEnd)
+        {
+            throw new SqlCatalogException("Malformed applied-schema state: a chunk contains trailing values.");
+        }
+        return new SchemaStateChunk(contentHash, generation, index, count, document, default);
+    }
 
     private static SqlCatalogSchemaState AssembleSchemaState(IReadOnlyList<SchemaStateChunk> chunks)
     {
@@ -1731,7 +1814,7 @@ public sealed class SqlCatalog
 
         foreach (SchemaStateChunk chunk in chunks)
         {
-            if (chunk.Count != first.Count ||
+            if (chunk.Count != first.Count || chunk.Generation != first.Generation ||
                 !string.Equals(chunk.ContentHash, first.ContentHash, StringComparison.Ordinal) ||
                 chunk.Index < 0 ||
                 chunk.Index >= ordered.Length ||
@@ -1759,7 +1842,7 @@ public sealed class SqlCatalog
 
         try
         {
-            return new SqlCatalogSchemaState(first.ContentHash, _strictUtf8.GetString(document));
+            return new SqlCatalogSchemaState(first.ContentHash, _strictUtf8.GetString(document), first.Generation);
         }
         catch (DecoderFallbackException)
         {
@@ -1773,6 +1856,7 @@ public sealed class SqlCatalog
 
     private sealed record SchemaStateChunk(
         string ContentHash,
+        ulong Generation,
         int Index,
         int Count,
         byte[] Document,

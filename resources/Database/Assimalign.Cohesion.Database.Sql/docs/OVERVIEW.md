@@ -33,7 +33,10 @@ shared storage, with DDL flowing through the relational catalog
   applies a schema imperatively, except another schema than its declaration's to a declared
   database. Both diff the validated `SqlCompiledSchema`, render deterministic table/column/index DDL
   into parsed `SqlQueryRequest`s, compensate completed reversible steps on failure, and record the
-  canonical document/hash only after live-catalog convergence. Failures lead with `COHSQLP001` to
+  canonical document/hash and DDL generation only after live-catalog convergence. An unchanged
+  hash and generation skip provisioning in constant time; crash recovery snapshots every existing
+  provisionable kind, including literal defaults and bounded domain columns, and applies only the
+  remaining steps. Catalog format 8 persists the generation with its DDL. Failures lead with `COHSQLP001` to
   `005`, and a `Verify` drift names the first object that differs. A server keeps a copy of its
   options, as the engine does.
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)

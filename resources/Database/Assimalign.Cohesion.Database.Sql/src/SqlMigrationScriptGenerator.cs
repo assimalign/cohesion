@@ -179,11 +179,11 @@ public static class SqlMigrationScriptGenerator
             throw InvalidPayload(operation, "a desired column definition");
         RequireMatchingName(operation, column.Name, "column");
 
-        if (!column.IsNullable)
+        if (!column.IsNullable && SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral) is null)
         {
             throw Unsupported(
                 operation,
-                "adding a non-nullable column requires a default or backfill, which is not supported");
+                "adding a non-nullable column requires a non-null literal default or a backfill");
         }
 
         return column;

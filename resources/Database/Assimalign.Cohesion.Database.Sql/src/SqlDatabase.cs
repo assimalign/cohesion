@@ -56,6 +56,9 @@ public sealed class SqlDatabase : DatabaseInstance
     private readonly TransactionCoordinator _coordinator;
     private readonly BTreeIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
+
+    // Internal diagnostics/fault-injection seam for this project's own tests.
+    internal SqlSchemaProvisioner SchemaProvisioner => _schemaProvisioner;
     private readonly SqlBoundTableCache _definitions;
     private readonly SqlDatabaseEngine _engine;
 
@@ -99,7 +102,7 @@ public sealed class SqlDatabase : DatabaseInstance
             // re-check keeps the invariant local to the instance, because
             // recovery's scrub, index purge and checkpoint below would otherwise
             // run with the wrong key encoding.
-            ThrowIfFormatIsNotCurrent(Name, _catalog);
+            ThrowIfFormatIsNotCurrent(Name, _catalog.RecordSpaceFormatVersion);
         }
         else
         {
@@ -208,11 +211,10 @@ public sealed class SqlDatabase : DatabaseInstance
     /// database can still open it.
     /// </summary>
     /// <param name="name">The database name, for the message.</param>
-    /// <param name="catalog">The database's catalog, opened on its catalog file set.</param>
+    /// <param name="version">The format version recorded in the database's catalog.</param>
     /// <exception cref="SqlDataStorageFormatException">The data-storage format is not <see cref="SqlRowCodec.RecordSpaceFormatVersion"/>.</exception>
-    internal static void ThrowIfFormatIsNotCurrent(string name, SqlCatalog catalog)
+    internal static void ThrowIfFormatIsNotCurrent(string name, int version)
     {
-        int version = catalog.RecordSpaceFormatVersion;
         int current = SqlRowCodec.RecordSpaceFormatVersion;
 
         if (version == current)

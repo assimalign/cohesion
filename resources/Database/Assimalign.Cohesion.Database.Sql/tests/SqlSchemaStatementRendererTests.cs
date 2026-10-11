@@ -237,7 +237,7 @@ public class SqlSchemaStatementRendererTests
 
         // Act / Assert
         Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
-            .Message.ShouldContain("requires a default or backfill");
+            .Message.ShouldContain("requires a non-null literal default or a backfill");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: compensation baseline must match source hash")]
