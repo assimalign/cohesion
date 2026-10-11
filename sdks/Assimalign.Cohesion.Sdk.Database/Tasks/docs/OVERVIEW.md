@@ -51,6 +51,9 @@ each database's migrations live under `Migrations/<database>/`:
 dotnet msbuild -t:CohesionDatabaseCreateMigration -p:CohesionDatabaseName=sales -p:CohesionDatabaseMigrationName=add-orders
 ```
 
-SQL schema compilation uses `Database.Sql.Schema` without loading the SQL engine into MSBuild.
+SQL schema compilation uses the `cohesion/database-schema/v4` contract in `Database.Sql.Schema`
+without loading the SQL engine into MSBuild. Migration generation uses `Database.Sql.Language`
+to validate and render DEFAULT literals, and supports required column additions with non-null
+literal defaults, matching runtime migrations.
 Key-value compilation and migration requests fail explicitly until that model supplies its own
 schema contract.

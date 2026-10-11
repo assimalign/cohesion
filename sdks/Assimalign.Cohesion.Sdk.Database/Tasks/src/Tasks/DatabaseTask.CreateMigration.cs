@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
+using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -337,11 +339,11 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     break;
                 case SqlSchemaMigrationOperationKind.AddColumn:
                     CompiledSchemaColumn addedColumn = Required(operation.Column, operation);
-                    if (!addedColumn.IsNullable)
+                    if (!addedColumn.IsNullable && CanonicalDefault(addedColumn.DefaultLiteral) is null)
                     {
                         throw Unsupported(
                             operation,
-                            "adding a non-nullable column requires a default or backfill, which the SQL DDL dialect does not model");
+                            "adding a non-nullable column requires a non-null literal default or a backfill");
                     }
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" ADD COLUMN ");
@@ -419,6 +421,42 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             }
 
             builder.Append(isPrimaryKey || !column.IsNullable ? " NOT NULL" : " NULL");
+            if (column.DefaultLiteral is not null)
+            {
+                builder.Append(" DEFAULT ").Append(CanonicalDefault(column.DefaultLiteral) ?? "NULL");
+            }
+        }
+
+        private static string? CanonicalDefault(string? text)
+        {
+            if (text is null)
+            {
+                return null;
+            }
+
+            // Match the runtime's literal-only declaration admission. The second parse prevents
+            // a terminator or trailing comment from escaping the expression; render only the AST.
+            SqlLiteralExpression literal = ParseDefault(text);
+            _ = ParseDefault($"({text})");
+            return literal.LiteralType == SqlLiteralType.Null ? null : SqlExpressionRenderer.Render(literal);
+        }
+
+        private static SqlLiteralExpression ParseDefault(string text)
+        {
+            const string carrierTable = "__migration_default";
+            var statement = new SqlQueryParser().Parse($"SELECT * FROM {carrierTable} WHERE {text}");
+            if (statement.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
+                statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
+                select.Where is not SqlLiteralExpression literal || select.IsDistinct || select.Columns.Count != 1 ||
+                select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
+                select.From is not { TableName: carrierTable, SchemaName: null, Alias: null } ||
+                select.Joins.Count > 0 || select.GroupBy.Count > 0 || select.Having is not null ||
+                select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
+            {
+                throw new InvalidOperationException($"DEFAULT '{text}' must be exactly one supported SQL literal.");
+            }
+
+            return literal;
         }
 
         private static string SqlType(CompiledSchemaColumn column)

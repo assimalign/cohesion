@@ -37,11 +37,11 @@ public sealed class CompiledSchemaDefaultTests
         declared.Hash.ShouldNotBe(absent.Hash);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Schema DEFAULT: absent defaults preserve the v3 canonical document")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema DEFAULT: absent defaults preserve the v4 canonical document")]
     public void Serialize_AbsentDefault_ShouldPreserveCanonicalDocument()
     {
         // Arrange
-        const string document = "{\"format\":\"cohesion/database-schema/v3\",\"name\":\"defaults\",\"allowsDestructiveChanges\":false,\"types\":[],\"tables\":[{\"owner\":1,\"name\":\"items\",\"rowType\":\"Tests:Item\",\"columns\":[{\"name\":\"Value\",\"type\":4,\"isNullable\":true,\"maxLength\":null,\"precision\":null,\"scale\":null,\"customType\":null}],\"primaryKey\":null,\"indexes\":[],\"constraints\":[]}],\"principals\":[]}";
+        const string document = "{\"format\":\"cohesion/database-schema/v4\",\"name\":\"defaults\",\"allowsDestructiveChanges\":false,\"types\":[],\"tables\":[{\"owner\":1,\"name\":\"items\",\"rowType\":\"Tests:Item\",\"columns\":[{\"name\":\"Value\",\"type\":4,\"isNullable\":true,\"maxLength\":null,\"precision\":null,\"scale\":null,\"customType\":null}],\"primaryKey\":null,\"indexes\":[],\"constraints\":[]}],\"principals\":[]}";
 
         // Act
         SqlCompiledSchema restored = SqlCompiledSchemaSerializer.Deserialize(document);

@@ -16,7 +16,7 @@ public class CompiledSchemaTests
     {
         SqlCompiledSchema schema = CompileOrders();
 
-        schema.Format.ShouldBe("cohesion/database-schema/v3");
+        schema.Format.ShouldBe("cohesion/database-schema/v4");
         schema.Name.ShouldBe("orders-db");
         schema.Tables.Select(table => table.Name).ShouldBe(["order_lines", "orders"]);
         schema.Tables[1].RowType.ShouldStartWith("Assimalign.Cohesion.Database.Sql.Schema.Tests:");
@@ -80,9 +80,10 @@ public class CompiledSchemaTests
     [Theory(DisplayName = "Cohesion Test [Database] - Schema compiler: a document of an earlier format version no longer reads")]
     [InlineData("cohesion/database-schema/v1")]
     [InlineData("cohesion/database-schema/v2")]
+    [InlineData("cohesion/database-schema/v3")]
     public void Deserialize_EarlierFormatVersion_ShouldBeRefused(string format)
     {
-        // v1 carried the engine model; v2 had no domains or named column types (phase E3 made v3).
+        // v1 carried the engine model; v2 had no domains or named column types; v3 had no defaults.
         string earlier = CompileOrders().CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, format, StringComparison.Ordinal);
 
         earlier.ShouldContain(format, Case.Sensitive);

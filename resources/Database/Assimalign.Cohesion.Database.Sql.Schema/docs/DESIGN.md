@@ -85,7 +85,7 @@ the engine's types, so it checks only the name's shape (an identifier, optionall
 unsigned integer arguments; `CompiledSchemaTypeNames`), which also keeps the name safe to write
 into DDL; the SQL engine's build resolves it, built-in names first, and refuses an unknown name or
 a type not stored as the member is, before it touches any file. Because a declared type's name and
-a column's type changed meaning, the document format is `cohesion/database-schema/v3`; a `v2`
+a column's type changed meaning, E3 moved the document format to `cohesion/database-schema/v3`; a `v2`
 document no longer deserializes, so a recorded `v2` state is replanned once from the catalog. The
 validator accepts a column `CustomType` the schema does not declare when it has the shape (the
 engine's domain or a built-in name), and checks the storage type of one it declares. The planner
@@ -105,8 +105,11 @@ non-blank constant for the SDK to extract it. This package validates that it is 
 SQL engine parses exactly one supported literal before provisioning. An
 expression or a function call is not a supported DEFAULT in the current SQL dialect.
 
-The optional `defaultLiteral` member is omitted when null, so documents without defaults keep
-their format `v3` document and hash. `NULL` text remains part of a declaration's identity even
+The optional `defaultLiteral` member is omitted when null. Adding it changes the strict document
+contract, so B2 uses `cohesion/database-schema/v4` for every schema, with or without defaults.
+Earlier documents are refused; no v3 compatibility reader or upgrade is provided. Provisioning
+reconstructs the live catalog before recording the v4 document and its new hash. The SDK compiler
+and migration baseline writer use this same format. `NULL` text remains part of a declaration's identity even
 though SQL gives it the same database behavior as an absent default. Adding or removing a
 default changes column equivalence, so the planner carries both definitions in `AlterColumn`
 instead of reporting false convergence; the current dialect still refuses that operation.

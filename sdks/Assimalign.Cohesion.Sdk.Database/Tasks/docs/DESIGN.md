@@ -23,7 +23,7 @@ The extractor recognizes the declaration DSL by metadata name: the two anchors, 
 sealed `SqlSchemaBuilder`, `SqlTableBuilder<TRow>` (``SqlTableBuilder`1``), `SqlTypeBuilder` and
 `SqlPrincipalBuilder` (`CSharpSchemaExtractor.cs`). Those strings change in the same commit as the
 types they name: a stale one compiles and then rejects every schema at build time. The task
-project references only `Database.Sql.Schema`, so `SqlDatabaseBuilder` and
+project references `Database.Sql.Schema` and `Database.Sql.Language`, so `SqlDatabaseBuilder` and
 `SqlDatabaseEngineBuilder` are names it matches in the consumer's compilation, never symbols it
 links against. The test project compiles its consumer sources against the real `Database.Sql`
 assembly, so renaming either builder fails the SDK tests in the same change.
@@ -35,8 +35,9 @@ builder, and SQL-defined functions arrive through DDL.
 
 The SDK is a build-time layer. Its tasks may run under the JIT-based MSBuild host and reference
 the AOT-compatible `Database.Sql.Schema` package, but the task and Roslyn assemblies never enter the
-consumer's runtime closure. The task references only `Database.Sql.Schema` (the `COHLIB001`
-same-area precedent); it does not pull the SQL engine, its storage implementation, or
+consumer's runtime closure. The task references `Database.Sql.Schema` and `Database.Sql.Language`
+(per the `COHLIB001` same-area rule). Migration DEFAULT validation uses the public SQL parser and
+expression renderer, avoiding a second literal grammar; it does not pull the SQL engine, its storage implementation, or
 `Connections.Tcp` into MSBuild.
 
 ## Orchestration commands
@@ -100,7 +101,7 @@ declaration is compiled before any artifact is written, so a failure replaces no
 `table.Check(name, sql)` (E2, design §5.7) extracts as two compile-time string constants into
 a CHECK constraint with the text as written and no columns, the record the runtime compiler
 writes, so the artifact's document and hash equal the runtime's (`CompileDatabaseSchemaTaskTests`).
-The task does not parse the SQL: it references only `Database.Sql.Schema`, never a SQL parser, and
+The schema extraction task does not parse CHECK SQL, and
 **native functions are invisible to it**. A CHECK that calls a function the application registers
 on its engine builder compiles into the artifact like any other; the engine's build binds it to its
 function catalog before it touches a file (`COHSQLP001` when it does not bind). A CHECK's name
@@ -146,7 +147,9 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document contains semantic data only, never source paths or timestamps. The task writes with
+The document format is `cohesion/database-schema/v4`, shared with the runtime compiler and the
+migration baseline writer. B2's `defaultLiteral` member changes the strict document contract;
+earlier formats are refused, including v3. The document contains semantic data only, never source paths or timestamps. The task writes with
 LF line endings and avoids replacing unchanged outputs. The manifest is the only record of which
 files in the directory are the SDK's: the task deletes the `.schema.json` and `.schema.sha256`
 files of a database its previous manifest listed and that is no longer declared, and leaves every
@@ -177,7 +180,15 @@ timestamps. Missing names, invalid schemas, unsupported/destructive operations, 
 collisions fail without partial outputs. `KeyValuePair` fails explicitly because a SQL script is
 not a valid migration artifact for that model. SQL text uses the same guarded, `dbo`-qualified
 dialect as the runtime renderer; the current dialect explicitly rejects constraints,
-ALTER metadata, and required column additions that have no default or backfill.
+ALTER metadata, and required column additions that have no non-null literal default or backfill.
+Every emitted column retains its DEFAULT. The migration writer validates it as exactly one SQL
+literal through `Sql.Language`, then renders the parsed value, so signs, Boolean spelling and
+escaped strings match the runtime's DDL. Required additions retain the shared planner's
+conservative destructive-change opt-in; after that opt-in, a non-null default makes the DDL valid;
+`DEFAULT NULL` has the same effect as absence and cannot supply that addition. Nonliteral text is
+`COHDBSDK206` before either the SQL script or the new baseline is written. Engine-specific domain
+resolution and default value conversion remain runtime validation, as the SDK does not build an
+engine. SDK tests compare scripts for the same plans directly with `SqlMigrationScriptGenerator`.
 
 ## Verification
 

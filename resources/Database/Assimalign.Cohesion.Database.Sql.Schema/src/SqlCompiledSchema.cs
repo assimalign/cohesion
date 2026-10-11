@@ -29,6 +29,12 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// once, as it did for <c>v1</c>.
 /// </para>
 /// <para>
+/// <b>Format <c>v4</c> (phase B2).</b> Columns may declare
+/// <see cref="CompiledSchemaColumn.DefaultLiteral"/>. Strict earlier readers cannot read that
+/// member, so every document uses <c>cohesion/database-schema/v4</c>, including schemas without
+/// defaults. Earlier formats are refused; provisioning reconstructs their state from the catalog.
+/// </para>
+/// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
 /// is read, and kept: the schema is immutable, so they never change.
 /// </para>
@@ -36,7 +42,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v3";
+    public const string CurrentFormat = "cohesion/database-schema/v4";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.
