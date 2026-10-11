@@ -213,7 +213,8 @@ public sealed class SqlDatabaseSession : DatabaseSession
             // keeps its own type. Both lead with COHSQLT004.
             throw translated;
         }
-        catch (InsufficientExecutionStackException exception)
+        catch (Exception exception) when (exception is InsufficientExecutionStackException
+            or SqlEvaluationException { Code: SqlEvaluationException.StatementTooComplexCode })
         {
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
             // Every recursive walk over a statement (the system-relation scan, planning,
@@ -226,27 +227,31 @@ public sealed class SqlDatabaseSession : DatabaseSession
             // (SQLSTATE 54001): the statement fails as this statement's error, the auto-commit
             // context has rolled back, an explicit transaction stays active, and the session
             // stays usable.
-            throw SqlEvaluationException.StatementTooComplex(exception);
-        }
-        catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.StatementTooComplexCode)
-        {
-            SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
+            if (exception is InsufficientExecutionStackException)
+            {
+                throw SqlEvaluationException.StatementTooComplex((InsufficientExecutionStackException)exception);
+            }
             throw;
         }
         finally
         {
-            // Metrics are already owned by execution. Report the completed plan's actual work,
-            // once per request (including failure), without another async wrapper or a timer.
-            if (_lastStatementMetrics is { } metrics && !ReferenceEquals(metrics, previousMetrics))
+            TraceStatementCompletion(request, previousMetrics);
+        }
+    }
+
+    private void TraceStatementCompletion(QueryRequest request, SqlStatementMetrics? previousMetrics)
+    {
+        // Metrics are already owned by execution. Keep reporting locals out of the async
+        // state machine: Debug hoists them, increasing the allocation even while tracing is off.
+        if (_lastStatementMetrics is { } metrics && !ReferenceEquals(metrics, previousMetrics))
+        {
+            if (metrics.IsPlanned)
             {
-                if (metrics.IsPlanned)
-                {
-                    SqlDatabaseEventSource.Log.StatementPlanned(_database.Name, metrics);
-                }
-                if (metrics.SelfCommits > 0 && request is SqlQueryRequest sql)
-                {
-                    SqlDatabaseEventSource.Log.DdlSelfCommitted(_database.Name, sql.Statement.SqlExpression.CommandType);
-                }
+                SqlDatabaseEventSource.Log.StatementPlanned(_database.Name, metrics);
+            }
+            if (metrics.SelfCommits > 0 && request is SqlQueryRequest sql)
+            {
+                SqlDatabaseEventSource.Log.DdlSelfCommitted(_database.Name, sql.Statement.SqlExpression.CommandType);
             }
         }
     }

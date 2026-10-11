@@ -3802,8 +3802,15 @@ record count final. A parse refusal, transaction-control command or unsupported 
 `DdlSelfCommitted` is written once if the statement committed at least one visible catalog change,
 even if a later step failed; merely attempting DDL, or reserving an unreachable identity, is not
 self-commit. These hooks reuse execution's metrics, add no timer or async wrapper, and convert
-payloads only inside the source's keyword guard. The disabled-hook allocation test runs 10,000
-iterations and requires zero bytes in both build configurations.
+payloads only inside the source's keyword guard. Completion reporting uses a private synchronous
+helper and the two complexity cases share one catch local, keeping tracing locals out of the
+Debug async state machine. The review's real-path allocation test caught 24 additional bytes per
+statement before this change. The disabled-hook test still runs 10,000 iterations and requires
+zero bytes. A separate test parses and executes a real indexed SELECT through the public session
+inside a snapshot transaction, requires synchronous completion and result disposal, and compares
+the fewest bytes of three warmed 1,000-statement rounds with the pre-tracing session's baseline
+(`e2830a17d`, measured 2026-10-11): 10,648 bytes per statement in Debug, 9,088 in Release. It covers
+`ExecuteRequestAsync`, its `finally`, and event argument evaluation as well as the guarded helpers.
 
 `StatementTooComplex` reports the text parser's nesting/stack diagnostic, the typed request's
 nesting refusal, or the execution stack backstop, once, with no SQL text or exception message.

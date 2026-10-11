@@ -272,6 +272,73 @@ public sealed class SqlDatabaseEventSourceTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Statement tracing: A real statement should retain its allocation baseline while disabled")]
+    public async Task ExecuteAsync_NoListener_ShouldRetainStatementAllocationBaseline()
+    {
+        // Arrange: parsing, binding, planning and materialization all run through the public
+        // session path. One snapshot transaction holds the database state steady across rounds.
+        SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse("A listener left the SQL event source enabled.");
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("allocations", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO items VALUES (1)", cancellationToken: CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        const int iterations = 1_000;
+        Measure(100);
+
+        // Act: take the fewest bytes of three warmed rounds, as DatabaseEventSourceTests does.
+        // Runtime bookkeeping can charge an occasional allocation to this thread; an allocation
+        // in ExecuteRequestAsync, its finally, or an event argument repeats in every round.
+        long allocated = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            allocated = Math.Min(allocated, Measure(iterations));
+        }
+
+        // Assert
+        // Baseline measured on 2026-10-11 with SqlDatabaseSession.cs restored from e2830a17d,
+        // before batch D statement tracing; the unchanged parser/planner/executor still run.
+        // Keep the whole public path pinned so a wrapper/finally allocation cannot hide behind
+        // a direct event-helper measurement. Debug allocates its existing async state machines.
+#if DEBUG
+        const long baselineBytesPerStatement = 10_648;
+#else
+        const long baselineBytesPerStatement = 9_088;
+#endif
+        allocated.ShouldBe(baselineBytesPerStatement * iterations);
+        session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldStartWith("seek:");
+        session.LastStatementMetrics.RecordsExamined.ShouldBe(1);
+        SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
+
+        long Measure(int count)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < count; index++)
+            {
+                var pending = session.ExecuteAsync("SELECT id FROM items WHERE id = 1", cancellationToken: CancellationToken.None);
+                if (!pending.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException("The measured statement did not complete synchronously.");
+                }
+
+                var result = pending.Result;
+                if (result is not QueryResultSet rows || result.Status != QueryResultStatus.Success)
+                {
+                    throw new InvalidOperationException("The measured statement did not produce its result set.");
+                }
+
+                var dispose = rows.DisposeAsync();
+                if (!dispose.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException("The measured result did not dispose synchronously.");
+                }
+                dispose.GetAwaiter().GetResult();
+            }
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should be named for its assembly")]
     public void GetName_SqlDatabaseEventSource_ShouldEqualAssemblyName()
     {
