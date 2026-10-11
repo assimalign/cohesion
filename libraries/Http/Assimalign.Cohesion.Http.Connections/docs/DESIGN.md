@@ -4047,10 +4047,24 @@ Each of the QPACK encoder (0x02) and decoder (0x03) streams may appear
 at most once (RFC 9204 §4.2); a duplicate is a connection error. Both are
 critical streams: the peer ending or resetting either one is
 `H3_CLOSED_CRITICAL_STREAM` (§4.2, #1083). With the QPACK dynamic table
-disabled (`QPACK_MAX_TABLE_CAPACITY = 0`, the default posture) the encoder
-stream carries no instruction the server must act on; it is watched for the
-connection's lifetime (`WatchQPackStreamAsync`): what arrives is discarded, so
-it cannot accumulate unread, and its closure ends the connection.
+disabled (`QPACK_MAX_TABLE_CAPACITY = 0`, the default posture), the encoder
+stream is decoded for the connection's lifetime (#1423). The only permitted
+instruction is Set Dynamic Table Capacity to zero (`0x20`). An Insert, a
+Duplicate into the empty table, or a capacity above zero closes the connection
+with `QPACK_ENCODER_STREAM_ERROR` (RFC 9204 §3.2.3, §4.3.1–4.3.4).
+The first octet already identifies every forbidden instruction: a capacity
+with a continuation is at least 31, and an Insert cannot fit any entry.
+Consequently the disabled-table drain needs no table, partial-string buffer,
+or allocation proportional to attacker-supplied instruction lengths. Capacity
+zero is accepted repeatedly, including across reads; FIN/reset still ends
+the connection with `H3_CLOSED_CRITICAL_STREAM`. The enabled-table parser is
+unchanged.
+
+This is a behavior break against 10.0.0-preview.1 on decision 15's terms:
+forbidden instructions that were ignored now close the connection. The tag
+left disabled-table encoder bytes unprocessed. Unauthenticated clients can
+reach that validation gap (CWE-20); no security impact beyond the requester's
+own protocol behavior has been established.
 
 The peer's decoder stream is read for the connection's lifetime too
 (`WatchQPackDecoderStreamAsync`), and its instructions are checked. The
@@ -4673,9 +4687,9 @@ otherwise-hard problems:
   to block on. `QPACK_BLOCKED_STREAMS` is effectively 0. The decoder
   enforces this by **rejecting any field section whose Required Insert
   Count is non-zero** as a decompression failure (RFC 9204 §2.2).
-- **No encoder/decoder instruction processing.** The QPACK encoder and
-  decoder unidirectional streams carry only dynamic-table instructions, so
-  with the table disabled they carry nothing the server must act on.
+- **No dynamic-table instruction state.** The encoder stream still validates
+  the zero-capacity profile (#1423), and the decoder stream still validates
+  feedback for the static-only response encoder. Neither needs a dynamic table.
 
 ### Dynamic table (opt-in)
 

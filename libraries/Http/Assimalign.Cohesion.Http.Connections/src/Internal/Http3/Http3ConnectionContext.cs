@@ -1115,9 +1115,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 // enabled, drain it in the background so its Set Capacity /
                 // Insert / Duplicate instructions populate the dynamic table while
                 // requests keep being served. With the dynamic table disabled
-                // (QPACK_MAX_TABLE_CAPACITY = 0) it carries no instruction to act
-                // on, but it is still a critical stream, so it is watched for its
-                // closure.
+                // (QPACK_MAX_TABLE_CAPACITY = 0), validate the zero-capacity profile
+                // without buffering instructions or constructing a dynamic table.
                 if (Interlocked.Exchange(ref _qpackEncoderStreamReceived, 1) == 1)
                 {
                     return new Http3ConnectionException(
@@ -1129,7 +1128,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 // insertions the drain applies. Neither loop faults, so neither is awaited.
                 _ = _decoderState is not null
                     ? DrainQPackEncoderStreamAsync(reader)
-                    : WatchQPackStreamAsync(reader, "QPACK encoder");
+                    : DrainDisabledQPackEncoderStreamAsync(reader);
 
                 return null;
 
@@ -1512,14 +1511,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Reads a peer QPACK stream the server takes no instruction from — the encoder stream while the
-    /// dynamic table is disabled — for the connection's lifetime, discarding what arrives, so its closure is
-    /// seen: the peer ending or resetting the stream is a connection error of type
+    /// Decodes the peer encoder stream with the dynamic table disabled (#1423). Only Set Capacity 0
+    /// is legal; any other instruction closes with QPACK_ENCODER_STREAM_ERROR. The peer ending or
+    /// resetting the stream is a connection error of type
     /// <c>H3_CLOSED_CRITICAL_STREAM</c> (RFC 9204 §4.2). Never throws.
     /// </summary>
     /// <param name="reader">The stream's input, positioned after its stream type.</param>
-    /// <param name="streamName">The stream's name, for the error's message.</param>
-    private async Task WatchQPackStreamAsync(PipeReader reader, string streamName)
+    private async Task DrainDisabledQPackEncoderStreamAsync(PipeReader reader)
     {
         CancellationToken cancellationToken = _connection.ConnectionClosed;
         Http3ConnectionException? violation;
@@ -1529,13 +1527,35 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             while (true)
             {
                 ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                bool invalid = false;
+                foreach (ReadOnlyMemory<byte> segment in result.Buffer)
+                {
+                    // RFC 9204 §4.3: 001xxxxx is Set Capacity. Only 00100000 fits the advertised
+                    // maximum of zero; a continued integer is already >= 31. Every other prefix is
+                    // Insert or Duplicate, neither of which can fit/reference the empty table.
+                    // Reject from the prefix, without buffering attacker-controlled string lengths.
+                    if (segment.Span.IndexOfAnyExcept((byte)0x20) >= 0)
+                    {
+                        invalid = true;
+                        break;
+                    }
+                }
+
                 reader.AdvanceTo(result.Buffer.End);
+
+                if (invalid)
+                {
+                    violation = new Http3ConnectionException(
+                        Http3ErrorCode.QPackEncoderStreamError,
+                        "The peer sent a QPACK encoder instruction incompatible with a maximum table capacity of zero (RFC 9204 §3.2.3, §4.3).");
+                    break;
+                }
 
                 if (result.IsCompleted)
                 {
                     violation = new Http3ConnectionException(
                         Http3ErrorCode.ClosedCriticalStream,
-                        $"The peer closed its {streamName} stream (RFC 9204 §4.2).");
+                        "The peer closed its QPACK encoder stream (RFC 9204 §4.2).");
                     break;
                 }
             }
@@ -1550,7 +1570,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             violation = IsCriticalStreamResetByPeer(exception)
                 ? new Http3ConnectionException(
                     Http3ErrorCode.ClosedCriticalStream,
-                    $"The peer reset its {streamName} stream (RFC 9204 §4.2).",
+                    "The peer reset its QPACK encoder stream (RFC 9204 §4.2).",
                     exception)
                 : null;
         }
