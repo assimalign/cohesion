@@ -283,8 +283,8 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     /// lazily). Returns <see langword="null"/> for a clean end-of-stream (the peer closed gracefully
     /// between requests), a wire-level failure (truncated line, malformed header, malformed body
     /// framing, socket error), a head-limit rejection (414 / 431, after emitting the status
-    /// response), and a read-timeout (idle keep-alive or slow-header Slowloris, after emitting a 408
-    /// when mid-headers). The receive enumerable treats them all the same way: the connection is
+    /// response), an https request-target on a cleartext connection (after emitting 421), and a
+    /// read-timeout (idle keep-alive or slow-header Slowloris, after emitting a 408 when mid-headers). The receive enumerable treats them all the same way: the connection is
     /// done. Body-size (413) and data-rate (408) violations surface after dispatch, on the streamed
     /// body read.
     /// </summary>
@@ -337,6 +337,14 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // octet other than VCHAR and SP (RFC 9112 §3), and a Host value with an octet other than
             // VCHAR (RFC 9112 §3.2) are answered the same way (#1341).
             await TryWriteErrorResponseAsync(HttpStatusCode.BadRequest, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Http1MisdirectedRequestException)
+        {
+            // RFC 9110 §4.2.2 / §7.4 — an https request-target received over a cleartext connection is
+            // rejected, not served: 421 (Misdirected Request, §15.5.20) tells the client to retry over a
+            // connection that is secured. Its body was never read, so the connection is closed after it.
+            await TryWriteErrorResponseAsync(HttpStatusCode.MisdirectedRequest, cancellationToken).ConfigureAwait(false);
             return null;
         }
         catch (HttpRequestRejectedException rejection)

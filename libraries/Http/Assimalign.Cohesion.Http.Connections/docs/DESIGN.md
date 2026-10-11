@@ -706,6 +706,44 @@ gone, replaced by the listener's declared `ConnectionCapabilities`:
   reports `Security = Tls` like any other secured listener, and HTTP/3
   derives the same way HTTP/1.1 and HTTP/2 do.
 
+### The request scheme and an https target on cleartext
+
+`IHttpRequest.Scheme` is the target URI's scheme (RFC 9112 §3.3): the connection's,
+unless an HTTP/1.1 absolute-form request-target or an HTTP/2 or HTTP/3 `:scheme`
+names one. Until #1324's review a named `https` was taken whatever the connection,
+so `GET https://example.com/admin HTTP/1.1` sent to a cleartext port, or an h2c
+stream with `:scheme https`, reached the application as `https`.
+`UseHttpsRedirection` passed it on, because the effective scheme falls back to
+`Request.Scheme` when no trusted proxy forwarded one, and HSTS (RFC 6797 §7.2) and
+the Secure-cookie decisions in CookiePolicy and Antiforgery read it as secure. RFC
+9110 §4.2.2 makes an `https` resource reachable only over a secured connection, and
+§7.4 has an origin server reject a request for one that arrives otherwise.
+
+- **HTTP/1.1** answers an `https` absolute-form target on a cleartext connection with
+  `421 Misdirected Request` (§15.5.20), which tells the client to retry over a
+  secured connection, and closes the connection. `Http1MessageReader` raises
+  `Http1MisdirectedRequestException` once the head is read, before any interceptor
+  or the application runs; `Http1ConnectionContext` writes the 421 the way it writes
+  a 400.
+- **HTTP/2 over cleartext (h2c)** gives the request the connection's `http`
+  whatever `:scheme` says, so the request is no longer marked secure; it is not
+  rejected yet. The test fixtures send `:scheme https` over plaintext connections
+  throughout (more than 300 tests), so a 421 on h2c needs them moved to `http` or
+  to a TLS-capable listener first. A reverse proxy that forwards `:scheme https` to
+  an h2c backend also raises the question Kestrel answers with
+  `AllowAlternateSchemes`, a trusted-gateway opt-out that §7.4 permits. Both are
+  owner decisions.
+- **HTTP/3** is unchanged: QUIC always carries TLS.
+- **An `http` target on a secured connection** keeps `http`. It claims less than the
+  connection gives, so at worst `UseHttpsRedirection` sends the client to the
+  `https` URI once.
+
+`https` on `Request.Scheme` therefore means a secured connection on every version. A
+proxy that terminates TLS and forwards cleartext reports the client's scheme
+through `UseForwardedHeaders`, not through the request-target, and that is the trust
+model the effective scheme reads. `HttpRequestSchemeTests` pins each case, and
+Web.HttpsPolicy's end-to-end tests pin the 421 in front of its redirect.
+
 ### Non-goals
 
 - **Mid-connection upgrade (STARTTLS / `Upgrade: TLS/1.0`).** The flag
@@ -1244,7 +1282,7 @@ elsewhere already or needs a design of its own:
 | Per-request latency, status, route, errors and trace context | The Web server's `ActivitySource` and `Meter`, `Assimalign.Cohesion.Web.Hosting` (#1064). The host sees the whole exchange and how its pipeline ended; the transport sees neither. |
 | Connection lifetimes and counts | Each connection driver's event source (`Assimalign.Cohesion.Connections.Tcp`, `.Quic`, `.NamedPipes`). An HTTP/1.1 or HTTP/2 connection is one driver connection and an HTTP/3 connection is one QUIC connection, so an HTTP-level `Opened`/`Closed` pair and a second `current-connections` counter would count the same connections twice under two names. |
 | TLS handshakes | The runtime's `System.Net.Security` source. A handshake that failed or timed out, and the connection closed for it: `Assimalign.Cohesion.Connections` (`UpgradeFailed`) for TCP endpoints, `Assimalign.Cohesion.Connections.Quic` (`HandshakeFailed`) for HTTP/3. |
-| Requests this package answers itself before dispatch (400, 408, 413, 414, 431), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
+| Requests this package answers itself before dispatch (400, 408, 413, 414, 421, 431), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
 
 The last row is the remaining gap, and filling a placeholder would not close it. It needs an
 error vocabulary per protocol, a choice between events and metric instruments (Kestrel reports the

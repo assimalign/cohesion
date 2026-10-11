@@ -19,11 +19,14 @@ public class Http2TransportTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should parse request headers and write response frames")]
     public async Task Http2_OnRequest_ShouldParseHeadersAndWriteResponseFrames()
     {
-        // Arrange
+        // Arrange — a secured connection, so the https :scheme is the request's; on cleartext (h2c) the
+        // request takes http (HttpRequestSchemeTests).
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/items?id=7", "https", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp2(new TestConnectionListener(connection));
+        options.UseHttp2(new TestConnectionListener(
+            TestConnection.DefaultCapabilities with { Security = Assimalign.Cohesion.Connections.ConnectionSecurity.Tls },
+            connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

@@ -986,7 +986,9 @@ internal sealed class Http2Stream
     /// </summary>
     /// <param name="decoder">The connection's HPACK decoder.</param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
-    /// <param name="fallbackScheme">The connection scheme used when the request omits <c>:scheme</c>.</param>
+    /// <param name="fallbackScheme">
+    /// The connection's scheme: the request's when it omits <c>:scheme</c> or the connection is not secured.
+    /// </param>
     /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="limits">
@@ -1184,7 +1186,15 @@ internal sealed class Http2Stream
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
         HttpHost host = HttpFieldNormalization.ResolveAuthority(decodedHeaders.Authority, decodedHeaders.Headers);
-        HttpScheme scheme = decodedHeaders.Scheme is null
+
+        // RFC 9113 §8.3.1 — :scheme is the target URI's scheme, and it decides the request's scheme only on
+        // a secured connection. An "https" resource is reachable only over one (RFC 9110 §4.2.2), so on
+        // cleartext HTTP/2 (h2c) the request takes the connection's http: taking :scheme as it is would
+        // mark a cleartext request secure, so UseHttpsRedirection would pass it on, and HSTS and
+        // Secure-cookie decisions would read it as https. RFC 9110 §7.4 asks an origin server to reject
+        // such a request, as HTTP/1.1 does with 421 for an https absolute-form target; on h2c that is
+        // not done yet (docs/DESIGN.md, "The request scheme and an https target on cleartext").
+        HttpScheme scheme = decodedHeaders.Scheme is null || fallbackScheme != HttpScheme.Https
             ? fallbackScheme
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 

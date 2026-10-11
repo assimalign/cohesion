@@ -46,6 +46,10 @@ internal static class Http1MessageReader
     /// malformed (a name that is not a token, or a value with a control character other than HTAB), or
     /// a <c>Host</c> value holds an octet other than VCHAR (400).
     /// </exception>
+    /// <exception cref="Http1MisdirectedRequestException">
+    /// Thrown when an absolute-form request-target has the <c>https</c> scheme and the connection is not
+    /// secured (421).
+    /// </exception>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when an interceptor rejects the request (4xx / 5xx).
     /// </exception>
@@ -215,7 +219,19 @@ internal static class Http1MessageReader
                 : HttpHost.Empty,
         };
 
-        // Scheme follows the same precedence: absolute-form carries it on the wire.
+        // Scheme follows the same precedence: absolute-form carries it on the wire, and it is the target
+        // URI's scheme (RFC 9112 §3.3). An "https" target names a resource reachable only over a secured
+        // connection, and an origin server MUST reject a request for one that arrives over a connection
+        // that is not (RFC 9110 §4.2.2, §7.4): answer 421 (Misdirected Request) instead of serving it.
+        // Taking the target's scheme as it is would mark a cleartext request secure, so
+        // UseHttpsRedirection would pass it on, and HSTS and Secure-cookie decisions would read it as
+        // https. An "http" target over TLS is kept as http: it claims less than the connection gives.
+        if (target.Form == HttpRequestTargetForm.Absolute && target.Scheme == HttpScheme.Https && scheme != HttpScheme.Https)
+        {
+            throw new Http1MisdirectedRequestException(
+                $"The HTTP/1.1 request-target '{target.RawValue}' names an https resource, but the connection is not secured (RFC 9110 §4.2.2).");
+        }
+
         HttpScheme requestScheme = target.Form == HttpRequestTargetForm.Absolute
             ? target.Scheme
             : scheme;

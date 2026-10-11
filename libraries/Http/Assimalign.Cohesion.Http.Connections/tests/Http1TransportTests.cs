@@ -111,12 +111,16 @@ public class Http1TransportTests
     public async Task Http1_OnAbsoluteFormRequest_ShouldParsePathAndQuery()
     {
         // RFC 9112 §3.2.2 — absolute-form, used when a proxy forwards a request.
-        // The authority component of the target supersedes any Host header.
+        // The authority component of the target supersedes any Host header. An https target is
+        // served only over a secured connection (RFC 9110 §4.2.2); over cleartext it is answered
+        // with 421 (HttpRequestSchemeTests).
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET https://upstream.example.com:8443/widgets?id=42 HTTP/1.1\r\nHost: lying-host-header.test\r\n\r\n");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(
+            TestConnection.DefaultCapabilities with { Security = Assimalign.Cohesion.Connections.ConnectionSecurity.Tls },
+            connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

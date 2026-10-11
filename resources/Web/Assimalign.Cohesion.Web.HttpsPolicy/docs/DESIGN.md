@@ -38,6 +38,15 @@ What #763 actually shipped, traced through the code:
   (`HttpConnectionIsSecurePropagationTests` in `Http.Connections` pins this:
   a TLS-capability listener yields `HttpScheme.Https` on every request, keep-alive
   included).
+- The request-target cannot raise it on a cleartext connection. An HTTP/1.1
+  absolute-form target such as `https://example.com/admin`, or an HTTP/2 `:scheme`
+  of `https`, used to become `IHttpRequest.Scheme` whatever the connection, so a
+  cleartext request that named an `https` target skipped the redirect and reached
+  the application in cleartext. Since #1324's review the HTTP/1.1 transport answers
+  that target with `421` (RFC 9110 §7.4) before the pipeline runs, and an h2c
+  request takes the connection's `http` (`Http.Connections` DESIGN, "The request
+  scheme and an https target on cleartext"). `https` on the request therefore
+  means a secured connection; `HttpsRedirectionEndToEndTests` pins the 421.
 
 So the "typed TLS feature" the issue calls for is realized, for this package's
 question, as the transport-derived `HttpScheme` enum on the request. The TLS

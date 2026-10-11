@@ -52,6 +52,51 @@ public class HttpsRedirectionEndToEndTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - E2E: An https absolute-form target on a cleartext connection should never reach the application")]
+    public async Task Redirection_HttpsAbsoluteFormTargetOverCleartext_ShouldNotReachTheApplication()
+    {
+        // Arrange — the target's scheme used to become Request.Scheme, so the request read as secure:
+        // the redirect was skipped and the application served it in cleartext. The transport now answers
+        // it with 421 (RFC 9110 §7.4) before the pipeline runs.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        RawHttp1Application application = await RawHttp1Application.StartAsync(cancellationToken);
+
+        await using (application)
+        {
+            // Act
+            string response = await application.ExchangeAsync(
+                "GET https://example.com/admin HTTP/1.1\r\nHost: example.com\r\n\r\n",
+                cancellationToken);
+
+            // Assert
+            response.ShouldStartWith("HTTP/1.1 421");
+            application.TerminalInvocations.ShouldBe(0);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - E2E: An http absolute-form target on a cleartext connection should still be redirected")]
+    public async Task Redirection_HttpAbsoluteFormTargetOverCleartext_ShouldRedirect()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        RawHttp1Application application = await RawHttp1Application.StartAsync(cancellationToken);
+
+        await using (application)
+        {
+            // Act
+            string response = await application.ExchangeAsync(
+                "GET http://example.com/admin HTTP/1.1\r\nHost: example.com\r\n\r\n",
+                cancellationToken);
+
+            // Assert
+            response.ShouldStartWith("HTTP/1.1 307");
+            ReadHeader(response, "Location").ShouldBe("https://example.com/admin");
+            application.TerminalInvocations.ShouldBe(0);
+        }
+    }
+
     private static string? ReadHeader(string response, string name)
     {
         foreach (string line in response.Split("\r\n"))
