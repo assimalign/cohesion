@@ -218,11 +218,6 @@ internal sealed class TestEngine : DatabaseEngine
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
-        if (CreateResult is { } result)
-        {
-            return new ValueTask<DatabaseInstance>(result);
-        }
-
         lock (_databases)
         {
             if (!_existing.Remove(name))
@@ -262,11 +257,6 @@ internal sealed class TestEngine : DatabaseEngine
     protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
         Interlocked.Increment(ref _coreCalls);
-        if (CreateResult is { } result)
-        {
-            return new ValueTask<DatabaseInstance>(result);
-        }
-
         lock (_databases)
         {
             bool found = _databases.TryGetValue(name, out var instance);
