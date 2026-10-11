@@ -77,8 +77,11 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   second before the response, which `RepresentationWriter` takes as the current time
   (`DateTimeOffset.UtcNow`; nothing upstream sets a response `Date`). A file written in the current
   second can change again without changing its `Last-Modified`, so it gets the full `200`, and so
-  does any date earlier or later than `Last-Modified`. The strong `ETag` form is unaffected; it is
-  what a resuming client should send anyway.
+  does any date earlier or later than `Last-Modified`. The one-second test is a conservative
+  heuristic, not RFC 9110 §8.8.2.2's "reliably knows" condition: a file written twice inside one
+  second, with a client's copy taken between the writes, keeps one `Last-Modified`, so that
+  client's date still matches (the core `HttpIfRange` design). The strong `ETag` form has no such
+  case; it is what a resuming client should send anyway.
 - **Single-range only; multi-range falls back to full `200`.** `multipart/byteranges`
   assembly is complexity with almost no modern client demand; the RFC permits serving the
   full representation instead. `HttpRangeSelector`'s DoS guard (16-range cap → full) rides

@@ -17,7 +17,10 @@ namespace Assimalign.Cohesion.Http;
 /// validator it carries is always evaluated with <em>strong</em> semantics via
 /// <see cref="Matches(HttpEntityTag?, DateTimeOffset?, DateTimeOffset)"/>: an entity-tag is compared
 /// with <see cref="HttpEntityTag.StrongEquals(HttpEntityTag)"/> (so a weak tag never matches), and a
-/// date applies the range only when it equals a <c>Last-Modified</c> that is itself a strong validator.
+/// date applies the range only when it equals a <c>Last-Modified</c> that a conservative heuristic
+/// accepts as strong. The entity-tag form is the reliable one; see
+/// <see cref="Matches(HttpEntityTag?, DateTimeOffset?, DateTimeOffset)"/> for what the date form cannot
+/// detect.
 /// </para>
 /// <para>
 /// This is RFC 9110 &#167; 13.2.2 step 5 (the range-application decision). It composes with steps
@@ -78,10 +81,11 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
     /// </para>
     /// <list type="bullet">
     ///   <item><description>
-    ///   <paramref name="currentLastModified"/> is a strong validator (RFC 9110 &#167; 8.8.2.2): it is at
-    ///   least one second earlier than <paramref name="responseDate"/>. A representation modified in
-    ///   the second the response is sent can change again within that second without changing its
-    ///   <c>Last-Modified</c>, and one dated after the response cannot be vouched for at all.
+    ///   <paramref name="currentLastModified"/> is at least one second earlier than
+    ///   <paramref name="responseDate"/>, which is how this method decides that it is strong. A
+    ///   representation modified in the second the response is sent can change again within that
+    ///   second without changing its <c>Last-Modified</c>, and one dated after the response cannot be
+    ///   vouched for at all.
     ///   </description></item>
     ///   <item><description>
     ///   The client's date equals <paramref name="currentLastModified"/> exactly. An earlier or a later
@@ -91,6 +95,17 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
     /// <para>
     /// Every other case serves the full representation, which RFC 9110 &#167; 13.1.5 requires when the
     /// condition is false.
+    /// </para>
+    /// <para>
+    /// The strength test is a conservative server-side heuristic, modeled on the RFC 9110
+    /// &#167; 8.8.2.2 rule that a client applies to the <c>Date</c> of the response that delivered its
+    /// cached copy. &#167; 8.8.2.2 lets an origin server treat a <c>Last-Modified</c> as strong only when
+    /// it reliably knows the representation did not change twice during that second, and a timestamp
+    /// alone cannot show that. The case the heuristic misses: the representation changes twice inside
+    /// one second, and the client's copy was taken between the two changes. Both versions carry the
+    /// same <c>Last-Modified</c>, so a later request with that date gets a <c>206</c> of bytes that do
+    /// not splice with the client's copy. The strong entity-tag form has no such case and is the
+    /// reliable way to resume a transfer.
     /// </para>
     /// </remarks>
     /// <param name="currentETag">The selected representation's current entity-tag, or <see langword="null"/> when it has none.</param>
@@ -121,9 +136,11 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
             // overflow the way DateTimeOffset.AddSeconds can at its range limits.
             long validator = lastModified.ToUnixTimeSeconds();
 
-            // RFC 9110 §8.8.2.2: Last-Modified is strong only when it is at least one second before
-            // the response's Date. §13.1.5: a weak date never applies the range, and a strong one
-            // applies it only on an exact match.
+            // Last-Modified counts as strong only when it is at least one second before the
+            // response's date: a conservative heuristic modeled on the RFC 9110 §8.8.2.2 Date rule,
+            // which cannot see two changes inside the validator's second (see the remarks).
+            // §13.1.5: a weak date never applies the range, and a strong one applies it only on an
+            // exact match.
             return validator < responseDate.ToUnixTimeSeconds()
                 && ifRangeDate.ToUnixTimeSeconds() == validator;
         }

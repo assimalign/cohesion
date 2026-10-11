@@ -330,8 +330,8 @@ public class HttpResponseFileExtensionsTests
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a current If-Range date should honor the range")]
     public async Task SendFileAsync_IfRangeCurrentDate_ShouldHonorRange()
     {
-        // Arrange — modified well before the response, so Last-Modified is a strong validator
-        // (RFC 9110 §8.8.2.2).
+        // Arrange — modified well before the response, so HttpIfRange's one-second heuristic
+        // (modeled on RFC 9110 §8.8.2.2) counts Last-Modified as strong.
         var file = new FixedTimestampFile("data.txt", "0123456789", new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc));
         TestHttpContext first = await RunAsync(HttpMethod.Get, response => response.SendFileAsync(file));
         string lastModified = Header(first, HttpHeaderKey.LastModified);
@@ -839,8 +839,9 @@ public class HttpResponseFileExtensionsTests
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - WriteStreamAsync: If-Range should honor the range only for a date equal to a strong Last-Modified")]
     public async Task WriteStreamAsync_IfRangeDate_ShouldHonorRangeOnlyForStrongLastModified()
     {
-        // Arrange — a date names a representation only when it equals Last-Modified, and only when
-        // Last-Modified is at least a second older than the response (RFC 9110 §8.8.2.2, §13.1.5).
+        // Arrange — a date names a representation only when it equals Last-Modified (RFC 9110
+        // §13.1.5), and only when Last-Modified is at least a second older than the response, the
+        // heuristic HttpIfRange models on §8.8.2.2's Date rule.
         // One dated after the response (a clock running ahead) is weak, as is one in the current
         // second; the past and the future are used here so the outcome cannot hinge on the clock.
         DateTimeOffset settled = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);

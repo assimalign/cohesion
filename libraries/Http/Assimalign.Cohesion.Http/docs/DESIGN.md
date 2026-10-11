@@ -1439,17 +1439,25 @@ Three correctness details:
 - **A date applies the range only on an exact match with a strong
   `Last-Modified` (#1185).** RFC 9110 §13.1.5 makes the date form true only when
   the date "exactly matches" `Last-Modified`, and only when that date is a strong
-  validator (§8.8.2.2). The origin-server test for strength is that the
-  representation cannot change twice in the second the date names, which
-  `Matches` reads as "`Last-Modified` is at least one second before the
-  response's `Date`". So a representation modified in the current second, or
-  dated after the response (a clock running ahead), never applies a date. The
-  caller passes `responseDate`, normally the current time, because the core reads
-  no ambient clock (the `HttpFreshness` rule). Through 10.0.0-preview.1 the date
-  form applied the range whenever `Last-Modified ≤ If-Range date`, the rule
-  Kestrel uses. A client holding a *later* date (a file replaced by an older copy,
-  or a client clock ahead of the server's) then got a `206` of a representation
-  its partial copy does not splice with. The two-argument `Matches` was replaced
+  validator (§8.8.2.2). §8.8.2.2 lets an origin server treat `Last-Modified` as
+  strong only when it reliably knows the representation did not change twice
+  during that second, which a timestamp alone cannot show. `Matches` therefore
+  uses a conservative heuristic modeled on §8.8.2.2's client rule, which reads the
+  `Date` of the response that delivered the cached copy: `Last-Modified` counts as
+  strong only when it is at least one second before `responseDate`. So a
+  representation modified in the current second, or dated after the response (a
+  clock running ahead), never applies a date. The heuristic cannot detect one
+  case: the representation changes twice inside the validator's second, and the
+  client's copy was taken between the two changes. Both versions carry the same
+  `Last-Modified`, so the client's date matches and it gets a `206` of bytes that
+  do not splice with its copy. The strong `ETag` form has no such case and is the
+  reliable path for resuming a transfer. The caller passes `responseDate`,
+  normally the current time, because the core reads no ambient clock (the
+  `HttpFreshness` rule). Through 10.0.0-preview.1 the date form applied the range
+  whenever `Last-Modified ≤ If-Range date`, the rule ASP.NET Core's StaticFiles
+  and `RangeHelper` use. A client holding a *later* date (a file replaced by an
+  older copy, or a client clock ahead of the server's) then got a `206` of a
+  representation its partial copy does not splice with. The two-argument `Matches` was replaced
   rather than kept beside the new one, since it cannot decide strength without a
   date. That is a source break for a caller outside this repository, accepted
   during the previews on the terms of the HTTP/Web program's decision 15.

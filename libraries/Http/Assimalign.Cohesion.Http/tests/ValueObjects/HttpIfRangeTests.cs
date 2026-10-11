@@ -219,8 +219,9 @@ public class HttpIfRangeTests
     [InlineData(-60_000)]
     public void Matches_WeakLastModified_ShouldIgnoreRange(int responseOffsetMilliseconds)
     {
-        // Arrange — RFC 9110 §8.8.2.2: Last-Modified is strong only when it is at least one second
-        // before the response's Date, and §13.1.5 never applies the range on a weak date.
+        // Arrange — Matches counts Last-Modified as strong only when it is at least one second
+        // before the response date, a conservative heuristic modeled on the RFC 9110 §8.8.2.2
+        // Date rule; §13.1.5 never applies the range on a weak date.
         HttpIfRange ifRange = HttpIfRange.FromDate(_lastModified);
 
         // Act
