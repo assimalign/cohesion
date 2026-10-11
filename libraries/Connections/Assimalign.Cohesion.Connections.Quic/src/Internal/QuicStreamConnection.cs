@@ -45,8 +45,11 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// Each half ends on its own (#1330). The pipes leave the <see cref="QuicStream"/> open when they complete,
 /// and the halves the holder sees end only their own direction: completing <see cref="Output"/> flushes and
 /// sends the FIN (<see cref="QuicStream.CompleteWrites"/>), or <c>RESET_STREAM</c> with the default code
-/// when it is completed with an error, and leaves the stream readable until the peer ends its side;
-/// completing <see cref="Input"/> stops the receiving direction with the default code (<c>STOP_SENDING</c>),
+/// when it is completed with an error or its final flush fails, and leaves the stream readable until the peer
+/// ends its side. That completion is the first signal for the sending direction, so a later
+/// <see cref="AbortWrite(long)"/> does nothing and <see cref="Abort(Exception)"/> stops only the receiving
+/// direction: <see cref="QuicStream"/> would still reset the direction until the peer acknowledges the FIN.
+/// Completing <see cref="Input"/> stops the receiving direction with the default code (<c>STOP_SENDING</c>),
 /// unless it has already ended, and leaves the sending direction alone. Once every usable half has been
 /// completed the stream is finished, so it is disposed in the background, and
 /// <see cref="DisposeAsync"/> waits for that disposal. Neither completion signals
@@ -72,6 +75,10 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     private volatile ConnectionState _state;
     // Set by AbortRead: every later read of Input fails, buffered octets included.
     private volatile bool _readAborted;
+    // Set once completing Output has ended the sending direction (FIN or RESET_STREAM). QuicStream treats the
+    // direction as open until the peer acknowledges the FIN and would still reset it, so AbortWrite and Abort
+    // consult this flag to keep the first signal for the direction.
+    private volatile bool _writesEnded;
     private bool _isDisposed;
     private int _closeReported;
     // The usable halves the holder has not completed yet; the last one to complete releases the stream.
@@ -190,8 +197,9 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         }
 
         // A direction already aborted through IMultiplexedStreamAbort keeps its code: QuicStream ends each
-        // direction once and skips one that has ended.
-        _stream.Abort(QuicAbortDirection.Both, _defaultStreamErrorCode);
+        // direction once and skips one that has ended. A sending direction ended by completing Output keeps its
+        // FIN: QuicStream would still reset it until the peer acknowledges the FIN, so only reading is aborted.
+        _stream.Abort(_writesEnded ? QuicAbortDirection.Read : QuicAbortDirection.Both, _defaultStreamErrorCode);
 
         CancelConnectionClosedToken();
         ReportClosed();
@@ -216,6 +224,16 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <inheritdoc />
     public void AbortWrite(long errorCode)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(errorCode);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode, maxApplicationErrorCode);
+
+        // The contract: no effect once Output was completed. QuicStream would still put RESET_STREAM on the wire
+        // after the FIN until the peer acknowledges it, and the peer could then discard data sent as complete.
+        if (_writesEnded)
+        {
+            return;
+        }
+
         AbortDirection(QuicAbortDirection.Write, errorCode);
     }
 
@@ -293,10 +311,14 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     }
 
     // The holder completed Output: end the sending direction alone — the FIN after the flushed data, or
-    // RESET_STREAM with the default code when Output was completed with an error. QuicStream ends each
-    // direction once, so a direction already aborted with a code keeps it.
+    // RESET_STREAM with the default code when Output was completed with an error or its final flush failed.
+    // QuicStream ends each direction once, so a direction already aborted with a code keeps it, and from here
+    // on no abort of this end resets the direction (_writesEnded).
     private void EndWrites(Exception? exception)
     {
+        // Raised before the FIN is queued, so an abort racing the completion cannot reset after it.
+        _writesEnded = true;
+
         try
         {
             if (exception is null)
@@ -513,8 +535,9 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <summary>
     /// The writable stream's <see cref="Output"/>: a <see cref="PipeWriter"/> over the QUIC stream whose
     /// completion ends the sending direction alone (#1330) — it flushes what the pipe holds, then sends the
-    /// FIN, or <c>RESET_STREAM</c> with the default code when completed with an error, and leaves the stream
-    /// readable (<see cref="EndWrites"/>), once. Everything else passes straight through.
+    /// FIN, or <c>RESET_STREAM</c> with the default code when completed with an error or when that flush
+    /// fails, and leaves the stream readable (<see cref="EndWrites"/>), once. Everything else passes straight
+    /// through.
     /// </summary>
     private sealed class HalfClosingOutput : PipeWriter
     {
@@ -551,13 +574,22 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
                 return;
             }
 
+            // A final flush that fails (a write still in flight, a stream already gone) left the data partial,
+            // so the direction is reset rather than ended with a FIN.
+            Exception? failure = exception;
+
             try
             {
                 _inner.Complete(exception);
             }
+            catch (Exception flushFailure)
+            {
+                failure ??= flushFailure;
+                throw;
+            }
             finally
             {
-                _connection.EndWrites(exception);
+                _connection.EndWrites(failure);
             }
         }
 
@@ -568,13 +600,20 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
                 return;
             }
 
+            Exception? failure = exception;
+
             try
             {
                 await _inner.CompleteAsync(exception).ConfigureAwait(false);
             }
+            catch (Exception flushFailure)
+            {
+                failure ??= flushFailure;
+                throw;
+            }
             finally
             {
-                _connection.EndWrites(exception);
+                _connection.EndWrites(failure);
             }
         }
     }

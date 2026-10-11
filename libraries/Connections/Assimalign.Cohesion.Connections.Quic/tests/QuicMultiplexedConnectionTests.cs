@@ -749,6 +749,76 @@ public class QuicMultiplexedConnectionTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: An abort after completing Output should keep the FIN and the data before it")]
+    [InlineData(false)] // AbortWrite with a code
+    [InlineData(true)]  // Abort of the whole stream
+    public async Task Abort_AfterCompletingOutput_ShouldKeepTheFin(bool wholeStream)
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the server ends its side while the response's tail and the FIN still wait for credit, so
+        // QuicStream would still reset the direction.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using WithheldCreditPair pair = await WithheldCreditPair.CreateAsync(certificate, static _ => { }, cancellation.Token);
+        await pair.ServerStream.Output.CompleteAsync();
+
+        // Act — the completion was the first signal for the sending direction; a later abort must not replace it.
+        if (wholeStream)
+        {
+            pair.ServerStream.Abort();
+        }
+        else
+        {
+            pair.ServerStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>()!.AbortWrite(0x42);
+        }
+
+        // Assert — the client reads the whole response and its FIN, never a RESET_STREAM.
+        int read = await pair.ReadToEndAsync(cancellation.Token);
+
+        read.ShouldBe(WithheldCreditPair.ResponseLength);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: Completing Output when its final flush fails should reset the sending direction")]
+    public async Task CompleteOutput_WhenFinalFlushFails_ShouldResetTheSendingDirection()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — MsQuic's send buffer is full, so the next write to the QUIC stream stays in flight. The pipe
+        // then holds 1 MiB in several segments and flushes them one at a time: the first is in flight.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using WithheldCreditPair pair = await WithheldCreditPair.CreateAsync(certificate, static _ => { }, cancellation.Token);
+        PipeWriter output = pair.ServerStream.Output;
+        await output.WriteAsync(new byte[256 * 1024], cancellation.Token);
+
+        output.Write(new byte[1024 * 1024]);
+        ValueTask<FlushResult> flushing = output.FlushAsync(cancellation.Token);
+        flushing.IsCompleted.ShouldBeFalse();
+
+        // Act — the completion's own flush collides with the one in flight and fails, leaving most of the
+        // buffered octets unsent.
+        Task<Exception?> completing = Task.Run<Exception?>(() => Record.Exception(() => output.Complete()));
+        Exception? readFailure = await Record.ExceptionAsync(() => pair.ReadToEndAsync(cancellation.Token));
+        Exception? completion = await completing.WaitAsync(cancellation.Token);
+        await Record.ExceptionAsync(async () => await flushing);
+
+        // Assert — the failed flush surfaced, and the client saw RESET_STREAM with the default code instead of a
+        // FIN after partial data.
+        completion.ShouldBeAssignableTo<InvalidOperationException>();
+        QuicException reset = readFailure.ShouldBeOfType<QuicException>();
+        reset.QuicError.ShouldBe(QuicError.StreamAborted);
+        reset.ApplicationErrorCode.ShouldBe(sentinelStreamErrorCode);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: The stream pipes should leave the QUIC stream open when they complete")]
     public void CreateStreamOptions_ShouldLeaveTheStreamOpen()
     {

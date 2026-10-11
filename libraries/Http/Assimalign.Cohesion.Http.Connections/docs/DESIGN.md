@@ -4792,7 +4792,12 @@ side, or until the exchange ends and the transport stops it with
 is closed, so after closing, the handler reads what the client still sends
 through the exchange's request body, which carries the CONNECT's `DATA`;
 `Http3ExtendedConnectRoundTripTests` does exactly that over real QUIC. The
-in-memory driver has always half-closed this way.
+in-memory driver has always half-closed this way. A reset that comes after the
+close — the request body hits a stream error, or the tunnel finishes with the
+body unread — stops only the reading direction: the FIN was the first signal
+for the sending one, and the QUIC driver no longer lets a later `AbortWrite`
+or `Abort` put `RESET_STREAM` after it, where the client could discard tunnel
+data it had been told was complete.
 
 Before #1330 the QUIC driver's pipes did not leave the `QuicStream` open, so
 completing the output disposed the stream and stopped its read side with the

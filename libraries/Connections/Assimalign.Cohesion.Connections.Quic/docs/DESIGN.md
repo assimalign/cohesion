@@ -55,7 +55,15 @@ it, then immediately fall back to the `IMultiplexedConnection` /
     (`QuicStream.CompleteWrites`), and the stream stays readable until the
     peer ends its side. Completing it with an error sends `RESET_STREAM`
     with `DefaultStreamErrorCode` instead, so an abnormal end never looks
-    like a complete one;
+    like a complete one, and so does a completion whose own final flush
+    fails — a write still in flight on the stream, for instance — which
+    would otherwise put a FIN after partial data. The completion is the
+    first signal for the sending direction, so a later `AbortWrite` does
+    nothing and `Abort` stops only the receiving direction:
+    `QuicStream` keeps the direction open until the peer acknowledges the
+    FIN, and would put `RESET_STREAM` on the wire after it, letting the
+    peer discard data it was told was complete (an HTTP/3 tunnel or
+    request body that fails after the response's FIN reaches this);
   - completing `Input` stops the receiving direction with
     `DefaultStreamErrorCode` (`STOP_SENDING`), unless it has already
     ended — read to its end, or stopped with a code — and leaves the
@@ -209,10 +217,13 @@ The driver implements the contracts library's two code-carrying facets
 | connection `Abort(errorCode, reason)` | `QuicConnection.CloseAsync(errorCode)` | `CONNECTION_CLOSE` |
 
 - **A direction ends once.** `QuicStream.Abort` skips a direction that
-  has already ended (read to its end, completed, or aborted), so a stream
-  `Abort(Exception?)` or disposal after a coded abort sends the default
-  code only for a direction still open. That is how the HTTP/3 transport
-  resets with a code: both directions, then `Abort(reason)`.
+  has already ended (read to its end, aborted, or completed and
+  acknowledged), so a stream `Abort(Exception?)` or disposal after a
+  coded abort sends the default code only for a direction still open.
+  That is how the HTTP/3 transport resets with a code: both directions,
+  then `Abort(reason)`. A sending direction whose FIN is queued but not
+  yet acknowledged is still open to `QuicStream`, so the driver tracks
+  `Output`'s completion itself and skips that direction too.
 - **A half abort is not the stream ending.** It changes no `State` and
   does not fire the stream's `ConnectionClosed`: the `ReadsClosed` or
   `WritesClosed` fault it causes is `OperationAborted`, which the
@@ -238,7 +249,8 @@ The driver implements the contracts library's two code-carrying facets
   with it. A protocol that wants its own code calls `AbortRead` or
   `AbortWrite` first, and the completion then leaves that direction alone.
   Completing `Output` cleanly needs nothing first: it sends the FIN and
-  leaves reading open (#1330), so the peer may keep sending.
+  leaves reading open (#1330), so the peer may keep sending. An abort after
+  it cannot turn the FIN into a reset.
 
 ## Diagnostics
 
