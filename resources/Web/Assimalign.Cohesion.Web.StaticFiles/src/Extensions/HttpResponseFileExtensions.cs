@@ -52,7 +52,8 @@ public static class HttpResponseFileExtensions
         /// <remarks>
         /// <para>
         /// The <c>ETag</c> is a strong entity-tag derived from the file's <c>Size</c> and
-        /// <c>UpdatedOn</c>, and <c>Last-Modified</c> is <c>UpdatedOn</c>: the validators
+        /// <c>UpdatedOn</c>, and <c>Last-Modified</c> is <c>UpdatedOn</c>, or the response time when
+        /// <c>UpdatedOn</c> is in the future (RFC 9110 &#167; 8.8.2.1): the validators
         /// <c>UseStaticFiles</c> emits for the same file. The file is opened only when the outcome has
         /// content, so a <c>304</c>, <c>412</c>, or <c>416</c> never reads it, and a file that no
         /// longer exists by the time it is read is answered with <c>404 Not Found</c>. It is opened
@@ -164,7 +165,8 @@ public static class HttpResponseFileExtensions
         /// <c>If-None-Match</c>, but never <c>If-Match</c> or <c>If-Range</c>, which compare strongly.
         /// A date in <c>If-Range</c> applies the range only when it equals
         /// <paramref name="lastModified"/> and <paramref name="lastModified"/> is at least one second
-        /// in the past (RFC 9110 &#167; 13.1.5, &#167; 8.8.2.2).
+        /// in the past (RFC 9110 &#167; 13.1.5; the one-second test is a heuristic modeled on
+        /// &#167; 8.8.2.2, and a strong <paramref name="entityTag"/> is the reliable validator).
         /// </para>
         /// <para>
         /// The stream is not disposed; whoever opened it disposes it once the returned task completes.
@@ -173,7 +175,7 @@ public static class HttpResponseFileExtensions
         /// <param name="stream">The readable stream whose remaining bytes are sent.</param>
         /// <param name="contentType">The <c>Content-Type</c> to send, or <see langword="null"/> for <c>application/octet-stream</c>.</param>
         /// <param name="entityTag">The representation's entity-tag, or <see langword="null"/> when it has none.</param>
-        /// <param name="lastModified">The representation's last-modification time, or <see langword="null"/> when unknown. It is sent and compared at whole-second (HTTP-date) precision.</param>
+        /// <param name="lastModified">The representation's last-modification time, or <see langword="null"/> when unknown. It is sent and compared at whole-second (HTTP-date) precision, and a time later than the response is replaced by the response time (RFC 9110 &#167; 8.8.2.1).</param>
         /// <param name="cancellationToken">A token that cancels the content copy. When it cannot be cancelled, the exchange's <see cref="IHttpContext.RequestCancelled"/> token is observed instead.</param>
         /// <returns>A task that completes when the response has been written.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="response"/> or <paramref name="stream"/> is <see langword="null"/>.</exception>

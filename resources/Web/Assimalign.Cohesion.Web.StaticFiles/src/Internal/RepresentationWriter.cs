@@ -69,7 +69,7 @@ internal static class RepresentationWriter
             return;
         }
 
-        if (!TrySelectContent(context, representation, out HttpRangeSlice? slice))
+        if (!TrySelectContent(context, ref representation, out HttpRangeSlice? slice))
         {
             return;
         }
@@ -110,11 +110,11 @@ internal static class RepresentationWriter
     /// <returns>A task that completes when the response has been written.</returns>
     public static Task WriteStreamAsync(
         IHttpContext context,
-        in RepresentationMetadata representation,
+        RepresentationMetadata representation,
         Stream source,
         CancellationToken cancellationToken)
     {
-        return TrySelectContent(context, representation, out HttpRangeSlice? slice)
+        return TrySelectContent(context, ref representation, out HttpRangeSlice? slice)
             ? WriteContentAsync(context, representation, slice, source, cancellationToken)
             : Task.CompletedTask;
     }
@@ -126,12 +126,23 @@ internal static class RepresentationWriter
     /// single byte range to send, or <see langword="null"/> for the full representation.
     /// </summary>
     /// <param name="context">The exchange.</param>
-    /// <param name="representation">The representation the request is evaluated against.</param>
+    /// <param name="representation">
+    /// The representation the request is evaluated against. A <c>Last-Modified</c> later than the
+    /// current time is first replaced with the current time (RFC 9110 &#167; 8.8.2.1,
+    /// <see cref="RepresentationMetadata.ClampLastModified"/>), so the caller passes the updated value
+    /// on to <see cref="WriteContentAsync"/>.
+    /// </param>
     /// <param name="slice">When this method returns <see langword="true"/>, the range to send, or <see langword="null"/> for the full representation.</param>
     /// <returns><see langword="true"/> when the caller should write the content; <see langword="false"/> when the response is complete.</returns>
-    public static bool TrySelectContent(IHttpContext context, in RepresentationMetadata representation, out HttpRangeSlice? slice)
+    public static bool TrySelectContent(IHttpContext context, ref RepresentationMetadata representation, out HttpRangeSlice? slice)
     {
         slice = null;
+
+        // One reading of the clock stands for the response's origination time (nothing upstream
+        // sets a response Date): the Last-Modified clamp and the If-Range strength test both use it,
+        // so every outcome below evaluates and emits the same Last-Modified.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        representation = representation.ClampLastModified(now);
 
         IHttpRequest request = context.Request;
         HttpMethod method = request.Method;
@@ -151,7 +162,7 @@ internal static class RepresentationWriter
         // If-Range, if present, still matches.
         if (method == HttpMethod.Get
             && representation.Length is long length
-            && TryGetRangeSelection(request, representation.ETag, representation.LastModified, length, out HttpRangeSelection selection))
+            && TryGetRangeSelection(request, representation.ETag, representation.LastModified, length, now, out HttpRangeSelection selection))
         {
             if (selection.Status == HttpRangeSelectionStatus.Unsatisfiable)
             {
@@ -307,6 +318,7 @@ internal static class RepresentationWriter
         HttpEntityTag? etag,
         DateTimeOffset? lastModified,
         long length,
+        DateTimeOffset now,
         out HttpRangeSelection selection)
     {
         selection = default;
@@ -320,11 +332,12 @@ internal static class RepresentationWriter
         // all. An unparseable If-Range cannot be validated, so the range is ignored; so is one
         // whose validator the representation does not have, a date that is not exactly the
         // Last-Modified, and any date while Last-Modified is still within the current second
-        // (a weak validator, §8.8.2.2: the file can change again without changing it).
+        // (HttpIfRange treats it as weak: the file can change again without changing it). A future
+        // Last-Modified, clamped to the current second above, is one of those.
         if (request.Headers.TryGetValue(HttpHeaderKey.IfRange, out HttpHeaderValue ifRangeValue))
         {
             if (!HttpIfRange.TryParse((string?)ifRangeValue, out HttpIfRange ifRange)
-                || !ifRange.Matches(etag, lastModified, DateTimeOffset.UtcNow))
+                || !ifRange.Matches(etag, lastModified, now))
             {
                 return false;
             }

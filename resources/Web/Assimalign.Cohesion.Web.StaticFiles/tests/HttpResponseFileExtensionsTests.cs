@@ -51,6 +51,10 @@ public class HttpResponseFileExtensionsTests
     private static string Header(TestHttpContext context, HttpHeaderKey key)
         => context.Response.Headers.TryGetValue(key, out HttpHeaderValue value) ? (string)value : string.Empty;
 
+    // An HTTP-date carries whole seconds, so a sent date is compared with the second it falls in.
+    private static DateTimeOffset WholeSecond(DateTimeOffset value)
+        => new(value.UtcTicks - (value.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+
     // ---------------------------------------------------------------- SendFileAsync(IFileSystemFile)
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a file should be sent as 200 with its entity headers")]
@@ -862,6 +866,7 @@ public class HttpResponseFileExtensionsTests
             HttpMethod.Get, response => response.WriteStreamAsync(later, "text/plain", lastModified: settled), Prepare(settled.AddDays(1)));
         TestHttpContext weakContext = await RunAsync(
             HttpMethod.Get, response => response.WriteStreamAsync(weak, "text/plain", lastModified: ahead), Prepare(ahead));
+        DateTimeOffset answered = DateTimeOffset.UtcNow;
 
         // Assert
         currentContext.Response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
@@ -870,6 +875,68 @@ public class HttpResponseFileExtensionsTests
         laterContext.ReadResponseBody().ShouldBe("0123456789");
         weakContext.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
         weakContext.ReadResponseBody().ShouldBe("0123456789");
+        // RFC 9110 §8.8.2.1: the future time is replaced by the response's, never sent as given.
+        HttpDate.TryParse(Header(weakContext, HttpHeaderKey.LastModified), out DateTimeOffset sent).ShouldBeTrue();
+        sent.ShouldBeLessThanOrEqualTo(answered);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a file dated in the future should send the response time as Last-Modified")]
+    [InlineData(null, false, 200)]
+    [InlineData("bytes=0-1", true, 200)] // a date If-Range naming the future time does not apply the range
+    [InlineData("bytes=20-", false, 416)]
+    public async Task SendFileAsync_FutureLastModified_ShouldSendResponseTime(string? range, bool ifRangeFutureDate, int expectedStatus)
+    {
+        // Arrange — RFC 9110 §8.8.2.1: an origin server with a clock MUST NOT send a Last-Modified
+        // later than the response, and MUST send the response time instead.
+        DateTimeOffset requested = WholeSecond(DateTimeOffset.UtcNow);
+        DateTimeOffset future = requested.AddHours(1);
+        var file = new FixedTimestampFile("data.txt", "0123456789", future.UtcDateTime);
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            HttpMethod.Get,
+            response => response.SendFileAsync(file),
+            ctx =>
+            {
+                if (range is not null)
+                {
+                    ctx.Request.Headers[HttpHeaderKey.Range] = range;
+                }
+                if (ifRangeFutureDate)
+                {
+                    ctx.Request.Headers[HttpHeaderKey.IfRange] = HttpDate.Format(future);
+                }
+            });
+        DateTimeOffset answered = DateTimeOffset.UtcNow;
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(expectedStatus);
+        HttpDate.TryParse(Header(context, HttpHeaderKey.LastModified), out DateTimeOffset sent).ShouldBeTrue();
+        sent.ShouldBeGreaterThanOrEqualTo(requested);
+        sent.ShouldBeLessThanOrEqualTo(answered);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - SendFileAsync: a 304 for a file dated in the future should send the response time as Last-Modified")]
+    public async Task SendFileAsync_FutureLastModifiedNotModified_ShouldSendResponseTime()
+    {
+        // Arrange — the 304 carries the validators a 200 would (RFC 9110 §15.4.5), clamped the same way.
+        DateTimeOffset requested = WholeSecond(DateTimeOffset.UtcNow);
+        var file = new FixedTimestampFile("data.txt", "0123456789", requested.AddHours(1).UtcDateTime);
+        TestHttpContext first = await RunAsync(HttpMethod.Get, response => response.SendFileAsync(file));
+        string etag = Header(first, HttpHeaderKey.ETag);
+
+        // Act
+        TestHttpContext second = await RunAsync(
+            HttpMethod.Get,
+            response => response.SendFileAsync(file),
+            ctx => ctx.Request.Headers[HttpHeaderKey.IfNoneMatch] = etag);
+        DateTimeOffset answered = DateTimeOffset.UtcNow;
+
+        // Assert
+        second.Response.StatusCode.ShouldBe(HttpStatusCode.NotModified);
+        HttpDate.TryParse(Header(second, HttpHeaderKey.LastModified), out DateTimeOffset sent).ShouldBeTrue();
+        sent.ShouldBeGreaterThanOrEqualTo(requested);
+        sent.ShouldBeLessThanOrEqualTo(answered);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - WriteStreamAsync: a stream of unknown length should be sent whole, without length or range support")]

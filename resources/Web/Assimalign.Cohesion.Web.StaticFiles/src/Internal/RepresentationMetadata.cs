@@ -88,6 +88,24 @@ internal readonly struct RepresentationMetadata
     }
 
     /// <summary>
+    /// Returns this metadata with a <see cref="LastModified"/> later than <paramref name="origination"/>
+    /// replaced by <paramref name="origination"/> at HTTP-date precision. RFC 9110 &#167; 8.8.2.1 forbids
+    /// an origin server to send a modification time later than the response's origination time, and
+    /// requires it to send that time instead when the source metadata (a file's timestamp, a value a
+    /// handler supplied) is in the future.
+    /// </summary>
+    /// <param name="origination">The response's origination time, normally the current time.</param>
+    /// <returns>This metadata, with <see cref="LastModified"/> no later than <paramref name="origination"/>.</returns>
+    public RepresentationMetadata ClampLastModified(DateTimeOffset origination)
+    {
+        DateTimeOffset latest = TruncateToSeconds(origination);
+
+        return LastModified is DateTimeOffset lastModified && lastModified > latest
+            ? this with { LastModified = latest }
+            : this;
+    }
+
+    /// <summary>
     /// Converts <paramref name="value"/> to UTC and drops its sub-second component: HTTP-date carries
     /// one-second resolution, so validators must compare at the precision they are emitted with.
     /// </summary>

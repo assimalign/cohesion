@@ -82,6 +82,16 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   second, with a client's copy taken between the writes, keeps one `Last-Modified`, so that
   client's date still matches (the core `HttpIfRange` design). The strong `ETag` form has no such
   case; it is what a resuming client should send anyway.
+- **A future `Last-Modified` is sent as the response time.** RFC 9110 §8.8.2.1 forbids an origin
+  server with a clock to send a `Last-Modified` later than the response's origination, and makes it
+  send that time instead. A file stamped in the future (a clock that ran ahead, an archive
+  extracted with its original times) or a `WriteStreamAsync` caller's future `lastModified` would
+  otherwise go out unchanged. `TrySelectContent` reads the clock once, clamps
+  `RepresentationMetadata.LastModified` to that second (`ClampLastModified`), and evaluates the
+  preconditions, the `If-Range` test, and every header section that carries validators (`200`,
+  `206`, `304`, `416`) against the clamped value, passing the same instant to `HttpIfRange.Matches`.
+  A clamped `Last-Modified` falls in the current second, so it never applies a date `If-Range`.
+  The `ETag` keeps the file's real timestamp, so it stays stable while the clamped date moves.
 - **Single-range only; multi-range falls back to full `200`.** `multipart/byteranges`
   assembly is complexity with almost no modern client demand; the RFC permits serving the
   full representation instead. `HttpRangeSelector`'s DoS guard (16-range cap → full) rides

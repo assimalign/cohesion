@@ -120,7 +120,7 @@ and also ride on a `304`. Pass an explicit content type for user-supplied files:
 
 | Concern | Behavior |
 |---|---|
-| Validators | Strong `ETag` derived from `Size` + `UpdatedOn`; `Last-Modified` (HTTP-date). |
+| Validators | Strong `ETag` derived from `Size` + `UpdatedOn`; `Last-Modified` (HTTP-date), sent as the response time when `UpdatedOn` is in the future (RFC 9110 §8.8.2.1). |
 | Conditional GET | `If-None-Match` / `If-Modified-Since` → `304`; `If-Match` / `If-Unmodified-Since` → `412` (RFC 9110 §13.2.2 via `HttpConditionalRequest`). |
 | Ranges | `Accept-Ranges: bytes`; single satisfiable byte range → `206` + `Content-Range`; multi-range set → full `200` fallback; unsatisfiable → `416` + `bytes */N` (via `HttpRangeSelector`); `If-Range` gates application: the current strong `ETag`, or a date equal to a `Last-Modified` at least one second old (RFC 9110 §13.1.5), else the full `200`. |
 | Content types | File-name lookup via `HttpContentTypes` with builder-time overlays; a name whose extension is unmapped, or that has none (`html`, the dotfile `.json`), passes through by default or serves the configured fallback type. |
