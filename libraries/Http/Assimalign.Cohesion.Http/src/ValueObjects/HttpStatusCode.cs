@@ -7,26 +7,48 @@ namespace Assimalign.Cohesion.Http;
 
 using Assimalign.Cohesion.Internal;
 
+/// <summary>
+/// An HTTP status code (RFC 9110 &#167; 15) and its reason phrase.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The known codes are the IANA HTTP Status Code Registry's assigned codes, each carrying the phrase
+/// the registry gives it: the RFC 9110 &#167; 15 phrase for the codes RFC 9110 defines, and the
+/// defining specification's phrase for the rest (<c>102</c>, <c>103</c>, <c>207</c>, <c>208</c>,
+/// <c>226</c>, <c>423</c>&#8211;<c>425</c>, <c>428</c>, <c>429</c>, <c>431</c>, <c>451</c>,
+/// <c>506</c>&#8211;<c>508</c>, <c>510</c>, <c>511</c>). The reserved <c>418</c> and the registry's
+/// temporary registrations are not included. HTTP/1.1 writes the phrase on the status line, and
+/// HTTP/2 and HTTP/3 carry no phrase at all.
+/// </para>
+/// <para>
+/// Only a known code can be constructed: <see cref="IsValid(int)"/> rejects every other value. RFC 9110
+/// &#167; 15 allows any three-digit code from <c>100</c> to <c>599</c>, and a recipient treats an
+/// unknown one as the <c>x00</c> code of its class, so an application cannot send an unregistered or
+/// private code through this type.
+/// </para>
+/// </remarks>
 [DebuggerDisplay("{ToString()}")]
 public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
 {
+    // The IANA HTTP Status Code Registry's phrases, which are RFC 9110 §15's for the codes it defines.
     private static readonly KeyValuePair<int, string>[] _statusCodes =
     {
-        // 1xx Information
-        new (100, "Continue"), 
-        new (101, "Switching Protocols"), 
-        new (102, "Processing"),
-        new (103, "Early Hints"),
-        // 2xx Success
-        new (200, "Ok"), 
-        new (201, "Created"), 
-        new (202, "Accepted"), 
-        new (203, "Non-Authoritative Information"), 
+        // 1xx Informational
+        new (100, "Continue"),
+        new (101, "Switching Protocols"),
+        new (102, "Processing"),                        // RFC 2518
+        new (103, "Early Hints"),                       // RFC 8297
+        // 2xx Successful
+        new (200, "OK"),
+        new (201, "Created"),
+        new (202, "Accepted"),
+        new (203, "Non-Authoritative Information"),
         new (204, "No Content"),
-        new (205, "Reset Content"), 
-        new (206, "Partial Content"), 
-        new (207, "Multi-Status"), 
-        new (208, "Already Reported"),
+        new (205, "Reset Content"),
+        new (206, "Partial Content"),
+        new (207, "Multi-Status"),                      // RFC 4918
+        new (208, "Already Reported"),                  // RFC 5842
+        new (226, "IM Used"),                           // RFC 3229
         // 3xx Redirection
         new (300, "Multiple Choices"),
         new (301, "Moved Permanently"),
@@ -35,7 +57,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
         new (304, "Not Modified"),
         new (305, "Use Proxy"),
         new (306, "(Unused)"),
-        new (307, "Redirect Keep Verb"),
+        new (307, "Temporary Redirect"),
         new (308, "Permanent Redirect"),
         // 4xx Client Error
         new (400, "Bad Request"),
@@ -51,35 +73,35 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
         new (410, "Gone"),
         new (411, "Length Required"),
         new (412, "Precondition Failed"),
-        new (413, "Request Entity Too Large"),
-        new (414, "Request Uri Too Long"),
+        new (413, "Content Too Large"),
+        new (414, "URI Too Long"),
         new (415, "Unsupported Media Type"),
-        new (416, "Requested Range Not Satisfiable"),
+        new (416, "Range Not Satisfiable"),
         new (417, "Expectation Failed"),
         new (421, "Misdirected Request"),
-        new (422, "Un-Processable Entity"),
-        new (423, "Locked"),
-        new (424, "Failed Dependency"),
-        new (425, "Too Early"),
+        new (422, "Unprocessable Content"),
+        new (423, "Locked"),                            // RFC 4918
+        new (424, "Failed Dependency"),                 // RFC 4918
+        new (425, "Too Early"),                         // RFC 8470
         new (426, "Upgrade Required"),
-        new (428, "Precondition Required"),
-        new (429, "Too Many Requests"),
-        new (431, "Request Header Fields Too Large"),
-        new (451, "Unavailable For Legal Reasons"),
+        new (428, "Precondition Required"),             // RFC 6585
+        new (429, "Too Many Requests"),                 // RFC 6585
+        new (431, "Request Header Fields Too Large"),   // RFC 6585
+        new (451, "Unavailable For Legal Reasons"),     // RFC 7725
         // 5xx Server Error
         new (500, "Internal Server Error"),
         new (501, "Not Implemented"),
         new (502, "Bad Gateway"),
         new (503, "Service Unavailable"),
         new (504, "Gateway Timeout"),
-        new (505, "Http Version Not Supported"),
-        new (506, "Variant Also Negotiates"),
-        new (507, "Insufficient Storage"),
-        new (508, "Loop Detected"),
-        new (510, "Not Extended"),
-        new (511, "Network Authentication Required"),
+        new (505, "HTTP Version Not Supported"),
+        new (506, "Variant Also Negotiates"),           // RFC 2295
+        new (507, "Insufficient Storage"),              // RFC 4918
+        new (508, "Loop Detected"),                     // RFC 5842
+        new (510, "Not Extended"),                      // RFC 2774, obsoleted
+        new (511, "Network Authentication Required"),   // RFC 6585
     };
-    
+
     /// <summary>
     /// The default constructor.
     /// </summary>
@@ -96,6 +118,26 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// </summary>
     public int Value { get; }
 
+    /// <summary>
+    /// Gets the code's registered reason phrase, such as <c>OK</c> or <c>Content Too Large</c>
+    /// (RFC 9110 &#167; 15), or an empty string for a default-constructed instance.
+    /// </summary>
+    public string ReasonPhrase
+    {
+        get
+        {
+            for (int i = 0; i < _statusCodes.Length; i++)
+            {
+                if (_statusCodes[i].Key == Value)
+                {
+                    return _statusCodes[i].Value;
+                }
+            }
+
+            return string.Empty;
+        }
+    }
+
     /// <inheritdoc />
     public bool Equals(HttpStatusCode other)
     {
@@ -104,22 +146,16 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
 
     #region Overloads
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Renders the code and its reason phrase as an HTTP/1.1 status line carries them, for example
+    /// <c>200 OK</c>.
+    /// </summary>
+    /// <returns>The code and reason phrase, or an empty string for a default-constructed instance.</returns>
     public override string ToString()
     {
-        var value = string.Empty;
+        string reasonPhrase = ReasonPhrase;
 
-        for (int i = 0; i < _statusCodes.Length; i++)
-        {
-            var statusCode = _statusCodes[i];
-
-            if (statusCode.Key == Value)
-            {
-                return statusCode.Key + " " + statusCode.Value;
-            }
-        }
-
-        return value;
+        return reasonPhrase.Length == 0 ? string.Empty : Value + " " + reasonPhrase;
     }
 
     /// <inheritdoc />
@@ -175,6 +211,9 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     public static HttpStatusCode PartialContent => 206;
     public static HttpStatusCode MultiStatus => 207;
     public static HttpStatusCode AlreadyReported => 208;
+
+    /// <summary>Gets <c>226 IM Used</c> (RFC 3229 &#167; 10.4.1).</summary>
+    public static HttpStatusCode ImUsed => 226;
     public static HttpStatusCode MultipleChoices => 300;
     public static HttpStatusCode MovedPermanently => 301;
     public static HttpStatusCode Found => 302;
@@ -228,6 +267,11 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// <summary>
     /// Checks whether the numeric <paramref name="statusCode"/> is valid.
     /// </summary>
+    /// <remarks>
+    /// Only a code in the IANA registry is known, so an unregistered code inside the RFC 9110 &#167; 15
+    /// range of <c>100</c>&#8211;<c>599</c>, such as <c>299</c> or the reserved <c>418</c>, returns
+    /// <see langword="false"/>.
+    /// </remarks>
     /// <param name="statusCode">The numeric status code to validate.</param>
     /// <returns><see langword="true"/> when the supplied code is known; otherwise <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -40,7 +40,8 @@ owns only the former:
   members are skipped so a stray extension can never emit a duplicate property.
 - **`type` is always emitted**, defaulting to the reserved `about:blank` (RFC 9457 §4.2); the
   other standard members are omitted when null. `ProblemDetails.FromStatus` fills the
-  status-phrase title for the default type.
+  status-phrase title for the default type: `HttpStatusCode.ReasonPhrase`, the RFC 9110 phrase
+  (`Content Too Large`, `Unprocessable Content`) since #1204.
 - **No result carriers, no factories, no middleware.** Earlier iterations wrapped this payload in
   a `ProblemHttpResult` (IResult) or an exception-boundary middleware. Both were deliberately
   removed: how an application responds to a fault is the application's decision, made through the

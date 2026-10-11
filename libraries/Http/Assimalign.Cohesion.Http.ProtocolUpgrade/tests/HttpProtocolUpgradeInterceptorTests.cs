@@ -232,7 +232,8 @@ public class HttpProtocolUpgradeInterceptorTests
         takeover.TakenOver.ShouldBeTrue();
 
         string response = Encoding.ASCII.GetString(wire.ToArray());
-        response.ShouldContain("HTTP/1.1 200 Ok");
+        // The RFC 9110 §15.3.1 reason phrase, compared case-sensitively (#1204: it was "Ok").
+        response.ShouldStartWith("HTTP/1.1 200 OK\r\n", Case.Sensitive);
         // RFC 9110 §9.3.6 — a successful CONNECT response carries no framing headers and must
         // not advertise Connection: close (the tunnel persists).
         response.ShouldNotContain("Content-Length");

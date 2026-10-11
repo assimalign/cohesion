@@ -150,6 +150,9 @@ public class OpenApiOperationDescriptionTests
         // A form over an Http.Forms limit is answered 413; a form is never a 415.
         operation.Responses.Items["413"].Content.Keys.ShouldBe(["application/problem+json"]);
         operation.Responses.Items.ShouldNotContainKey("415");
+
+        // The description is HttpStatusCode's RFC 9110 phrase (#1204), not "Request Entity Too Large".
+        operation.Responses.Items["413"].Description.ShouldBe("Content Too Large");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Operations: uploaded files make the form a multipart body of binary parts")]

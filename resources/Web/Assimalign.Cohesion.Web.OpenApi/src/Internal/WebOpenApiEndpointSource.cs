@@ -400,18 +400,18 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         // endpoint describes them itself.
         if (bindsInput)
         {
-            responses.TryAdd(HttpStatusCode.BadRequest.Value, CreateProblemResponse(HttpStatusCode.BadRequest.Value));
+            responses.TryAdd(HttpStatusCode.BadRequest.Value, CreateProblemResponse(HttpStatusCode.BadRequest));
         }
 
         if (readsForm)
         {
             // A form over an Http.Forms limit (#1061).
-            responses.TryAdd(HttpStatusCode.RequestEntityTooLarge.Value, CreateProblemResponse(HttpStatusCode.RequestEntityTooLarge.Value));
+            responses.TryAdd(HttpStatusCode.RequestEntityTooLarge.Value, CreateProblemResponse(HttpStatusCode.RequestEntityTooLarge));
         }
 
         if (readsBody)
         {
-            responses.TryAdd(HttpStatusCode.UnsupportedMediaType.Value, CreateProblemResponse(HttpStatusCode.UnsupportedMediaType.Value));
+            responses.TryAdd(HttpStatusCode.UnsupportedMediaType.Value, CreateProblemResponse(HttpStatusCode.UnsupportedMediaType));
         }
 
         if (negotiates)
@@ -419,7 +419,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
             responses.TryAdd(HttpStatusCode.NotAcceptable.Value, new OpenApiResponseMetadata
             {
                 StatusCode = FormatStatus(HttpStatusCode.NotAcceptable.Value),
-                Description = HttpReasonPhrases.Get(HttpStatusCode.NotAcceptable.Value)
+                Description = HttpStatusCode.NotAcceptable.ReasonPhrase
             });
         }
 
@@ -428,7 +428,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
             responses[HttpStatusCode.Ok.Value] = new OpenApiResponseMetadata
             {
                 StatusCode = FormatStatus(HttpStatusCode.Ok.Value),
-                Description = HttpReasonPhrases.Get(HttpStatusCode.Ok.Value)
+                Description = HttpStatusCode.Ok.ReasonPhrase
             };
         }
 
@@ -437,9 +437,10 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
 
     private OpenApiResponseMetadata DescribeResponse(EndpointResponseMetadata response)
     {
-        int status = response.StatusCode.Value;
-        string statusCode = FormatStatus(status);
-        string description = HttpReasonPhrases.Get(status);
+        string statusCode = FormatStatus(response.StatusCode.Value);
+        // OpenAPI requires a description (before 3.2); the registered phrase says what the status means
+        // and nothing the endpoint did not declare.
+        string description = response.StatusCode.ReasonPhrase;
 
         if (response.Type is not { } type)
         {
@@ -478,10 +479,10 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         };
     }
 
-    private OpenApiResponseMetadata CreateProblemResponse(int status) => new()
+    private OpenApiResponseMetadata CreateProblemResponse(HttpStatusCode status) => new()
     {
-        StatusCode = FormatStatus(status),
-        Description = HttpReasonPhrases.Get(status),
+        StatusCode = FormatStatus(status.Value),
+        Description = status.ReasonPhrase,
         ContentType = problemMediaType,
         Schema = _schemas.GetProblemDetailsSchema()
     };

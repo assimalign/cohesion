@@ -836,7 +836,8 @@ public class Http1TransportTests
         Stream tunnel = await upgrade.AcceptAsync();
 
         string response = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
-        response.ShouldContain("HTTP/1.1 200 Ok");
+        // The RFC 9110 §15.3.1 reason phrase, compared case-sensitively (#1204: it was "Ok").
+        response.ShouldStartWith("HTTP/1.1 200 OK\r\n", Case.Sensitive);
         response.ShouldNotContain("Content-Length");
         response.ShouldNotContain("Transfer-Encoding");
 

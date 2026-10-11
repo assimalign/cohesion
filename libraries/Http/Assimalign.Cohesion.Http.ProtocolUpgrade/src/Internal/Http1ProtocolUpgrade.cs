@@ -167,7 +167,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         StringBuilder builder = new();
         // HttpStatusCode has an implicit conversion to int, which would steer overload
         // resolution toward StringBuilder.Append(int) and drop the reason phrase. Explicitly
-        // stringify to preserve "101 Switching Protocols" / "200 Ok" on the status line.
+        // stringify to preserve "101 Switching Protocols" / "200 OK" on the status line.
         builder.Append("HTTP/1.1 ").Append(status.ToString()).Append("\r\n");
 
         bool replacesUpgrade = Kind == HttpProtocolUpgradeKind.Upgrade && !string.IsNullOrEmpty(Protocol);

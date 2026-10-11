@@ -1651,6 +1651,39 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
   ubiquitous `X-Forwarded-*` headers plus RFC 7239; other vendor variants are a
   consumer overlay if ever needed.
 
+## Status codes and reason phrases (RFC 9110 §15)
+
+`HttpStatusCode` holds one table: the IANA HTTP Status Code Registry's assigned
+codes and the phrase the registry gives each (#1204). That is RFC 9110 §15's
+phrase for every code RFC 9110 defines, and the defining RFC's for the rest,
+`226 IM Used` (RFC 3229) included.
+- **One table, read three ways.** `ReasonPhrase` returns the phrase alone,
+  `ToString()` renders `200 OK` for the HTTP/1.1 status line (the transport's
+  head writer and the Http.ProtocolUpgrade `101`/`200` writer), and
+  `IsValid` asks whether a code is in it. Web.ProblemDetails titles an
+  `about:blank` problem with `ReasonPhrase`, and Web.OpenApi describes a
+  response with it. Before #1204 Web.OpenApi kept a private RFC 9110 copy,
+  because the core still had pre-RFC 9110 wording ("Ok", "Redirect Keep Verb",
+  "Request Entity Too Large", "Request Uri Too Long", "Requested Range Not
+  Satisfiable", "Un-Processable Entity", "Http Version Not Supported"). That
+  wording reached HTTP/1.1 status lines and problem titles in 10.0.0-preview.1.
+- **Left out.** The reserved `418 (Unused)`, and the registry's temporary
+  registrations, such as `104` for resumable uploads.
+- **Only registered codes are valid.** RFC 9110 §15 allows any three-digit code
+  from 100 to 599, and a recipient treats an unknown one as the `x00` code of its
+  class. `IsValid` rejects anything not in the table, so the constructor and the
+  implicit conversion from `int` throw for an unregistered code such as `299`. An
+  application therefore cannot send a private or newly registered code until the
+  table learns it. Widening that changes what every transport accepts as a
+  response status, so it is outside #1204 and is recorded as a gap. The
+  `HttpStatusCode` member names are unchanged (`RedirectKeepVerb`,
+  `RequestEntityTooLarge`, `UnProcessableEntity` and others still name their
+  codes), so no caller breaks; only the text changed.
+- **HTTP/2 and HTTP/3** send `:status` digits only, so the phrase never reaches
+  them. RFC 9112 §4 tells an HTTP/1.1 client to ignore it, so the change is
+  cosmetic on the wire. It is user-visible in problem titles and in the OpenAPI
+  document.
+
 ## Methods are case-sensitive (RFC 9110 §9.1)
 
 `HttpMethod` keeps its token exactly as given and compares it byte for byte:

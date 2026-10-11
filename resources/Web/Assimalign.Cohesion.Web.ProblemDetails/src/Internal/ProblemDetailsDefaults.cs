@@ -25,14 +25,8 @@ internal static class ProblemDetailsDefaults
     {
         if (HttpStatusCode.IsValid(status))
         {
-            // HttpStatusCode.ToString() renders "<code> <phrase>" (e.g. "404 Not Found"); take the
-            // phrase after the first space so the title carries only the human-readable portion.
-            string text = new HttpStatusCode(status).ToString();
-            int space = text.IndexOf(' ');
-            if (space >= 0 && space + 1 < text.Length)
-            {
-                return text[(space + 1)..];
-            }
+            // The registered reason phrase (RFC 9110 §15), e.g. "Not Found" or "Content Too Large".
+            return new HttpStatusCode(status).ReasonPhrase;
         }
 
         return status >= 500 ? "Internal Server Error" : "Error";
