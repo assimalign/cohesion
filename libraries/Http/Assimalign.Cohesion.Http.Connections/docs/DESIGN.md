@@ -2623,10 +2623,22 @@ another thread, so the application's failed read could unwind, and its host's `5
 while the reset still waited for the write gate: the send claimed the stream and wrote the `500`, and the
 reset followed it. The Web host's end-to-end test caught a `500` head on the wire about one run in
 three. The pump now takes the stream's final response before it fails the pipe (`FailMalformedBody`,
-through `TryClaimResponseForRejection` with `400`), as it does for its own `413`: `SendAsync` finds the
-stream answered by the transport, writes nothing, and adopts the `400`. An application response already
-under way keeps its claim, and the reset cuts it off. HTTP/3 needs no claim: its body is read on the
-application's own read, which resets the stream before it throws.
+through `TryClaimResponseForRejection` with `400`): `SendAsync` finds the stream answered by the transport,
+writes nothing, and adopts the `400`. An application response already under way keeps its claim, and the
+reset cuts it off.
+
+The pump's own `413` had the same order: `Http2Stream.ReceiveData` failed the pipe, and the caller's
+`RejectRequestBodyAsync` claimed the response only after it returned. No write stood between the two, so
+the window was far narrower, but a host's `500` that won it was written in place of the `413`, and the
+claim the pump then lost left the `413` unsent. `ReceiveData` now takes the claim for the `413` before it
+fails the pipe and reports whether it got it, and the pump writes the `413` only when it did
+(`AnswerRequestBodyRejectionAsync`), so the cap's answer and the malformed body's reset follow one order.
+The `408` needs no change: the body reader latches it and has the connection answer the stream before its
+own read throws. The narrower window has no deterministic test — nothing runs on the pump's thread between
+the two steps — so the order itself, and the existing `413` tests, are what pin it.
+
+HTTP/3 needs no claim for this: its body is read on the application's own read, which resets the stream
+before it throws.
 
 ### The body signal for a host's gate
 
@@ -2669,8 +2681,16 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   exchange now pays for a response sink, an exchange control, a response context and the feature; before
   #1378 no HTTP/3 exchange did. HTTP/1.1, HTTP/2 and the in-memory HTTP/3 driver keep the fast path for a
   request without a body.
+- *Observable by clients.* An HTTP/1.1 request whose framing cannot be read (both `Content-Length` and
+  `Transfer-Encoding`, a malformed `Content-Length`, a `Transfer-Encoding` that does not end in `chunked`)
+  is refused before any head hook runs, so a hook can no longer answer it first with its own rejection, a
+  `403` or a `429`; it used to be refused after the head hooks.
+- *Public API.* `HttpExchangeInterceptorRequestContext.CanHaveBody` (core `Assimalign.Cohesion.Http`): an
+  optional `init` property, `true` when a context built outside a transport does not set it, which every
+  version of this transport sets from the framing it sees (see "The body signal for a host's gate").
 - *Internal.* `Http2RequestBodyStream` takes its `Http2Stream` instead of a stream id, an abort token and
   a trailer-publishing delegate, which also saves the delegate it allocated per request.
+  `Http2Stream.ReceiveData` takes the claim for the `413` itself and reports it.
 
 ## HTTP/2 abuse limits
 

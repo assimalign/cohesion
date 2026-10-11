@@ -763,6 +763,13 @@ internal sealed class Http2Stream
     /// credit back to the peer once the application consumes this chunk.
     /// </param>
     /// <param name="endStream">Whether the frame carried END_STREAM.</param>
+    /// <param name="rejectionClaimed">
+    /// Set when this frame crossed the cap and the transport took the stream's final response to answer it
+    /// (<see cref="TryClaimResponseForRejection"/>) before the body pipe failed: the caller then writes the
+    /// <c>413</c>. Taking it first keeps the application's response — a host's <c>500</c> for the failed
+    /// read among them, which failing the pipe can set off on another thread — off a stream the transport
+    /// answers (#1378).
+    /// </param>
     /// <returns>
     /// <see langword="true"/> when the payload was delivered to the body pipe;
     /// <see langword="false"/> when the request content has crossed the stream's body-size cap
@@ -782,8 +789,10 @@ internal sealed class Http2Stream
     /// Thrown when DATA is received on a stream in <see cref="Http2StreamState.Idle"/>
     /// (no HEADERS yet) — that is a PROTOCOL_ERROR connection-level fault.
     /// </exception>
-    public bool ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream)
+    public bool ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream, out bool rejectionClaimed)
     {
+        rejectionClaimed = false;
+
         lock (_stateLock)
         {
             switch (State)
@@ -840,6 +849,11 @@ internal sealed class Http2Stream
         if (_maxRequestBodySize is { } limit && _requestBodyReceived > limit)
         {
             _requestBodyRejected = true;
+
+            // The final response is taken before the pipe fails, as for a malformed body (FailMalformedBody):
+            // failing the pipe wakes the reader on another thread, and its host's 500 must find the stream
+            // already answered. An application response already under way keeps its claim.
+            rejectionClaimed = TryClaimResponseForRejection(HttpStatusCode.RequestEntityTooLarge);
             FailBody(LatchClientFault(
                 HttpStatusCode.RequestEntityTooLarge,
                 new IOException($"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large).")));

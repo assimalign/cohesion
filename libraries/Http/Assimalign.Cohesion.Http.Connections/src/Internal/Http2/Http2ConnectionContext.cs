@@ -2150,12 +2150,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             ? receivedFrame.Payload.AsMemory(0, dataLength)
             : ReadOnlyMemory<byte>.Empty;
 
-        if (!stream!.ReceiveData(data, flowControlLength, receivedFrame.Frame.DataEndStream))
+        if (!stream!.ReceiveData(data, flowControlLength, receivedFrame.Frame.DataEndStream, out bool rejectionClaimed))
         {
             // RFC 9110 §15.5.14 — the request content crossed the stream's body-size cap. The frame was
             // not delivered; its flow-control cost stays consumed until the stream's removal reclaims it
-            // to the connection window, which every rejection path below ends in.
-            await RejectRequestBodyAsync(stream, HttpStatusCode.RequestEntityTooLarge, cancellationToken).ConfigureAwait(false);
+            // to the connection window, which every rejection path below ends in. The stream took its final
+            // response for the 413 before it failed the body pipe (#1378), so the claim is already settled.
+            await AnswerRequestBodyRejectionAsync(stream, HttpStatusCode.RequestEntityTooLarge, rejectionClaimed, cancellationToken).ConfigureAwait(false);
         }
 
         return null;
@@ -2346,9 +2347,21 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// body.</description></item>
     /// </list>
     /// </remarks>
-    private async Task RejectRequestBodyAsync(Http2Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
+    private Task RejectRequestBodyAsync(Http2Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
     {
-        if (stream.TryClaimResponseForRejection(statusCode))
+        return AnswerRequestBodyRejectionAsync(stream, statusCode, stream.TryClaimResponseForRejection(statusCode), cancellationToken);
+    }
+
+    /// <summary>
+    /// Answers a rejected request body once the claim on the stream's final response is settled
+    /// (<see cref="RejectRequestBodyAsync"/>): the transport writes its status when it took the claim, and
+    /// otherwise resets an application response still in progress with <c>CANCEL</c>. The frame pump takes
+    /// the claim for a body over the cap itself, before it fails the body pipe
+    /// (<see cref="Http2Stream.ReceiveData"/>), and hands the outcome here.
+    /// </summary>
+    private async Task AnswerRequestBodyRejectionAsync(Http2Stream stream, HttpStatusCode statusCode, bool claimed, CancellationToken cancellationToken)
+    {
+        if (claimed)
         {
             await WriteRequestBodyRejectionAsync(stream, statusCode, cancellationToken).ConfigureAwait(false);
             return;

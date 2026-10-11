@@ -381,11 +381,11 @@ internal static class Http1MessageReader
         catch when (features is not null)
         {
             // The request failed after interceptors started participating (a head- or body-hook
-            // rejection, or malformed framing) and no Http1Context — the owner of the feature-
-            // disposal walk — will ever exist for this exchange. Honor the seam's disposal contract
-            // here instead: tear down the partially-built wrapper chain (the outermost wrapper owns
-            // its inner stream) and dispose every hook-attached feature, then let the failure surface
-            // unchanged. The exception filter keeps the zero-interceptor fast path entirely outside
+            // rejection; malformed framing is refused before any hook runs, above) and no Http1Context —
+            // the owner of the feature-disposal walk — will ever exist for this exchange. Honor the seam's
+            // disposal contract here instead: tear down the partially-built wrapper chain (the outermost
+            // wrapper owns its inner stream) and dispose every hook-attached feature, then let the failure
+            // surface unchanged. The exception filter keeps the zero-interceptor fast path entirely outside
             // this handler.
             bodyStream?.Dispose();
             await DisposeFeaturesAsync(features).ConfigureAwait(false);
