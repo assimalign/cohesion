@@ -683,10 +683,12 @@ it may.
   Stage 13), this is the reader to switch to it.
 - **The received query.** The server reads it before the pipeline runs, so it reports what the client
   sent, not a `Web.Rewrite` rewrite of it, as it does for `url.path`.
-- **Cost.** It is built only while an `ActivityListener` subscribes to the source, once per span, as
-  one string; it is a creation-time attribute, so samplers can read it. Without a span listener the
-  server never reads the query, and the metrics never carry `url.query`, as the convention defines
-  them.
+- **Cost.** It is built once per request while an `ActivityListener` subscribes to the source,
+  before the sampler runs, whether or not a span is recorded: it is a creation-time attribute, so
+  samplers can read it. A request with a query then pays one string, one `Uri.EscapeDataString` per
+  name and shown value, and the query collection's boxed enumerator, even when a ratio sampler drops
+  the span. Without a span listener the server never reads the query, and the metrics never carry
+  `url.query`, as the convention defines them.
 
 Rejected:
 
@@ -773,8 +775,9 @@ response. This is the isolation boundary the server keeps around application cod
 - W3C `baggage`.
 
 **AOT.** `ActivitySource`, `Meter`, `TagList`, `ActivityContext.TryParse`, `FrozenSet`,
-`Uri.EscapeDataString` and `DefaultInterpolatedStringHandler`: no reflection and no runtime code. The Web AOT guard's smoke run subscribes with an `ActivityListener`
-and a `MeterListener` and checks a routed request's span and duration. In-process listeners need no
+`Uri.EscapeDataString` and `DefaultInterpolatedStringHandler`: no reflection and no runtime code.
+The Web AOT guard's smoke run subscribes with an `ActivityListener` and a `MeterListener` and
+checks a routed request's span and duration. In-process listeners need no
 `EventSourceSupport` in a NativeAOT application; tools that read meters out of process through
 EventPipe (`dotnet-counters`) do, as they do for event sources.
 
@@ -1119,7 +1122,8 @@ version's, with and without extra fields, continue the caller's trace (#1299). V
 version-00 value with extra fields, a later version whose flags are followed by something other than
 a dash, upper-case hex, a short value and a separator other than a dash each start a new trace, and
 a later version keeps only its sampled flag. `url.query` (#1298) is pinned end to end
-with every value redacted and with values declared safe, and its builder against empty and
+with every value redacted, with values declared safe, and after a declaration rejected for a missing
+or empty name, which leaves its other names redacted; its builder is pinned against empty and
 valueless parameters, encoded names and case-insensitive declarations; a request double that counts
 reads of its query (`TestObjects/ServerTestDoubles`, `FakeHttpRequest`) shows the query is read only
 when a span listener subscribes. Listeners are process-wide, so the class runs in the non-parallel

@@ -1039,6 +1039,39 @@ public class WebServerTelemetryTests
         emptyName.ShouldBeOfType<ArgumentException>();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - AllowQueryValuesInTelemetry: A call rejected for a missing or empty name should declare none of its names")]
+    public async Task AllowQueryValuesInTelemetry_CallRejectedForAMissingOrEmptyName_ShouldDeclareNoneOfItsNames()
+    {
+        // Arrange — each rejected call names a valid parameter before the invalid one. Keeping the valid
+        // name would show a value the application believes it never allowed (#1298).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+
+        string path = $"/telemetry/query-rejected/{Guid.NewGuid():N}";
+
+        await using WebApplicationTestFactory factory = new();
+
+        Should.Throw<ArgumentNullException>(() => factory.Builder.Server.AllowQueryValuesInTelemetry("page", null!));
+        Should.Throw<ArgumentException>(() => factory.Builder.Server.AllowQueryValuesInTelemetry("sort", string.Empty));
+
+        factory.Application.Use((context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+            return Task.CompletedTask;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync($"{path}?page=2&sort=name", cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NoContent);
+        span.GetTagItem("url.query").ShouldBe("page=REDACTED&sort=REDACTED");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: The known-method list should default to the semantic convention's and be replaceable")]
     public void GetMethodAttribute_KnownMethods_ShouldDefaultToTheConventionAndBeReplaceable()
     {

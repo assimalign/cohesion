@@ -99,7 +99,8 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
     /// <param name="exchange">The exchange about to run its pipeline.</param>
     /// <param name="shownQueryValues">
     /// The query parameters whose values the span's <c>url.query</c> shows, or <see langword="null"/> to
-    /// redact every value. Read only when the span is created.
+    /// redact every value. Read only while an activity listener subscribes to the source, before the
+    /// span is sampled.
     /// </param>
     /// <returns>The exchange's telemetry, which the server stops once the exchange is finalized.</returns>
     public static WebExchangeTelemetry Start(IHttpContext exchange, FrozenSet<string>? shownQueryValues)
