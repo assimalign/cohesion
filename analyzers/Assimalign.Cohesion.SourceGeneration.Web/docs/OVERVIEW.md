@@ -14,6 +14,8 @@ Query parameters support scalar values and sequences of scalars: arrays, `List<T
 `app.MapGet("/search", (string[] tag) => string.Join('|', tag))` reads every `tag` occurrence in order.
 `?tag=one&tag=&tag=two` supplies `["one", "", "two"]`; a scalar `string tag` reads `"one"`.
 A missing collection is empty, and an invalid element rejects the request with 400.
+Scalar and collection elements implementing `IParsable<T>` use that interface's invariant-culture
+parser, including explicit implementations such as `bool`, `char` and `System.Net.IPAddress`.
 
 Use `[FromQuery(Name = "tag")]` to choose a different query key. Use `[FromBody]` explicitly for a
 collection that should be deserialized from the request body. Before #1335 scalar query reads kept

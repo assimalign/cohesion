@@ -142,7 +142,20 @@ Each interceptor:
   name keeps the plain, non-generic interceptor.
 
 Conversions use `IParsable<T>.TryParse` / `Enum.TryParse<T>` with `InvariantCulture`, so no runtime
-binder helper is required and the emitted code carries no reflection.
+binder dependency is required and the emitted code carries no reflection. The interceptor class
+emits one private `TryParse<T>` helper constrained to `IParsable<T>` whenever any binding needs it.
+Scalar and sequence conversions call that helper, which invokes `T.TryParse` through the interface.
+This includes explicit static implementations: `bool`, `char`, `IPAddress`, and custom parsable
+types need not expose a public provider-taking `TryParse` overload. Nullable value types parse
+through the same helper using their underlying type; enum conversion remains `Enum.TryParse<T>`.
+Nullable reference declarations retain their annotation, while the helper's type argument is the
+non-nullable parsable type so that it matches `IParsable<T>` without nullable-constraint warnings.
+
+Compatibility with 10.0.0-preview.1: scalar parsing previously called a concrete public
+`TryParse` method, which failed to compile for explicit implementations. It now invokes the
+`IParsable<T>` implementation. For a custom type with different public and explicit parser behavior,
+this is a breaking change under program decision 15: binding now follows the interface contract.
+Query sequences were unsupported in preview.1; their new parser dispatch follows the same contract.
 
 Every binding key reaches the emitted code as a C# string literal produced by
 `SymbolDisplay.FormatLiteral` — the route, query, header and form reads, the `errors` key of a 400,

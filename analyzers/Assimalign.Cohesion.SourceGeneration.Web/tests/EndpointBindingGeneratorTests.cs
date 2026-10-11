@@ -153,6 +153,94 @@ public class EndpointBindingGeneratorTests
         run.Generated.ShouldNotContain("ReadContentAsync", Case.Sensitive);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web Generator] - Generate: query elements with explicit parsers compile")]
+    [InlineData("bool[]")]
+    [InlineData("bool?[]")]
+    [InlineData("char[]")]
+    [InlineData("char?[]")]
+    [InlineData("System.Net.IPAddress[]")]
+    public void Generate_QuerySequenceWithExplicitParsable_ShouldCompile(string type)
+    {
+        // Arrange
+        string endpoint = "app.MapGet(\"/search\", ([FromQuery] " + type + " values) => \"ok\");";
+
+        // Act
+        GeneratorRun run = Generate(endpoint, referenceSerialization: false);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Generator] - Generate: a custom explicit query element parser compiles")]
+    public void Generate_QuerySequenceWithCustomExplicitParsable_ShouldCompile()
+    {
+        // Arrange
+        const string endpoint = """app.MapGet("/search", ([FromQuery] ExplicitValue[] values) => "ok");""";
+        const string types = """
+            public readonly struct ExplicitValue : System.IParsable<ExplicitValue>
+            {
+                static ExplicitValue System.IParsable<ExplicitValue>.Parse(string value, System.IFormatProvider? provider)
+                    => default;
+
+                static bool System.IParsable<ExplicitValue>.TryParse(string? value, System.IFormatProvider? provider, out ExplicitValue result)
+                {
+                    result = default;
+                    return value == "valid";
+                }
+            }
+            """;
+
+        // Act
+        GeneratorRun run = Generate(endpoint, referenceSerialization: false, types: types);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web Generator] - Generate: scalar types with explicit parsers compile")]
+    [InlineData("bool")]
+    [InlineData("bool?")]
+    [InlineData("char")]
+    [InlineData("char?")]
+    [InlineData("System.Net.IPAddress")]
+    public void Generate_QueryScalarWithExplicitParsable_ShouldCompile(string type)
+    {
+        // Arrange
+        string endpoint = "app.MapGet(\"/search\", ([FromQuery] " + type + " value) => \"ok\");";
+
+        // Act
+        GeneratorRun run = Generate(endpoint, referenceSerialization: false);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web Generator] - Generate: nullable reference parsers compile without constraint warnings")]
+    [InlineData("System.Net.IPAddress?")]
+    [InlineData("System.Net.IPAddress?[]")]
+    public void Generate_NullableReferenceParsable_ShouldCompileWithoutConstraintWarnings(string type)
+    {
+        // Arrange
+        string endpoint = "app.MapGet(\"/search\", ([FromQuery] " + type + " value) => \"ok\");";
+
+        // Act
+        GeneratorRun run = Generate(endpoint, referenceSerialization: false);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        Diagnostic[] constraintWarnings = run.Output.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Id is "CS8631" or "CS8634").ToArray();
+        constraintWarnings.ShouldBeEmpty(Describe(constraintWarnings));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web Generator] - Generate: an inferred scalar sequence binds from the query")]
     public void Generate_InferredQuerySequence_ShouldCompileWithoutBodySerialization()
     {
@@ -228,7 +316,7 @@ public class EndpointBindingGeneratorTests
 
         generated.ShouldContain("context.Request.Query.TryGetValue(\"q\"", Case.Sensitive);
         generated.ShouldContain("context.Request.Query.TryGetValue(\"page\"", Case.Sensitive);
-        generated.ShouldContain("global::System.Int32.TryParse(__raw1", Case.Sensitive);
+        generated.ShouldContain("TryParse<global::System.Int32>(__raw1", Case.Sensitive);
         generated.ShouldContain("HttpStatusCode.BadRequest", Case.Sensitive);
         generated.ShouldContain("\"errors\"", Case.Sensitive);
     }
@@ -926,7 +1014,10 @@ public class EndpointBindingGeneratorTests
 
         // Assert
         generated.ShouldContain("Intercept_0(this global::Assimalign.Cohesion.Web.Hosting.WebApplication builder, string pattern, global::System.Delegate handler)", Case.Sensitive);
-        generated.ShouldNotContain("where ", Case.Sensitive);
+        MethodDeclarationSyntax interceptor = CSharpSyntaxTree.ParseText(generated).GetRoot()
+            .DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Single(method => method.Identifier.ValueText == "Intercept_0");
+        interceptor.ConstraintClauses.ShouldBeEmpty();
     }
 
     // ---------------------------------------------------------------------

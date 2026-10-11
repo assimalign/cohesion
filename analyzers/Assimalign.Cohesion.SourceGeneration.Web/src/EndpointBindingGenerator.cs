@@ -1141,7 +1141,9 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         if (ImplementsParsable(type, parsableType))
         {
-            return (ConversionKind.Parsable, type.ToDisplayString(_fullyQualified), true);
+            // The interface is IParsable<T>, even when the handler declares a nullable reference.
+            // Preserve that annotation on DeclaredType, not on the constrained parser type argument.
+            return (ConversionKind.Parsable, type.WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString(_fullyQualified), true);
         }
 
         return (ConversionKind.Complex, "", false);
@@ -1237,6 +1239,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
 
         bool usesSerialization = models.Any(static model => model.BodyParameterIndex >= 0 || model.Response == ResponseKind.Serialized);
+        bool usesParsable = models.Any(static model => model.Parameters.Any(static parameter =>
+            parameter.Conversion is ConversionKind.Parsable or ConversionKind.NullableParsable));
 
         var builder = new StringBuilder();
 
@@ -1274,6 +1278,16 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         for (int i = 0; i < models.Length; i++)
         {
             EmitEndpoint(builder, models[i], i);
+        }
+
+        if (usesParsable)
+        {
+            // Dispatch through the interface: an accepted type may implement its provider overload
+            // explicitly, as bool, char and IPAddress do, with no matching public static method.
+            builder.AppendLine();
+            builder.AppendLine("        private static bool TryParse<T>(string? value, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T result)");
+            builder.AppendLine("            where T : global::System.IParsable<T>");
+            builder.AppendLine("            => T.TryParse(value, global::System.Globalization.CultureInfo.InvariantCulture, out result);");
         }
 
         builder.AppendLine("    }");
@@ -1837,7 +1851,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         return isEnum
             ? "global::System.Enum.TryParse<" + coreType + ">(" + valueExpression + ", true, out " + target + ")"
-            : coreType + ".TryParse(" + valueExpression + ", global::System.Globalization.CultureInfo.InvariantCulture, out " + target + ")";
+            : "TryParse<" + coreType + ">(" + valueExpression + ", out " + target + ")";
     }
 
     private static void EmitBadRequest(StringBuilder builder, string indent, string key, string detail)
