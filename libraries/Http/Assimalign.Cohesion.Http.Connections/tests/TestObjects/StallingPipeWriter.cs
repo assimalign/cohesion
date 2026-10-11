@@ -24,6 +24,8 @@ internal sealed class StallingPipeWriter : PipeWriter
     private long _written;
     private long _credit = long.MaxValue;
     private bool _isFlushWaiting;
+    private int _flushesInFlight;
+    private bool _concurrentUseObserved;
     private TaskCompletionSource _creditGranted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public StallingPipeWriter(PipeWriter inner)
@@ -51,6 +53,13 @@ internal sealed class StallingPipeWriter : PipeWriter
         get => Volatile.Read(ref _isFlushWaiting);
         private set => Volatile.Write(ref _isFlushWaiting, value);
     }
+
+    /// <summary>
+    /// Gets a value indicating whether the writer was used while one of its flushes was in flight — a write,
+    /// or a second flush — which the single writer a <see cref="PipeWriter"/> allows never does. Two writers
+    /// racing for one request stream are what it catches.
+    /// </summary>
+    public bool ConcurrentUseObserved => Volatile.Read(ref _concurrentUseObserved);
 
     /// <summary>
     /// Stops accepting octets: everything written so far is covered, and nothing more until
@@ -85,6 +94,8 @@ internal sealed class StallingPipeWriter : PipeWriter
     /// <inheritdoc />
     public override void Advance(int bytes)
     {
+        ObserveUse();
+
         lock (_gate)
         {
             _written += bytes;
@@ -94,10 +105,18 @@ internal sealed class StallingPipeWriter : PipeWriter
     }
 
     /// <inheritdoc />
-    public override Memory<byte> GetMemory(int sizeHint = 0) => _inner.GetMemory(sizeHint);
+    public override Memory<byte> GetMemory(int sizeHint = 0)
+    {
+        ObserveUse();
+        return _inner.GetMemory(sizeHint);
+    }
 
     /// <inheritdoc />
-    public override Span<byte> GetSpan(int sizeHint = 0) => _inner.GetSpan(sizeHint);
+    public override Span<byte> GetSpan(int sizeHint = 0)
+    {
+        ObserveUse();
+        return _inner.GetSpan(sizeHint);
+    }
 
     /// <inheritdoc />
     public override void CancelPendingFlush() => _inner.CancelPendingFlush();
@@ -111,25 +130,45 @@ internal sealed class StallingPipeWriter : PipeWriter
     /// <inheritdoc />
     public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
     {
-        while (true)
+        if (Interlocked.Increment(ref _flushesInFlight) > 1)
         {
-            Task granted;
-
-            lock (_gate)
-            {
-                if (_written <= _credit)
-                {
-                    IsFlushWaiting = false;
-                    break;
-                }
-
-                IsFlushWaiting = true;
-                granted = _creditGranted.Task;
-            }
-
-            await granted.WaitAsync(cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref _concurrentUseObserved, true);
         }
 
-        return await _inner.FlushAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            while (true)
+            {
+                Task granted;
+
+                lock (_gate)
+                {
+                    if (_written <= _credit)
+                    {
+                        IsFlushWaiting = false;
+                        break;
+                    }
+
+                    IsFlushWaiting = true;
+                    granted = _creditGranted.Task;
+                }
+
+                await granted.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return await _inner.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _flushesInFlight);
+        }
+    }
+
+    private void ObserveUse()
+    {
+        if (Volatile.Read(ref _flushesInFlight) > 0)
+        {
+            Volatile.Write(ref _concurrentUseObserved, true);
+        }
     }
 }

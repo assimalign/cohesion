@@ -24,7 +24,9 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// <c>100 Continue</c>, which the transport sends at the first read of the request body — an interim
 /// HEADERS block without <c>END_STREAM</c> on HTTP/2 (RFC 9113 §8.1), an interim HEADERS frame on the
 /// request stream on HTTP/3 (RFC 9114 §4.1) — and never when the application answers without reading the
-/// body, or when the head left no content to solicit.
+/// body, or when the head left no content to solicit. On HTTP/3 the <c>100</c> and a streamed response's
+/// head take the request stream's writer in turn, and a <c>100</c> the client's <c>STOP_SENDING</c> fails
+/// surfaces as the exchange's cancellation.
 /// </summary>
 public class HttpExpectContinueTests
 {
@@ -214,7 +216,99 @@ public class HttpExpectContinueTests
             .ShouldBe(["200"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Expect 100-continue/Http3: A streamed response started while the first read writes the 100 Continue should wait for it")]
+    public async Task Http3_StreamedHeadRacingTheFirstRead_ShouldFollowThe100WithoutSharingTheWriter()
+    {
+        // Arrange — a full-duplex handler: one task makes the first body read, which writes the 100 Continue,
+        // while another starts the streamed response. The request stream takes no octets, so the 100 is
+        // still being written when the head commit begins.
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            configureListener: options => options.Interceptors.Add(new SinkCapturingInterceptor()),
+            decorate: inner => server = new StallingMultiplexedConnection(inner));
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
+            "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
+        IHttpContext context = await peer.NextContextAsync();
+        Stream sink = context.Features.Get<CapturedSinkFeature>().ShouldNotBeNull().Sink;
+        StallingPipeWriter writer = server.ShouldNotBeNull().RequestStreams.Single().Writer;
+        writer.Stall();
+
+        // Act — the read stalls in the 100's flush; the head commit starts behind it, and the stream then takes
+        // everything.
+        Task<string> read = Task.Run(() => ReadToEndAsync(context.Request.Body));
+        (await WaitUntilAsync(() => writer.IsFlushWaiting)).ShouldBeTrue();
+        Task head = Task.Run(() => sink.FlushAsync());
+        (await WaitUntilAsync(() => context.HasResponseStarted)).ShouldBeTrue();
+        await Task.Delay(100);
+        writer.Grant(1 << 20);
+        await head.WaitAsync(_timeout);
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello")));
+        await request.Output.CompleteAsync();
+        string body = await read.WaitAsync(_timeout);
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames =
+            HttpProtocolPayloadFactory.ParseHttp3Frames(await Http3InMemoryPeer.ReadToEndAsync(request));
+
+        // Assert — one writer at a time, and the 100 whole and ahead of the final head (RFC 9114 §4.1).
+        writer.ConcurrentUseObserved.ShouldBeFalse();
+        body.ShouldBe("hello");
+        frames.Where(frame => frame.FrameType == (long)Http3FrameType.Headers)
+            .Select(frame => HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frame.Payload)[":status"])
+            .ShouldBe(["100", "200"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Expect 100-continue/Http3: A first read whose 100 Continue meets the client's STOP_SENDING should fail as the exchange's cancellation")]
+    public async Task Http3_FirstReadAfterTheClientStoppedTheResponse_ShouldFailAsCancelled()
+    {
+        // Arrange — the client refuses the response direction (STOP_SENDING) before the handler reads the body,
+        // so the 100 Continue's write is the first to meet it.
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
+            "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
+        IHttpContext context = await peer.NextContextAsync();
+        ((IMultiplexedStreamAbort)request).AbortRead((long)Http3ErrorCode.RequestCancelled);
+
+        // Act
+        Exception? failure = null;
+
+        try
+        {
+            await ReadToEndAsync(context.Request.Body).WaitAsync(_timeout);
+        }
+        catch (Exception exception) when (exception is not TimeoutException)
+        {
+            failure = exception;
+        }
+
+        // Assert — the client cancelled its request (RFC 9114 §4.1.1), and the read says so as a read meeting
+        // its RESET_STREAM would: never a raw driver failure.
+        failure.ShouldBeAssignableTo<OperationCanceledException>();
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+
+        context.Cancel();
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private static async Task<bool> WaitUntilAsync(Func<bool> condition)
+    {
+        using CancellationTokenSource timeout = new(_timeout);
+
+        while (!condition())
+        {
+            if (timeout.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return true;
+    }
 
     private static string[] StatusesOf(Http2TestPeer peer, int streamId)
     {
@@ -298,5 +392,31 @@ public class HttpExpectContinueTests
 
         index += length;
         return true;
+    }
+
+    /// <summary>
+    /// Takes every exchange into the response phase and publishes its raw response body sink as a feature,
+    /// so a test can start a streamed response the way a response feature does.
+    /// </summary>
+    private sealed class SinkCapturingInterceptor : HttpExchangeInterceptor
+    {
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
+
+        public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
+        {
+            context.Features.Set(new CapturedSinkFeature(context.ResponseBody));
+        }
+    }
+
+    private sealed class CapturedSinkFeature : IHttpFeature
+    {
+        public CapturedSinkFeature(Stream sink)
+        {
+            Sink = sink;
+        }
+
+        public string Name => nameof(CapturedSinkFeature);
+
+        public Stream Sink { get; }
     }
 }

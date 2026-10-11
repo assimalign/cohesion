@@ -1151,15 +1151,47 @@ invites the body:
 - **HTTP/3.** `Http3RequestBodyStream` sends it after `EnsureStarted` at its first
   read, so a Content-Length over the cap is refused (`413`) rather than invited, through
   the request-stream overload of `Http3ConnectionContext.WriteInterimResponseAsync`: an
-  interim HEADERS frame on the request stream. It skips the write when the final
-  response has started, the exchange was cancelled, or the stream was reset or stopped.
-  The read and the response are both on the exchange's own flow, so nothing races the
-  write. A request hook that reads the body before dispatch solicits it too, as on
-  HTTP/1.1.
+  interim HEADERS frame on the request stream, handed to the stream's writer whole and
+  then flushed, so a cancelled flush never leaves part of a frame behind. It skips the
+  write when the final response has started, the exchange was cancelled, or the stream
+  was reset or stopped. A request hook that reads the body before dispatch solicits it
+  too, as on HTTP/1.1.
+- **HTTP/3 has no connection write gate, so the `100` and the final head take turns.** A
+  full-duplex handler reads the body on one task while another starts the streamed
+  response, and both write the same request stream's `PipeWriter`, which allows one
+  writer. HTTP/2 serializes them under the connection write gate and re-checks the claim
+  there; HTTP/3 writes each stream directly, so the exchange carries a small claim
+  (`Http3Context.TryBeginContinue` / `EndContinue` / `ClaimFinalResponseHeadAsync`, an
+  interlocked state and, only for a request that solicits, a completion source). The
+  `100` takes it before it writes and is dropped once the final head has; the final head
+  — the buffered send's commit and the streamed sink's `CommitHeadersAsync` — takes it
+  before its HEADERS frame and waits for a `100` still being written, within the
+  response's minimum data rate (#1384), so a peer that withholds the credit the `100`
+  needs is reclaimed as a stalled head would be (`FailSlowResponse`). The `100` goes out
+  whole and first, and the two never share the writer. An application's own interim
+  responses through `Http.InterimResponses` stay its own to sequence, as on every
+  version.
+- **Its failures are the read's.** The `100` is written inside the read's error handling
+  and under the read's token (the caller's, the exchange's abort, the connection's
+  closure), so a write the client's `STOP_SENDING` fails reaches the application as the
+  exchange's cancellation, exactly as a read meeting its `RESET_STREAM` does (see "Client
+  faults on HTTP/2 and HTTP/3"), never as a raw driver exception the read never maps.
 - **Once.** The first read clears the decision, so a later read sends nothing. As on
   HTTP/1.1, an explicit `100` the application sent through `Http.InterimResponses`
   before its first read is not remembered, so the automatic one may follow it: a
   second interim response is legal (RFC 9110 §15.2), and every version behaves alike.
+
+**Behavior changes.**
+
+- *Observable by clients.* An HTTP/2 or HTTP/3 request that carries `Expect: 100-continue`
+  and can still carry content receives an interim `100 Continue` at the application's
+  first body read, ahead of the final response; it used to receive none, so a client that
+  waited for it stalled until its own timeout. Over the QUIC driver a request with the
+  expectation and no content receives one too (see "Which requests").
+- *Observable by applications.* On HTTP/3, the head of a streamed response started while
+  the first read writes the `100` waits for it, within the response's minimum data rate;
+  and a first read whose `100` meets the client's `STOP_SENDING` throws the exchange's
+  cancellation.
 
 ### AOT posture
 

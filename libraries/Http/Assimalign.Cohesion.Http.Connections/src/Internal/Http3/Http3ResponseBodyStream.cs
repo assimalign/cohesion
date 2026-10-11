@@ -58,6 +58,10 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
         _suppressBody = !HttpResponseContentRules.CarriesContent(_context.Response.StatusCode, _context.Request.Method);
 
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
+
+        // #1385 — a full-duplex handler's first body read may be writing the automatic 100 Continue on another
+        // task: the head takes the request stream's writer after it, so the 100 goes out whole and first.
+        await _connection.ClaimFinalResponseHeadAsync(_context, cancellationToken).ConfigureAwait(false);
         await _connection.WriteResponseFrameAsync(_context, _stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
         await _connection.FlushResponseAsync(_context, _stream, cancellationToken).ConfigureAwait(false);
     }

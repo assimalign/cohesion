@@ -56,7 +56,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// had not ended with its head, has its content solicited at the first read, as HTTP/1.1 does: once the
 /// cap and the rate are resolved, <c>100 Continue</c> goes out as an interim HEADERS frame on the request
 /// stream, unless the final response has started, so a handler that answers without reading the body never
-/// invites it.
+/// invites it. The <c>100</c> and the final head take the request stream's writer in turn
+/// (<see cref="Http3Context.TryBeginContinue"/>), and the write runs inside the read's error handling.
 /// </para>
 /// <para>
 /// <b>Errors.</b> A malformed request detected in the body (a Content-Length the DATA frames contradict,
@@ -71,8 +72,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// exchange control reports (#1378).
 /// </para>
 /// <para>
-/// <b>A client that abandons its request.</b> A peer <c>RESET_STREAM</c> a read meets is how a client
-/// cancels a request (RFC 9114 §4.1.1), not a body that failed. Once the exchange exists, the read fires its
+/// <b>A client that abandons its request.</b> A peer <c>RESET_STREAM</c> a read meets, or a
+/// <c>STOP_SENDING</c> the <c>100 Continue</c>'s write meets, is how a client cancels a request
+/// (RFC 9114 §4.1.1), not a body that failed. Once the exchange exists, the read fires its
 /// <see cref="HttpContext.RequestCancelled"/> and throws an <see cref="OperationCanceledException"/>,
 /// as an HTTP/2 <c>RST_STREAM</c> does, so a host classifies the exchange as cancelled rather than as an
 /// application fault (#1378). Before dispatch, a request hook's read reports it as a stream failure.
@@ -493,16 +495,6 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             return 0;
         }
 
-        // RFC 9110 §10.1.1 — the client declared Expect: 100-continue and withholds the content until it is
-        // solicited. The first read solicits it, as HTTP/1.1 does (#1385), after the cap and the rate are
-        // resolved, so a Content-Length over the cap is refused (413) rather than invited, and a handler that
-        // answers without reading the body never invites it onto the wire.
-        if (_solicitContinue)
-        {
-            _solicitContinue = false;
-            await SolicitContinueAsync(cancellationToken).ConfigureAwait(false);
-        }
-
         // #1085 — the read may wait for the peer no longer than what is left of its allowance. Where the
         // stream carries a code, the deadline stops it with STOP_SENDING(H3_NO_ERROR), which fails the read
         // (RFC 9114 §4.1: the server needs no more of the request and will answer it); elsewhere it
@@ -537,6 +529,18 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         try
         {
+            // RFC 9110 §10.1.1 — the client declared Expect: 100-continue and withholds the content until it
+            // is solicited. The first read solicits it, as HTTP/1.1 does (#1385), after the cap and the rate
+            // are resolved, so a Content-Length over the cap is refused (413) rather than invited, and a
+            // handler that answers without reading the body never invites it onto the wire. It is written
+            // under the read's token and inside its error handling, so a write the client's STOP_SENDING
+            // fails reports what a read would.
+            if (_solicitContinue)
+            {
+                _solicitContinue = false;
+                await SolicitContinueAsync(readToken).ConfigureAwait(false);
+            }
+
             while (true)
             {
                 if (_dataRemaining > 0)
@@ -619,7 +623,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
         catch (Exception exception) when (IsStreamFailure(exception) && _owner is { } owner && IsPeerAbort(exception))
         {
-            // RFC 9114 §4.1.1 — the client abandoned its own request with RESET_STREAM. That is a cancellation,
+            // RFC 9114 §4.1.1 — the client abandoned its own request with RESET_STREAM (or refused the response,
+            // the 100 Continue's write included, with STOP_SENDING). That is a cancellation,
             // as an HTTP/2 RST_STREAM is (#1378), not a body that failed: the exchange's RequestCancelled fires
             // before the read throws, so a host's fault boundary sees a cancelled exchange, never an
             // application fault. The stream's own closure fires it too, but on the QUIC driver only later.
@@ -813,19 +818,35 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// Sends <c>100 Continue</c> (RFC 9110 §10.1.1) as a HEADERS frame on the request stream, ahead of the
     /// final response (RFC 9114 §4.1), through the connection's interim-response path — unless an interim
     /// response can no longer precede the final one: the final response has started, the exchange was
-    /// cancelled, or the stream was reset or is no longer read. The response direction is written only from
-    /// the exchange's own flow, which this read is part of, so nothing races the write.
+    /// cancelled, or the stream was reset or is no longer read.
     /// </summary>
+    /// <remarks>
+    /// A full-duplex handler can start its streamed response on one task while another makes this read, so
+    /// the <c>100</c> takes the request stream's writer from the exchange first
+    /// (<see cref="Http3Context.TryBeginContinue"/>): it is dropped once the final head has claimed the writer,
+    /// and a final head that claims it while the <c>100</c> is being written waits for it. Without an exchange
+    /// — a request hook reading the body before dispatch — no response can be under way.
+    /// </remarks>
     private async ValueTask SolicitContinueAsync(CancellationToken cancellationToken)
     {
+        Http3Context? owner = _owner;
+
         if (IsReset
             || Volatile.Read(ref _closed)
-            || _owner is { HasFinalResponseStarted: true } or { CancelRequested: true })
+            || owner is { HasFinalResponseStarted: true } or { CancelRequested: true }
+            || (owner is not null && !owner.TryBeginContinue()))
         {
             return;
         }
 
-        await _connection.WriteInterimResponseAsync(_streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _connection.WriteInterimResponseAsync(_streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            owner?.EndContinue();
+        }
     }
 
     private void EnsureContentLengthSatisfied()
@@ -904,8 +925,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     }
 
     /// <summary>
-    /// Whether a failed read is the client abandoning its request with <c>RESET_STREAM</c> (RFC 9114 §4.1.1):
-    /// the QUIC driver reports it as <see cref="QuicError.StreamAborted"/>, the in-memory driver as a
+    /// Whether a failed read is the client abandoning its request (RFC 9114 §4.1.1): a <c>RESET_STREAM</c> a
+    /// read met, or a <c>STOP_SENDING</c> the <c>100 Continue</c>'s write met. The QUIC driver reports either
+    /// as <see cref="QuicError.StreamAborted"/>, the in-memory driver as a
     /// <see cref="ConnectionResetException"/> that carries the code. A stream this server reset or stopped
     /// reading, the loss of the whole connection, and a body already rejected for the client's fault are not.
     /// </summary>

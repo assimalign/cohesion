@@ -2689,6 +2689,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // credit, or reads below the rate, has the request stream reset instead of holding this writer.
         http3Context.MarkFinalResponseStarted();
 
+        // #1385 — an automatic 100 Continue a leaked body read is still writing goes out whole, first.
+        await ClaimFinalResponseHeadAsync(http3Context, cancellationToken).ConfigureAwait(false);
         await WriteResponseFrameAsync(http3Context, stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
 
         if (bodyBytes.Length > 0 && carriesContent)
@@ -2958,11 +2960,62 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)
     {
-        Stream stream = streamConnection.AsStream();
         byte[] headerBlock = Http3HeaderCodec.EncodeInterimResponseHeaders(statusCode, headers);
 
-        await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        // RFC 9114 §7.1 — the whole frame is handed to the request stream's writer before the one flush, so
+        // a flush the token cancels never leaves part of a frame behind for the final response to follow,
+        // and no write blocks the thread waiting for the peer's credit, as a write through the stream adapter
+        // would.
+        PipeWriter output = streamConnection.Output;
+        Span<byte> header = output.GetSpan(2 * QuicVariableLengthInteger.MaxLength);
+        int headerLength = QuicVariableLengthInteger.Write(header, (long)Http3FrameType.Headers);
+        headerLength += QuicVariableLengthInteger.Write(header[headerLength..], headerBlock.Length);
+        output.Advance(headerLength);
+        output.Write(headerBlock);
+
+        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Takes the request stream's writer for an exchange's final response head
+    /// (<see cref="Http3Context.ClaimFinalResponseHeadAsync"/>) before the head's HEADERS frame is written: an
+    /// automatic <c>100 Continue</c> (#1385) the first body read is still writing is waited for, so the two
+    /// never share the writer. The wait is held to the response's minimum data rate (#1384), as the head's own
+    /// write would be: a peer that withholds the credit the <c>100</c> needs would stall the head too, and a
+    /// spent allowance resets the request stream (<see cref="FailSlowResponse"/>).
+    /// </summary>
+    /// <param name="context">The exchange whose final head is about to be written.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that completes once the head may be written.</returns>
+    /// <exception cref="OperationCanceledException">The peer did not take the <c>100</c> at the rate; the exchange was aborted.</exception>
+    internal async ValueTask ClaimFinalResponseHeadAsync(Http3Context context, CancellationToken cancellationToken)
+    {
+        ValueTask claimed = context.ClaimFinalResponseHeadAsync();
+
+        if (claimed.IsCompletedSuccessfully)
+        {
+            return;
+        }
+
+        Task continueWritten = claimed.AsTask();
+        MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
+
+        if (gate is null)
+        {
+            await continueWritten.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        bool written = await MinDataRateWait.TryRunAsync(
+            gate,
+            continueWritten,
+            static (written, token) => new ValueTask(written.WaitAsync(token)),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!written)
+        {
+            throw FailSlowResponse(context);
+        }
     }
 
     /// <summary>
