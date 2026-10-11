@@ -1437,7 +1437,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Coerces an evaluated value to a column's storage type, enforcing nullability.
+    /// Coerces an evaluated value to a column's storage type, enforcing nullability and declared bounds.
     /// </summary>
     internal static object? CoerceForColumn(object? value, SqlCatalogColumn column)
     {
@@ -1453,7 +1453,7 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            return column.Type.Type switch
+            object converted = column.Type.Type switch
             {
                 DatabaseType.Boolean => Convert.ToBoolean(value, CultureInfo.InvariantCulture),
                 DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
@@ -1462,7 +1462,9 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
                 DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
                 DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
-                DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
+                DatabaseType.Decimal => value is string numericText
+                    ? SqlCastConverter.ParseNumericText(numericText, column.Type)
+                    : Convert.ToDecimal(value, CultureInfo.InvariantCulture),
                 DatabaseType.String or DatabaseType.Json => value as string
                     ?? Convert.ToString(value, CultureInfo.InvariantCulture)!,
                 DatabaseType.Binary or DatabaseType.JsonBinary => value is byte[] bytes
@@ -1507,6 +1509,11 @@ internal sealed partial class SqlPlanExecutor
                 },
                 _ => throw new DatabaseException($"Column type {column.Type.Type} cannot store values yet."),
             };
+            return SqlCastConverter.ApplyModifiers(converted, column.Type);
+        }
+        catch (SqlEvaluationException exception)
+        {
+            throw exception.WithContext($"Column '{column.Name}'{(column.DomainName is null ? string.Empty : $" (domain '{column.DomainName}')")}");
         }
         catch (OverflowException exception) when (column.Type.Type is DatabaseType.Int8 or DatabaseType.Int16
             or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal)

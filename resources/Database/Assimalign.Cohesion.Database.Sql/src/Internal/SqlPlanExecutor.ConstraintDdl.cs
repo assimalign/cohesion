@@ -240,7 +240,7 @@ internal sealed partial class SqlPlanExecutor
         int[]? added = bound is null ? null : [columns.Length - 1];
         foreach (var row in rows)
         {
-            CoerceForColumn(row[^1], plan.Column);
+            row[^1] = CoerceForColumn(row[^1], plan.Column);
             if (added is not null)
             {
                 CheckDomains(bound!, row, evaluator!, added);

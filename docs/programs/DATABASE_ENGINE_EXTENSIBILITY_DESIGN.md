@@ -1,7 +1,7 @@
 # Database engine extensibility, provisioning and composition: design
 
 **Status:** approved; the owner accepted decisions 49 to 73 (§13) on 2026-10-09, answers inline,
-with one follow-up proposed under 49 (49a, awaiting the owner and excluded from B2). Phases B1 and E1
+and the follow-up 49a under 49 on 2026-10-11 (it lands in B2, after B2's core). Phases B1 and E1
 start from here · **Created:** 2026-10-08 ·
 **Owner:** Chase Crawford
 **Answers:** the owner's request of 2026-10-08 (Database Hosting items 1 to 3, Provisioning, Event
@@ -1482,7 +1482,8 @@ Numbering continues the plan of record's table. Each line is the question, then 
     *Landed in B1 part 1:* the SQL engine's `Build`/`BuildAsync` provisions its declared databases;
     49a below is not implemented.
 
-    **49a (proposed 2026-10-09, awaiting the owner; excluded from B2).** The concern holds. [Certain]
+    **49a (proposed 2026-10-09, accepted 2026-10-11; lands in B2 after its core).** The concern
+    holds. [Certain]
     Four of the planner's operations cost time in proportion to the table: `AddIndex` and
     `AddConstraint` on a populated table scan every row (an index also builds its whole tree), and
     an `AlterColumn` that tightens a column checks or rewrites every row
@@ -1509,6 +1510,15 @@ Numbering continues the plan of record's table. Each line is the question, then 
     PostgreSQL has `CREATE INDEX CONCURRENTLY` (`src/backend/commands/indexcmds.c:429`) and
     `NOT VALID` constraints validated later (`src/backend/commands/tablecmds.c:3266`). An index build
     that lets writers continue on the same table, as `CONCURRENTLY` does, is a later work item.
+
+    >My Decision (2026-10-11): Accept, understood as "rather than run a migration at engine build
+    >time, run it as an independent engine worker at run time".
+
+    *Clarified with the owner the same day:* only the data-scaling steps move to the worker. Build
+    still runs every step whose cost does not depend on the data, and the worker locks the one
+    table it migrates before the engine accepts work, so the rest of the database serves. Its
+    provisioning events (start, progress, end) are catalogued with batch D (#1349), which lands
+    after it.
 
 50. **The `DatabaseInstance` capability.** Delete `SupportsSchemaProvisioning`, `ApplySchemaAsync`,
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence

@@ -441,12 +441,15 @@ convert to the declared storage type and fit its bounds, including string length
 and decimal precision/scale; invalid conversions and out-of-range defaults reject
 before publication. `CREATE TABLE` applies the same check to every column
 `DEFAULT` before it publishes the table (`INT DEFAULT 'abc'` fails the DDL, not
-each later INSERT that omits the column). Strings are not truncated and decimals
-are not rounded.
+each later INSERT that omits the column). The assignment rules in
+[Declared bounds on writes](#declared-bounds-on-writes-1418) apply: excess ASCII spaces
+may be discarded, other excess characters report `COHSQLE012`, and NUMERIC rounds
+to its scale before checking precision (`COHSQLE002`). The code still leads a
+DEFAULT failure's message.
 Approximate floating-point defaults use normal IEEE conversion rounding, but
 nonfinite results and nonzero values that underflow to zero are rejected.
-`COLLATE` on an added string column preserves the literal's
-original text and controls its comparisons and indexes, just as for CREATE TABLE.
+`COLLATE` on an added string column controls its comparisons and indexes without
+changing the bounded text, just as for CREATE TABLE.
 
 Publication changes the complete table definition atomically after validation;
 there is no row-rewrite phase to partially commit. A failed ADD COLUMN preserves
@@ -744,7 +747,7 @@ same kind, with its own code:
 | Code | ISO SQLSTATE | Raised when |
 |---|---|---|
 | `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
-| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; or a value does not fit the integer or `DECIMAL` column it is stored into. |
+| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; a value does not fit the integer or `DECIMAL` column it is stored into; or a NUMERIC/DECIMAL value exceeds its declared precision or cannot be represented exactly as `System.Decimal` in assignment, DEFAULT or CAST, after rounding to the declared scale when there is one. |
 | `COHSQLE003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known or the operand is a parameter bound to a non-number, so it fails over an empty table too, and while evaluating when only a row's value reveals it. See Signs under [Statement completeness](#statement-completeness-1068). |
 
 The code leads the message, for example
@@ -789,9 +792,10 @@ the value order cannot compare (`Cannot compare values of types ...`).
   a number at all keeps the uncoded `Cannot convert value ...` error, and a REAL
   column stores a finite DOUBLE beyond REAL's range as an infinity.
 - **CAST:** arithmetic inside a CAST operand keeps its own code
-  (`CAST(1 / 0 AS INT)` reports `COHSQLE001`). A value or literal the target cannot
-  represent remains a CAST failure under the conversion contract below, with its
-  `CAST ... failed` message.
+  (`CAST(1 / 0 AS INT)` reports `COHSQLE001`). NUMERIC modifier overflow, or a built-in
+  text-to-NUMERIC result that cannot fit `System.Decimal` exactly after any declared-scale
+  rounding, reports `COHSQLE002`. Other source conversion failures keep
+  their `CAST ... failed` message under the conversion contract below.
 
 ## VALUES and counts have no column scope (#1165)
 
@@ -1280,9 +1284,69 @@ write that assigns the column, its INSERT default included, and every `CAST` to 
 domain applies the base type's length, precision and scale, then evaluates the
 domain's check, of which only FALSE refuses the value (`DOMAIN constraint 'email' on
 'dbo.contacts' was violated.`, a `SqlConstraintViolationException` of kind `DOMAIN`,
-which a `CAST` raises too, with an empty table). A plain `VARCHAR(n)` or
-`NUMERIC(p, s)` column does not apply its bound on a write yet. A domain's name is an
-ASCII identifier.
+which a `CAST` raises too, with an empty table). Plain columns and domain base types
+use the same bounds, described next. A domain's name is an ASCII identifier.
+
+## Declared bounds on writes (#1418)
+
+INSERT VALUES, INSERT ... SELECT and UPDATE apply a destination column's declared
+length, precision and scale. Numeric text rounds to a declared scale before
+conversion to its storage type; other values are bounded after conversion.
+DEFAULT validation uses the same rule, including CREATE
+TABLE defaults and ADD COLUMN's existing-row backfill. Domain checks see the
+bounded value. NULL remains NULL, subject to the column's nullability and the
+domain's check. Comparison literals retain their comparison meaning: a bound that
+would change or reject an index-seek comparand falls back to residual evaluation.
+Character join probes retain the complete text, since strings of different
+lengths can compare equal under the index's collation.
+
+- **VARCHAR(n), CHAR(n), CHARACTER(n), TEXT(n):** length counts Unicode scalar
+  values, so a supplementary character is one character. If a value is longer than
+  n, assignment accepts it only when everything past n is an ASCII space (U+0020),
+  discarding those spaces. Other excess characters fail with `COHSQLE012`, SQLSTATE
+  22001 (`value too long for type character varying(n)`). Explicit CAST truncates to
+  n characters instead. PostgreSQL makes the same assignment/explicit distinction
+  in `varchar()` and `bpchar()` (`src/backend/utils/adt/varchar.c:264-268`,
+  `:605-647`). A bound never splits a surrogate pair. Bare VARCHAR and TEXT have no
+  declared length limit.
+- **CHAR padding:** CHAR and CHARACTER remain unpadded VARCHAR aliases. A short
+  value stored in CHAR(3) remains `'a'`, not `'a  '`, in assignment and CAST. This
+  differs from PostgreSQL's fixed-character padding
+  (`src/backend/utils/adt/varchar.c:330-343`). The shared type and column metadata
+  keep no separate CHAR identity; this fix retains that representation.
+- **NUMERIC(p,s), DECIMAL(p,s):** round to s fractional digits, with midpoint ties
+  away from zero, then reject a rounded magnitude of `10^(p-s)` or more with
+  `COHSQLE002`, SQLSTATE 22003 (`numeric field overflow`). NUMERIC(p) and DECIMAL(p)
+  mean scale zero. For NUMERIC(3,2), `1.235` becomes `1.24`, `-1.235` becomes `-1.24`,
+  and `9.995` fails because it rounds to `10.00`. CAST uses the same numeric rule.
+  Text is rounded directly from all its digits before conversion to `System.Decimal`,
+  so `'1.23499999999999999999999999995'` becomes `1.23` in NUMERIC(4,2), and
+  `'9.94999999999999999999999999999'` becomes `9.9` in NUMERIC(2,1). Only the rounded
+  value must fit Decimal exactly; rounding to Decimal's capacity first would change
+  both answers. This applies equally to quoted literals, string parameters,
+  text-source INSERT ... SELECT, UPDATE, CAST, DEFAULT and ADD COLUMN backfill,
+  for plain columns and domain base types.
+  PostgreSQL rounds before checking precision in `apply_typmod`
+  (`src/backend/utils/adt/numeric.c:7693-7750`), with midpoint handling in
+  `round_var` at `:11720-11748`. Bare NUMERIC/DECIMAL requires text to fit the existing
+  `System.Decimal` representation exactly, without rounding. An unrepresentable
+  unscaled value, or a rounded value that still cannot fit Decimal exactly, fails
+  with `COHSQLE002` too. Numeric text follows CAST's grammar: surrounding whitespace
+  and a leading `+` or `-` are accepted; exponent notation such as `'1.5e2'`,
+  grouping, and a decimal point without digits on both sides are rejected.
+  Unquoted SQL numeric literals retain their separate lexical rules.
+  Declared scale does not promise display padding or arbitrary precision.
+  A scale of 28 or more needs no rounding of a value
+  Decimal can hold; wider declarations do not extend its storage range. Modifier
+  application rejects precision below 1 or scale outside 0..precision.
+
+Bounds are checked before DML writes or DDL publication, so a failing statement
+stores no partial rows or added column. Its code leads the `DatabaseException`
+message in process and the `ExecutionFailure` message over the wire; the SQL
+client's `SqlClientException` retains `ConnectionUsable = true`. Earlier successful
+statements of an explicit transaction remain available to commit or roll back.
+The shared rule corrects the earlier CAST, DEFAULT and domain behavior too: CAST
+now truncates character values, and all four paths round NUMERIC to its scale.
 
 ## Explicit conversion (`CAST`, #1022, E3)
 
@@ -1354,10 +1418,12 @@ bounds.
 - **Text:** surrounding whitespace is trimmed when reading numbers or booleans.
   Numeric text must match `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation,
   empty strings, and invalid text (including `'abc' AS INT`) are errors. Numeric
-  text must be exactly representable as `System.Decimal` before narrowing.
+  text converted to an integer or an unscaled NUMERIC must be exactly representable
+  as `System.Decimal` before narrowing. A NUMERIC target with a declared scale
+  rounds the text's digits to that scale first; only that result must fit Decimal.
   Boolean text accepts case-insensitive `TRUE`/`FALSE` only. String output uses
   invariant numeric formatting and uppercase `TRUE`/`FALSE`; string-to-string
-  preserves the original text, including whitespace.
+  preserves the original text, including whitespace, before target-length coercion.
 - **NULL:** returns NULL for every supported target, with the target's result
   type metadata even when every row is null or the result has no rows. Invalid
   target names/modifiers are still errors with a NULL operand.
@@ -1367,13 +1433,16 @@ bounds.
 - **Decimal:** the implementation uses `System.Decimal` (96-bit coefficient,
   scale 0..28), not arbitrary precision. Bare DECIMAL/NUMERIC has no additional
   bound. `DECIMAL(p)` means scale 0; `DECIMAL(p,s)` requires `1 <= p <= 28` and
-  `0 <= s <= p`, `abs(value) < 10^(p-s)`, and no nonzero digits beyond scale s.
-  Excess precision/scale errors; trailing fractional zeros may be discarded
-  without changing value. Text too precise for the runtime errors before it can
-  be rounded. The output does not promise padding to the declared scale.
+  `0 <= s <= p`. The value rounds to s fractional digits, with midpoint ties away
+  from zero, then must satisfy `abs(value) < 10^(p-s)` or it fails with `COHSQLE002`
+  (22003). Text rounds directly to the target scale before Decimal conversion,
+  avoiding a second rounding caused by Decimal's own precision limit. If the rounded
+  text still cannot fit Decimal exactly, or unscaled text cannot fit it exactly,
+  conversion fails with the same `COHSQLE002` code.
+  The output does not promise padding to the declared scale.
 - **Strings:** all four string aliases permit an optional positive Int32 length
-  n; bare aliases have no CAST length limit. Length counts UTF-16 code units.
-  Longer results error; CHAR/CHARACTER do not pad, and no alias truncates. The
+  n; bare aliases have no CAST length limit. Length counts Unicode scalar values.
+  Longer results truncate at a character boundary; CHAR/CHARACTER do not pad. The
   binary aliases permit an optional positive length too. Every other built-in
   target, and a domain, takes no parameters.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
@@ -1384,8 +1453,10 @@ bounds.
   that fails on the value (a `FormatException`, `OverflowException` or
   `InvalidCastException`, the only failures the built-in casts throw, an
   application's alike) throws `DatabaseException` naming CAST and its target, with
-  the original as the inner exception, surfaced as a query error over the wire. A
-  cast that throws anything else, a cancellation the statement did not ask for
+  the original as the inner exception, surfaced as a query error over the wire.
+  A built-in NUMERIC conversion's representation failure or modifier overflow
+  instead carries `COHSQLE002` (22003), after rounding to its declared scale when
+  present. A cast that throws anything else, a cancellation the statement did not ask for
   included, fails with `COHSQLE007` (`Cast TEXT AS cents failed: ...`), as a
   function does, and the connection stays usable; a `DatabaseException` it throws
   passes unchanged. A value a domain target's check refuses is the
@@ -1395,9 +1466,10 @@ bounds.
   exposes the base type, with a matching boxed runtime value. Neither result
   contract has length/precision/scale fields; the client has no nullability field.
 
-This is a deliberate ISO/IEC 9075 subset: approximate numerics and other type
-families are excluded; lossy narrowing raises an error, and fixed character
-padding is not implemented. CAST in DEFAULT and CHECK is rejected by planning.
+This is a deliberate ISO/IEC 9075 subset: integer conversion requires an exact
+value, declared numeric scale rounds, explicit character conversion truncates,
+and fixed character padding is not implemented. CAST in DEFAULT and CHECK is
+rejected by planning.
 CAST values in INSERT/UPDATE are converted before the existing destination-column
 storage coercion; nested arithmetic therefore sees the converted numeric value.
 
@@ -1510,7 +1582,7 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
-| `COHSQLE002` | Error | Numeric value out of range during evaluation or store assignment (ISO SQLSTATE 22003) |
+| `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
 | `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
@@ -1520,6 +1592,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
 | `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain the engine registers: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the engine that opened the database does not register, or registers over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
 | `COHSQLE011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
+| `COHSQLE012` | Error | Character value exceeds its destination's declared length and the excess is not entirely ASCII spaces: INSERT, INSERT ... SELECT, UPDATE, DEFAULT or ADD COLUMN backfill, for plain columns and domain base types. Explicit CAST truncates instead (ISO SQLSTATE 22001, string data right truncation; #1418) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1555,7 +1628,8 @@ scope, `COHSQLE006` for a function call whose arguments no overload of its funct
 accepts, and `COHSQLE008` for one several accept equally well; a `LIMIT`/`OFFSET` count
 is evaluated while planning, so its arithmetic
 faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
-from any planner walk.
+from any planner walk. Comparison-literal coercion for an access path falls back
+to residual evaluation if the value fails the destination's declared bounds.
 
 The `COHSQLE` codes are engine execution diagnostics, not parser diagnostics, and
 carry no position. They lead the `DatabaseException` message in process and the
@@ -1564,7 +1638,9 @@ defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
 counts when `COHSQLE005` is, the function-argument and overload rules under Statement
 completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function rules
-under Builtin functions when `COHSQLE007` and `COHSQLE009` are, and the type and cast rules under Explicit conversion when `COHSQLE010` and `COHSQLE011` are. The engine's transaction-state codes,
+under Builtin functions when `COHSQLE007` and `COHSQLE009` are, the type and cast rules
+under Explicit conversion when `COHSQLE010` and `COHSQLE011` are, and Declared bounds
+on writes when `COHSQLE012` is. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
 code, `COHSQLT005`, are documented in the SQL engine design.
 
