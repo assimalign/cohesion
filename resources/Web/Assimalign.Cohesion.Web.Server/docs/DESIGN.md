@@ -3,9 +3,10 @@
 ## Design intent
 
 `Assimalign.Cohesion.Web.Server` holds the per-exchange contracts the Web server publishes:
-`IWebRequestIdFeature`, `IWebResponseCompletionFeature`, `IWebServerDrainFeature` and
-`IWebClientFaultFeature`. It is a contracts-only feature package. The default server in
-`Web.Hosting` implements and installs all four; feature libraries and applications read them.
+`IWebRequestIdFeature`, `IWebRequestActivityFeature`, `IWebResponseCompletionFeature`,
+`IWebServerDrainFeature` and `IWebClientFaultFeature`. It is a contracts-only feature package.
+The default server in `Web.Hosting` implements and installs all five; feature libraries and
+applications read them.
 
 The package exists because of two rules that point in opposite directions:
 
@@ -27,32 +28,33 @@ The packages that publish, declare and read the contracts, with every arrow mean
 flowchart LR
     Server["Assimalign.Cohesion.Web.Server"] --> Root["Assimalign.Cohesion.Web"]
     Server --> Http["Assimalign.Cohesion.Http"]
-    Hosting["Web.Hosting — publishes all four"] --> Server
+    Hosting["Web.Hosting — publishes all five"] --> Server
     WebSockets["Web.WebSockets — reads the drain"] --> Server
     Resources["Web.Hosting.Resources — reads completion"] --> Server
-    Faults["Web.Diagnostics, Web.ErrorHandling, Web.Compression — read the client fault"] --> Server
+    Logging["Web.Diagnostics — reads correlation and client fault"] --> Server
+    Faults["Web.ErrorHandling, Web.Compression — read the client fault"] --> Server
     WebSockets -.->|"COHRES001 ✗"| Hosting
 ```
 
 | Package | Role | Reference to `Web.Server` |
 |---|---|---|
-| `Assimalign.Cohesion.Web.Server` | declares the four contracts | — |
-| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all four (the client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
+| `Assimalign.Cohesion.Web.Server` | declares the five contracts | — |
+| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all five (the client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | defers a control-plane stop until its `202` is written | project reference |
-| `Assimalign.Cohesion.Web.Diagnostics` | logs a client fault at the configured level with the status sent, not at `Error` | project reference |
+| `Assimalign.Cohesion.Web.Diagnostics` | reads the request id and server activity for correlation; logs a client fault at the configured level with the status sent | project reference |
 | `Assimalign.Cohesion.Web.ErrorHandling` | skips `OnException` and the `500` problem for a client fault | project reference |
 | `Assimalign.Cohesion.Web.Compression` | leaves the transport's framing failure under a decoder unrelabeled | project reference |
 
 The dotted edge is the reference COHRES001 rejects: a feature library may never reference the
 runtime module, which is why the contracts could not move into `Web.Hosting`. No other Web library
-reads these contracts today. `Web.Diagnostics` correlates its logs with the `traceparent` header
-rather than the request id.
+reads these contracts today. `Web.Diagnostics` correlates its logs with the server's request id
+and the activity published on this exchange (#1297).
 
 ## Why the contracts share one package
 
 They have one publisher, the server, and one lifetime, the exchange. A package per contract
-would add three packages to every framework that carries `Web.Hosting`, for interfaces of one or two
+would add four packages to every framework that carries `Web.Hosting`, for interfaces of one or two
 members each. The owner chose two homes over one shared features package (decision 33): contracts a
 feature publishes go with that feature (the endpoint and the path base went to `Web.Routing`), and
 contracts the server publishes come here.
@@ -66,6 +68,26 @@ every exchange before the pipeline runs. With a server span the id is the span's
 one it is the trace id of a valid `traceparent`, or else a random id generated on first read, stable
 for the exchange. It is a Web contract, not an `Assimalign.Cohesion.Http` one, because a request id
 is a server concern and the protocol core models only the wire.
+
+**`IWebRequestActivityFeature`** exposes this exchange's server `Activity`, or `null` when no
+activity was created (#1297). The default server's existing telemetry object implements both
+this interface and `IWebRequestIdFeature`; the feature collection resolves either interface
+from that one object. A listener can decline to create a span, and no listener creates none.
+Readers borrow the activity; the server owns its start and stop. The feature names the server
+activity even while a handler's child activity is current, and remains `null` when an unrelated
+ambient activity flows into an untraced exchange.
+
+This is an optional new contract, leaving `IWebRequestIdFeature` unchanged. Putting it here
+respects the server-published feature boundary; putting it in Web.Hosting would require a
+forbidden reference from Web.Diagnostics, and the Web root holds no feature contracts. Merely
+matching an ambient activity's source name and trace id cannot prove which exchange owns it.
+The public BCL activity also lets diagnostics inspect or enrich the server span without
+depending on the runtime module's implementation.
+
+**Compatibility with 10.0.0-preview.1.** The activity contract is additive; existing interface
+implementations need no new member. HTTP logging's behavior changes: its `span.id` now names
+the exchange's server span, rather than the inbound parent span, and its `trace.id` reads the
+server's request-id feature even without an inbound header (decision 15).
 
 **`IWebResponseCompletionFeature`** is the response-transmission seam. The default server installs
 it on every exchange and invokes callbacks in registration order after writing the response to the
@@ -109,7 +131,9 @@ runs.
 **Every contract is optional.** A custom `IWebApplicationServer` may omit any of them, so every
 reader handles an absent feature: the control plane falls back to a direct stop, WebSockets has
 no drain-time close, so a socket ends by its own close or by the exchange's cancellation, and a
-reader of the client fault treats an absent feature as no fault reported.
+reader of the client fault treats an absent feature as no fault reported. HTTP logging omits
+trace correlation when the request-id feature is absent and omits the span id when there is no
+activity feature or server activity.
 
 ## Namespace: `Assimalign.Cohesion.Web`
 
@@ -132,8 +156,9 @@ framework-closure tests prove each list covers the project graph.
 ## AOT posture
 
 Interfaces only: no reflection and no runtime code generation (`IsAotCompatible=true`).
-`IWebRequestIdFeature` exposes the BCL `ActivityTraceId` from `System.Diagnostics.DiagnosticSource`,
-which the shared framework carries; no package is added.
+`IWebRequestIdFeature` and `IWebRequestActivityFeature` expose the BCL `ActivityTraceId` and
+`Activity` from `System.Diagnostics.DiagnosticSource`, which the shared framework carries;
+no package is added.
 
 ## Adding a contract
 

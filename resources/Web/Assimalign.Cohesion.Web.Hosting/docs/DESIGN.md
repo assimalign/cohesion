@@ -632,7 +632,7 @@ The flow of one exchange's telemetry:
 
 ```mermaid
 flowchart TD
-    Start["Start: install the request-id feature"] --> Check{"A listener on the source or an instrument?"}
+    Start["Start: install request-id and server-activity features"] --> Check{"A listener on the source or an instrument?"}
     Check -->|"no"| Pipeline["Pipeline runs; UseRouting publishes RouteTemplate"]
     Check -->|"yes"| Begin["+1 active request, start timestamp, span parented to traceparent"]
     Begin --> Pipeline
@@ -654,7 +654,7 @@ nest under it.
 traceparent", has a parser read a header of a version it does not know by its version-00 fields
 and ignore what follows. `ActivityContext.TryParse` accepts exactly the 55 characters of a
 version-00 header, so a later version with extra fields used to start a new trace, while HTTP
-logging, whose own parser accepts it, recorded the caller's. The server now checks what the BCL
+logging's former parser accepted it and recorded the caller's. The server now checks what the BCL
 parser does not, then hands it the version-00 fields:
 
 - the three separators are dashes (`TryParse` checks only the characters between them);
@@ -667,15 +667,16 @@ parser does not, then hands it the version-00 fields:
 are not all zeros, and lower-case hex flags. A later version's header costs one 55-character
 substring; a version-00 header costs nothing more than before.
 
-Decision 32 lets this module reference `Web.Diagnostics`, whose HTTP logging already parses later
-versions. It does not, because:
+Decision 32 lets this module reference `Web.Diagnostics`. Reusing HTTP logging's former parser
+was rejected because:
 
 - its parser is internal, so reusing it needs a public API or shared source for one consumer;
 - it yields hex strings, not an `ActivityContext` with its `tracestate`, and it accepts a version-00
   value with trailing fields, which W3C forbids;
 - the reference would ship `Web.Diagnostics` in every area framework that carries this module.
 
-The local check is one short method on top of the BCL parser.
+The local check is one short method on top of the BCL parser. Since #1297 HTTP logging reads the
+server's published request id and activity instead of parsing the header again.
 
 **Attributes** follow the stable OpenTelemetry HTTP server conventions:
 
@@ -806,6 +807,26 @@ only when a span or the duration is being recorded. Rejected:
 `IWebRequestIdFeature`, installed before the pipeline runs. Its `RequestId` is the span's trace id
 when there is a span. Without one, it is the trace id of a valid `traceparent`, which is the id a span
 would have had, or else a random trace id resolved on the first read and stable for the exchange.
+
+**The activity belongs to the exchange (#1297).** That same telemetry object implements
+`IWebRequestActivityFeature` from `Web.Server`, exposing its server `Activity` or `null` when
+no span was created. Both contracts resolve from the existing feature instance; no second
+object or new dependency is needed. The server owns the activity's lifetime. The feature stays
+available while middleware runs and completion callbacks finish, so a consumer can read the
+server span even while a child activity is current.
+
+HTTP logging reads the trace id from `IWebRequestIdFeature` and the server span id through this
+new feature, checking that it is a W3C `Server` activity with the same trace id. It never infers
+exchange ownership from `Activity.Current`: the ambient clear above runs only when a span
+listener exists, so an untraced exchange may retain an unrelated ambient activity. Checking
+only a source name and trace id would still confuse different exchanges sharing a trace.
+The optional contract belongs in `Web.Server`; existing interfaces and the Web root stay
+unchanged. A custom server may omit it.
+
+This is a behavior break from 10.0.0-preview.1 on decision 15's terms: HTTP logging formerly
+copied the inbound parent span id and omitted correlation without a valid header. It now logs
+the server span id when present, omits the span id otherwise, and logs the server's request id
+even for an unparented request.
 
 **No listener, no cost.** `Start` reads `ActivitySource.HasListeners()` and the two instruments'
 `Enabled`. With all three off it creates no activity, reads no request state, records nothing, and

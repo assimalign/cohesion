@@ -69,11 +69,16 @@ preflight that names it, which is logged with the configured fields.
 | `Assimalign.Cohesion.Web.Routing` | reads the endpoint metadata bag for per-endpoint overrides |
 | `Assimalign.Cohesion.Http.Forwarded` | the effective scheme, host, and client address (`Effective*`), resolved by `UseForwardedHeaders` behind a trusted proxy |
 | `Assimalign.Cohesion.Logging` | the emission model (`ILogger`, `LoggerEntry`, `LoggerProvider`) |
-| `Assimalign.Cohesion.Web.Server` | `IWebClientFaultFeature`: on a request that can have a body, on every version, a request body that broke its framing or a limit, or that the client cut short, is logged as a client fault at the configured level with the status sent, not escalated to `Error` (#1340, #1378) |
+| `Assimalign.Cohesion.Web.Server` | request-id and server-activity features for trace correlation (#1297); `IWebClientFaultFeature` for logging malformed, over-limit or cut-short bodies at the configured level with the transport's status (#1340, #1378) |
 | `Assimalign.Cohesion.Http.Streaming` | whether the response had started, so a client fault logs the status that reached the wire |
 
-Trace correlation comes from the request's `traceparent` header. The package does not read the
-server's request id (`IWebRequestIdFeature`, in `Web.Server` since #1379).
+With `HttpLoggingFields.TraceContext` enabled, `trace.id` comes from
+`IWebRequestIdFeature.RequestId`, including a request that arrived without `traceparent`.
+`span.id` identifies this exchange's server span through `IWebRequestActivityFeature`; it is
+absent when no server span exists, including when nobody listens for spans. An unrelated
+`Activity.Current` is never used. Custom servers may omit the features, in which case the
+corresponding attributes are absent. This changes preview.1's behavior, which logged the
+inbound parent span id; consumers must now interpret `span.id` as the server's span.
 
 An exchange whose downstream pipeline throws is logged at `Error` with the exception, except a client
 fault the default Web server reports, on any version: an entry marked `http.client_fault = true`, at the

@@ -644,36 +644,6 @@ public class HttpLoggingEndToEndTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: An inbound traceparent yields trace and span id attributes")]
-    public async Task TraceContext_InboundTraceparent_ShouldAttachIds()
-    {
-        // Arrange
-        using CancellationTokenSource cancellation = new(_testTimeout);
-        RecordingLoggerProvider recorded = new();
-        using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
-
-        await using WebApplicationTestFactory factory = new();
-        factory.Application
-            .UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category))
-            .Use((context, next) =>
-            {
-                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
-                return Task.CompletedTask;
-            });
-
-        using HttpClient client = factory.CreateClient();
-        using HttpRequestMessage request = new(System.Net.Http.HttpMethod.Get, "/traced");
-        request.Headers.TryAddWithoutValidation("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
-
-        // Act
-        (await client.SendAsync(request, cancellation.Token)).Dispose();
-
-        // Assert
-        ILoggerEntry entry = (await WaitForEntriesAsync(recorded, 1, cancellation.Token))[0];
-        entry.Attributes[HttpLoggingAttributes.TraceId].ShouldBe("0af7651916cd43dd8448eb211c80319c");
-        entry.Attributes[HttpLoggingAttributes.SpanId].ShouldBe("b7ad6b7169203331");
-    }
-
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: LogRequestStart correlates start and completion via ParentId")]
     public async Task RequestStart_Enabled_ShouldCorrelateEntries()
     {

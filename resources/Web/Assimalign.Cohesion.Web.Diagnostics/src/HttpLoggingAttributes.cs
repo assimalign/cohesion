@@ -125,9 +125,9 @@ public static class HttpLoggingAttributes
     /// </summary>
     public const string PeerPort = "network.peer.port";
 
-    /// <summary>The W3C trace-context trace id parsed from the inbound <c>traceparent</c> header. String (32 hex digits).</summary>
+    /// <summary>The trace id from <see cref="IWebRequestIdFeature"/>. String (32 hex digits).</summary>
     public const string TraceId = "trace.id";
 
-    /// <summary>The W3C trace-context parent span id parsed from the inbound <c>traceparent</c> header. String (16 hex digits).</summary>
+    /// <summary>This exchange's W3C server span id, when available through <see cref="IWebRequestActivityFeature"/>. String (16 hex digits).</summary>
     public const string SpanId = "span.id";
 }

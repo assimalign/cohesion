@@ -115,8 +115,8 @@ public enum HttpLoggingFields
     BytesTransferred = 1 << 13,
 
     /// <summary>
-    /// W3C trace-context correlation (<c>trace.id</c> / <c>span.id</c>) parsed from the inbound
-    /// <c>traceparent</c> header when present. No OpenTelemetry dependency is taken.
+    /// W3C trace-context correlation: <c>trace.id</c> from <see cref="IWebRequestIdFeature"/>
+    /// and <c>span.id</c> from this exchange's server activity when available. No OpenTelemetry dependency is taken.
     /// </summary>
     TraceContext = 1 << 14,
 

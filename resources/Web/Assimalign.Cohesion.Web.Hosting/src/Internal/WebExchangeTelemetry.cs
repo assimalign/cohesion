@@ -34,7 +34,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// telemetry, never the exchange: <see cref="Start"/> and <see cref="Stop"/> contain the failure.
 /// </para>
 /// </remarks>
-internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
+internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestActivityFeature
 {
     private const string httpRequestMethod = "http.request.method";
     private const string httpRequestMethodOriginal = "http.request.method_original";
@@ -68,6 +68,9 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
 
     /// <inheritdoc />
     public string Name => nameof(IWebRequestIdFeature);
+
+    /// <inheritdoc />
+    Activity? IWebRequestActivityFeature.Activity => _activity;
 
     /// <inheritdoc />
     public ActivityTraceId RequestId

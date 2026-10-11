@@ -25,18 +25,32 @@ everything else, so it is safe on a factory that also carries application loggin
 same seam a future OTLP/OpenTelemetry adapter would consume (#583/#317): correlation concepts
 (trace/span ids as attributes) live here; OTel-specific behavior belongs in later adapters.
 
-Trace correlation is the inbound `traceparent` header, span-parsed (`Internal/TraceParent`)
-into `trace.id`/`span.id` attributes when valid. Optionally (`LogRequestStart`), a start entry
-seeds an `IScopedLogger` scope so the completion entry correlates via `ILoggerEntry.ParentId` —
-the Logging library's own correlation mechanism, not a bespoke one.
+Trace correlation reads the exchange's server features from `Web.Server` (#1297). With
+`HttpLoggingFields.TraceContext` enabled, `trace.id` is
+`IWebRequestIdFeature.RequestId.ToHexString()`: the server span's trace id, the valid inbound trace
+id when no span exists, or the server's stable random id for an unparented request. `span.id` is
+the span id of `IWebRequestActivityFeature.Activity` only when that activity is a W3C `Server`
+span whose trace id matches the request id. The server publishes the activity on this exchange,
+which identifies its span even if a child or an unrelated activity is current during logging.
+The middleware never reads `Activity.Current` or parses `traceparent` itself. A custom server
+may omit either feature: without a request id both attributes are absent, and without a server
+activity only `span.id` is absent.
 
-The package does not read the server's request id (`IWebRequestIdFeature`). It references
-`Web.Server` only for the client-fault report (`IWebClientFaultFeature`, "Emission model" below). The
-request id is the same W3C trace id the header carries when it is valid, but the default server also
-invents one for a request without a valid `traceparent`. Logging that id would give every entry a
-`trace.id`, including entries no span or caller shares. That is a separate decision: if it is taken,
-the middleware reads the feature from `Web.Server`, where it moved from the Web root with #1379, and
-handles its absence under a custom server.
+The optional activity contract lives in `Web.Server`, alongside the existing request-id contract;
+no member is added to an existing interface or to the Web root. Source-name and trace-id checks
+on `Activity.Current` would not establish exchange ownership: with no listener the host can
+retain an ambient activity, and several exchanges can share a trace. The server's feature
+provides the association directly.
+
+**Behavior break from 10.0.0-preview.1 (decision 15).** That release copied the inbound
+`traceparent`'s parent span id into `span.id` and omitted both ids without a valid header.
+Logging now records the server span id when one exists, omits `span.id` without one, and records
+the server's request id even without an inbound header. Consumers that interpreted `span.id`
+as the caller's span must migrate. A custom server that supplies neither feature no longer gets
+header-derived ids.
+
+Optionally (`LogRequestStart`), a start entry seeds an `IScopedLogger` scope so the completion
+entry correlates via `ILoggerEntry.ParentId` — the Logging library's own correlation mechanism.
 
 ## Why-this-not-that
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -330,11 +331,19 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         }
 
         if ((fields & HttpLoggingFields.TraceContext) != 0
-            && request.Headers.TryGetValue(HttpHeaderKey.TraceParent, out HttpHeaderValue traceParent)
-            && TraceParent.TryParse(traceParent.Value, out string traceId, out string spanId))
+            && context.Features.Get<IWebRequestIdFeature>() is { } requestIdFeature)
         {
-            attributes[HttpLoggingAttributes.TraceId] = traceId;
-            attributes[HttpLoggingAttributes.SpanId] = spanId;
+            ActivityTraceId traceId = requestIdFeature.RequestId;
+            attributes[HttpLoggingAttributes.TraceId] = traceId.ToHexString();
+
+            // The feature identifies this exchange's server span. Activity.Current can instead be
+            // an ambient activity inherited by an untraced server, or middleware's child span.
+            if (context.Features.Get<IWebRequestActivityFeature>()?.Activity is
+                { IdFormat: ActivityIdFormat.W3C, Kind: ActivityKind.Server } activity
+                && activity.TraceId == traceId)
+            {
+                attributes[HttpLoggingAttributes.SpanId] = activity.SpanId.ToHexString();
+            }
         }
 
         // A client fault carries no exception: the exception is the transport's answer to the client's
