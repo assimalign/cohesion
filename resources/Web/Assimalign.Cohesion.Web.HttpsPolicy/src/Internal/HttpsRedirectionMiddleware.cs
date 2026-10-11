@@ -136,10 +136,18 @@ internal sealed class HttpsRedirectionMiddleware : IWebApplicationMiddleware
     /// Reconstructs the origin-form path and query. The transports hand the path over percent-decoded,
     /// so it is encoded back per segment; the query is rebuilt from the parsed collection (the raw query
     /// string is not exposed on <see cref="IHttpRequest"/>), re-encoding each key and value and following
-    /// the collection's enumeration order.
+    /// the collection's enumeration order. The asterisk-form <c>*</c> becomes the empty path.
     /// </summary>
     private static string BuildPathAndQuery(IHttpRequest request)
     {
+        // RFC 9112 §3.2.4 — "*" (an OPTIONS request for the server as a whole) names no path: its
+        // absolute-form is the authority with an empty path and no query. Written after the authority it
+        // would become part of it ("https://example.com*").
+        if (string.Equals(request.Path.Value, "*", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
         string path = request.Path.ToUriComponent();
         IHttpQueryCollection query = request.Query;
 

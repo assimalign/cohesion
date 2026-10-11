@@ -52,6 +52,26 @@ public class HttpsRedirectionEndToEndTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - E2E: An OPTIONS * request should be redirected to the bare authority")]
+    public async Task Redirection_AsteriskFormTarget_ShouldRedirectToTheAuthority()
+    {
+        // Arrange — the transport surfaces "*" as the path of an asterisk-form request (RFC 9112 §3.2.4).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        RawHttp1Application application = await RawHttp1Application.StartAsync(cancellationToken);
+
+        await using (application)
+        {
+            // Act
+            string response = await application.ExchangeAsync("OPTIONS * HTTP/1.1\r\nHost: example.com\r\n\r\n", cancellationToken);
+
+            // Assert
+            response.ShouldStartWith("HTTP/1.1 307");
+            ReadHeader(response, "Location").ShouldBe("https://example.com");
+            application.TerminalInvocations.ShouldBe(0);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - E2E: An https absolute-form target on a cleartext connection should never reach the application")]
     public async Task Redirection_HttpsAbsoluteFormTargetOverCleartext_ShouldNotReachTheApplication()
     {

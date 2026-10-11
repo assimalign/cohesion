@@ -133,7 +133,10 @@ trust walk accepted the hop and shape-checked the value):
   different URI `%252F` or `%25E9`. `HttpPath.FromUriComponent` reads the result
   back as the request's path. A space, `?` or `#` never reaches this point:
   `HttpPath` rejects them, and the transports fail a request-target that decodes
-  to one (`HttpPathTests` in core Http pins both).
+  to one (`HttpPathTests` in core Http pins both). The asterisk-form `*` of an
+  `OPTIONS` request for the whole server (RFC 9112 §3.2.4) is written as the
+  empty path, so the `Location` is `https://example.com`, the absolute-form of
+  `*`; appended as a path it made the authority `example.com*`.
 - **Query** — rebuilt from the parsed `IHttpQueryCollection` by
   `HttpQuery.Create`, which percent-encodes each key and value except for the
   unreserved characters and writes an empty value as the bare key.

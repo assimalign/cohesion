@@ -125,6 +125,25 @@ public class HttpsRedirectionTests
         context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe(expected);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should redirect an OPTIONS * request to the bare authority")]
+    [InlineData(443, "https://example.com")]
+    [InlineData(8443, "https://example.com:8443")]
+    public async Task Redirection_AsteriskFormRequest_ShouldRedirectToTheAuthority(int httpsPort, string expected)
+    {
+        // Arrange — RFC 9112 §3.2.4: "*" names the server as a whole, and its absolute-form is the
+        // authority with an empty path. Appended after the authority, it would become "example.com*".
+        IWebApplicationMiddleware middleware = BuildRedirection(options => options.HttpsPort = httpsPort);
+        TestHttpContext context = new(HttpScheme.Http, "example.com", "*");
+        context.Request.Method = HttpMethod.Options;
+
+        // Act
+        await middleware.InvokeAsync(context, Terminal);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(307);
+        context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe(expected);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should answer 400 instead of redirecting to a host it cannot name")]
     [InlineData("")]
     [InlineData("example.com:")]
