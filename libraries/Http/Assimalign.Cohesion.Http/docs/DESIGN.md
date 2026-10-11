@@ -1664,7 +1664,9 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
 `HttpStatusCode` holds one table: the IANA HTTP Status Code Registry's assigned
 codes and the phrase the registry gives each (#1204). That is RFC 9110 §15's
 phrase for every code RFC 9110 defines, and the defining RFC's for the rest,
-`226 IM Used` (RFC 3229) included.
+`226 IM Used` (RFC 3229) included. The registry lists `510` as "Not Extended
+(OBSOLETED)" since RFC 2774 moved to Historic; that annotation is not part of
+the phrase, so the table sends `510 Not Extended`.
 - **One table, read three ways.** `ReasonPhrase` returns the phrase alone,
   `ToString()` renders `200 OK` for the HTTP/1.1 status line (the transport's
   head writer and the Http.ProtocolUpgrade `101`/`200` writer), and
@@ -1675,8 +1677,13 @@ phrase for every code RFC 9110 defines, and the defining RFC's for the rest,
   "Request Entity Too Large", "Request Uri Too Long", "Requested Range Not
   Satisfiable", "Un-Processable Entity", "Http Version Not Supported"). That
   wording reached HTTP/1.1 status lines and problem titles in 10.0.0-preview.1.
-- **Left out.** The reserved `418 (Unused)`, and the registry's temporary
-  registrations, such as `104` for resumable uploads.
+- **Left out.** Reserved codes, such as `418 (Unused)` (RFC 9110 §15.5.19), and
+  the registry's temporary registrations, such as `104` for resumable uploads.
+  The reserved `306 (Unused)` (§15.4.7) is the one exception, and not on the
+  merits: the public `HttpStatusCode.Unused => 306` shipped in
+  10.0.0-preview.1, and dropping the code from the table would make that
+  accessor throw. So `306` stays valid with the registry's `(Unused)`, and
+  `Unused` is marked `[Obsolete]` to steer callers off it.
 - **Only registered codes are valid.** RFC 9110 §15 allows any three-digit code
   from 100 to 599, and a recipient treats an unknown one as the `x00` code of its
   class. `IsValid` rejects anything not in the table, so the constructor and the

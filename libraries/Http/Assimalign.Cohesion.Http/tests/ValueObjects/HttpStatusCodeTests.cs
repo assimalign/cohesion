@@ -24,7 +24,8 @@ public class HttpStatusCodeTests
 
     // The IANA HTTP Status Code Registry's assigned codes and phrases: RFC 9110 §15 for the codes it
     // defines, the defining specification for the rest (#1204). The reserved 418 and the registry's
-    // temporary registrations are left out.
+    // temporary registrations are left out; the reserved 306 stays only because the obsolete
+    // HttpStatusCode.Unused shipped in 10.0.0-preview.1.
     [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.ReasonPhrase: every registered code carries the registry's phrase")]
     [InlineData(100, "Continue")]
     [InlineData(101, "Switching Protocols")]
@@ -86,7 +87,7 @@ public class HttpStatusCodeTests
     [InlineData(506, "Variant Also Negotiates")]
     [InlineData(507, "Insufficient Storage")]
     [InlineData(508, "Loop Detected")]
-    [InlineData(510, "Not Extended")]
+    [InlineData(510, "Not Extended")] // the registry's "(OBSOLETED)" annotation is not part of the phrase
     [InlineData(511, "Network Authentication Required")]
     public void ReasonPhrase_RegisteredStatusCode_ShouldBeRegistryPhrase(int value, string expected)
     {
@@ -129,11 +130,14 @@ public class HttpStatusCodeTests
     }
 
     // 226 is registered (RFC 3229). 299 and the reserved 418 are three-digit codes RFC 9110 §15 lets a
-    // sender use, but only registered codes are known here: the documented limit of IsValid.
+    // sender use, but only assigned codes are known here: the documented limit of IsValid. The reserved
+    // 306 is known only because the obsolete HttpStatusCode.Unused shipped in 10.0.0-preview.1, and
+    // dropping it would make that accessor throw.
     [Theory(DisplayName = "Cohesion Test [Http] - HttpStatusCode.IsValid: accepts registered codes only")]
     [InlineData(200, true)]
     [InlineData(226, true)]
     [InlineData(300, true)]
+    [InlineData(306, true)]
     [InlineData(425, true)]
     [InlineData(299, false)]
     [InlineData(418, false)]

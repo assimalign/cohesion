@@ -16,9 +16,17 @@ using Assimalign.Cohesion.Internal;
 /// the registry gives it: the RFC 9110 &#167; 15 phrase for the codes RFC 9110 defines, and the
 /// defining specification's phrase for the rest (<c>102</c>, <c>103</c>, <c>207</c>, <c>208</c>,
 /// <c>226</c>, <c>423</c>&#8211;<c>425</c>, <c>428</c>, <c>429</c>, <c>431</c>, <c>451</c>,
-/// <c>506</c>&#8211;<c>508</c>, <c>510</c>, <c>511</c>). The reserved <c>418</c> and the registry's
-/// temporary registrations are not included. HTTP/1.1 writes the phrase on the status line, and
-/// HTTP/2 and HTTP/3 carry no phrase at all.
+/// <c>506</c>&#8211;<c>508</c>, <c>510</c>, <c>511</c>). The registry marks <c>510</c>
+/// "Not Extended (OBSOLETED)", after RFC 2774 moved to Historic; that annotation is not part of the
+/// phrase, so <c>510</c> carries <c>Not Extended</c>. HTTP/1.1 writes the phrase on the status line,
+/// and HTTP/2 and HTTP/3 carry no phrase at all.
+/// </para>
+/// <para>
+/// Reserved codes are not included: the reserved <c>418</c> (RFC 9110 &#167; 15.5.19) and the
+/// registry's temporary registrations are unknown. The reserved <c>306</c> (RFC 9110 &#167; 15.4.7)
+/// is the one exception: it stays known, with the registry's <c>(Unused)</c>, only because
+/// <see cref="Unused"/> shipped in 10.0.0-preview.1, and dropping the code would make that accessor
+/// throw. <see cref="Unused"/> is obsolete instead.
 /// </para>
 /// <para>
 /// Only a known code can be constructed: <see cref="IsValid(int)"/> rejects every other value. RFC 9110
@@ -56,7 +64,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
         new (303, "See Other"),
         new (304, "Not Modified"),
         new (305, "Use Proxy"),
-        new (306, "(Unused)"),
+        new (306, "(Unused)"),                          // reserved; kept only because Unused shipped in 10.0.0-preview.1
         new (307, "Temporary Redirect"),
         new (308, "Permanent Redirect"),
         // 4xx Client Error
@@ -98,7 +106,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
         new (506, "Variant Also Negotiates"),           // RFC 2295
         new (507, "Insufficient Storage"),              // RFC 4918
         new (508, "Loop Detected"),                     // RFC 5842
-        new (510, "Not Extended"),                      // RFC 2774, obsoleted
+        new (510, "Not Extended"),                      // RFC 2774 (Historic); the registry's "(OBSOLETED)" is an annotation, not phrase
         new (511, "Network Authentication Required"),   // RFC 6585
     };
 
@@ -220,6 +228,9 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     public static HttpStatusCode SeeOther => 303;
     public static HttpStatusCode NotModified => 304;
     public static HttpStatusCode UseProxy => 305;
+
+    /// <summary>Gets the reserved <c>306 (Unused)</c> (RFC 9110 &#167; 15.4.7), which no response should carry.</summary>
+    [Obsolete("306 is reserved (RFC 9110 §15.4.7) and is no longer used.")]
     public static HttpStatusCode Unused => 306;
     public static HttpStatusCode RedirectKeepVerb => 307;
     public static HttpStatusCode PermanentRedirect => 308;
@@ -268,9 +279,10 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// Checks whether the numeric <paramref name="statusCode"/> is valid.
     /// </summary>
     /// <remarks>
-    /// Only a code in the IANA registry is known, so an unregistered code inside the RFC 9110 &#167; 15
-    /// range of <c>100</c>&#8211;<c>599</c>, such as <c>299</c> or the reserved <c>418</c>, returns
-    /// <see langword="false"/>.
+    /// Only an assigned code in the IANA registry is known, so an unregistered code inside the RFC 9110
+    /// &#167; 15 range of <c>100</c>&#8211;<c>599</c>, such as <c>299</c> or the reserved <c>418</c>,
+    /// returns <see langword="false"/>. The reserved <c>306</c> returns <see langword="true"/>, only
+    /// because the obsolete <see cref="Unused"/> shipped in 10.0.0-preview.1 (see the type remarks).
     /// </remarks>
     /// <param name="statusCode">The numeric status code to validate.</param>
     /// <returns><see langword="true"/> when the supplied code is known; otherwise <see langword="false"/>.</returns>
