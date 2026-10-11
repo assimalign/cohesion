@@ -87,6 +87,37 @@ public sealed class SqlTableBuilder<TRow>
         _columnDefinitions[index] = column with { SqlType = sqlType };
     }
 
+    /// <summary>Declares a column's SQL DEFAULT literal.</summary>
+    /// <param name="selector">Selects a direct row member stored in the column.</param>
+    /// <param name="literal">
+    /// The SQL literal as written, including quotes for a string (for example <c>'pending'</c>,
+    /// <c>7</c> or <c>TRUE</c>). Pass a constant string so the <c>Sdk.Database</c> build task can read it.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="selector"/> or <paramref name="literal"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="selector"/> does not select a direct row member; <paramref name="literal"/> is
+    /// empty or white space; or the column already declares another default literal.
+    /// </exception>
+    /// <remarks>
+    /// The column is declared if it has not been mentioned yet. This package keeps the text in the
+    /// compiled document and hash without parsing SQL. The SQL engine validates it as exactly one
+    /// supported literal before it touches a file. SQL <c>NULL</c> is permitted
+    /// and has the same database behavior as an absent default.
+    /// </remarks>
+    public void Default(Expression<Func<TRow, object?>> selector, string literal)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(literal);
+        string name = AddColumn(selector);
+        int index = _columnDefinitions.FindIndex(column => column.Name == name);
+        var column = _columnDefinitions[index];
+        if (column.DefaultLiteral is not null && !string.Equals(column.DefaultLiteral, literal, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Column '{name}' is already declared with DEFAULT '{column.DefaultLiteral}'.", nameof(literal));
+        }
+
+        _columnDefinitions[index] = column with { DefaultLiteral = literal };
+    }
+
     /// <summary>Declares the table's primary key.</summary>
     /// <param name="selector">Selects the direct primary-key member.</param>
     /// <exception cref="ArgumentException"><paramref name="selector"/> does not select a direct row member.</exception>

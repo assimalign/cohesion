@@ -554,6 +554,9 @@ internal sealed class CSharpSchemaExtractor
                     break;
                 case "Column":
                     break;
+                case "Default":
+                    ExtractColumnDefault(model, operation, operationMethod, tableName, columns, selectedColumn.Name);
+                    break;
                 case "Key":
                 case "PrimaryKey":
                     if (primaryKey is not null && !string.Equals(primaryKey, selectedColumn.Name, StringComparison.Ordinal))
@@ -615,6 +618,31 @@ internal sealed class CSharpSchemaExtractor
         }
 
         columns[index] = declared with { SqlType = sqlType };
+    }
+
+    // table.Default(selector, literal): the SQL literal is preserved as written, like CHECK text.
+    // The engine validates SQL without pulling its parser into this build-time task.
+    private void ExtractColumnDefault(SemanticModel model, InvocationExpressionSyntax operation, IMethodSymbol method, string tableName,
+        List<SchemaColumnSource> columns, string columnName)
+    {
+        ExpressionSyntax? literalExpression = GetArgument(operation, method, "literal", 1);
+        string? literal = literalExpression is null ? null : ConstantString(model, literalExpression);
+        if (string.IsNullOrWhiteSpace(literal))
+        {
+            Error("COHDBSDK104", $"Column '{tableName}.{columnName}' needs its DEFAULT literal as a non-empty compile-time string constant, " +
+                "so the build can read it without executing Program.Main.", literalExpression?.GetLocation() ?? operation.GetLocation());
+            return;
+        }
+
+        int index = columns.FindIndex(column => string.Equals(column.Name, columnName, StringComparison.Ordinal));
+        SchemaColumnSource declared = columns[index];
+        if (declared.DefaultLiteral is not null && !string.Equals(declared.DefaultLiteral, literal, StringComparison.Ordinal))
+        {
+            Error("COHDBSDK105", $"Column '{tableName}.{columnName}' is already declared with DEFAULT literal '{declared.DefaultLiteral}'.", operation.GetLocation());
+            return;
+        }
+
+        columns[index] = declared with { DefaultLiteral = literal };
     }
 
     // table.Check(name, sql): both arguments compile-time string constants, read as written. The SQL
@@ -709,7 +737,7 @@ internal sealed class CSharpSchemaExtractor
         {
             if (table.Columns.Count == 0)
             {
-                Error("COHDBSDK106", $"Table '{table.Name}' must declare at least one column through Column, Key, Index, or References.", location);
+                Error("COHDBSDK106", $"Table '{table.Name}' must declare at least one column through Column, Default, Key, Index, or References.", location);
             }
             ValidateUnique(table.Columns.Select(static item => item.Name), $"column on table '{table.Name}'", location);
             ValidateUnique(table.Indexes, $"index on table '{table.Name}'", location);

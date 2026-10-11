@@ -45,16 +45,26 @@ public class CompiledSchemaTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: the canonical document and its hash are computed once")]
-    public void CanonicalDocumentAndHash_ShouldBeComputedOnce()
+    public void CanonicalDocumentAndHash_RepeatedReads_ShouldBeComputedOnce()
     {
+        // Arrange
         SqlCompiledSchema schema = CompileOrders();
+        schema.SerializationComputationCount.ShouldBe(0);
+        schema.HashComputationCount.ShouldBe(0);
 
+        // Act
         string document = schema.CanonicalDocument;
         string hash = schema.Hash;
 
-        schema.CanonicalDocument.ShouldBeSameAs(document);
-        schema.Hash.ShouldBeSameAs(hash);
-        SqlCompiledSchemaSerializer.ComputeHash(schema).ShouldBeSameAs(hash);
+        // Assert
+        for (int iteration = 0; iteration < 10; iteration++)
+        {
+            schema.CanonicalDocument.ShouldBeSameAs(document);
+            schema.Hash.ShouldBeSameAs(hash);
+            SqlCompiledSchemaSerializer.ComputeHash(schema).ShouldBeSameAs(hash);
+        }
+        schema.SerializationComputationCount.ShouldBe(1);
+        schema.HashComputationCount.ShouldBe(1);
         hash.ShouldBe(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document))));
     }
 

@@ -28,14 +28,15 @@ internal static class CompiledSchemaSourceWriter
         {
             (DatabaseType type, string? custom, int? precision, int? scale) = ResolveType(column.TypeName, customTypes);
             return column.SqlType is { } sqlType
-                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType)
+                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType, DefaultLiteral: column.DefaultLiteral)
                 : new CompiledSchemaColumn(
                     column.Name,
                     type,
                     column.IsNullable,
                     Precision: precision,
                     Scale: scale,
-                    CustomType: custom);
+                    CustomType: custom,
+                    DefaultLiteral: column.DefaultLiteral);
         }
 
         var tablesByRowType = source.Tables.ToDictionary(static table => table.RowType, StringComparer.Ordinal);

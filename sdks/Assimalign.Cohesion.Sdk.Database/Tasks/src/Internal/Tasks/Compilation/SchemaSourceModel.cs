@@ -36,7 +36,8 @@ internal sealed record SchemaTableSource(
 /// <param name="TypeName">The member's CLR type identity.</param>
 /// <param name="IsNullable">Whether the member can hold null.</param>
 /// <param name="SqlType">The SQL type <c>table.Column(selector, sqlType)</c> declares, as written; null when none does.</param>
-internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable, string? SqlType = null);
+/// <param name="DefaultLiteral">The SQL literal <c>table.Default(selector, literal)</c> declares, as written; null when none does.</param>
+internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable, string? SqlType = null, string? DefaultLiteral = null);
 
 internal sealed record SchemaReferenceSource(string Member, string TargetType);
 

@@ -22,6 +22,12 @@ not author. The internal `SqlSchemaCompiler` lowers that retained C# declaration
 opt-in, and the SQL tables, columns, keys, indexes, constraints, types, principals and
 grants.
 
+Since B2, a retained `SqlSchema` also caches its compiled result. Every builder snapshots its
+collections when its callback ends, including a principal's caller-supplied grant names; later
+builder calls cannot change the declaration. Reusing that declaration in a later engine Build
+therefore reuses the immutable compiled shape, its canonical document and its hash. Concurrent
+first compiles may duplicate the same deterministic work, as concurrent first identity reads may.
+
 **Standalone since B1** (owner decisions 50, 57 and 59 of 2026-10-09,
 `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`). `SqlCompiledSchema` used to derive the
 area root's model-agnostic `CompiledSchema`, which carried an engine `Model` and recomputed the
@@ -57,6 +63,8 @@ snapshot inputs and sort semantic sets; column order remains significant.
 `CanonicalDocument` and `Hash` are excluded from their own serialization.
 Validation rejects malformed input, unknown JSON members, an unsupported format,
 duplicate declarations, missing references, and unsupported value types.
+The owning test assembly reads internal computation counters to prove that repeated identity
+reads do not serialize or hash again. These hooks add no public or protected surface.
 
 `SqlSchemaMigrationPlanner` produces deterministic dependency-ordered operations
 and requires the declaration's destructive-change opt-in for data-losing steps.
@@ -86,6 +94,27 @@ after them, both safe and carrying the `CompiledSchemaType` (`SqlSchemaMigration
 a redefined domain is a drop and an add, and the columns declared with it change through their own
 `AlterColumn` steps. A domain is registered on the engine, not stored in the database, so a SQL
 engine renders no statement for either step.
+
+**Column defaults (B2).** `table.Default(selector, literal)` declares a column's SQL default,
+including the column if no earlier verb mentioned it. Its literal is SQL text, for example
+`"7"`, `"TRUE"`, `"'it''s ready'"` or `"NULL"`, kept as written in
+`CompiledSchemaColumn.DefaultLiteral`. It composes with `Column(selector, sqlType)`, a domain,
+a key and an index without changing column order. Repeating the same literal is harmless;
+declaring two different literals for one column fails at the second call. The text must be a
+non-blank constant for the SDK to extract it. This package validates that it is non-blank; the
+SQL engine parses exactly one supported literal before provisioning. An
+expression or a function call is not a supported DEFAULT in the current SQL dialect.
+
+The optional `defaultLiteral` member is omitted when null, so documents without defaults keep
+their format `v3` document and hash. `NULL` text remains part of a declaration's identity even
+though SQL gives it the same database behavior as an absent default. Adding or removing a
+default changes column equivalence, so the planner carries both definitions in `AlterColumn`
+instead of reporting false convergence; the current dialect still refuses that operation.
+New tables and columns carry the default into their creation steps. The SQL provisioner can
+therefore reconstruct columns with defaults after a crash, preserving the declaration's spelling
+when it denotes the persisted literal, and plan only the remaining steps. Schema snapshots also
+retain domains and their bounds, keys, unique and ordinary indexes, references and checks; SQL
+owns their catalog reconstruction. Principals and grants remain explicitly unsupported.
 
 Foreign keys and checks are executable schema metadata. The planner first creates
 all tables and their indexes, then emits `AddConstraint` operations rendered as

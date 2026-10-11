@@ -295,8 +295,9 @@ internal static class SqlSchemaCompiler
             // A column declared with a SQL type (table.Column(selector, sqlType)) keeps the name as
             // written, and the engine resolves its length, precision and scale.
             result.Add(column.SqlType is { } sqlType
-                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType)
-                : new CompiledSchemaColumn(column.Name, type, column.IsNullable, Precision: precision, Scale: scale, CustomType: custom));
+                ? new CompiledSchemaColumn(column.Name, type, column.IsNullable, CustomType: sqlType, DefaultLiteral: column.DefaultLiteral)
+                : new CompiledSchemaColumn(column.Name, type, column.IsNullable, Precision: precision, Scale: scale,
+                    CustomType: custom, DefaultLiteral: column.DefaultLiteral));
         }
 
         if (result.Count == 0)

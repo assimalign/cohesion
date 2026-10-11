@@ -115,6 +115,15 @@ invisible to the task** as functions are: a column of a domain the application r
 engine builder compiles into the artifact, and the engine's build resolves the name before it
 touches a file. `schema.Type<T>(t => t.Decimal(p, s))` is a domain named for `T`'s simple name, as
 the runtime compiler names it; a generic or array `T`, which has no such name, is `COHDBSDK106`.
+`table.Default(selector, literal)` (B2) extracts a non-empty compile-time string constant into
+the column's `DefaultLiteral`, preserving the SQL text in the canonical document and hash. It
+can select a column on its own, before or after a type declaration, including an explicit SQL
+type or an inferred domain. Repeating the same literal is idempotent; a different literal for
+that column is `COHDBSDK105`. A nonconstant, null or blank literal is `COHDBSDK104`. Like a CHECK,
+the task preserves its text without parsing SQL; the engine validates the literal before applying
+the schema. The SDK/runtime parity tests cover constant concatenation, named arguments, domains,
+type bounds, and exact document/hash equality.
+
 The diagnostics:
 
 | Code | Meaning |
@@ -123,8 +132,8 @@ The diagnostics:
 | `COHDBSDK101` | No schema declaration was found, or a database name (compared ignoring case, across every engine of the project) has more than one. |
 | `COHDBSDK102` | A name is not a non-empty constant (a CHECK's included); a `database.Schema(...)` call has no constant enclosing `AddDatabase` name; or a database name cannot name a file. |
 | `COHDBSDK103` | A schema, table, type or principal callback is not an inline lambda. |
-| `COHDBSDK104` | An operation the DSL does not support, or a CHECK whose SQL text is not a non-empty constant. |
-| `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
+| `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DEFAULT literal that is not a non-empty constant. |
+| `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, a conflicting column type or DEFAULT literal, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
 | `COHDBSDK106` | A semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
 | `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
 
