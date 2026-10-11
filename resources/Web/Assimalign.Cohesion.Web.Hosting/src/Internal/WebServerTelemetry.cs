@@ -56,9 +56,10 @@ internal static class WebServerTelemetry
     /// the transport reported that the client's request was at fault (<see cref="IWebClientFaultFeature"/>):
     /// reading its body failed on the client's side once the response had started, so the transport's
     /// own status could not replace it and the exchange was reset. The application did not fail, so it is
-    /// not <see cref="UnhandledException"/>. It also names an exchange cancelled after such a report: on
-    /// HTTP/2 and HTTP/3 the transport's answer or reset for the fault fires the exchange's cancellation,
-    /// so the client's fault, not a cancellation of its own, is how it ended (#1378).
+    /// not <see cref="UnhandledException"/>. It also names an exchange cancelled after such a report once its
+    /// response had started: on HTTP/2 and HTTP/3 the transport's answer or reset for the fault fires the
+    /// exchange's cancellation, so the client's fault, not a cancellation of its own, is how it ended (#1378).
+    /// Before the response started, the transport's own status is the outcome and no error is reported.
     /// </summary>
     public const string ClientFault = "client_fault";
 

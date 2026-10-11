@@ -625,12 +625,13 @@ public class WebServerTelemetryTests
         duration.Tags.ContainsKey("error.type").ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An HTTP/2 exchange cancelled by the reset for a client fault should report client_fault, not request_canceled")]
-    public async Task ServerSpan_Http2ExchangeCancelledByAClientFaultReset_ShouldReportClientFault()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An HTTP/2 exchange cancelled by the reset for a malformed body should report the client fault's 400 without an error")]
+    public async Task ServerSpan_Http2ExchangeCancelledByAClientFaultReset_ShouldReportTheClientFault400WithoutAnError()
     {
         // Arrange — the handler has read the body it was sent and waits on RequestCancelled, so the reset for
         // the malformed trailer section that follows reaches it as the exchange's cancellation, not as a read
-        // failure. That cancellation was the transport's answer to the client's fault (#1378).
+        // failure. That cancellation was the transport's answer to the client's fault (#1378), and the
+        // exchange ends as it does when the read meets the fault: with the 400 the transport records.
         using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
         using TelemetryRecorder recorder = new(metrics: false);
@@ -660,9 +661,49 @@ public class WebServerTelemetryTests
         Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
 
         // Assert
-        span.GetTagItem("error.type").ShouldBe("client_fault");
-        span.GetTagItem("http.response.status_code").ShouldBeNull();
-        span.Status.ShouldBe(ActivityStatusCode.Error);
+        span.GetTagItem("http.response.status_code").ShouldBe(400);
+        span.GetTagItem("error.type").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An HTTP/2 exchange cancelled after the transport answered its body 413 should report the 413 without an error")]
+    public async Task ServerSpan_Http2ExchangeCancelledAfterTheTransport413_ShouldReportThe413WithoutAnError()
+    {
+        // Arrange — the handler never reads the body and waits on RequestCancelled. The frame pump answers the
+        // over-cap body 413 itself and stops the rest of the request with RST_STREAM(NO_ERROR), which reaches
+        // the handler as the exchange's cancellation (#1378). The 413 went out; it is how the exchange ended.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new();
+
+        string path = $"/telemetry/h2-413-cancel/{Guid.NewGuid():N}";
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp2(transport, http2 => http2.Limits.MaxRequestBodySize = 16));
+        factory.Application.Use(async (context, next) => await Task.Delay(Timeout.Infinite, context.RequestCancelled));
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Http2RawClient client = await Http2RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act — no content-length, so only the running total crosses the cap.
+        await client.SendHeadersAsync(1, "POST", path, endStream: false, cancellationToken);
+        await client.SendDataAsync(1, new byte[32], endStream: false, cancellationToken);
+        Http2RawFrame answer = await client.ReadUntilAsync(frame => frame.StreamId == 1 && frame.Type == Http2RawFrame.HeadersType, cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // The span stops after the duration is recorded, so the exchange's measurement is already in.
+        RecordedMeasurement duration = recorder.Measurements.Single(
+            m => m.Instrument == "http.server.request.duration" && Equals(m.Tags.GetValueOrDefault("network.protocol.version"), "2"));
+
+        // Assert
+        answer.EndStream.ShouldBeTrue();
+        span.GetTagItem("http.response.status_code").ShouldBe(413);
+        span.GetTagItem("error.type").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+        duration.Tags.GetValueOrDefault("http.response.status_code").ShouldBe(413);
+        duration.Tags.ContainsKey("error.type").ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A malformed HTTP/3 body the transport resets the stream for should report the client fault's 400, not a 500 error")]

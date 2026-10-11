@@ -168,9 +168,12 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
                 elapsed = Stopwatch.GetElapsedTime(_startTimestamp);
             }
 
+            bool answeredClientFault = IsCancellationAnsweringClientFault();
+
             error = _result switch
             {
                 ExchangeResult.Responded => null,
+                ExchangeResult.Canceled when answeredClientFault => null,
                 ExchangeResult.Canceled when IsClientFault() => WebServerTelemetry.ClientFault,
                 ExchangeResult.Canceled => WebServerTelemetry.RequestCanceled,
                 ExchangeResult.Faulted when IsClientFault() => WebServerTelemetry.ClientFault,
@@ -180,8 +183,11 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
 
             // A status was sent when the response was, and when the application had already started a
             // streamed response before the exchange was reset. A failed send leaves it unknown: the
-            // transport marks the head committed before it writes it, so the status is not reported.
+            // transport marks the head committed before it writes it, so the status is not reported. A
+            // cancellation that was the transport's answer to a client fault carries the status the
+            // transport set on the exchange.
             if (_result == ExchangeResult.Responded
+                || answeredClientFault
                 || ((_result is ExchangeResult.Canceled or ExchangeResult.Faulted) && _exchange.HasResponseStarted))
             {
                 statusCode = _exchange.Response.StatusCode.Value;
@@ -216,9 +222,31 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
     /// as responded. The pipeline's exception was then the body read's, not the application's. A cancelled
     /// one reaches here when the cancellation was the transport's reaction to the fault: on HTTP/2 and
     /// HTTP/3 the transport answers or resets the stream for it, which fires the exchange's cancellation,
-    /// and a pipeline that observed that rather than the read's failure ends as cancelled (#1378).
+    /// and a pipeline that observed that rather than the read's failure ends as cancelled (#1378). Unless
+    /// its response had started, the transport's status then stands instead
+    /// (<see cref="IsCancellationAnsweringClientFault"/>).
     /// </summary>
     private bool IsClientFault() => _exchange.Features.Get<IWebClientFaultFeature>()?.StatusCode is not null;
+
+    /// <summary>
+    /// Whether a cancelled exchange ended in the transport's own answer to a client fault before the
+    /// application's response started (#1378). On HTTP/2 the transport answers the stream with its
+    /// <c>413</c> or <c>408</c>, or resets it for a malformed body, and either fires the exchange's
+    /// cancellation, so a pipeline awaiting something other than the body read ends as cancelled. When the
+    /// server's reset then sends into the stream, the transport sets the exchange's status to the one it
+    /// answered with, or to the <c>400</c> it records for a malformed body. That status is how the exchange
+    /// ended, the same as when the pipeline met the read's failure instead: a <c>4xx</c>, which the semantic
+    /// convention leaves unset on a server span. A status other than the fault's was not set by the
+    /// transport, and an application response that had started was cut off by the reset; both stay
+    /// <c>client_fault</c>.
+    /// </summary>
+    private bool IsCancellationAnsweringClientFault()
+    {
+        return _result == ExchangeResult.Canceled
+            && !_exchange.HasResponseStarted
+            && _exchange.Features.Get<IWebClientFaultFeature>()?.StatusCode is { } faultStatus
+            && _exchange.Response.StatusCode == faultStatus;
+    }
 
     private void Instrument(bool traced, bool timed, bool counted, FrozenSet<string>? shownQueryValues)
     {

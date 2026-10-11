@@ -376,10 +376,13 @@ trailer section, makes the request malformed on these versions, so the transport
 instead (RFC 9113 §8.1.1, RFC 9114 §4.1.2): the client gets no status, the feature reports `400`, and
 the transport sets the exchange's status to that `400` when the server's finalization sends into the
 reset stream, so the span and the access log read it rather than the `500` the server staged. The reset
-also fires `RequestCancelled`. A body read still throws the fault's `IOException`, but a pipeline that
-was awaiting something else meets the cancellation instead and ends as cancelled; the telemetry then
-reads the feature too and reports `client_fault` rather than `request_canceled`, since the cancellation
-was the transport's answer to the client's fault. On HTTP/3 a connection error the body read finds (DATA
+also fires `RequestCancelled`, and so does the `RST_STREAM(NO_ERROR)` that follows HTTP/2's own `413` or
+`408`. A body read still throws the fault's `IOException`, but a pipeline that was awaiting something else
+meets the cancellation instead and ends as cancelled. The server's reset then sends into the stream, which
+sets the exchange's status to the transport's, and the telemetry reads the feature too: before the
+application's response started, that status is how the exchange ended, so the span carries the `4xx` with
+no `error.type`, exactly as when the read met the fault; after it started, the reset cut a response off,
+and the span reports `client_fault` rather than `request_canceled`. On HTTP/3 a connection error the body read finds (DATA
 after the trailer section, a frame type a request stream may not carry, a truncated frame) closes the
 connection, and the exchange whose read found it reports `400` as well, so it ends like a malformed body.
 A client that resets its own request is not at fault on either version: the read throws the exchange's
@@ -729,7 +732,8 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | The request body contradicted its content-length or carried a malformed trailer section, and the HTTP/2 or HTTP/3 transport reset its stream before a response started (#1378) | `400`, the client fault the transport reports and sets on the exchange; nothing reached the wire | none |
 | A response was sent with a 5xx status, including the server's replacement `500` after a fault | the status | the status, for example `500` |
 | The exchange was cancelled (a peer reset or closed connection, the server stopping, `IHttpContext.Cancel`) and reset | only when a streamed response had started | `request_canceled` |
-| The exchange was cancelled by the HTTP/2 or HTTP/3 transport's answer to, or reset for, a client fault it reported (`IWebClientFaultFeature`, #1378) | only when a streamed response had started | `client_fault` |
+| The exchange was cancelled by the HTTP/2 or HTTP/3 transport's answer to, or reset for, a client fault it reported (`IWebClientFaultFeature`, #1378), before the application's response started | the transport's `400`, `408` or `413`, which it sets on the exchange when the server's reset sends into the stream | none |
+| The exchange was cancelled by that answer or reset after a streamed response had started (#1378) | the started response's status | `client_fault` |
 | The pipeline threw after its response started, or its response could not be replaced, after the transport reported a client fault (`IWebClientFaultFeature`), and the exchange was reset (#1340) | only when the response had started | `client_fault` |
 | The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
 | The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
@@ -741,7 +745,10 @@ transport's status cannot replace it and the server resets the exchange. Before,
 configured level; any client could raise it on such an endpoint. `WebExchangeTelemetry.Stop` now reads
 `IWebClientFaultFeature` for a faulted exchange, and since #1378 for a cancelled one, and reports
 `client_fault`, so `unhandled_exception` means the application's own defect again and `request_canceled`
-a cancellation that was not the transport's answer to a client fault. It reads the feature only when the
+a cancellation that was not the transport's answer to a client fault. A cancelled exchange whose response
+had not started is the exception: the transport's answer is then the whole outcome, so the span reports its
+status and no error (`IsCancellationAnsweringClientFault`, which also requires the exchange's status to be
+the fault's, so a staged status the transport never set is not reported). It reads the feature only when the
 exchange is instrumented and faulted or cancelled, so the fast path pays nothing. The span status stays `Error`, as for `request_canceled`:
 the reset cut off a response whose status (usually a `2xx`) is not how the exchange ended, and the
 semantic convention sets `Error` on a `1xx`–`3xx` span that ended in another error. The `4xx`-is-unset
@@ -1181,8 +1188,9 @@ ended with its head carries no feature; on HTTP/3, DATA after the trailer sectio
 too, and a client's `RESET_STREAM` mid-body reaches the pipeline as the exchange's cancellation, with no
 fault reported, and ends in a reset rather than a `500`. `WebServerTelemetryTests` pins that the same
 faults end the span with the transport's status (the `400` a reset records, on HTTP/2 and HTTP/3), no
-`error.type` and an unset status, that an HTTP/2 exchange the fault's reset cancels reports
-`client_fault`, and that an HTTP/3 request the client resets mid-body reports `request_canceled`.
+`error.type` and an unset status, that an HTTP/2 exchange the fault's reset or the transport's `413`
+cancels before its response started reports that `400` or `413` the same way, and that an HTTP/3 request
+the client resets mid-body reports `request_canceled`.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
