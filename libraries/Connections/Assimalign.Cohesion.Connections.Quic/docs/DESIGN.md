@@ -135,7 +135,13 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
      connection close MUST fail the connection with
      `H3_CLOSED_CRITICAL_STREAM`. Disposing them after `CloseAsync`
      releases pipes and handles without putting stream-level frames on
-     the wire. This ordering is the driver-level guarantee that lets the
+     the wire. All remaining disposals start together and share a second
+     `CloseDeliveryTimeout` bound, including bidirectional streams
+     still delivering and streams accepted after the first snapshot.
+     Repeated disposal waits for the same native release, so no separate
+     unbounded sweep retries that wait afterward; native connection
+     disposal finishes teardown (#1424).
+     This ordering is the driver-level guarantee that lets the
      HTTP/3 layer tear down without a per-stream shutdown protocol.
 - **`Abort` (immediate)** — synchronous; fires the connection close
   (fire-and-forget, observing its own faults) and cancels
@@ -158,9 +164,29 @@ learns that the peer abandoned the stream without reading or writing,
 which is how an HTTP/3 server fires `RequestCancelled` for a request the
 client cancelled.
 
-Stream and connection dispose are idempotent, and each stream untracks
-itself from the owning connection through a dispose callback, so
-connection teardown and individual stream disposal can race safely.
+Stream and connection dispose are idempotent. Once the background
+`QuicStream` release finishes, the driver untracks its wrapper and reports
+`StreamClosed` exactly once (#1424), whether it was released by completing
+both usable halves or by explicit disposal. Until that release finishes it
+stays tracked, so connection teardown still waits for delivery within
+`CloseDeliveryTimeout`. Completing just one half neither untracks the stream
+nor changes its state or cancellation signal; completing both halves still
+leaves those signals alone. Explicit abort/disposal retains its existing
+state and cancellation behavior. Aborting a stream also starts its pipe and native
+cleanup, so reset requests do not retain wrappers either. Concurrent disposals
+wait for the same native release instead of skipping a delivery already in progress.
+
+The driver owns this transition rather than asking HTTP/3 to await stream
+disposal: every protocol that completes both halves needs the same release,
+and waiting in an exchange would bypass the connection's delivery bound.
+This fixes preview.1's retention of one wrapper (pipes, CTS and TCS) per
+request until connection teardown. A remote unauthenticated client can
+retain managed memory by repeatedly requesting on one opt-in HTTP/3
+connection (CWE-401; availability impact). The current-streams gauge now
+falls at release instead of remaining inflated until connection teardown;
+that diagnostic behavior change is recorded against preview.1 on decision
+15's terms.
+
 Close failures during teardown (`QuicException` — peer already gone,
 `ObjectDisposedException` — abort raced dispose) are swallowed: teardown
 must converge, not throw. Pipe completion during stream dispose

@@ -4372,12 +4372,33 @@ With request bodies read lazily, the FIN is also where the request direction is 
 If the request was not read to its end and its FIN has not already arrived, the send path
 refuses the remainder with `STOP_SENDING(H3_NO_ERROR)` through the stream's code-carrying
 abort, then ends the response, then releases the request stream's input (see "Request
-streams: dispatch at HEADERS, lazy body"). The order matters on the QUIC driver: completing the stream's
-`Output` releases the whole QUIC stream, so nothing can be read after the FIN, and a
-request direction still open when the stream is released is stopped with the driver's
-default code instead of `H3_NO_ERROR`. A buffered response, a streamed response
+streams: dispatch at HEADERS, lazy body"). Since #1330 completing `Output` ends only
+the sending half; completing `Input` then allows the background QUIC stream release.
+Refusing the remainder first still selects `H3_NO_ERROR` instead of the driver's
+default code. A buffered response, a streamed response
 (`CompleteFramedAsync`), a transport-written rejection, and the end of an extended
 CONNECT tunnel all refuse before their FIN.
+
+### Releasing completed request streams (#1424)
+
+The HTTP/3 engine continues to complete both request-stream halves. The QUIC
+driver owns removal from its tracked stream collection and reports `StreamClosed`
+once its background `QuicStream` disposal finishes. HTTP/3 does not await per-stream
+delivery at exchange completion: a peer withholding delivery must remain subject
+to the connection's `CloseDeliveryTimeout`. A stream still delivering stays tracked,
+so teardown retains its FIN-before-`CONNECTION_CLOSE` ordering. Single-half completion
+and its cancellation/state behavior are unchanged. Disposing an exchange also starts
+observed background disposal of its stream after exchange cleanup, covering a host
+that never called `SendAsync` and a peer reset. The connection still owns the bounded
+delivery wait, including a stream disposal already started by the exchange.
+
+Preview.1 retained each wrapper until the connection closed, even after both pipes
+completed. Repeated unauthenticated requests on a long-lived opt-in HTTP/3 connection
+could therefore grow retained managed memory (CWE-401). The driver's current-streams
+gauge now falls as requests are released; this diagnostic behavior change against
+preview.1 follows decision 15. The in-memory driver already keeps no collection of
+accepted streams; tests pin HTTP/3's half completion there and verify real QUIC
+request-stream release and the gauge separately.
 
 ### A client's cancellation fires `RequestCancelled` (#1329)
 

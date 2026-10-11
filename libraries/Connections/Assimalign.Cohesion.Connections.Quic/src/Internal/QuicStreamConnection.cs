@@ -203,6 +203,10 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
 
         CancelConnectionClosedToken();
         ReportClosed();
+
+        // An abort ends the stream, including any pending pipe operation. Release its pipes and native
+        // handle too: a protocol need not keep an aborted wrapper alive until connection teardown.
+        _ = DisposeAsync();
     }
 
     /// <inheritdoc />
@@ -240,20 +244,44 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
+        bool completePipes;
         lock (_stateLock)
         {
-            if (_isDisposed)
-            {
-                return;
-            }
-
+            completePipes = !_isDisposed;
             _isDisposed = true;
         }
 
+        if (!completePipes)
+        {
+            // The first disposer may still be flushing. Do not start native release ahead of it, and
+            // do not let connection teardown close before its FIN has reached the peer.
+            await _streamReleased.Task.ConfigureAwait(false);
+        }
+        else
+        {
+            CompletePipes();
+
+            // Completing the last open half starts release. Wait for that same native shutdown before
+            // completing disposal; the owning connection bounds delivery with CloseDeliveryTimeout.
+            await ReleaseStream().ConfigureAwait(false);
+        }
+
+        CancelConnectionClosedToken();
+
+        lock (_stateLock)
+        {
+            if (_state != ConnectionState.Aborted)
+            {
+                _state = ConnectionState.Closed;
+            }
+        }
+    }
+
+    private void CompletePipes()
+    {
         try
         {
             Output.Complete();
-            Input.Complete();
         }
         catch (InvalidOperationException)
         {
@@ -267,24 +295,17 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
             // closed — routine for streams released after their owning connection closed.
         }
 
-        // Completing the last open half has started the release; a half whose completion threw has not,
-        // so the release is started here too. Either way this waits for it, as the owning connection's
-        // disposal needs: a bidirectional stream's FIN and data are delivered before the connection closes.
-        // The wait ends once the peer has the data, or once the stream ends otherwise, the connection's close
-        // included; the connection bounds how long its own disposal waits (CloseDeliveryTimeout).
-        await ReleaseStream().ConfigureAwait(false);
-
-        CancelConnectionClosedToken();
-
-        _onDisposed(this);
-        ReportClosed();
-
-        lock (_stateLock)
+        try
         {
-            if (_state != ConnectionState.Aborted)
-            {
-                _state = ConnectionState.Closed;
-            }
+            Input.Complete();
+        }
+        catch (InvalidOperationException)
+        {
+            // A pending read was ended by the abort or connection teardown.
+        }
+        catch (IOException)
+        {
+            // An output failure must not skip releasing the input pipe.
         }
     }
 
@@ -396,6 +417,10 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         }
         finally
         {
+            // Both halves have ended and native shutdown has finished. Keeping the wrapper tracked
+            // beyond here retains its pipes and cancellation state for the life of the connection.
+            _onDisposed(this);
+            ReportClosed();
             _streamReleased.TrySetResult();
         }
     }

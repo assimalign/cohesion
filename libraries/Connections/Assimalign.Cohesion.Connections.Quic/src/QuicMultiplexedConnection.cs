@@ -126,6 +126,8 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     /// <inheritdoc />
     public override CancellationToken ConnectionClosed => _connectionClosedSource.Token;
 
+    internal int TrackedStreamCount => _streams.Count;
+
     /// <inheritdoc />
     /// <exception cref="ObjectDisposedException">Thrown when the connection has been disposed.</exception>
     public override async ValueTask<Connection> AcceptStreamAsync(CancellationToken cancellationToken = default)
@@ -212,7 +214,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         // withholds stream credit while keeping the connection alive never does. So every bidirectional
         // stream is disposed at once and the waits share one bound, CloseDeliveryTimeout; a stream still
         // delivering when it runs out is ended by the close below, which completes its disposal.
-        Task? deliveries = DisposeBidirectionalStreams();
+        Task? deliveries = DisposeStreams(bidirectionalOnly: true);
 
         if (deliveries is not null)
         {
@@ -221,18 +223,14 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
 
         await CloseConnectionAsync(_defaultCloseErrorCode).ConfigureAwait(false);
 
-        // The close ended any stream still delivering; let its disposal finish before the rest is released.
-        // Bounded too, so a stream that never reports its end cannot hold the teardown.
-        if (deliveries is not null)
+        // The close ended any stream still delivering. Release the remaining streams together,
+        // including streams accepted after the first snapshot, within a second shared bound. Repeated
+        // stream disposal waits for the same native release, so an unbounded final sweep would
+        // undo the delivery timeout. Unidirectional streams are touched only after the close.
+        Task? remaining = DisposeStreams(bidirectionalOnly: false);
+        if (remaining is not null)
         {
-            await WaitForDeliveryAsync(deliveries).ConfigureAwait(false);
-        }
-
-        // The connection is closed; disposing the remaining (unidirectional) streams releases
-        // their pipes and handles without putting stream-level frames on the wire.
-        foreach (QuicStreamConnection stream in _streams.Values)
-        {
-            await stream.DisposeAsync().ConfigureAwait(false);
+            await WaitForDeliveryAsync(remaining).ConfigureAwait(false);
         }
 
         await _connection.DisposeAsync().ConfigureAwait(false);
@@ -314,16 +312,15 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         _streams.TryRemove(stream.Id, out _);
     }
 
-    // Starts the disposal of every tracked bidirectional stream without waiting for any, so their deliveries
-    // run concurrently; returns the task that completes once all of them are disposed, or null when there is
-    // none.
-    private Task? DisposeBidirectionalStreams()
+    // Starts stream disposals without waiting for any, so their waits share one timeout. Before the
+    // connection closes only bidirectional streams may end; afterward every remaining stream is released.
+    private Task? DisposeStreams(bool bidirectionalOnly)
     {
         List<Task>? disposals = null;
 
         foreach (QuicStreamConnection stream in _streams.Values)
         {
-            if (stream.Direction == ConnectionDirection.Bidirectional)
+            if (!bidirectionalOnly || stream.Direction == ConnectionDirection.Bidirectional)
             {
                 (disposals ??= []).Add(stream.DisposeAsync().AsTask());
             }
@@ -332,8 +329,8 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         return disposals is null ? null : Task.WhenAll(disposals);
     }
 
-    // Waits for the bidirectional streams' disposal for at most CloseDeliveryTimeout. Running out of time is
-    // not a failure: the caller closes the connection, which ends every stream still delivering.
+    // Waits for a group of stream disposals for at most CloseDeliveryTimeout. Running out of time is
+    // not a failure: native connection teardown supersedes any stream shutdown still in progress.
     private async Task WaitForDeliveryAsync(Task deliveries)
     {
         if (deliveries.IsCompleted)

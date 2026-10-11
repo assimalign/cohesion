@@ -14,10 +14,13 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Connections.Quic.Internal;
+
 namespace Assimalign.Cohesion.Connections.Quic.Tests;
 
 // Every test gates on QuicListener.IsSupported and no-ops where the platform lacks a QUIC
 // implementation (for example, a missing libmsquic); xunit 2.x has no runtime skip.
+[Collection(nameof(EventSourceCollection))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -676,6 +679,146 @@ public class QuicMultiplexedConnectionTests
             serverStream.State.ShouldBe(ConnectionState.Open);
             serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
             clientStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Stream abort: Repeated reset exchanges should release tracked streams while the connection stays open")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Abort_RepeatedResetExchanges_ShouldReleaseTrackedStreams(bool codedReset)
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — HTTP/3 resets both stream directions before aborting the request wrapper.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        QuicMultiplexedConnection server = pair.Server.ShouldBeOfType<QuicMultiplexedConnection>();
+        int streamsBaseline = server.TrackedStreamCount;
+        long gaugeBaseline = QuicConnectionEventSource.Log.CurrentStreams;
+
+        for (int exchange = 0; exchange < 6; exchange++)
+        {
+            (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+            try
+            {
+                // Act — the request ends without completing the aborted input pipe.
+                long errorCode = sentinelStreamErrorCode;
+                if (codedReset)
+                {
+                    errorCode = 0x10c;
+                    IMultiplexedStreamAbort abort = serverStream.ShouldBeAssignableTo<IMultiplexedStreamAbort>();
+                    abort.AbortRead(errorCode);
+                    abort.AbortWrite(errorCode);
+                }
+
+                serverStream.Abort();
+                QuicException reset = await Should.ThrowAsync<QuicException>(async () =>
+                    await clientStream.Input.ReadAsync(cancellation.Token));
+                reset.QuicError.ShouldBe(QuicError.StreamAborted);
+                reset.ApplicationErrorCode.ShouldBe(errorCode);
+                await clientStream.DisposeAsync();
+
+                for (int attempt = 0; attempt < 200 && server.TrackedStreamCount != streamsBaseline; attempt++)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(10), cancellation.Token);
+                }
+
+                // Assert — no connection-owned wrapper survives the reset, and explicit disposal is optional.
+                server.TrackedStreamCount.ShouldBe(streamsBaseline);
+                QuicConnectionEventSource.Log.CurrentStreams.ShouldBe(gaugeBaseline);
+                serverStream.State.ShouldBe(ConnectionState.Aborted);
+                serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+                server.State.ShouldBe(ConnectionState.Open);
+            }
+            finally
+            {
+                await serverStream.DisposeAsync();
+                await clientStream.DisposeAsync();
+            }
+
+            QuicConnectionEventSource.Log.CurrentStreams.ShouldBe(gaugeBaseline);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream completion: Repeated exchanges should release tracked streams and restore the gauge without disposal")]
+    public async Task CompleteHalves_RepeatedExchanges_ShouldReleaseTrackedStreamsAndRestoreGauge()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — each request and response uses one bidirectional stream on the same connection.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        QuicMultiplexedConnection client = pair.Client.ShouldBeOfType<QuicMultiplexedConnection>();
+        QuicMultiplexedConnection server = pair.Server.ShouldBeOfType<QuicMultiplexedConnection>();
+        int clientBaseline = client.TrackedStreamCount;
+        int serverBaseline = server.TrackedStreamCount;
+        long streamsBaseline = QuicConnectionEventSource.Log.CurrentStreams;
+
+        for (int exchange = 0; exchange < 6; exchange++)
+        {
+            (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+            try
+            {
+                // Act — complete each pipe as HTTP/3 does, without disposing either wrapper.
+                await clientStream.Output.CompleteAsync();
+                ReadResult requestEnd = await serverStream.Input.ReadAsync(cancellation.Token);
+                serverStream.Input.AdvanceTo(requestEnd.Buffer.End);
+                requestEnd.IsCompleted.ShouldBeTrue();
+                requestEnd.Buffer.IsEmpty.ShouldBeTrue();
+                await serverStream.Input.CompleteAsync();
+
+                // A completed receiving half alone must leave the response available and tracked.
+                server.TrackedStreamCount.ShouldBe(serverBaseline + 1);
+                client.TrackedStreamCount.ShouldBe(clientBaseline + 1);
+                QuicConnectionEventSource.Log.CurrentStreams.ShouldBe(streamsBaseline + 2);
+
+                byte[] response = [(byte)exchange];
+                await serverStream.Output.WriteAsync(response, cancellation.Token);
+                await serverStream.Output.CompleteAsync();
+                (await ReadBytesAsync(clientStream.Input, response.Length, cancellation.Token)).ShouldBe(response);
+                ReadResult responseEnd = await clientStream.Input.ReadAsync(cancellation.Token);
+                clientStream.Input.AdvanceTo(responseEnd.Buffer.End);
+                responseEnd.IsCompleted.ShouldBeTrue();
+                responseEnd.Buffer.IsEmpty.ShouldBeTrue();
+                await clientStream.Input.CompleteAsync();
+
+                // Releasing QuicStream waits in the background for the FIN acknowledgement.
+                for (int attempt = 0; attempt < 200 &&
+                    (server.TrackedStreamCount != serverBaseline || client.TrackedStreamCount != clientBaseline ||
+                     QuicConnectionEventSource.Log.CurrentStreams != streamsBaseline); attempt++)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(10), cancellation.Token);
+                }
+
+                // Assert — each exchange restores the baseline while the connection remains usable.
+                server.TrackedStreamCount.ShouldBe(serverBaseline);
+                client.TrackedStreamCount.ShouldBe(clientBaseline);
+                QuicConnectionEventSource.Log.CurrentStreams.ShouldBe(streamsBaseline);
+                serverStream.State.ShouldBe(ConnectionState.Open);
+                clientStream.State.ShouldBe(ConnectionState.Open);
+                serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+                clientStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+                server.State.ShouldBe(ConnectionState.Open);
+                client.State.ShouldBe(ConnectionState.Open);
+            }
+            finally
+            {
+                await serverStream.DisposeAsync();
+                await clientStream.DisposeAsync();
+            }
+
+            // A later explicit disposal cannot report a second close or decrement the gauge again.
+            QuicConnectionEventSource.Log.CurrentStreams.ShouldBe(streamsBaseline);
         }
     }
 

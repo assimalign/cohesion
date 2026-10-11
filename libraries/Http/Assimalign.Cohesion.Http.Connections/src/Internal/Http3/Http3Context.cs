@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -167,9 +169,32 @@ internal sealed class Http3Context : TransportHttpContext
     /// Ends the exchange on its connection, then disposes it. A host that never finalizes the exchange
     /// through <c>SendAsync</c> still lets the connection fall idle by disposing it (#1085).
     /// </summary>
-    public override ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
-        Connection?.EndExchange(this);
-        return base.DisposeAsync();
+        try
+        {
+            Connection?.EndExchange(this);
+            await base.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // A host may dispose without sending, or after a failed send. Release that stream too,
+            // after the exchange's cleanup. Do not await peer delivery here: the multiplexed
+            // connection owns the delivery wait and its CloseDeliveryTimeout (#1424).
+            _ = ReleaseRequestStreamAsync();
+        }
+    }
+
+    private async Task ReleaseRequestStreamAsync()
+    {
+        try
+        {
+            await StreamConnection.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or ConnectionException
+            or InvalidOperationException or OperationCanceledException)
+        {
+            // Teardown is best effort when the stream or its connection has already ended.
+        }
     }
 }
