@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,6 +18,40 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// </summary>
 public class WebApplicationPipelineTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Pipeline: Middleware registration after build names the closed pipeline")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Use_AfterPipelineBuild_ShouldThrowWithCause(int overload)
+    {
+        // Arrange
+        await using WebApplication application = WebApplication.CreateBuilder().Build();
+        IWebApplicationPipelineBuilder pipeline = application;
+        pipeline.Use(next => next);
+        pipeline.Build();
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() =>
+        {
+            switch (overload)
+            {
+                case 0:
+                    application.Use((context, next) => next(context));
+                    break;
+                case 1:
+                    pipeline.Use(next => next);
+                    break;
+                default:
+                    pipeline.Use((context, next) => next);
+                    break;
+            }
+        });
+
+        // Assert
+        failure.Message.ShouldContain("pipeline", Case.Sensitive);
+        failure.Message.ShouldContain("built", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Pipeline: A cancelled token keeps the middleware from starting")]
     public void ExecuteAsync_WithCancelledToken_ShouldReturnCanceledTaskWithoutRunningMiddleware()
     {

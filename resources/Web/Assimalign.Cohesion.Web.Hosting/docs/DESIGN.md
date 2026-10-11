@@ -962,6 +962,12 @@ also fails during rollback. The generic host owns this guarantee; Web needs no s
 workaround. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
 observe cancellation through `RequestCancelled`.
 
+**Late middleware registration fails (#1078).** Once the pipeline has been built, every
+`WebApplication.Use` / `IWebApplicationPipelineBuilder.Use` overload throws
+`InvalidOperationException` explaining that the pipeline is already built. Register middleware
+before starting the application (or explicitly building its pipeline). This is a behavioral
+break from 10.0.0-preview.1, which accepted the registration but never executed it.
+
 ### Sizing each exchange's feature collection (owner decision 36, #1381)
 
 Stamping used to grow each exchange's feature collection. Its dictionary starts with three slots and

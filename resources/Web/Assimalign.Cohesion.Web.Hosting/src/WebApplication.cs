@@ -136,6 +136,8 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     {
         ArgumentNullException.ThrowIfNull(middleware);
 
+        InvalidOperationException.ThrowIf(_isBuilt, "Middleware cannot be added because the web pipeline has already been built.");
+
         _middleware.Add(middleware);
 
         return this;

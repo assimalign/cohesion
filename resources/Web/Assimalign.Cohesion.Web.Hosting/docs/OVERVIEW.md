@@ -26,6 +26,9 @@ its own failures — a listener that cannot bind, a connection fault, a drain th
 short — through `builder.Logging`, never with request content. Disposing the application
 disposes the service provider and every factory-created service.
 
+Register middleware with `Use` before starting the application or explicitly building its
+pipeline. A later `Use` throws `InvalidOperationException` because the pipeline is already built.
+
 Every listener the default server composes gets four interceptors before any of the application's
 own: the request limits, the HTTP/1.1 protocol upgrade, the HTTP/2 and HTTP/3 extended
 CONNECT, and the client fault. The first surfaces the body-size cap and the minimum request-body and
