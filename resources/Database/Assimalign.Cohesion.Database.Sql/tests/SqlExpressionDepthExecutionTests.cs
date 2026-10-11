@@ -50,6 +50,13 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 {
     private const int Limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
     private const int Hostile = 200_000;
+
+    /// <summary>
+    /// A LIKE depth no runtime-sized thread holds: at the 40 or more bytes a level optimized code
+    /// spends, a million levels need 40 MB, five times the 8 MB Linux default. The statement text
+    /// stays near 3 MB, under the protocol's 16 MB frame.
+    /// </summary>
+    private const int HostileOnAnyThread = 1_000_000;
     private const string StatementTooComplex = "COHSQLE004";
 
     /// <summary>The depth of the trees the near-stack-limit walks use: well inside the runtime's reserve.</summary>
@@ -687,6 +694,11 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// LIKE matching recursed once per wildcard it backtracked through, so a long enough pattern
     /// over a long enough value overflowed the stack from data alone. It now fails its statement.
     /// </summary>
+    /// <remarks>
+    /// The statement runs on a 1 MB thread. On a thread the runtime sizes, optimized code fits
+    /// about 40 to 65 bytes a level, so the 8 MB Linux default can hold 200,000 levels and the
+    /// match completed on Ubuntu CI once the suite ran without tiering.
+    /// </remarks>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a LIKE match deeper than the stack fails its statement with COHSQLE004")]
     public async Task ExecuteAsync_DeepLikeMatch_ShouldFailWithStatementTooComplex()
     {
@@ -700,10 +712,11 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         };
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(() =>
-            session.ExecuteAsync("SELECT id FROM t WHERE @value LIKE @pattern", parameters).AsTask());
+        var outcome = RunOnThread(1024, () =>
+            session.ExecuteAsync("SELECT id FROM t WHERE @value LIKE @pattern", parameters).AsTask().GetAwaiter().GetResult());
 
         // Assert
+        var failure = outcome.Failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
         AssertStatementTooComplex(failure);
         (await ScalarAsync(session, "SELECT id FROM t WHERE 'abc' LIKE '%b%'")).ShouldBe(1);
     }
@@ -1058,6 +1071,11 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>A LIKE match that runs out of stack is an ExecutionFailure on the wire, and the session stays ready.</summary>
+    /// <remarks>
+    /// The server runs the statement on a thread the runtime sizes, so the depth must exceed any
+    /// such thread (<see cref="HostileOnAnyThread"/>): at 200,000 levels the match completed on
+    /// Ubuntu CI, whose 8 MB threads fit it once the suite ran without tiering.
+    /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a LIKE match deeper than the stack is an ExecutionFailure that keeps the session")]
     public async Task Wire_DeepLikeMatch_ShouldReturnExecutionFailureAndKeepSession()
     {
@@ -1065,7 +1083,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var harness = await ServerTestHarness.StartAsync();
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
-        string sql = $"SELECT id FROM users WHERE '{new string('a', Hostile)}' LIKE '{string.Concat(Enumerable.Repeat("%a", Hostile))}'";
+        string sql = $"SELECT id FROM users WHERE '{new string('a', HostileOnAnyThread)}' LIKE '{string.Concat(Enumerable.Repeat("%a", HostileOnAnyThread))}'";
 
         // Act
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
