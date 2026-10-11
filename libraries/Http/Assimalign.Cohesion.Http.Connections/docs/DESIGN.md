@@ -2503,6 +2503,17 @@ it already set the transport's own `413` or `408` (HTTP/2's `AdoptTransportRespo
 access log read the exchange's status after the send, so without it they recorded a `500` for a request
 the client got wrong.
 
+On HTTP/2 the frame pump finds the malformed body, fails the body pipe, and only then writes the
+`RST_STREAM`; the stream counts as reset once that write is done. Failing the pipe wakes the reader on
+another thread, so the application's failed read could unwind, and its host's `500` reach `SendAsync`,
+while the reset still waited for the write gate: the send claimed the stream and wrote the `500`, and the
+reset followed it. The Web host's end-to-end test caught a `500` head on the wire about one run in
+three. The pump now takes the stream's final response before it fails the pipe (`FailMalformedBody`,
+through `TryClaimResponseForRejection` with `400`), as it does for its own `413`: `SendAsync` finds the
+stream answered by the transport, writes nothing, and adopts the `400`. An application response already
+under way keeps its claim, and the reset cuts it off. HTTP/3 needs no claim: its body is read on the
+application's own read, which resets the stream before it throws.
+
 ### The body signal for a host's gate
 
 The control exists only in the response phase. `HttpExchangeInterceptorRequestContext.CanHaveBody`

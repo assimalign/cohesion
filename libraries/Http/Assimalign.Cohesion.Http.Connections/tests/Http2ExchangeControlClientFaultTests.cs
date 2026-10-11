@@ -123,6 +123,37 @@ public class Http2ExchangeControlClientFaultTests
         peer.Output.ForStream(1).Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.ProtocolError);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Client Fault: The application's response should not start on a stream the transport is resetting for a malformed body")]
+    public async Task SendAsync_WhileMalformedBodyResetIsPending_ShouldNotStartTheApplicationResponse()
+    {
+        // Arrange — the server's output stalls once the request is dispatched, so the frame pump's
+        // RST_STREAM for the malformed body waits in its write, the stream not yet marked reset, while the
+        // application's failed read unwinds and its host sends the 500 it staged for the failure.
+        StallingConnection? transport = null;
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(decorate: inner => transport = new StallingConnection(inner));
+        await peer.SendHeadersAsync(1, endStream: false, Http2TestPeer.Request("POST", "/upload", ("content-length", "100")));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        await peer.SyncAsync();
+        transport!.Writer.Stall();
+
+        // Act — the stream ends after 5 of the 100 declared octets.
+        await peer.SendDataAsync(1, Encoding.ASCII.GetBytes("hello"), endStream: true);
+        Exception? failure = await TryReadToEndAsync(exchange.Request.Body);
+        exchange.Response.StatusCode = HttpStatusCode.InternalServerError;
+        await peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert — the transport already owned the stream's response: the send wrote nothing and left the
+        // client fault's 400, and once the output drains, the reset is all the client sees on the stream.
+        failure.ShouldBeOfType<IOException>();
+        exchange.HasResponseStarted.ShouldBeFalse();
+        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+
+        transport.Writer.Grant(1 << 20);
+        await WaitForResetAsync(peer, streamId: 1);
+        await peer.SyncAsync();
+        peer.Output.ForStream(1).ShouldNotContain(frame => frame.IsHeaders);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Client Fault: A well-formed body should report no client fault")]
     public async Task ClientFaultStatusCode_OnWellFormedBody_ShouldReportNull()
     {

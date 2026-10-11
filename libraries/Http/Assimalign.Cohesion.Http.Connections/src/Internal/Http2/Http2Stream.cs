@@ -38,8 +38,9 @@ internal sealed class Http2Stream
 {
     // _responseOwner values. RFC 9113 §8.1 — a stream carries exactly one final response, written
     // either by the application or, when the transport rejects the request itself (413 or 408), by the
-    // transport. A transport claim stores the status the transport answers with, a 4xx and so never
-    // one of these two values, which keeps the claim and its status a single atomic write.
+    // transport; the transport also claims it, recording 400, for a stream it resets as malformed (#1378),
+    // so no response starts there. A transport claim stores the status the transport answers with, a 4xx
+    // and so never one of these two values, which keeps the claim and its status a single atomic write.
     private const int responseOwnerNone = 0;
     private const int responseOwnerApplication = 1;
 
@@ -108,7 +109,8 @@ internal sealed class Http2Stream
 
     // Who owns this stream's final response (the responseOwner* constants, or the transport's status):
     // the application claims it when its buffered send or streaming head commit starts the final
-    // response; the transport claims it only to answer a request it rejects itself. The frame pump, the
+    // response; the transport claims it only to answer a request it rejects itself, or to reset a malformed
+    // one. The frame pump, the
     // body reader and the application race for the claim, so it is taken with Interlocked.
     private int _responseOwner;
 
@@ -365,14 +367,16 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Whether the transport claimed the stream's final response to answer a request it rejected
-    /// itself (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>). The application's response
-    /// for such an exchange is never written.
+    /// itself (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>), or to reset a malformed one
+    /// (<c>400</c>, nothing written, #1378). The application's response for such an exchange is never
+    /// written.
     /// </summary>
     public bool IsAnsweredByTransport => Volatile.Read(ref _responseOwner) > responseOwnerApplication;
 
     /// <summary>
-    /// The status the transport answers the stream with when it claimed the final response itself
-    /// (<see cref="TryClaimResponseForRejection"/>), or <see langword="null"/> when it did not. Set with
+    /// The status the transport answers the stream with, or records for a stream it resets as malformed,
+    /// when it claimed the final response itself (<see cref="TryClaimResponseForRejection"/>), or
+    /// <see langword="null"/> when it did not. Set with
     /// the claim, so it is never missing once <see cref="IsAnsweredByTransport"/> is <see langword="true"/>.
     /// </summary>
     public HttpStatusCode? TransportResponseStatusCode
@@ -446,9 +450,12 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Claims the stream's final response for the transport, to answer a request it rejects itself
-    /// with <paramref name="statusCode"/> (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>).
+    /// with <paramref name="statusCode"/> (<c>413 Content Too Large</c> or <c>408 Request Timeout</c>),
+    /// or, with <c>400 Bad Request</c>, to keep the application's response off a stream it resets for a
+    /// malformed body (#1378): nothing is written for that one, and the status is what the exchange
+    /// records.
     /// </summary>
-    /// <param name="statusCode">The status the transport answers with; a <c>4xx</c>.</param>
+    /// <param name="statusCode">The status the transport answers with, or records; a <c>4xx</c>.</param>
     /// <returns>
     /// <see langword="true"/> when the transport now owns the final response;
     /// <see langword="false"/> when the application already started its own, or the transport already
@@ -664,7 +671,7 @@ internal sealed class Http2Stream
         {
             // A malformed request is the client's fault (#1378), reported as the 400 HTTP/1.1 answers a
             // malformed trailer section with; the stream is reset instead (RFC 9113 §8.1.1).
-            FailBody(LatchClientFault(HttpStatusCode.BadRequest, new IOException(exception.Message, exception)));
+            FailMalformedBody(new IOException(exception.Message, exception));
             throw new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, exception.Message);
         }
 
@@ -695,8 +702,24 @@ internal sealed class Http2Stream
             ? $"The HTTP/2 request on stream {StreamId} is malformed: its DATA frames exceed its content-length of {declared} octets (RFC 9113 §8.1.1)."
             : $"The HTTP/2 request on stream {StreamId} is malformed: the stream ended after {_requestBodyReceived} of the {declared} octets its content-length declared (RFC 9113 §8.1.1).";
 
-        FailBody(LatchClientFault(HttpStatusCode.BadRequest, new IOException(message)));
+        FailMalformedBody(new IOException(message));
         return new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, message);
+    }
+
+    /// <summary>
+    /// Fails the body of a request the frame pump found malformed, which it then resets with
+    /// <c>PROTOCOL_ERROR</c> (RFC 9113 §8.1.1). The transport first takes the stream's final response,
+    /// recording the client fault's <c>400</c> (<see cref="TryClaimResponseForRejection"/>), and latches
+    /// the fault (#1378): failing the body wakes the reader on another thread, and until the reset is on
+    /// the wire nothing else would keep the application's response — a host's <c>500</c> for the failed
+    /// read among them — from starting on a stream the transport is about to reset. An application
+    /// response already under way keeps its claim, and the reset cuts it off.
+    /// </summary>
+    /// <param name="failure">The failure every read of the body throws from now on.</param>
+    private void FailMalformedBody(IOException failure)
+    {
+        TryClaimResponseForRejection(HttpStatusCode.BadRequest);
+        FailBody(LatchClientFault(HttpStatusCode.BadRequest, failure));
     }
 
     private void CompleteHeaderBlock()
