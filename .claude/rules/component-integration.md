@@ -58,11 +58,15 @@ product through the `Func<>` sink (always disposal-safe):
     Contract = typeof(IThing))]
 ```
 
-The projected verb is `AddThing(Action<ThingBuilder> configure)`. **Do not create a
+The projected verb is `AddThing(Action<ThingBuilder>? configure = null)`. The callback is optional
+(owner decision 39, 2026-10-10, #1395): `AddThing()` and `AddThing(null)` build the builder's
+defaults, so a verb callers invoke bare is a builder template too. **Do not create a
 `XxxComponents` factory class when the builder template can express the integration** — the whole
 point of the instance shape is that the integration adds nothing to the library's public API
-(precedent: `Http.ClientFactory`, whose `HttpClientFactoryComponents` class was deleted in favor
-of declaring `HttpClientFactoryBuilder.Build`).
+beyond the builder (precedent: `Http.ClientFactory`, whose `HttpClientFactoryComponents` class was
+deleted in favor of declaring `HttpClientFactoryBuilder.Build`). A value the verb used to take as an
+argument becomes a builder method when it is optional (`antiforgery => antiforgery.UseDataProtection(provider)`);
+a builder whose `Build()` cannot produce a product from its defaults throws there, at registration.
 
 **Fallback shape — a static factory** for compositions a builder can't express: a `public static`
 factory class whose method the attribute names. Quarantine it — `[EditorBrowsable(
@@ -70,10 +74,11 @@ EditorBrowsableState.Never)]`, ideally in a `<RootNamespace>.ComponentModel` sub
 it exists only for the generator to call. The generator emits the verb into the **factory type's
 namespace**, so a factory in a sub-namespace makes every caller import that sub-namespace too; when
 the verb belongs beside the package's other verbs, keep the factory in a `ComponentModel/` folder
-but declare the root namespace (Web precedent: `RoutingComponents` in `Assimalign.Cohesion.Web.Routing`
-projects `builder.Services.AddRouting()`). The builder template always takes a required
-`Action<TBuilder>`, so a verb callers invoke bare (`AddRouting()`) or with only an optional options
-callback is a static factory. If the product is disposable the factory **must** return
+but declare the root namespace (Web precedent: `SerializationComponents` in
+`Assimalign.Cohesion.Web.Serialization` projects `builder.Services.AddJsonSerialization(resolver)`).
+Since the builder template's callback became optional, the
+static factory is only for a verb with a **required** value argument, which a builder method would turn
+from a compile-time error into a registration-time throw. If the product is disposable the factory **must** return
 `Func<IServiceProvider, T>`, never a bare instance: an instance registration becomes a
 `ConstantCallSite`, which the resolver returns **without** `CaptureDisposable`, so the container
 would never dispose it (`COHCMP0007` guards this; the builder template is immune by construction).
@@ -110,6 +115,13 @@ members is rejected (`COHCMP0003`).
 - **The generator stays semantics-free.** It holds zero seam names, verb names, or lifetime
   tables, and never changes when an integration is added. If an integration seems to need a
   generator change, the design is wrong — surface it to the user.
+  - **Recorded exception — the optional configure callback (owner decision 39, 2026-10-10,
+    #1395).** The owner approved one change to the builder template: its callback is
+    `Action<TBuilder>? configure = null` and a `null` builds the defaults, where it used to be
+    required and throw. It is template-wide, so the generator still knows no seam, verb, or
+    lifetime. It exists so the Web registration verbs callers invoke bare need no hidden static
+    factory. The approval covers this change only; any other generator change goes back to the
+    user first.
 - **Factories are dependency-free.** A factory signature may only use types the library already
   references. `AddThing(IConfiguration, ...)` is impossible by design — if a verb must *call into*
   the other library's API, the mechanism does not apply (see below).

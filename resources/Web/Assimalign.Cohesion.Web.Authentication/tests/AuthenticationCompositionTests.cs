@@ -86,15 +86,22 @@ public sealed class AuthenticationCompositionTests : IDisposable
         auth.Options.ResolveDefaultChallengeScheme().ShouldBe(CookieAuthenticationDefaults.AuthenticationScheme);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddAuthentication rejects a null configure callback")]
-    public void AddAuthentication_WithNullConfigure_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddAuthentication called bare registers a service with no schemes")]
+    public void AddAuthentication_CalledBare_ShouldRegisterServiceWithoutSchemes()
     {
         // Arrange
         ServiceProviderBuilder services = new();
 
-        // Act / Assert
-        Should.Throw<ArgumentNullException>(() => services.AddAuthentication(null!));
-        services.Container.Count.ShouldBe(0);
+        // Act — the builder template's configure callback is optional (owner decision 39, #1395), so a
+        // bare call registers what an empty callback did, where a null callback used to throw.
+        IServiceProviderBuilder returned = services.AddAuthentication();
+
+        // Assert
+        returned.ShouldBeSameAs(services);
+        ServiceDescriptor descriptor = services.Container.ShouldHaveSingleItem();
+        descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+        IAuthenticationService service = Resolve(services).ShouldHaveSingleItem().ShouldBeAssignableTo<IAuthenticationService>()!;
+        service.DefaultAuthenticateScheme.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseDataProtection after a scheme read the provider fails")]

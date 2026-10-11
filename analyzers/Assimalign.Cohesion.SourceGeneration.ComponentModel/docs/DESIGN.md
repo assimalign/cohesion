@@ -65,7 +65,8 @@ On the static path, supported parameters are ordinary by-value parameters. The g
 `params`, nullable type annotations, and explicit defaults, and forwards every argument without adding
 behavior. Generic factory methods, by-reference parameters, void returns, and non-public signature types
 are intentionally rejected. On the builder path, parameterized instance members are ignored and the
-single zero-parameter method supplies the product type for the fixed template.
+single zero-parameter method supplies the product type for the fixed template, whose only parameter is
+the optional configure callback.
 
 ## Emission
 
@@ -96,15 +97,10 @@ An instance factory method emits the fixed builder template instead of copying a
 
 ```csharp
 public global::Target.ISeam AddThing(
-    global::System.Action<global::Contributor.ThingBuilder> @configure)
+    global::System.Action<global::Contributor.ThingBuilder>? @configure = null)
 {
-    if (@configure is null)
-    {
-        throw new global::System.ArgumentNullException("configure");
-    }
-
     var cohesionComponentFactory = new global::Contributor.ThingBuilder();
-    @configure.Invoke(cohesionComponentFactory);
+    @configure?.Invoke(cohesionComponentFactory);
     var cohesionComponent = cohesionComponentFactory.Build();
 
     builder.AddThing<global::Contributor.IThing>(_ => cohesionComponent);
@@ -116,6 +112,15 @@ Composition is eager so the builder's own `Build()` validation runs during regis
 still uses a producer lambda, allowing the container to capture the product for disposal. The lambda is
 deliberately uncast: a lambda converts to the `Func<IServiceProvider, T>` sink overload but cannot convert
 to the `T` instance overload.
+
+The configure callback is optional (owner decision 39 of 2026-10-10, #1395). A bare call, or an explicit
+`null`, builds the builder's defaults: `builder.Services.AddAuthorization()` and
+`builder.Services.AddAuthorization(authorization => ...)` are the same verb. Until then the callback was required and
+a `null` threw `ArgumentNullException`, so a verb that callers invoke bare had to be a static factory
+behind a hidden public type. The change is template-wide, not per integration, so the generator still
+holds no seam names, verb names, or lifetimes; it is recorded as the one owner-approved change to the
+template in `.claude/rules/component-integration.md`. A builder whose `Build()` cannot produce a product
+from its defaults rejects the bare call there, at registration.
 
 ## Disposal guard
 

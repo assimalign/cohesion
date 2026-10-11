@@ -106,8 +106,11 @@ source assembly continues to reference only its own HTTP family.
 
 When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
 `Assimalign.Cohesion.SourceGeneration.ComponentModel` recognizes the instance method as a builder
-template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>)` into that consumer.
-The generated adapter eagerly constructs the builder, invokes the configuration action, calls
+template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>? configure = null)` into
+that consumer. The callback is optional for every builder template (owner decision 39, #1395), but a
+bare `AddHttpClientFactory()` still fails at registration: `Build()` rejects a factory with no named
+client with `InvalidOperationException`, so the requirement stays where it was, in the builder.
+The generated adapter eagerly constructs the builder, invokes the configuration action when one is given, calls
 `Build()` so its validation runs at registration time, and registers the result through a producer
 lambda so the container captures it for disposal. Without the dependency-injection assembly the
 generator emits no verb, preserving the library boundary while still providing an ergonomic

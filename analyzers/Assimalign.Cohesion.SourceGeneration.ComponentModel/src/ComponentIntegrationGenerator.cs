@@ -439,7 +439,9 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 factoryTypeName,
                 renderedFactoryMethodName,
                 renderedVerb,
-                $"global::System.Action<{factoryTypeName}> @configure",
+                // Optional (owner decision 39, #1395): a verb with nothing to configure is called bare,
+                // so a builder template also covers registrations that take no arguments.
+                $"global::System.Action<{factoryTypeName}>? @configure = null",
                 string.Empty,
                 contract?.ToDisplayString(_typeDisplayFormat) ?? string.Empty,
                 contract is not null,
@@ -1088,18 +1090,13 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 builder.AppendLine($"{indent}        {{");
                 if (projection.IsBuilderTemplate)
                 {
-                    builder.AppendLine($"{indent}            if (@configure is null)");
-                    builder.AppendLine($"{indent}            {{");
-                    builder.AppendLine(
-                        $"{indent}                throw new global::System.ArgumentNullException(\"configure\");");
-                    builder.AppendLine($"{indent}            }}");
-                    builder.AppendLine();
                     builder.AppendLine(
                         $"{indent}            // Composed eagerly so the factory's own Build-time validation fires at registration");
-                    builder.AppendLine($"{indent}            // time rather than at first resolve.");
+                    builder.AppendLine(
+                        $"{indent}            // time rather than at first resolve. Without a callback the builder's defaults are built.");
                     builder.AppendLine(
                         $"{indent}            var cohesionComponentFactory = new {projection.FactoryTypeName}();");
-                    builder.AppendLine($"{indent}            @configure.Invoke(cohesionComponentFactory);");
+                    builder.AppendLine($"{indent}            @configure?.Invoke(cohesionComponentFactory);");
                     builder.AppendLine(
                         $"{indent}            var cohesionComponent = cohesionComponentFactory."
                         + $"{projection.FactoryMethodName}();");

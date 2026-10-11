@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -37,6 +39,44 @@ public class ComponentIntegrationGeneratorTests
                 public ISeam AddThing<T>(Func<IServiceProvider, T> factory)
                     where T : class
                     => seam;
+
+                public ISeam AddThing<T>(T instance)
+                    where T : class
+                    => seam;
+            }
+        }
+        """;
+
+    /// <summary>
+    /// <see cref="SeamSource"/>'s shape with a seam that records what each producer registration
+    /// produces, so an executed consumer can report what the projected verbs registered.
+    /// </summary>
+    private const string RecordingSeamSource = """
+        #nullable enable
+        using System;
+        using System.Collections.Generic;
+
+        namespace Test.Seams;
+
+        public interface ISeam
+        {
+        }
+
+        public sealed class RecordingSeam : ISeam
+        {
+            public List<object> Products { get; } = new();
+        }
+
+        public static class SeamExtensions
+        {
+            extension(ISeam seam)
+            {
+                public ISeam AddThing<T>(Func<IServiceProvider, T> factory)
+                    where T : class
+                {
+                    ((RecordingSeam)seam).Products.Add(factory(null!));
+                    return seam;
+                }
 
                 public ISeam AddThing<T>(T instance)
                     where T : class
@@ -648,12 +688,12 @@ public class ComponentIntegrationGeneratorTests
         string generated = GeneratedText(result);
 
         generated.ShouldContain(
-            "public global::Test.Seams.ISeam AddProjected(global::System.Action<global::Test.BuilderContributor.ThingBuilder> @configure)",
+            "public global::Test.Seams.ISeam AddProjected(global::System.Action<global::Test.BuilderContributor.ThingBuilder>? @configure = null)",
             Case.Sensitive);
         generated.ShouldContain(
             "var cohesionComponentFactory = new global::Test.BuilderContributor.ThingBuilder();",
             Case.Sensitive);
-        generated.ShouldContain("@configure.Invoke(cohesionComponentFactory);", Case.Sensitive);
+        generated.ShouldContain("@configure?.Invoke(cohesionComponentFactory);", Case.Sensitive);
         generated.ShouldContain(
             "var cohesionComponent = cohesionComponentFactory.Build();",
             Case.Sensitive);
@@ -765,22 +805,61 @@ public class ComponentIntegrationGeneratorTests
         AssertNoErrors(result.Compilation);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb guards a null configure action")]
-    public void Generator_BuilderTemplateVerb_EmitsExplicitNullGuard()
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb takes an optional configure callback")]
+    public void Generator_BuilderTemplateVerb_EmitsOptionalConfigureCallback()
     {
         MetadataReference contributor = CompileReference(
-            "Test.NullGuardBuilderContributor",
-            BuilderContributorSource(contributorNamespace: "Test.NullGuardBuilderContributor"));
+            "Test.OptionalBuilderContributor",
+            BuilderContributorSource(contributorNamespace: "Test.OptionalBuilderContributor"));
         MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
 
-        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+        GeneratorResult result = Run(
+            """
+            using Test.OptionalBuilderContributor;
+            using Test.Seams;
+
+            internal static class Consumer
+            {
+                internal static ISeam Bare(ISeam seam) => seam.AddProjected();
+
+                internal static ISeam ExplicitNull(ISeam seam) => seam.AddProjected(null);
+
+                internal static ISeam Configured(ISeam seam) => seam.AddProjected(builder => { });
+            }
+            """,
+            new[] { contributor },
+            new[] { seam });
         string generated = GeneratedText(result);
 
-        generated.ShouldContain("if (@configure is null)", Case.Sensitive);
         generated.ShouldContain(
-            "throw new global::System.ArgumentNullException(\"configure\");",
+            "AddProjected(global::System.Action<global::Test.OptionalBuilderContributor.ThingBuilder>? @configure = null)",
             Case.Sensitive);
+        generated.ShouldContain("@configure?.Invoke(cohesionComponentFactory);", Case.Sensitive);
+        generated.ShouldNotContain("ArgumentNullException", Case.Sensitive);
         AssertNoErrors(result.Compilation);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb called bare registers the builder's default product")]
+    public void Generator_BuilderTemplateVerbCalledBare_RegistersDefaultProduct()
+    {
+        string[] registered = ExecuteNamedThingConsumer(
+            """
+            seam.AddProjected();
+            seam.AddProjected(null);
+            """);
+
+        registered.ShouldBe(new[] { "default", "default" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb with a callback registers the configured product")]
+    public void Generator_BuilderTemplateVerbWithCallback_RegistersConfiguredProduct()
+    {
+        string[] registered = ExecuteNamedThingConsumer(
+            """
+            seam.AddProjected(builder => builder.Name = "configured");
+            """);
+
+        registered.ShouldBe(new[] { "configured" });
     }
 
     [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb emits the complete eager composition body")]
@@ -821,17 +900,12 @@ public class ComponentIntegrationGeneratorTests
         generated.ShouldContain(
             Indent(NormalizeLineEndings(
                 """
-                    public global::Test.Seams.ISeam AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder> @configure)
+                    public global::Test.Seams.ISeam AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder>? @configure = null)
                     {
-                        if (@configure is null)
-                        {
-                            throw new global::System.ArgumentNullException("configure");
-                        }
-
                         // Composed eagerly so the factory's own Build-time validation fires at registration
-                        // time rather than at first resolve.
+                        // time rather than at first resolve. Without a callback the builder's defaults are built.
                         var cohesionComponentFactory = new global::Test.EndToEndBuilderContributor.ThingBuilder();
-                        @configure.Invoke(cohesionComponentFactory);
+                        @configure?.Invoke(cohesionComponentFactory);
                         var cohesionComponent = cohesionComponentFactory.Build();
 
                         // Registered through the Func<> sink so the container captures the product for
@@ -926,7 +1000,94 @@ public class ComponentIntegrationGeneratorTests
             }
             """;
 
+    /// <summary>
+    /// Compiles a builder-template contributor whose product records the builder's <c>Name</c>, runs the
+    /// generator over a consumer whose <c>Run</c> method executes <paramref name="registrations"/> against a
+    /// recording seam, then loads and invokes the consumer and returns each registered product's name in
+    /// registration order.
+    /// </summary>
+    private static string[] ExecuteNamedThingConsumer(string registrations)
+    {
+        const string contributorNamespace = "Test.NamedBuilderContributor";
+        byte[] contributorImage = CompileImage(
+            contributorNamespace,
+            BuilderContributorSource(
+                contributorNamespace: contributorNamespace,
+                builderMembers: """
+                    public string Name { get; set; } = "default";
+
+                    public IThing Build()
+                        => new NamedThing(Name);
+                    """,
+                additionalTypes: """
+                    public sealed class NamedThing : IThing
+                    {
+                        public NamedThing(string name)
+                        {
+                            Name = name;
+                        }
+
+                        public string Name { get; }
+                    }
+                    """));
+        byte[] seamImage = CompileImage("Test.Seam", RecordingSeamSource, includeCore: false);
+
+        GeneratorResult result = Run(
+            $$"""
+            using System.Linq;
+            using Test.NamedBuilderContributor;
+            using Test.Seams;
+
+            public static class Consumer
+            {
+                public static string[] Run()
+                {
+                    var seam = new RecordingSeam();
+                    {{registrations}}
+                    return seam.Products.Select(product => ((NamedThing)product).Name).ToArray();
+                }
+            }
+            """,
+            new[] { MetadataReference.CreateFromImage(contributorImage) },
+            new[] { MetadataReference.CreateFromImage(seamImage) });
+        AssertNoErrors(result.Compilation);
+
+        using var consumerStream = new MemoryStream();
+        var emitResult = result.Compilation.Emit(consumerStream);
+        emitResult.Success.ShouldBeTrue(FormatDiagnostics(emitResult.Diagnostics));
+
+        var context = new AssemblyLoadContext("ComponentIntegrationGeneratorTests", isCollectible: true);
+        try
+        {
+            var loaded = new Dictionary<string, Assembly>(StringComparer.Ordinal)
+            {
+                ["Test.Seam"] = context.LoadFromStream(new MemoryStream(seamImage)),
+                [contributorNamespace] = context.LoadFromStream(new MemoryStream(contributorImage)),
+            };
+            context.Resolving += (_, name) =>
+                name.Name is not null && loaded.TryGetValue(name.Name, out Assembly? assembly) ? assembly : null;
+
+            consumerStream.Position = 0;
+            Assembly consumer = context.LoadFromStream(consumerStream);
+            object? registered = consumer.GetType("Consumer", throwOnError: true)!
+                .GetMethod("Run", BindingFlags.Public | BindingFlags.Static)!
+                .Invoke(null, null);
+
+            return registered.ShouldBeOfType<string[]>();
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
     private static MetadataReference CompileReference(
+        string assemblyName,
+        string source,
+        bool includeCore = true) =>
+        MetadataReference.CreateFromImage(CompileImage(assemblyName, source, includeCore));
+
+    private static byte[] CompileImage(
         string assemblyName,
         string source,
         bool includeCore = true)
@@ -949,7 +1110,7 @@ public class ComponentIntegrationGeneratorTests
         using var stream = new MemoryStream();
         var emitResult = compilation.Emit(stream);
         emitResult.Success.ShouldBeTrue(FormatDiagnostics(emitResult.Diagnostics));
-        return MetadataReference.CreateFromImage(stream.ToArray());
+        return stream.ToArray();
     }
 
     private static GeneratorResult Run(
