@@ -33,6 +33,9 @@ public sealed class ResourceControlPlaneTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The in-memory peer has no IP address; authorize management as a gateway.
+        using var identity = new TestBootstrapIdentity("tests", "gateway");
+        string credential = identity.Issue("resource");
         var plane = new RecordingControlPlane();
         await using var factory = new WebApplicationTestFactory();
         factory.Application.Use(async (context, next) =>
@@ -46,8 +49,9 @@ public sealed class ResourceControlPlaneTests
             });
             await next(context);
         });
-        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, new ResourceContext(), () => true);
+        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, CreateContext(identity, credential), () => true);
         using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credential);
 
         try
         {
