@@ -1,7 +1,7 @@
 # Database engine extensibility, provisioning and composition: design
 
 **Status:** approved; the owner accepted decisions 49 to 73 (§13) on 2026-10-09, answers inline,
-with one follow-up proposed under 49 (49a, awaiting the owner; it lands in B2). Phases B1 and E1
+with one follow-up proposed under 49 (49a, awaiting the owner and excluded from B2). Phases B1 and E1
 start from here · **Created:** 2026-10-08 ·
 **Owner:** Chase Crawford
 **Answers:** the owner's request of 2026-10-08 (Database Hosting items 1 to 3, Provisioning, Event
@@ -1231,12 +1231,16 @@ add/drop operation kinds and assert the exact remaining plan and final marker. P
 collisions refuse before compensation can claim another session's object. Format-7 counters reach
 the existing actionable format refusal; there is no compatibility reader or upgrade.
 Release NativeAOT `win-arm64`, best-of-five medians in alternating runs of the base
-`2bf42d94b3a200662fb7e22c54f55607d9af4b94` and B2: Q8's isolated provisioning entry point (Q8P)
-**0.1063 → 0.0027 ms**, below **1 ms**; complete Q8 Build **10.2314 → 9.7064 ms**. Q8P uses
-`ApplySchemaAsync` immediately after Build with the same precompiled schema identity, rather than
-an internal Build timer. The [benchmark README](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md)
-retains both campaigns, every alternating median, and exact commands; both NativeAOT harnesses
-publish without IL2xxx/IL3xxx warnings. **49a remains unaccepted and unimplemented**: a future
+`2bf42d94b3a200662fb7e22c54f55607d9af4b94` and B2: timers inside Q8 Build measure the apply call
+**0.3881 → 0.0065 ms** and all reconciliation after open **0.4004 → 0.0079 ms**, below **1 ms**.
+The complete phase 6, including database open and recovery, measures **7.6384 → 6.4633 ms**:
+the literal whole-phase interpretation of the gate is **not met**; the owner must resolve whether
+its intended scope is reconciliation. Benchmark-only source copies add the timers without a
+production API or assembly-access change. The separate, uninstrumented full Q8 Build measures
+**10.2314 → 9.7064 ms**; the already-warmed apply proxy Q8P measures **0.1063 → 0.0027 ms**.
+The [benchmark README](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md)
+retains every campaign, all medians, exact commands, and the reproducible timing helper. Both
+NativeAOT harnesses publish without IL2xxx/IL3xxx warnings. **49a remains unaccepted and unimplemented**: a future
 classification/scheduling decision would attach between plan rendering and statement execution,
 with the applied marker still withheld until all required steps finish.
 
@@ -1478,7 +1482,7 @@ Numbering continues the plan of record's table. Each line is the question, then 
     *Landed in B1 part 1:* the SQL engine's `Build`/`BuildAsync` provisions its declared databases;
     49a below is not implemented.
 
-    **49a (proposed 2026-10-09, awaiting the owner; lands in B2).** The concern holds. [Certain]
+    **49a (proposed 2026-10-09, awaiting the owner; excluded from B2).** The concern holds. [Certain]
     Four of the planner's operations cost time in proportion to the table: `AddIndex` and
     `AddConstraint` on a populated table scan every row (an index also builds its whole tree), and
     an `AlterColumn` that tightens a column checks or rewrites every row
