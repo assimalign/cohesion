@@ -77,6 +77,12 @@ internal static partial class HPackEncoder
         WriteStatusHeader(buffer, (int)statusCode);
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
         bool permitsDate = !HttpInterimResponseRules.IsInformational(statusCode);
+        if (permitsDate && dateHeader is not null && dateHeader.IsOnlyHeader(headers))
+        {
+            buffer.Write(dateHeader.Http2Field.Span);
+            return buffer.ToArray();
+        }
+
         bool hasDate = false;
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)

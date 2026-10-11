@@ -25,4 +25,10 @@ internal sealed class HttpResponseDateHeader
     public ReadOnlyMemory<byte> Http1Field { get; }
     public ReadOnlyMemory<byte> Http2Field { get; }
     public ReadOnlyMemory<byte> Http3Field { get; }
+
+    // Use the existing lookup contract to avoid boxing the enumerator of a Date-only head.
+    public bool IsOnlyHeader(IHttpHeaderCollection headers) => headers.Count == 1
+        && headers.TryGetValue(HttpHeaderKey.Date, out HttpHeaderValue date)
+        && date.Count == 1
+        && string.Equals(date.Value, Value, StringComparison.Ordinal);
 }

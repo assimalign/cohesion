@@ -784,7 +784,14 @@ The snapshot, its string and all three encoded fields are reused across listener
 and connections. Core Http's generic inline-first header storage avoids allocating
 a dictionary or consuming its capacity for this default field. Cache hits, header
 insertion and copying cached field bytes need no per-request scratch allocation;
-response output buffers still contain the additional wire bytes.
+response output buffers still contain the additional wire bytes. A final head
+containing only the matching cached Date bypasses collection enumeration in all
+three writers, avoiding the boxed enumerator that otherwise adds an allocation
+when Date turns an empty head into a nonempty one. The check uses the existing
+header count and lookup contract; no interface or core collection changes are
+needed. The 204/304 encoding regressions compare enabled and disabled listener
+policies, measuring the extra output-array storage separately, including runtime
+alignment. HTTP/1.1 retains its existing capacity buffer.
 
 The transport seeds response headers before application dispatch and re-seeds a
 missing Date before each `BeforeResponse` interceptor, respecting the listener's

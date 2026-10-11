@@ -177,7 +177,68 @@ public class HttpResponseDateWriterTests
         (ordinary - cached).ShouldBeGreaterThanOrEqualTo(128L * 100);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Date Writers: Enabling Date on a header-only response should allocate only its additional output bytes")]
+    [InlineData(1, 204)]
+    [InlineData(1, 304)]
+    [InlineData(2, 204)]
+    [InlineData(2, 304)]
+    [InlineData(3, 204)]
+    [InlineData(3, 304)]
+    public async Task EncodeFinalHead_WithAutomaticDate_ShouldOnlyAllocateAdditionalWireStorage(int protocol, int status)
+    {
+        // Arrange — originate real exchanges so the enabled case includes the transport-seeded Date.
+        (long disabled, int disabledLength) = await MeasureHeadAllocationsAsync(protocol, status, addDate: false);
+        (long enabled, int enabledLength) = await MeasureHeadAllocationsAsync(protocol, status, addDate: true);
+
+        // Act — HTTP/1.1 returns its existing capacity buffer. HPACK and QPACK return exact-length arrays;
+        // measure those arrays separately to include the runtime's object alignment in the wire-byte cost.
+        long additionalOutputStorage = protocol == 1 ? 0
+            : MeasureAllocations(() => GC.KeepAlive(new byte[enabledLength]))
+                - MeasureAllocations(() => GC.KeepAlive(new byte[disabledLength]));
+
+        // Assert — Date adds wire bytes, but no boxed header enumerator or field-encoding scratch space.
+        enabledLength.ShouldBeGreaterThan(disabledLength);
+        (enabled - disabled).ShouldBe(additionalOutputStorage);
+    }
+
     private static HttpResponseDateHeader CreateDate() => new HttpResponseDateCache(new ManualTimeProvider()).GetCurrent();
+
+    private static async Task<(long Allocated, int EncodedLength)> MeasureHeadAllocationsAsync(int protocol, int status, bool addDate)
+    {
+        HttpConnectionListenerOptions options = new() { AddDateHeader = addDate, DateTimeProvider = new ManualTimeProvider() };
+        byte[] request = protocol switch
+        {
+            1 => HttpProtocolPayloadFactory.CreateHttp1Request("GET / HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n"),
+            2 => HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "http", "api.test"),
+            _ => HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test"),
+        };
+        TestConnection transport = new(request);
+        switch (protocol)
+        {
+            case 1: options.UseHttp1(new TestConnectionListener(transport)); break;
+            case 2: options.UseHttp2(new TestConnectionListener(transport)); break;
+            default: options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(transport))); break;
+        }
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
+        await using HttpConnectionListener listener = new(options);
+        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
+        await using IAsyncEnumerator<IHttpContext> requests = connectionContext.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
+        (await requests.MoveNextAsync()).ShouldBeTrue();
+        await using TransportHttpContext context = (TransportHttpContext)requests.Current;
+        context.Response.StatusCode = status;
+        context.Response.Headers.Count.ShouldBe(addDate ? 1 : 0);
+        context.Response.Headers.ContainsKey(HttpHeaderKey.Date).ShouldBe(addDate);
+        Func<ReadOnlyMemory<byte>> encode = protocol switch
+        {
+            1 => () => Http1MessageWriter.EncodeHead(context.Response.StatusCode, context.Response.Headers, context.Response.GetDateHeader()),
+            2 => () => HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers, context.Response.GetDateHeader()),
+            _ => () => Http3HeaderCodec.EncodeResponseHeaders((Http3Context)context),
+        };
+        int length = encode().Length;
+        long allocated = MeasureAllocations(() => _ = encode());
+        return (allocated, length);
+    }
 
     private static long MeasureAllocations(Action action)
     {

@@ -241,6 +241,13 @@ internal static class Http1MessageWriter
 
         ArrayBufferWriter<byte> head = new(InitialHeadCapacity);
         WriteStatusLine(head, statusCode);
+        if (dateHeader is not null && dateHeader.IsOnlyHeader(headers))
+        {
+            head.Write(dateHeader.Http1Field.Span);
+            WriteAscii(head, LineEnd);
+            return head.WrittenMemory;
+        }
+
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
         bool permitsTransferEncoding = HttpResponseContentRules.PermitsTransferEncoding(statusCode);
         bool hasDate = false;

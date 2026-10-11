@@ -418,6 +418,11 @@ internal static class Http3HeaderCodec
 
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(context.Response.StatusCode);
         bool permitsDate = !HttpInterimResponseRules.IsInformational(context.Response.StatusCode);
+        if (permitsDate && dateHeader is not null && dateHeader.IsOnlyHeader(headers))
+        {
+            return QPackFieldSectionEncoder.Encode(fields, dateHeader.Http3Field);
+        }
+
         bool hasDate = false;
         ReadOnlyMemory<byte> encodedDate = default;
 
