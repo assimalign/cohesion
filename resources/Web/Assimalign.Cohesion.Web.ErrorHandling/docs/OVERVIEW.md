@@ -21,13 +21,12 @@ decides what the client sees, with an overridable default that renders the RFC 9
   faults escaping downstream, publishes the caught exception as an `IHttpExceptionFeature`, resets
   an unstarted response (aborting the exchange when it has already started), and dispatches through
   the `OnError` chain. A developer-detail toggle enriches the terminal payload; a diagnostics
-  observer (`OnException`) and its suppression predicate provide the fault-observation seam. On an
-  HTTP/1.1 request with a body, a request body that broke its framing or a limit while it was read,
-  or that the client cut short by closing the connection, is the client's fault, which the default
-  Web server reports through `IWebClientFaultFeature`: the boundary skips `OnException` and the
-  `OnError` chain for it and stages the transport's `400`/`413`/`408`/`431` instead of a `500`
-  (#1340). HTTP/2 and HTTP/3 exchanges carry no such report until #1378, so the boundary handles
-  their body faults like any other fault.
+  observer (`OnException`) and its suppression predicate provide the fault-observation seam. A
+  request body that broke its framing or a limit while it was read, or that the client cut short by
+  closing the connection, is the client's fault, which the default Web server reports through
+  `IWebClientFaultFeature` on every version: the boundary skips `OnException` and the `OnError` chain
+  for it and stages the transport's `400`/`413`/`408`/`431` instead of a `500` (#1340, #1378). On
+  HTTP/2 and HTTP/3 a malformed body resets the stream, and the `400` is what the server records.
 - **Status-code pages** — `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal response
   (such as the pipeline's bodyless 404) into problem+json, or a custom responder body.
 

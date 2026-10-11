@@ -69,17 +69,16 @@ preflight that names it, which is logged with the configured fields.
 | `Assimalign.Cohesion.Web.Routing` | reads the endpoint metadata bag for per-endpoint overrides |
 | `Assimalign.Cohesion.Http.Forwarded` | the effective scheme, host, and client address (`Effective*`), resolved by `UseForwardedHeaders` behind a trusted proxy |
 | `Assimalign.Cohesion.Logging` | the emission model (`ILogger`, `LoggerEntry`, `LoggerProvider`) |
-| `Assimalign.Cohesion.Web.Server` | `IWebClientFaultFeature`: on an HTTP/1.1 request with a body, a request body that broke its framing or a limit, or that the client cut short, is logged as a client fault at the configured level with the status sent, not escalated to `Error` (#1340); HTTP/2 and HTTP/3 follow with #1378 |
+| `Assimalign.Cohesion.Web.Server` | `IWebClientFaultFeature`: on a request that can have a body, on every version, a request body that broke its framing or a limit, or that the client cut short, is logged as a client fault at the configured level with the status sent, not escalated to `Error` (#1340, #1378) |
 | `Assimalign.Cohesion.Http.Streaming` | whether the response had started, so a client fault logs the status that reached the wire |
 
 Trace correlation comes from the request's `traceparent` header. The package does not read the
 server's request id (`IWebRequestIdFeature`, in `Web.Server` since #1379).
 
 An exchange whose downstream pipeline throws is logged at `Error` with the exception, except a client
-fault on an HTTP/1.1 request with a body: an entry marked `http.client_fault = true`, at the
+fault the default Web server reports, on any version: an entry marked `http.client_fault = true`, at the
 configured level, without the exception, whose `http.response.status` is the `400`, `413`, `408` or
-`431` the transport answered with. The default Web server reports client faults on HTTP/1.1 only
-until #1378, so on HTTP/2 and HTTP/3 a body fault that throws through the middleware is logged at
-`Error` like any other exception.
+`431` the transport answered with. On HTTP/2 and HTTP/3 a malformed body resets the stream instead of
+drawing a status, and is logged as the `400` the transport reports for it (#1378).
 
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.

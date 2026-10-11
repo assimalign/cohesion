@@ -120,7 +120,7 @@ public class ExceptionBoundaryMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: A client-fault feature reporting no fault should leave the fault an application fault")]
     public async Task InvokeAsync_ClientFaultFeatureReportingNoFault_ShouldObserveAndRender500()
     {
-        // Arrange — the server installs the feature on every HTTP/1.1 request with a body; it reports a
+        // Arrange — the server installs the feature on every request that can have a body; it reports a
         // status only once the transport latches one.
         InvalidOperationException fault = new("boom");
         Exception? observed = null;

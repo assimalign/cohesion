@@ -369,6 +369,18 @@ reads the feature itself is its telemetry, for a fault after the response starte
 status can no longer replace that response, so the exchange is reset, and its `error.type` is
 `client_fault` rather than `unhandled_exception` (see "Outcomes and `error.type`").
 
+**HTTP/2 and HTTP/3 (#1378).** Both report the fault too, and the feature is installed on a request
+that can have a body there as well (see "Default interceptors"). An over-cap or too-slow body is
+answered with its `413` or `408` as above. A body that contradicts its content-length, or a malformed
+trailer section, makes the request malformed on these versions, so the transport resets the stream
+instead (RFC 9113 §8.1.1, RFC 9114 §4.1.2): the client gets no status, the feature reports `400`, and
+the transport sets the exchange's status to that `400` when the server's finalization sends into the
+reset stream, so the span and the access log read it rather than the `500` the server staged. The reset
+also fires `RequestCancelled`. A body read still throws the fault's `IOException`, but a pipeline that
+was awaiting something else meets the cancellation instead and ends as cancelled; the telemetry then
+reads the feature too and reports `client_fault` rather than `request_canceled`, since the cancellation
+was the transport's answer to the client's fault.
+
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
 boundary around arbitrary user code** — middleware, completion callbacks, application
@@ -709,8 +721,10 @@ itself stays with the error boundary, which does not keep it, and with the hosti
 | A response was sent with a status below 500 | the status | none |
 | The request body broke its framing or a limit while it was read, or the client cut it short, and the HTTP/1.1 transport answered it in place of the staged response (#1333, #1339, #1340) | the transport's `400`, `413`, `408` or `431`, which it also sets on the exchange | none |
 | The request body fell below the minimum data rate while it was read, and the HTTP/2 or HTTP/3 transport answered its stream with `408` before the server's replacement `500` (#1085) | `408`, which the transport also sets on the exchange | none |
+| The request body contradicted its content-length or carried a malformed trailer section, and the HTTP/2 or HTTP/3 transport reset its stream before a response started (#1378) | `400`, the client fault the transport reports and sets on the exchange; nothing reached the wire | none |
 | A response was sent with a 5xx status, including the server's replacement `500` after a fault | the status | the status, for example `500` |
 | The exchange was cancelled (a peer reset or closed connection, the server stopping, `IHttpContext.Cancel`) and reset | only when a streamed response had started | `request_canceled` |
+| The exchange was cancelled by the HTTP/2 or HTTP/3 transport's answer to, or reset for, a client fault it reported (`IWebClientFaultFeature`, #1378) | only when a streamed response had started | `client_fault` |
 | The pipeline threw after its response started, or its response could not be replaced, after the transport reported a client fault (`IWebClientFaultFeature`), and the exchange was reset (#1340) | only when the response had started | `client_fault` |
 | The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
 | The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
@@ -720,9 +734,10 @@ and then reads a malformed, over-limit or cut-short body throws after its respon
 transport's status cannot replace it and the server resets the exchange. Before, that was
 `unhandled_exception`, while the HTTP access log recorded the same exchange as a client fault at its
 configured level; any client could raise it on such an endpoint. `WebExchangeTelemetry.Stop` now reads
-`IWebClientFaultFeature` for a faulted exchange and reports `client_fault`, so `unhandled_exception`
-means the application's own defect again. It reads the feature only when the exchange is instrumented
-and faulted, so the fast path pays nothing. The span status stays `Error`, as for `request_canceled`:
+`IWebClientFaultFeature` for a faulted exchange, and since #1378 for a cancelled one, and reports
+`client_fault`, so `unhandled_exception` means the application's own defect again and `request_canceled`
+a cancellation that was not the transport's answer to a client fault. It reads the feature only when the
+exchange is instrumented and faulted or cancelled, so the fast path pays nothing. The span status stays `Error`, as for `request_canceled`:
 the reset cut off a response whose status (usually a `2xx`) is not how the exchange ended, and the
 semantic convention sets `Error` on a `1xx`–`3xx` span that ended in another error. The `4xx`-is-unset
 rule covers a `4xx` that was sent, which is the case where the transport's status replaced the staged
@@ -972,8 +987,8 @@ exchange passes through them, and in an ordinary application those sit on most e
   default authenticate scheme is configured, and `IAuthenticationFeature` too on each exchange that
   authenticates. `UseCookiePolicy` installs `ICookieConsentFeature` and its
   `IHttpResponseCookieFeature`.
-- **Only some exchanges:** the upgrade and extended CONNECT features, the client-fault feature on an
-  HTTP/1.1 request with a body (#1340), the WebSocket policy feature on a handshake, the rewrite feature
+- **Only some exchanges:** the upgrade and extended CONNECT features, the client-fault feature on a
+  request that can have a body (#1340, #1378), the WebSocket policy feature on a handshake, the rewrite feature
   on a rewritten request, the exception feature on a failure, and the TLS feature built on first read.
 
 The server cannot count these itself: the transport learns only a number (owner decision 20), and
@@ -1149,13 +1164,17 @@ by behavior) and by `WebApplicationProtocolUpgradeTests` over a real loopback co
 upgrade nobody accepts is served as an ordinary `200`, and an accepted one answers `101` and hands
 the handler the raw connection. The default extended CONNECT interceptor is pinned by the same
 defaults suite (slot 2, by behavior) and by `WebApplicationServerExtendedConnectTests`, a WebSocket
-echo over a real HTTP/2 extended CONNECT. The client-fault interceptor (#1340) is pinned by the defaults
-suite (slot 3, by behavior: it joins the response phase only for an HTTP/1.1 request that declares a
-body, and its feature reads the control on each access) and by `WebApplicationServerClientFaultTests`
-over a raw in-memory connection: a malformed chunked body and a body over the cap are reported to the
-pipeline as the `400` and `413` the transport sends, a well-formed body reports nothing, and a plain
-`GET` carries no feature. `WebServerTelemetryTests` pins that the same two faults end the span with the
-transport's status, no `error.type` and an unset status.
+echo over a real HTTP/2 extended CONNECT. The client-fault interceptor (#1340, #1378) is pinned by the
+defaults suite (slot 3, by behavior: it joins the response phase only for a request that can have a
+body, on every version, and its feature reads the control on each access) and by
+`WebApplicationServerClientFaultTests` over raw in-memory connections: on HTTP/1.1 a malformed chunked
+body and a body over the cap are reported to the pipeline as the `400` and `413` the transport sends, a
+well-formed body reports nothing, and a plain `GET` carries no feature; on HTTP/2 and HTTP/3 a body that
+contradicts its content-length and a malformed trailer section are reported as `400` while the client
+sees the stream reset, a body over the cap as the `413` the transport sends, and a request whose stream
+ended with its head carries no feature. `WebServerTelemetryTests` pins that the same faults end the span
+with the transport's status (the `400` a reset records, on HTTP/2 and HTTP/3), no `error.type` and an
+unset status, and that an HTTP/2 exchange the fault's reset cancels reports `client_fault`.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
@@ -1519,10 +1538,15 @@ the upgrade interceptor cost 12,912 B and 10,125 B when it still sat in every ex
 phase (measured against 12,552 B and 9,840 B without it, before it moved to the request scope).
 
 The client-fault interceptor follows the same rule with a wider condition. Only an exchange whose
-body is read after dispatch can fault that way, so it joins the response phase of an HTTP/1.1 request
-that declares a body (a `Transfer-Encoding`, or a `Content-Length` other than zero, RFC 9112 §6) and
-installs the feature there. Its head hook allocates nothing, so a request without a body (a plain `GET`)
-keeps the fast path and carries no feature. `HostFeatureCount` stays four because the feature is not on
+body is read after dispatch can fault that way, so it joins the response phase of a request that can
+have a body and installs the feature there. The transport decides that from the framing only it sees
+(`HttpExchangeInterceptorRequestContext.CanHaveBody`, #1378): on HTTP/1.1 a `Transfer-Encoding` or a
+`Content-Length` other than zero (RFC 9112 §6); on HTTP/2 a head that did not end the stream, whatever
+`content-length` it declares; on HTTP/3 a request stream that had not ended with its HEADERS frame; never
+a `CONNECT`. Until #1378 the interceptor read the HTTP/1.1 framing fields itself and left HTTP/2 and HTTP/3
+alone, since their controls reported nothing; an HTTP/2 or HTTP/3 request need not declare its body, so
+those fields cannot answer it there. Its head hook allocates nothing, so a request without a body (a plain
+`GET`) keeps the fast path and carries no feature. `HostFeatureCount` stays four because the feature is not on
 every exchange; when it overflows the rounded capacity, the collection grows as an unsized one would
 (see "Rounding: an overflow never costs more than not presizing"), so it never costs more than not
 presizing. That is not spare room: the rounding leaves a free slot only when the count falls between
@@ -1533,9 +1557,13 @@ raw keep-alive client (Debug build, median of five rounds of 5,000 requests, thr
 `POST` allocated about 470 B more with no stamped application features (36,837 B against 36,308 B),
 where the host's four round up to seven slots and the feature takes a free one, and about 1,150 B more
 with three (37,512 B against 36,351 B), where the count is seven and the feature grows the collection
-to 17 slots. A plain `GET` stayed within the run-to-run noise in both. HTTP/2 and HTTP/3 exchanges
-are left alone: their controls keep the interface's `null` default until #1378, so the response phase
-would buy nothing there.
+to 17 slots. A plain `GET` stayed within the run-to-run noise in both. On HTTP/2 a `GET` ends its
+stream with its head, so it keeps the fast path as on HTTP/1.1. On HTTP/3 it does only when the
+transport has already seen the request stream's FIN: the in-memory driver reports it, but the QUIC
+driver's input sees the end only on a read that returns nothing, so over QUIC most HTTP/3 requests
+report that they can have a body, and the interceptor takes the response phase for them. That costs an
+HTTP/3 `GET` the sink, the control, the response context and the feature until the driver reports a FIN
+it already holds (core Http DESIGN, "The body signal").
 
 **Clearing the defaults removes WebSockets.** A `UseServer` callback that clears
 `HttpConnectionListenerOptions.Interceptors` removes both transition interceptors: HTTP/1.1

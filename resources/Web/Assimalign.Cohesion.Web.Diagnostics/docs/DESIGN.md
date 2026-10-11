@@ -125,8 +125,9 @@ One entry per completed exchange, emitted in the middleware's `finally`:
   the exchange itself with `400`, `413`, `408` or `431`.
   Any client can cause that, so it is not an application defect, and escalating it filled the log with
   `Error` entries on demand. The server reports it through `IWebClientFaultFeature` (`Web.Server`,
-  installed by the default Web server on an HTTP/1.1 request with a body). When the feature reports a
-  status, the entry stays at `Options.Level`, carries no exception, is marked
+  installed by the default Web server on a request that can have a body, on every version since #1378;
+  on HTTP/2 and HTTP/3 a malformed body resets the stream and is reported as `400`). When the feature
+  reports a status, the entry stays at `Options.Level`, carries no exception, is marked
   `http.client_fault = true` (`HttpLoggingAttributes.ClientFault`), and logs the status that reaches
   the wire: the transport's, unless the response had already started
   (`IHttpResponseStreamingFeature.HasStarted`, from `Http.Streaming`), in which case the transport ends

@@ -44,6 +44,12 @@
     <CohesionPackageReference Include="xunit.runner.visualstudio" GeneratePathProperty="true" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The HTTP/3 raw client speaks QPACK through the Web.WebSockets tests' codec, which decodes what the
+         server's static-only encoder emits, Huffman strings included (#1378). -->
+    <Compile Include="..\..\Assimalign.Cohesion.Web.WebSockets\tests\TestObjects\QPackTestCodec.cs" Link="TestObjects\QPackTestCodec.cs" />
+  </ItemGroup>
+
   <Target Name="EnsureVSTestSupportFiles" AfterTargets="Build">
     <Copy SourceFiles="$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll"
           DestinationFiles="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(OutputPath)xunit.runner.visualstudio.testadapter.dll'))"

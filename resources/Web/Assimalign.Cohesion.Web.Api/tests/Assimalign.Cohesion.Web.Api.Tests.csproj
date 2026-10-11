@@ -28,8 +28,17 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
 		<!-- The malformed-body tests assert the level the HTTP logging middleware logs a client fault at (#1340). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
+		<!-- ...and, on HTTP/2 and HTTP/3, that the exception boundary does not observe it (#1378). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
 		<!-- Activate the endpoint-binding generator on this project's typed Map* call sites so the
 		     generated thunks can be exercised end-to-end through the factory. -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The HTTP/2 and HTTP/3 malformed-body tests send what no real client does, frame by frame (#1378):
+		     the raw clients are the Web.Hosting tests', and the QPACK codec the Web.WebSockets tests'. -->
+		<Compile Include="..\..\Assimalign.Cohesion.Web.Hosting\tests\TestObjects\Http2RawClient.cs" Link="TestObjects\Http2RawClient.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Web.Hosting\tests\TestObjects\Http3RawClient.cs" Link="TestObjects\Http3RawClient.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Web.WebSockets\tests\TestObjects\QPackTestCodec.cs" Link="TestObjects\QPackTestCodec.cs" />
 	</ItemGroup>
 </Project>

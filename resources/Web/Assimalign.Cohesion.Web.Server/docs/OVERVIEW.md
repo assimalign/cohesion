@@ -17,9 +17,11 @@ handlers read them from `context.Features`.
   nothing. `Web.WebSockets` closes open sockets with `1001 Going Away` on it.
 - **Client fault** — `IWebClientFaultFeature.StatusCode` is the `4xx` the transport answers the
   exchange with because the request body broke its framing or a configured limit while it was read,
-  or the client cut it short by closing the connection (`400`, `413`, `408` or `431`), or `null`. The read still throws; this tells the code that sees the
-  exception it was the client's fault, not an application defect (#1340). The default server
-  installs it on an HTTP/1.1 request that declares a body. `Web.Diagnostics`, `Web.ErrorHandling` and
+  or the client cut it short by closing the connection (`400`, `413`, `408` or `431`), or `null`. On
+  HTTP/2 and HTTP/3 a malformed body resets the stream instead and is reported as `400`. The read still
+  throws; this tells the code that sees the exception it was the client's fault, not an application
+  defect (#1340, #1378). The default server installs it on a request that can have a body, on every
+  version. `Web.Diagnostics`, `Web.ErrorHandling` and
   `Web.Compression` read it.
 
 A custom `IWebApplicationServer` may omit any of the four, so every reader handles an absent

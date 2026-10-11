@@ -34,6 +34,9 @@ internal readonly record struct Http2RawFrame(byte Type, byte Flags, int StreamI
 
     /// <summary>The error code of a GOAWAY frame.</summary>
     public uint GoAwayErrorCode => BinaryPrimitives.ReadUInt32BigEndian(Payload.AsSpan(4, 4));
+
+    /// <summary>The error code of an RST_STREAM frame (RFC 9113 §6.4): <c>0x1</c> is <c>PROTOCOL_ERROR</c>.</summary>
+    public uint RstStreamErrorCode => BinaryPrimitives.ReadUInt32BigEndian(Payload);
 }
 
 /// <summary>
@@ -96,6 +99,47 @@ internal sealed class Http2RawClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Opens <paramref name="streamId"/> with <paramref name="method"/> for <paramref name="path"/> and the
+    /// regular <paramref name="fields"/> (lowercase names), ending the stream with the head when
+    /// <paramref name="endStream"/> is set.
+    /// </summary>
+    public Task SendHeadersAsync(
+        int streamId,
+        string method,
+        string path,
+        bool endStream,
+        CancellationToken cancellationToken,
+        params (string Name, string Value)[] fields)
+    {
+        byte[] headerBlock = CreateRequestHeaderBlock(method, path, fields);
+
+        // END_HEADERS (0x4), plus END_STREAM (0x1) when the head ends the stream.
+        return WriteFrameAsync(Http2RawFrame.HeadersType, endStream ? (byte)0x5 : (byte)0x4, streamId, headerBlock, cancellationToken);
+    }
+
+    /// <summary>Sends one DATA frame on <paramref name="streamId"/>, ending the stream when <paramref name="endStream"/> is set.</summary>
+    public Task SendDataAsync(int streamId, byte[] data, bool endStream, CancellationToken cancellationToken)
+    {
+        return WriteFrameAsync(Http2RawFrame.DataType, endStream ? (byte)0x1 : (byte)0x0, streamId, data, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends a trailer section on <paramref name="streamId"/>: a HEADERS frame carrying END_STREAM and
+    /// END_HEADERS whose fields are <paramref name="fields"/> (RFC 9113 §8.1).
+    /// </summary>
+    public Task SendTrailersAsync(int streamId, CancellationToken cancellationToken, params (string Name, string Value)[] fields)
+    {
+        using MemoryStream headerBlock = new();
+
+        foreach ((string name, string value) in fields)
+        {
+            WriteLiteralField(headerBlock, name, value);
+        }
+
+        return WriteFrameAsync(Http2RawFrame.HeadersType, flags: 0x5, streamId, headerBlock.ToArray(), cancellationToken);
+    }
+
+    /// <summary>
     /// Reads frames until one satisfies <paramref name="predicate"/>, and returns that frame.
     /// </summary>
     public async Task<Http2RawFrame> ReadUntilAsync(Func<Http2RawFrame, bool> predicate, CancellationToken cancellationToken)
@@ -149,13 +193,18 @@ internal sealed class Http2RawClient : IAsyncDisposable
         return buffer;
     }
 
-    private static byte[] CreateRequestHeaderBlock(string method, string path)
+    private static byte[] CreateRequestHeaderBlock(string method, string path, params (string Name, string Value)[] fields)
     {
         using MemoryStream headerBlock = new();
         WriteLiteralField(headerBlock, ":method", method);
         WriteLiteralField(headerBlock, ":scheme", "http");
         WriteLiteralField(headerBlock, ":path", path);
         WriteLiteralField(headerBlock, ":authority", "localhost");
+
+        foreach ((string name, string value) in fields)
+        {
+            WriteLiteralField(headerBlock, name, value);
+        }
 
         return headerBlock.ToArray();
     }

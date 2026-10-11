@@ -36,11 +36,12 @@ response starts (#1384). A client that grants no flow-control credit or stops re
 reclaimed on every protocol, and its exchange is recorded as cancelled. The
 next two make `context.Upgrade`, `context.ExtendedConnect` and a
 WebSocket handshake (`context.WebSockets`) work on every protocol without listener configuration. A
-request no handler accepts is served as before. The last publishes `IWebClientFaultFeature` on an
-HTTP/1.1 request with a body: when the body breaks its framing or a limit while it is read, the
-transport answers `400`, `413`, `408` or `431` itself, and the HTTP logging middleware and the
+request no handler accepts is served as before. The last publishes `IWebClientFaultFeature` on a
+request that can have a body, on every version: when the body breaks its framing or a limit while it is
+read, the transport answers `400`, `413`, `408` or `431` itself (on HTTP/2 and HTTP/3 it resets the
+stream for a malformed body instead, reported as `400`), and the HTTP logging middleware and the
 exception boundary treat the read's exception as the client's fault, not an application defect
-(#1340). A `UseServer` callback that clears `options.Interceptors` removes them, and with them
+(#1340, #1378). A `UseServer` callback that clears `options.Interceptors` removes them, and with them
 WebSockets on every protocol (the HTTP/2 and HTTP/3 transports keep advertising extended CONNECT, but
 nothing surfaces it) and the client-fault classification.
 

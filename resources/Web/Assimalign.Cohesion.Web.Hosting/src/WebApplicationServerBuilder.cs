@@ -308,11 +308,11 @@ public sealed class WebApplicationServerBuilder
     /// listener. The extended CONNECT interceptor follows, so <c>context.ExtendedConnect</c>, and
     /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. The
     /// client-fault interceptor comes last: it publishes the transport's client-fault report as
-    /// <see cref="IWebClientFaultFeature"/> on an HTTP/1.1 request that declares a body, so the HTTP
+    /// <see cref="IWebClientFaultFeature"/> on a request that can have a body, on any version, so the HTTP
     /// logging middleware, the exception boundary and request decompression classify a malformed or
-    /// over-limit body as the client's fault rather than the application's (#1340). A request that no
+    /// over-limit body as the client's fault rather than the application's (#1340, #1378). A request that no
     /// application accepts is served exactly as before, and an ordinary exchange keeps the transport's
-    /// fast path under all four; an HTTP/1.1 request with a body takes the response phase, for its
+    /// fast path under all four; a request that can have a body takes the response phase, for its
     /// exchange control. User configurations may still inspect or clear
     /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
     /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended

@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Api.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Diagnostics;
+using Assimalign.Cohesion.Web.ErrorHandling;
+using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Serialization;
 using Assimalign.Cohesion.Web.Testing;
@@ -29,7 +31,10 @@ namespace Assimalign.Cohesion.Web.Api.Tests;
 /// stream throws <see cref="InvalidDataException"/> and answers the exchange <c>400</c> itself (#1333).
 /// The generated binding answers it <c>400</c> with a problem body, whether the body is bound from JSON
 /// or from a form, and the HTTP logging middleware records the exchange as a client fault at its
-/// configured level rather than as an application defect at <c>Error</c>.
+/// configured level rather than as an application defect at <c>Error</c>. On HTTP/2 and HTTP/3 (#1378) a
+/// body that contradicts its content-length, or a malformed trailer section, resets the stream instead; the
+/// read throws an <see cref="IOException"/> the binding does not catch, and the exception boundary and the
+/// access log still treat it as the client's fault.
 /// </summary>
 public class EndpointMalformedBodyTests
 {
@@ -125,6 +130,89 @@ public class EndpointMalformedBodyTests
         entry.Attributes[HttpLoggingAttributes.ClientFault].ShouldBe(true);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Api] - Malformed body: A JSON-bound endpoint should treat a malformed HTTP/2 body as a client fault, not an application fault")]
+    [InlineData("content-length")]
+    [InlineData("trailer")]
+    public async Task Binding_JsonBodyMalformedOverHttp2_ShouldLogAClientFaultWithoutOnException(string fault)
+    {
+        // Arrange — #1378: the stream ends short of its declared content-length (RFC 9113 §8.1.1), or a
+        // trailer section carries a field no trailer may, so the transport resets the stream while the
+        // binding reads the body.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using MalformedBodyHarness harness = new();
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp2(transport));
+        harness.Compose(factory);
+        await factory.StartAsync(cancellationToken);
+        await using Http2RawClient client = await Http2RawClient.ConnectAsync(transport, cancellationToken);
+        byte[] json = Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}");
+
+        // Act
+        if (fault == "content-length")
+        {
+            await client.SendHeadersAsync(1, "POST", "/widgets", endStream: false, cancellationToken, ("content-type", "application/json"), ("content-length", "100"));
+            await client.SendDataAsync(1, json, endStream: true, cancellationToken);
+        }
+        else
+        {
+            await client.SendHeadersAsync(1, "POST", "/widgets", endStream: false, cancellationToken, ("content-type", "application/json"));
+            await client.SendDataAsync(1, json, endStream: false, cancellationToken);
+            await client.SendTrailersAsync(1, cancellationToken, ("content-length", "5"));
+        }
+
+        Http2RawFrame reset = await client.ReadUntilAsync(frame => frame.StreamId == 1 && frame.Type == Http2RawFrame.RstStreamType, cancellationToken);
+        ILoggerEntry entry = await WaitForEntryAsync(harness.Recorded, cancellationToken);
+
+        // Assert — PROTOCOL_ERROR on the wire; to the pipeline, the client's fault.
+        reset.RstStreamErrorCode.ShouldBe(0x1u);
+        harness.AssertClientFault(entry);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Api] - Malformed body: A JSON-bound endpoint should treat a malformed HTTP/3 body as a client fault, not an application fault")]
+    [InlineData("content-length")]
+    [InlineData("trailer")]
+    public async Task Binding_JsonBodyMalformedOverHttp3_ShouldLogAClientFaultWithoutOnException(string fault)
+    {
+        // Arrange — #1378: as over HTTP/2, against RFC 9114 §4.1.2.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using MalformedBodyHarness harness = new();
+
+        InMemoryMultiplexedConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp3(transport));
+        harness.Compose(factory);
+        await factory.StartAsync(cancellationToken);
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+        byte[] json = Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}");
+
+        // Act
+        Connection stream = fault == "content-length"
+            ? await client.SendRequestAsync(
+                "POST",
+                "/widgets",
+                [("content-type", "application/json"), ("content-length", "100")],
+                [Http3RawClient.Data(json)],
+                endStream: true,
+                cancellationToken)
+            : await client.SendRequestAsync(
+                "POST",
+                "/widgets",
+                [("content-type", "application/json")],
+                [Http3RawClient.Data(json), Http3RawClient.Trailers(("content-length", "5"))],
+                endStream: true,
+                cancellationToken);
+        (_, long? resetCode) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
+        ILoggerEntry entry = await WaitForEntryAsync(harness.Recorded, cancellationToken);
+
+        // Assert — H3_MESSAGE_ERROR on the wire; to the pipeline, the client's fault.
+        resetCode.ShouldBe(0x10eL);
+        harness.AssertClientFault(entry);
+    }
+
     /// <summary>
     /// Waits for the HTTP logging middleware's exchange entry, which it writes as the pipeline unwinds and
     /// can race the client reading the response.
@@ -176,6 +264,62 @@ public class EndpointMalformedBodyTests
             }
 
             received.Append(Encoding.ASCII.GetString(buffer, 0, read));
+        }
+    }
+
+    /// <summary>
+    /// A JSON-bound endpoint behind the HTTP access log and the exception boundary, recording whether the
+    /// handler ran, what the access log wrote, and whether the boundary's fault observer saw anything.
+    /// </summary>
+    private sealed class MalformedBodyHarness : IDisposable
+    {
+        private int _observed;
+        private ILoggerFactory? _loggerFactory;
+
+        public RecordingLoggerProvider Recorded { get; } = new();
+
+        public bool HandlerRan { get; private set; }
+
+        public void Compose(WebApplicationTestFactory factory)
+        {
+            ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(Recorded).Build();
+            _loggerFactory = loggerFactory;
+
+            factory.Builder.Services.AddRouting();
+            factory.Builder.Services.AddJsonSerialization(ApiTestJsonContext.Default);
+
+            factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+            factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+            {
+                Interlocked.Increment(ref _observed);
+                return ValueTask.CompletedTask;
+            });
+            factory.Application.UseRouting();
+            factory.Application.MapPost("/widgets", (Widget widget) =>
+            {
+                HandlerRan = true;
+                return widget.Name;
+            });
+        }
+
+        /// <summary>
+        /// Asserts that the exchange was handled as the client's fault: the handler never ran, the boundary
+        /// observed nothing, and the access log recorded the client fault's 400 at its configured level,
+        /// without an exception.
+        /// </summary>
+        public void AssertClientFault(ILoggerEntry entry)
+        {
+            HandlerRan.ShouldBeFalse();
+            Volatile.Read(ref _observed).ShouldBe(0);
+            entry.Level.ShouldBe(LogLevel.Information);
+            entry.Exception.ShouldBeNull();
+            entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(400);
+            entry.Attributes[HttpLoggingAttributes.ClientFault].ShouldBe(true);
+        }
+
+        public void Dispose()
+        {
+            _loggerFactory?.Dispose();
         }
     }
 }

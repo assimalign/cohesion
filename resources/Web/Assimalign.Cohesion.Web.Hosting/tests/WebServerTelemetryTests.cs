@@ -576,6 +576,142 @@ public class WebServerTelemetryTests
         duration.Tags.ContainsKey("error.type").ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A malformed HTTP/2 body the transport resets the stream for should report the client fault's 400, not a 500 error")]
+    public async Task ServerSpan_Http2MalformedBody_ShouldReportTheClientFault400WithoutAnError()
+    {
+        // Arrange — the pipeline reads a body that ends short of its content-length and lets the failed read
+        // escape, so the server's fault boundary stages a 500. The transport resets the stream with
+        // PROTOCOL_ERROR (RFC 9113 §8.1.1): no status reaches the wire, and the exchange records the client
+        // fault's 400 (#1378).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new();
+
+        string path = $"/telemetry/h2-malformed-body/{Guid.NewGuid():N}";
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp2(transport));
+        factory.Application.Use(async (context, next) =>
+        {
+            byte[] buffer = new byte[256];
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Http2RawClient client = await Http2RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act
+        await client.SendHeadersAsync(1, "POST", path, endStream: false, cancellationToken, ("content-length", "100"));
+        await client.SendDataAsync(1, Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}"), endStream: true, cancellationToken);
+        Http2RawFrame reset = await client.ReadUntilAsync(frame => frame.StreamId == 1 && frame.Type == Http2RawFrame.RstStreamType, cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+        // The span stops after the duration is recorded, so the exchange's measurement is already in.
+        RecordedMeasurement duration = recorder.Measurements.Single(
+            m => m.Instrument == "http.server.request.duration" && Equals(m.Tags.GetValueOrDefault("network.protocol.version"), "2"));
+
+        // Assert
+        reset.RstStreamErrorCode.ShouldBe(0x1u);
+        span.GetTagItem("http.response.status_code").ShouldBe(400);
+        span.GetTagItem("error.type").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+        duration.Tags.GetValueOrDefault("http.response.status_code").ShouldBe(400);
+        duration.Tags.ContainsKey("error.type").ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An HTTP/2 exchange cancelled by the reset for a client fault should report client_fault, not request_canceled")]
+    public async Task ServerSpan_Http2ExchangeCancelledByAClientFaultReset_ShouldReportClientFault()
+    {
+        // Arrange — the handler has read the body it was sent and waits on RequestCancelled, so the reset for
+        // the malformed trailer section that follows reaches it as the exchange's cancellation, not as a read
+        // failure. That cancellation was the transport's answer to the client's fault (#1378).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+        TaskCompletionSource waiting = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        string path = $"/telemetry/h2-client-fault-cancel/{Guid.NewGuid():N}";
+
+        await using InMemoryConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp2(transport));
+        factory.Application.Use(async (context, next) =>
+        {
+            await context.Request.Body.ReadExactlyAsync(new byte[16], context.RequestCancelled);
+            waiting.TrySetResult();
+            await Task.Delay(Timeout.Infinite, context.RequestCancelled);
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Http2RawClient client = await Http2RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act
+        await client.SendHeadersAsync(1, "POST", path, endStream: false, cancellationToken);
+        await client.SendDataAsync(1, Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}"), endStream: false, cancellationToken);
+        await waiting.Task.WaitAsync(cancellationToken);
+        await client.SendTrailersAsync(1, cancellationToken, ("content-length", "5"));
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        span.GetTagItem("error.type").ShouldBe("client_fault");
+        span.GetTagItem("http.response.status_code").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Error);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A malformed HTTP/3 body the transport resets the stream for should report the client fault's 400, not a 500 error")]
+    public async Task ServerSpan_Http3MalformedBody_ShouldReportTheClientFault400WithoutAnError()
+    {
+        // Arrange — as for HTTP/2: the stream ends short of its Content-Length, the transport resets it with
+        // H3_MESSAGE_ERROR (RFC 9114 §4.1.2), and the exchange records the client fault's 400 (#1378).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+
+        string path = $"/telemetry/h3-malformed-body/{Guid.NewGuid():N}";
+
+        InMemoryMultiplexedConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp3(transport));
+        factory.Application.Use(async (context, next) =>
+        {
+            byte[] buffer = new byte[256];
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act
+        Connection stream = await client.SendRequestAsync(
+            "POST",
+            path,
+            [("content-length", "100")],
+            [Http3RawClient.Data(Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}"))],
+            endStream: true,
+            cancellationToken);
+        (_, long? resetCode) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        resetCode.ShouldBe(0x10eL);
+        span.GetTagItem("http.response.status_code").ShouldBe(400);
+        span.GetTagItem("error.type").ShouldBeNull();
+        span.Status.ShouldBe(ActivityStatusCode.Unset);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A cancelled exchange should report request_canceled and no status code")]
     public async Task ServerSpan_CanceledExchange_ShouldReportRequestCanceled()
     {
