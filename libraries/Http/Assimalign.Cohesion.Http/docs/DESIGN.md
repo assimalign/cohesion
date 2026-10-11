@@ -488,8 +488,8 @@ A space, `?` or `#` never needs encoding in a path that came from a request:
 decodes to one (`HttpRequestTargetDecodeParityTests`, `Http2MalformedPathTests`,
 `Http3MalformedPathTests` in Http.Connections). Both helpers are value-object
 members, not feature contracts, so decision 20's rule for the core is unchanged.
-`Web.HttpsPolicy` and `Web.StaticFiles` build their redirects with them;
-`Web.Rewrite` still uses its own encoder (`RewriteUrl`).
+`Web.HttpsPolicy`, `Web.StaticFiles` and `Web.Rewrite` build their redirects
+with them.
 
 ## Media types and content negotiation
 

@@ -75,7 +75,7 @@ Effective values suit forwarded headers because forwarded headers change how the
 
 **Also:**
 - Path branches keep their feature. Turning branches into views later is possible, but not required.
-- **To revisit:** a shared redirect helper. HttpsPolicy, StaticFiles and Rewrite each write a `Location`, and they rebuild the query differently.
+- **To revisit:** a shared redirect helper. HttpsPolicy, StaticFiles and Rewrite each write a `Location`, and they used to encode the path and rebuild the query differently. Since #1324 all three encode with the core `HttpPath.ToUriComponent` and `HttpQuery.Create`, so what is left to share is only where each reads its values; a helper beyond those two calls is not needed unless a fourth redirect appears.
 
 ### Action items
 

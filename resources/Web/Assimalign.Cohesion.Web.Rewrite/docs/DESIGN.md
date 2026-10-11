@@ -187,7 +187,8 @@ time under the JIT.
 kept, so a pattern reads like the URL. `RewriteMatchTarget.PathAndQuery` matches the path, then `?` and the
 query when there is one. The raw query string is not carried on `IHttpRequest`, so the query is rebuilt from
 the parsed collection: each key and value percent-encoded, joined with `&` in enumeration order, a key with
-an empty value written without `=`. This is the same rebuilding Web.HttpsPolicy's redirect does.
+an empty value written without `=`. It is the core `HttpQuery.Create`, the call Web.HttpsPolicy's and
+Web.StaticFiles' redirects make.
 
 ### Target syntax
 
@@ -248,10 +249,14 @@ to `308`. Anything other than the four statuses is an `ArgumentOutOfRangeExcepti
 answers with a different resource rather than moving this one, and the other `3xx` codes are not redirects a
 client follows.
 
-The `Location` is percent-encoded: the path base and path through the path escaping above, the query in its
-re-encoded form. Web.HttpsPolicy and Web.StaticFiles write the decoded path into `Location` as it is, which is
-not a valid URI reference when the path holds a non-ASCII character or a literal `%`. A shared redirect helper
-for the three is an open item in ADR 1 ("To revisit"); until then the helper here stays internal.
+The `Location` is percent-encoded with the core helpers Web.HttpsPolicy and Web.StaticFiles use (#1324): the
+path base and a decoded path through `HttpPath.ToUriComponent`, the query through `HttpQuery.Create`, which is
+also the re-encoded form the pattern rules match. So the three redirects write a path and a query the same way,
+including an escape the transports keep as written (an encoded slash `%2F`, a byte that is not UTF-8 such as
+`%E9`), which `ToUriComponent` writes as the request carried it rather than as `%252F`. A template's expansion is
+URL text already and is written as it is; a capture in it is escaped as the table above says. The remaining
+difference between the three is where each reads its values, not how it encodes them, so the shared helper ADR 1
+listed to revisit is these two core calls.
 
 A relative `Location` that starts with `//` is a network-path reference: a client reads its first segment as
 a host. A capture can produce one (`/go//evil.example` matched by `^/go/(.*)$` into `/$1`), so with no path

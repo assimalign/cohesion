@@ -72,9 +72,10 @@ internal sealed class RewriteContext : IRewriteContext
 
     /// <summary>
     /// Gets the current query, re-encoded the way <see cref="RewriteMatchTarget.PathAndQuery"/> matches it and
-    /// a redirect carries it. Computed once per query.
+    /// a redirect carries it: <see cref="HttpQuery.Create"/>, which Web.HttpsPolicy and Web.StaticFiles write
+    /// into their redirects too. Computed once per query.
     /// </summary>
-    public string SerializedQuery => _serializedQuery ??= RewriteUrl.SerializeQuery(_query);
+    public string SerializedQuery => _serializedQuery ??= HttpQuery.Create(_query).Value;
 
     /// <summary>
     /// Gets the text a pattern matches for <paramref name="target"/>, and the length of its path.

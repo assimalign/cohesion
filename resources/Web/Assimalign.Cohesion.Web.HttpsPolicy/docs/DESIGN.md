@@ -140,8 +140,8 @@ trust walk accepted the hop and shape-checked the value):
 - **Query** — rebuilt from the parsed `IHttpQueryCollection` by
   `HttpQuery.Create`, which percent-encodes each key and value except for the
   unreserved characters and writes an empty value as the bare key.
-  `Web.StaticFiles`' add-a-slash redirect uses the same call, so the two
-  rebuild a query the same way. **This is not byte-verbatim**,
+  `Web.StaticFiles`' add-a-slash redirect and `Web.Rewrite`'s redirects use the
+  same calls, so the three write a path and a query the same way. **This is not byte-verbatim**,
   and deliberately so: `IHttpRequest` exposes only the *parsed* query (the raw
   query string is discarded at the transport boundary — see
   `TransportHttpRequest`), so the reconstruction (a) follows the parsed

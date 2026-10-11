@@ -1,6 +1,5 @@
 using System;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
@@ -21,11 +20,12 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// <see cref="HttpQuery.Parse"/> for the query. Every value is decoded exactly once.
 /// </para>
 /// <para>
-/// A redirect <c>Location</c> is written percent-encoded. The Web.HttpsPolicy and Web.StaticFiles redirects
-/// encode theirs with the core <see cref="HttpPath.ToUriComponent"/> and <see cref="HttpQuery.Create"/>
-/// (#1324), which write an encoded slash the transports keep (<c>%2F</c>) as it is; <see cref="AppendEscaped"/>
-/// escapes its <c>%</c>, so a decoded path holding one is written here as <c>%252F</c>. Moving this type onto
-/// the core helpers is the open item in the Web area decisions (ADR 1, "To revisit").
+/// A redirect <c>Location</c> is written percent-encoded with the core <see cref="HttpPath.ToUriComponent"/>
+/// for the path base and a decoded path, and <see cref="HttpQuery.Create"/> for the query: the two calls the
+/// Web.HttpsPolicy and Web.StaticFiles redirects make (#1324), so all three write an escape the transports keep
+/// (an encoded slash <c>%2F</c>, or a sequence that is not UTF-8) as the request carried it, never as
+/// <c>%252F</c>. A capture substituted into a template is still escaped by <see cref="AppendEscaped"/>, which
+/// escapes every <c>%</c> (the encoding model in the package DESIGN).
 /// </para>
 /// </remarks>
 internal static class RewriteUrl
@@ -161,40 +161,6 @@ internal static class RewriteUrl
     }
 
     /// <summary>
-    /// Serializes a parsed query the way the pattern rules match it and redirects carry it: each key and
-    /// value percent-encoded, joined with <c>&amp;</c> in enumeration order, and a key with an empty value
-    /// written without <c>=</c>. Empty when the query has no entries.
-    /// </summary>
-    public static string SerializeQuery(IHttpQueryCollection query)
-    {
-        if (query.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        StringBuilder builder = new(32);
-
-        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> entry in query)
-        {
-            if (builder.Length != 0)
-            {
-                builder.Append('&');
-            }
-
-            AppendEscaped(builder, entry.Key.Value, _componentCharacters);
-
-            string value = entry.Value.Value;
-            if (value.Length != 0)
-            {
-                builder.Append('=');
-                AppendEscaped(builder, value, _componentCharacters);
-            }
-        }
-
-        return builder.ToString();
-    }
-
-    /// <summary>
     /// Parses percent-encoded path text the way the transports parse a request target's path, decoding it
     /// once. Fails, rather than throwing, for a path no request may carry: one that decodes to a space,
     /// <c>?</c>, <c>#</c>, CR, LF, tab or NUL.
@@ -276,13 +242,14 @@ internal static class RewriteUrl
 
     /// <summary>
     /// Builds a redirect <c>Location</c> from percent-decoded values: the scheme and authority when given
-    /// (an absolute URL), then the path base and path percent-encoded, then the re-encoded query.
+    /// (an absolute URL), then the path base and path percent-encoded with <see cref="HttpPath.ToUriComponent"/>,
+    /// then the re-encoded query.
     /// </summary>
     /// <param name="scheme">The scheme of an absolute URL, or <see langword="null"/> for an absolute path.</param>
     /// <param name="authority">The authority of an absolute URL.</param>
     /// <param name="pathBase">The path base the path is below.</param>
     /// <param name="path">The percent-decoded path below <paramref name="pathBase"/>.</param>
-    /// <param name="query">The re-encoded query (<see cref="SerializeQuery"/>), empty for none.</param>
+    /// <param name="query">The re-encoded query (<see cref="HttpQuery.Create"/>), empty for none.</param>
     public static string BuildLocation(string? scheme, string? authority, HttpPath pathBase, HttpPath path, string query)
     {
         StringBuilder builder = new(64);
@@ -292,7 +259,7 @@ internal static class RewriteUrl
             builder.Append(scheme).Append("://").Append(authority);
         }
 
-        AppendPath(builder, pathBase, path.Value, encoded: false, relative: scheme is null);
+        AppendPath(builder, pathBase, path.ToUriComponent(), relative: scheme is null);
 
         if (query.Length != 0)
         {
@@ -324,7 +291,7 @@ internal static class RewriteUrl
         }
         else
         {
-            AppendPath(builder, pathBase, target.Path, encoded: true, relative: true);
+            AppendPath(builder, pathBase, target.Path, relative: true);
         }
 
         if (query.Length != 0)
@@ -358,16 +325,17 @@ internal static class RewriteUrl
         }
     }
 
-    // Appends the path base (outside the root) and the path. A relative Location that starts with "//" is a
-    // network-path reference whose first segment a client reads as a host, so with no base to precede it the
-    // leading slashes collapse to one and the redirect stays on this origin.
-    private static void AppendPath(StringBuilder builder, HttpPath pathBase, ReadOnlySpan<char> path, bool encoded, bool relative)
+    // Appends the path base (outside the root), percent-encoded, and the path, which is URL text already. A
+    // relative Location that starts with "//" is a network-path reference whose first segment a client reads as
+    // a host, so with no base to precede it the leading slashes collapse to one and the redirect stays on this
+    // origin. Encoding leaves every '/' where it is, so the check reads the encoded path as it would the decoded.
+    private static void AppendPath(StringBuilder builder, HttpPath pathBase, ReadOnlySpan<char> path, bool relative)
     {
-        ReadOnlySpan<char> prefix = pathBase.Value is { Length: > 1 } value ? value.AsSpan().TrimEnd('/') : default;
+        ReadOnlySpan<char> prefix = pathBase.Value is { Length: > 1 } ? pathBase.ToUriComponent().AsSpan().TrimEnd('/') : default;
 
         if (!prefix.IsEmpty)
         {
-            AppendEscaped(builder, prefix, _pathCharacters);
+            builder.Append(prefix);
         }
         else if (relative && path.Length > 1 && path[0] == '/' && path[1] == '/')
         {
@@ -375,14 +343,7 @@ internal static class RewriteUrl
             path = path.TrimStart('/');
         }
 
-        if (encoded)
-        {
-            builder.Append(path);
-        }
-        else
-        {
-            AppendEscaped(builder, path, _pathCharacters);
-        }
+        builder.Append(path);
     }
 
     private static void AppendPercentEncoded(StringBuilder builder, Rune rune)

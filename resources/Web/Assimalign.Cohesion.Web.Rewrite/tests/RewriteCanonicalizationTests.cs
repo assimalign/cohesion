@@ -41,6 +41,24 @@ public class RewriteCanonicalizationTests
         probe.Invocations.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Rewrite] - HTTPS: The decoded path should be written back as the request carried it")]
+    [InlineData("/a%2Fb", "https://example.com/a%2Fb")]          // an encoded slash, kept rather than written as %252F
+    [InlineData("/caf%E9", "https://example.com/caf%E9")]        // a Latin-1 escape the decoder leaves as written
+    [InlineData("/café/100%", "https://example.com/caf%C3%A9/100%25")]
+    public async Task AddRedirectToHttps_PathWithEscapes_ShouldEncodeItOnce(string decodedPath, string location)
+    {
+        // Arrange — the transports hand the rules the decoded path; the Location encodes it with
+        // HttpPath.ToUriComponent, as Web.HttpsPolicy's redirect does.
+        (TestPipelineBuilder builder, _) = Create(rules => rules.AddRedirectToHttps());
+
+        // Act
+        TestHttpContext context = await builder.SendAsync(new TestHttpContext(decodedPath));
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(308);
+        context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe(location);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - HTTPS: A secure request should pass through")]
     public async Task AddRedirectToHttps_SecureRequest_ShouldPassThrough()
     {
@@ -290,6 +308,8 @@ public class RewriteCanonicalizationTests
     [Theory(DisplayName = "Cohesion Test [Web.Rewrite] - Slash: A directory path should be redirected to its trailing-slash form")]
     [InlineData("/docs", "a=1", "/docs/?a=1")]
     [InlineData("/v1.2/docs", null, "/v1.2/docs/")]
+    [InlineData("/a%2Fb", null, "/a%2Fb/")]
+    [InlineData("/docs", "flag", "/docs/?flag")]
     public async Task AddRedirectToTrailingSlash_DirectoryPath_ShouldRedirect(string path, string? query, string location)
     {
         // Arrange
