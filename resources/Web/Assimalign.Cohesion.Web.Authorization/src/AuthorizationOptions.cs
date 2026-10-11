@@ -8,16 +8,16 @@ namespace Assimalign.Cohesion.Web.Authorization;
 
 /// <summary>
 /// Builder-time options for authorization: the default policy, the optional fallback policy, and the
-/// named policies endpoints reference. Configure them in the
-/// <c>builder.Services.AddAuthorization(...)</c> callback.
+/// named policies endpoints reference. Configure them through <see cref="AuthorizationBuilder.Options"/> in the
+/// <c>builder.Services.AddAuthorization(authorization => ...)</c> callback.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Composition is dependency-free: policies are values captured at builder time, with no service
-/// container, configuration binding, or request-time service location. When the
-/// <c>AddAuthorization</c> callback returns, the options become read-only and every mutator throws
-/// <see cref="InvalidOperationException"/>, so the policies <c>UseAuthorization</c> evaluates cannot
-/// change underneath concurrent requests.
+/// container, configuration binding, or request-time service location. When
+/// <see cref="AuthorizationBuilder.Build"/> runs, after the <c>AddAuthorization</c> callback returns, the
+/// options become read-only and every mutator throws <see cref="InvalidOperationException"/>, so the
+/// policies <c>UseAuthorization</c> evaluates cannot change underneath concurrent requests.
 /// </para>
 /// <para>
 /// Policy names are compared ordinal (case-sensitive), as the sibling rate-limiting policy map does:
@@ -226,7 +226,7 @@ public sealed class AuthorizationOptions
                 {
                     throw new InvalidOperationException(
                         $"No authorization policy named '{policyName}' has been registered. " +
-                        "Register it with options.AddPolicy(name, policy) in AddAuthorization.");
+                        "Register it with authorization.Options.AddPolicy(name, policy) in AddAuthorization.");
                 }
 
                 builder.Combine(named);
@@ -260,8 +260,8 @@ public sealed class AuthorizationOptions
     }
 
     /// <summary>
-    /// Makes the options read-only. <c>AddAuthorization</c> calls this once its callback returns; reads
-    /// after that never race a write.
+    /// Makes the options read-only. <see cref="AuthorizationBuilder.Build"/> calls this, after the
+    /// <c>AddAuthorization</c> callback returns; reads after that never race a write.
     /// </summary>
     internal void MakeReadOnly() => _isReadOnly = true;
 

@@ -34,7 +34,7 @@ public class AntiforgeryRegistrationTests
         ServiceProviderBuilder services = new();
 
         // Act / Assert
-        Should.Throw<ArgumentNullException>(() => services.AddAntiforgery((IDataProtectionProvider)null!));
+        Should.Throw<ArgumentNullException>(() => services.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(null!)));
         services.Container.Count.ShouldBe(0);
     }
 
@@ -78,10 +78,10 @@ public class AntiforgeryRegistrationTests
     {
         // Arrange — the second instance creates its own provider over the same key repository.
         InMemoryKeyRepository keys = new();
-        IHttpAntiforgery first = Register(builder => builder.AddAntiforgery(DataProtectionProvider.Create(keys)));
+        IHttpAntiforgery first = Register(builder => builder.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(DataProtectionProvider.Create(keys))));
         HttpAntiforgeryTokenSet tokens = first.GetAndStoreTokens(new AntiforgeryTestContext(HttpMethod.Get));
 
-        IHttpAntiforgery restarted = Register(builder => builder.AddAntiforgery(DataProtectionProvider.Create(keys)));
+        IHttpAntiforgery restarted = Register(builder => builder.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(DataProtectionProvider.Create(keys))));
 
         // Act
         bool valid = await restarted.IsRequestValidAsync(Post(tokens));
@@ -114,7 +114,7 @@ public class AntiforgeryRegistrationTests
         // Arrange — the purpose chain is part of the token format: a service that seals under exactly
         // ("Assimalign.Cohesion.Web.Antiforgery", "v1") interoperates with the registered one.
         IDataProtectionProvider provider = DataProtectionProvider.Create(new InMemoryKeyRepository());
-        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(provider));
+        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(provider)));
         IHttpAntiforgery samePurpose = HttpAntiforgery.Create(new HttpAntiforgeryOptions
         {
             Protector = new TestDataProtectionProtector(provider.CreateProtector("Assimalign.Cohesion.Web.Antiforgery", "v1")),
@@ -134,7 +134,7 @@ public class AntiforgeryRegistrationTests
     {
         // Arrange — same key ring, a different purpose (cookie authentication's): purpose-bound isolation.
         IDataProtectionProvider provider = DataProtectionProvider.Create(new InMemoryKeyRepository());
-        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(provider));
+        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(provider)));
         IHttpAntiforgery otherPurpose = HttpAntiforgery.Create(new HttpAntiforgeryOptions
         {
             Protector = new TestDataProtectionProtector(provider.CreateProtector("Assimalign.Cohesion.Web.Authentication.Cookie", "Cookies", "v1")),
@@ -153,7 +153,8 @@ public class AntiforgeryRegistrationTests
     public async Task AddAntiforgery_WithDataProtectionProvider_TamperedTokenShouldBeInvalid()
     {
         // Arrange
-        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(DataProtectionProvider.Create(new InMemoryKeyRepository())));
+        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(
+            antiforgery => antiforgery.UseDataProtection(DataProtectionProvider.Create(new InMemoryKeyRepository()))));
         HttpAntiforgeryTokenSet tokens = registered.GetAndStoreTokens(new AntiforgeryTestContext(HttpMethod.Get));
 
         char[] tampered = tokens.CookieToken!.ToCharArray();
@@ -175,9 +176,11 @@ public class AntiforgeryRegistrationTests
     {
         // Arrange
         CountingProtector explicitProtector = new();
-        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(
-            DataProtectionProvider.Create(new InMemoryKeyRepository()),
-            options => options.Protector = explicitProtector));
+        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(antiforgery =>
+        {
+            antiforgery.UseDataProtection(DataProtectionProvider.Create(new InMemoryKeyRepository()));
+            antiforgery.Options.Protector = explicitProtector;
+        }));
 
         // Act
         registered.GetAndStoreTokens(new AntiforgeryTestContext(HttpMethod.Get));
@@ -186,14 +189,33 @@ public class AntiforgeryRegistrationTests
         explicitProtector.ProtectCount.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AddAntiforgery: A later UseDataProtection should replace the earlier provider")]
+    public async Task AddAntiforgery_UseDataProtectionCalledTwice_LastProviderShouldProtectTokens()
+    {
+        // Arrange — a second instance over the same key repository as the later provider.
+        InMemoryKeyRepository keys = new();
+        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(antiforgery => antiforgery
+            .UseDataProtection(DataProtectionProvider.Create(new InMemoryKeyRepository()))
+            .UseDataProtection(DataProtectionProvider.Create(keys))));
+        IHttpAntiforgery sameKeys = Register(builder => builder.AddAntiforgery(
+            antiforgery => antiforgery.UseDataProtection(DataProtectionProvider.Create(keys))));
+        HttpAntiforgeryTokenSet tokens = sameKeys.GetAndStoreTokens(new AntiforgeryTestContext(HttpMethod.Get));
+
+        // Act
+        bool valid = await registered.IsRequestValidAsync(Post(tokens));
+
+        // Assert
+        valid.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - AddAntiforgery: The configure callback should shape the registered service")]
     public void AddAntiforgery_Configure_ShouldApplyOptions()
     {
         // Arrange
-        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(options =>
+        IHttpAntiforgery registered = Register(builder => builder.AddAntiforgery(antiforgery =>
         {
-            options.HeaderName = "X-XSRF-TOKEN";
-            options.FormFieldName = "csrf";
+            antiforgery.Options.HeaderName = "X-XSRF-TOKEN";
+            antiforgery.Options.FormFieldName = "csrf";
         }));
 
         // Act

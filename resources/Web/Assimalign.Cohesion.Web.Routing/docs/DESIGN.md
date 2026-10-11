@@ -711,12 +711,15 @@ app:
 - `builder.Services.AddRouting()` (builder time) registers the per-application `RouterFeature` as an
   `IHttpFeature`. Because it is one DI singleton per application, two applications get two distinct
   features. The verb is a component integration (owner decisions 34 and 35, 2026-10-09, #1380): the
-  package declares `[assembly: ComponentIntegration]` over `RoutingComponents.CreateFeature`
-  (`src/Properties/ComponentIntegrations.cs`), and the generator projects `AddRouting` onto
+  package declares `[assembly: ComponentIntegration]` over the public `RoutingBuilder.Build` instance
+  method (`src/Properties/ComponentIntegrations.cs`), and the generator projects `AddRouting` onto
   `IServiceProviderBuilder` in the application's compilation, so the package takes no
-  dependency-injection reference. `RoutingComponents` is the static-factory shape,
-  `[EditorBrowsable(Never)]` in the package's root namespace, because the verb takes no configuration.
-  The singleton is load-bearing, and `Web.Hosting` enforces it at `Build`: a transient registration
+  dependency-injection reference. Naming an instance method selects the builder template, whose
+  configure callback is optional (owner decision 39, 2026-10-10, #1395), so the verb is called bare:
+  routing has no application-wide settings yet, and `RoutingBuilder` is where they go when it gains
+  them. Until #1395 the verb was a static factory behind a hidden `RoutingComponents` type, because the
+  template's callback was required. `RoutingBuilder` composes the feature; `RouterBuilder` is the route
+  table the feature owns. The singleton is load-bearing, and `Web.Hosting` enforces it at `Build`: a transient registration
   would hand `UseRouting` and the exchange two different routers, so routes mapped into one would be
   served by the other. Until #1380 the verb was an `extension(IWebApplicationBuilder)` member.
 - `UseRouting()` (pipeline time) resolves that **same** feature off the application context

@@ -11,8 +11,9 @@ with a challenge or a forbid through `Web.Authentication`. It evaluates over the
   requirements a request must all satisfy (an authenticated user, roles, claims with allowed values,
   sync or async delegate assertions, or a custom `IAuthorizationRequirement`), plus the authentication
   schemes that establish the principal they evaluate.
-- **Options** (`AuthorizationOptions`, registered with `builder.Services.AddAuthorization(...)`, a
-  component integration the application's compilation receives): the default policy
+- **Options** (`AuthorizationOptions`, configured as `AuthorizationBuilder.Options` in
+  `builder.Services.AddAuthorization(authorization => ...)`, a component integration the application's
+  compilation receives; called bare, `AddAuthorization()` registers the defaults): the default policy
   (an authenticated user), an optional fallback policy for requests without authorization metadata,
   and named policies. They become read-only once registered.
 - **Endpoint metadata** (`AuthorizationMetadata`, attached with `RequireAuthorization(...)` and
@@ -59,14 +60,15 @@ builder.Services.AddAuthentication(auth =>
         .AddJwtBearer(options => { /* signing keys, issuers, audiences */ });
 });
 
-builder.Services.AddAuthorization(options =>
+builder.Services.AddAuthorization(authorization =>
 {
-    options.AddPolicy("admins", policy => policy.RequireRole("admin"));
-    options.AddPolicy("sales", policy => policy.RequireClaim("department", "sales", "support"));
+    authorization.Options.AddPolicy("admins", policy => policy.RequireRole("admin"));
+    authorization.Options.AddPolicy("sales", policy => policy.RequireClaim("department", "sales", "support"));
 
     // Optional: authorize every request that has no authorization metadata.
-    options.FallbackPolicy = options.DefaultPolicy;
+    authorization.Options.FallbackPolicy = authorization.Options.DefaultPolicy;
 });
+// builder.Services.AddAuthorization();   // the defaults: RequireAuthorization() needs an authenticated user
 
 WebApplication app = builder.Build();
 

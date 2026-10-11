@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// <remarks>
 /// <para>
 /// Registration is <c>builder.Services.AddAuthorization(...)</c>, a component integration the
-/// application's compilation receives (<see cref="AuthorizationComponents"/>, owner decision 34). It
+/// application's compilation receives (<see cref="AuthorizationBuilder"/>, owner decisions 34 and 39). It
 /// captures the policies as values and registers them as an application feature, an
 /// <see cref="Http.IHttpFeature"/> singleton the host hands to the pipeline. This package takes no
 /// dependency-injection or hosting reference; a composition surface without a service container

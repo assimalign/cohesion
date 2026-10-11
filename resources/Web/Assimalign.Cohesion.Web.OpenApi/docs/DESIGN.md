@@ -279,15 +279,17 @@ everything under it; a reusable endpoint library would push the OpenApi family o
 
 ## The document endpoint
 
-`builder.Services.AddOpenApi(options => ...)` captures the options as a typed application feature, an
-`IHttpFeature` singleton; they are read-only once the callback returns. The verb is a component
-integration (owner decisions 34 and 35, 2026-10-09, #1380): the package declares
-`[assembly: ComponentIntegration]` over `OpenApiComponents.CreateFeature`
+`builder.Services.AddOpenApi(openApi => ...)` captures the options as a typed application feature, an
+`IHttpFeature` singleton; they are read-only once `OpenApiBuilder.Build` runs, after the callback
+returns. The verb is a component integration (owner decisions 34 and 35, 2026-10-09, #1380): the package
+declares `[assembly: ComponentIntegration]` over the public `OpenApiBuilder.Build` instance method
 (`src/Properties/ComponentIntegrations.cs`), and the generator projects `AddOpenApi` onto
 `IServiceProviderBuilder` in the application's compilation, so the package takes no dependency-injection
-reference; until #1380 it was an `extension(IWebApplicationBuilder)` member. `OpenApiComponents` is the
-static-factory shape, `[EditorBrowsable(Never)]` in the package's root namespace, because the callback is
-optional. `MapOpenApi(pattern = "/openapi/v1.json")` maps a `GET` route through
+reference; until #1380 it was an `extension(IWebApplicationBuilder)` member. Naming an instance method
+selects the builder template, whose callback is optional (owner decision 39, 2026-10-10, #1395), so
+`AddOpenApi()` registers the default document; the callback configures `OpenApiBuilder.Options`, which
+the builder owns and exposes, as `AuthenticationBuilder` does. Until #1395 the verb was a static factory
+behind a hidden type taking `Action<OpenApiOptions>`. `MapOpenApi(pattern = "/openapi/v1.json")` maps a `GET` route through
 Web.Api's raw `Map` and returns its `IRouterRouteBuilder`, so the document route can carry policies
 (`RequireAuthorization`, `RequireCors`). The route is itself marked `ExcludeFromDescription`.
 

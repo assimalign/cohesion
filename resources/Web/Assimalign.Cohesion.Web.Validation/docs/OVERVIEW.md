@@ -7,8 +7,9 @@ binding failures already use.
 
 ## Scope
 
-- **`builder.Services.AddValidation(...)`** (builder time), a component integration the application's
-  compilation receives (#1380), registers a validator per model type and the application's default.
+- **`builder.Services.AddValidation(validation => ...)`** (builder time), a component integration the
+  application's compilation receives (#1380, #1395), registers a validator per model type and the
+  application's default on `validation.Options`.
   Validators are keyed by `typeof(T)`: `AddProfile(new CustomerProfile())` builds a validator over one
   profile, `AddValidator(validator)` registers a configured `IValidator` for every type it has a profile
   for, and `AddValidator<T>(validator)` names the type. No reflection is involved.
@@ -20,7 +21,7 @@ binding failures already use.
   and an `errors` extension member mapping each failing member to its messages:
   `{ "Name": ["..."], "Address.City": ["..."] }`. Keys are the member paths the profile declares; a nested
   profile's errors are reported under their parent member.
-- **Turning it off or on.** `options.Enabled = false` turns validation off by default;
+- **Turning it off or on.** `validation.Options.Enabled = false` turns validation off by default;
   `DisableValidation()` turns it off for a route or a route group, and `RequireValidation()` turns it on,
   the most specific declaration winning.
 - **Handlers** that bind a value themselves validate it the same way:
@@ -53,7 +54,7 @@ builder.Services.AddRouting();
 builder.Services.AddJsonSerialization(AppJsonContext.Default);
 builder.Services.AddValidation(validation =>
 {
-    validation.AddProfile(new CustomerProfile());
+    validation.Options.AddProfile(new CustomerProfile());
 });
 
 WebApplication app = builder.Build();

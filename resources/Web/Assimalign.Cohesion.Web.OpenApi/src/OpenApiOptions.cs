@@ -10,15 +10,15 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// <summary>
 /// Builder-time options for the application's OpenAPI document: the document-level information, the
 /// OpenAPI line it targets, the security schemes and tags it declares, extra endpoint sources, and
-/// transformers that edit the finished document. Configure them in the
-/// <c>builder.Services.AddOpenApi(...)</c> callback.
+/// transformers that edit the finished document. Configure them through <see cref="OpenApiBuilder.Options"/>
+/// in the <c>builder.Services.AddOpenApi(openApi => ...)</c> callback.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Composition is dependency-free: the options are values captured at builder time, with no service
-/// container or configuration binding. When the <c>AddOpenApi</c> callback returns, the options become
-/// read-only and every mutator throws <see cref="InvalidOperationException"/>, so the document a request
-/// receives cannot change underneath it.
+/// container or configuration binding. When <see cref="OpenApiBuilder.Build"/> runs, after the
+/// <c>AddOpenApi</c> callback returns, the options become read-only and every mutator throws
+/// <see cref="InvalidOperationException"/>, so the document a request receives cannot change underneath it.
 /// </para>
 /// <para>
 /// Security schemes are matched to endpoints by name: declare each authentication scheme an endpoint's
@@ -247,7 +247,8 @@ public sealed class OpenApiOptions
     }
 
     /// <summary>
-    /// Makes the options read-only. <c>AddOpenApi</c> calls this once its callback returns.
+    /// Makes the options read-only. <see cref="OpenApiBuilder.Build"/> calls this, after the
+    /// <c>AddOpenApi</c> callback returns.
     /// </summary>
     internal void MakeReadOnly() => _isReadOnly = true;
 

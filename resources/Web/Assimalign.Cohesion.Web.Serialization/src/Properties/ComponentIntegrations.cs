@@ -18,7 +18,9 @@ using Assimalign.Cohesion.Web.Serialization;
     Contract = typeof(IHttpFeature))]
 
 // builder.Services.AddJsonSerialization(resolver, configure): the JSON shorthand, a static factory
-// because the resolver is an argument the builder template cannot carry.
+// because the resolver is a required argument. The builder template's only argument is its optional
+// callback (decision 39, #1395), so a builder method would turn a missing resolver from a compile-time
+// error into a registration-time throw.
 [assembly: ComponentIntegration(
     targetTypeName:    "Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder",
     targetMethodName:  "AddSingleton",

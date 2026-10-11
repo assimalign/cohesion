@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <para>
 /// <c>builder.Services.AddRouting()</c> (builder time) registers the per-application
 /// <see cref="IRouterFeature"/> as an <see cref="IHttpFeature"/> singleton; the verb is a component
-/// integration the application's compilation receives (<see cref="RoutingComponents"/>, owner decision 34).
+/// integration the application's compilation receives (<see cref="RoutingBuilder"/>, owner decisions 34 and 39).
 /// <c>UseRouting</c> (pipeline time) resolves that <em>same</em> feature and returns its
 /// <see cref="IRouterFeature.Builder"/>. Both therefore operate on one per-application builder — there
 /// is no process-wide shared builder, so route tables never leak between applications hosted in the

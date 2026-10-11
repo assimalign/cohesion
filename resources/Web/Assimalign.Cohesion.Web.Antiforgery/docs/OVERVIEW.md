@@ -13,7 +13,8 @@ reimplements token cryptography; it chooses the protector the engine seals token
   carries it and a handler mints tokens with `context.RequireAntiforgery.GetAndStoreTokens(context)`.
   The verb is a component integration the application's compilation receives (owner decision 34,
   #1380); this package takes no dependency-injection reference.
-- **Protector selection.** `AddAntiforgery(dataProtectionProvider)` seals tokens with a protector the
+- **Protector selection.** `AddAntiforgery(antiforgery => antiforgery.UseDataProtection(dataProtectionProvider))`
+  seals tokens with a protector the
   application's `Security.DataProtection` key ring derives for the antiforgery purpose, so tokens
   survive restarts and validate on every instance that shares the key repository. `AddAntiforgery()`
   without a provider falls back to the engine's per-process random key, which is for **development
@@ -65,8 +66,9 @@ IDataProtectionProvider dataProtection = DataProtectionProvider.Create(
     KeyRepository.CreateFileSystem("/var/lib/app/keys"));
 
 builder.Services.AddRouting();
-builder.Services.AddAntiforgery(dataProtection);  // the cookie token is Secure on every HTTPS request
-// builder.Services.AddAntiforgery();             // development only: a per-process random key
+builder.Services.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(dataProtection));
+// builder.Services.AddAntiforgery();   // development only: a per-process random key
+// Token names and cookie attributes are antiforgery.Options; the cookie token is Secure on HTTPS.
 
 WebApplication app = builder.Build();
 
@@ -92,7 +94,8 @@ account.Map(HttpMethod.Post, "webhook", ReceiveWebhookAsync).DisableAntiforgery(
 
 To share the key ring cookie authentication uses, pass the same provider to both
 (`builder.Services.AddAuthentication(auth => auth.UseDataProtection(dataProtection).AddCookie())` and
-`builder.Services.AddAntiforgery(dataProtection)`); each derives its own purpose, so neither accepts the
+`builder.Services.AddAntiforgery(antiforgery => antiforgery.UseDataProtection(dataProtection))`); each
+derives its own purpose, so neither accepts the
 other's payloads.
 
 Register `UseAntiforgery` after `UseRouting`, and after `UseRateLimiting` and `UseRequestTimeouts` when

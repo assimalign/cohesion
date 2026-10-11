@@ -356,7 +356,7 @@ and `Web.Api` still references neither it nor ObjectValidation. Placing it there
 `Web.Api` is the integrator's recommendation, pending owner review: it keeps the 2026-07-20 decision
 for this package intact, and keeps the engine out of the closure of every endpoint-mapping consumer.
 
-- **Registration** is the package's: `AddValidation(options => options.AddProfile(new CustomerProfile()))`
+- **Registration** is the package's: `AddValidation(validation => validation.Options.AddProfile(new CustomerProfile()))`
   keys a validator per model type by `typeof(T)`, with a global `Enabled` switch, and
   `DisableValidation()`/`RequireValidation()` turn it off or on per endpoint and per group
   (`ValidationMetadata`, most specific wins).

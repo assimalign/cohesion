@@ -752,7 +752,7 @@ public class AuthorizationEndToEndTests
                 .AddScheme(TestEndpoints.Scheme(TestEndpoints.Primary))
                 .AddScheme(TestEndpoints.Scheme(TestEndpoints.Secondary));
         });
-        factory.Builder.Services.AddAuthorization(configure);
+        factory.Builder.Services.AddAuthorization(authorization => configure?.Invoke(authorization.Options));
         return factory;
     }
 

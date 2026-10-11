@@ -8,6 +8,8 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.OpenApi.Attributes;
 using Assimalign.Cohesion.OpenApi.Integration;
@@ -81,6 +83,39 @@ public class OpenApiOptionsTests
         Should.Throw<InvalidOperationException>(() => captured.Title = "Changed");
         Should.Throw<InvalidOperationException>(() => captured.Description = "Changed");
         Should.Throw<InvalidOperationException>(() => captured.AddTag(new OpenApiTagMetadata { Name = "late" }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - AddOpenApi: called bare, one IHttpFeature singleton is registered")]
+    public void AddOpenApi_CalledBare_ShouldRegisterOneFeatureSingleton()
+    {
+        // Arrange
+        ServiceProviderBuilder services = new();
+
+        // Act — the builder template's callback is optional (owner decision 39).
+        IServiceProviderBuilder returned = services.AddOpenApi();
+
+        // Assert
+        returned.ShouldBeSameAs(services);
+        ServiceDescriptor descriptor = services.Container.ShouldHaveSingleItem();
+        descriptor.ServiceType.ShouldBe(typeof(IHttpFeature));
+        descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - OpenApiBuilder: Build makes the options read-only")]
+    public void OpenApiBuilderBuild_OptionsMutatedAfterward_ShouldThrowInvalidOperationException()
+    {
+        // Arrange
+        OpenApiBuilder openApi = new();
+        openApi.Options.Title = "Orders API";
+
+        // Act
+        IHttpFeature feature = openApi.Build();
+        Action retitle = () => openApi.Options.Title = "Changed";
+
+        // Assert
+        feature.ShouldNotBeNull();
+        retitle.ShouldThrow<InvalidOperationException>();
+        openApi.Options.Title.ShouldBe("Orders API");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Options: document transformers edit every built document")]

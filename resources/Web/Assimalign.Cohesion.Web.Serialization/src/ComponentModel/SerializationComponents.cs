@@ -23,8 +23,11 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// </para>
 /// <para>
 /// The type is public only because the generated verb, compiled into the application, calls it. It is
-/// the static-factory shape because the verb takes the resolver as an argument, which the builder
-/// template's single configure callback cannot carry.
+/// the static-factory shape because the resolver is a required argument. The builder template's only
+/// argument is its optional configure callback (owner decision 39, #1395), so the resolver would become a
+/// builder method and a missing resolver a registration-time throw instead of a compile-time error. It is
+/// the one Web registration verb that still uses a static factory; the builder-template spelling of the
+/// same registration is <c>AddContentSerialization(serialization => serialization.AddJson(resolver))</c>.
 /// </para>
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]

@@ -186,7 +186,7 @@ wires it at builder time: choose a repository, set the discriminator and rotatio
 construct the provider, and adapt the resulting `IDataProtector` to whatever seam the consumer
 exposes. For antiforgery that seam is `IHttpAntiforgeryProtector` on `HttpAntiforgeryOptions`;
 the `Http.Antiforgery` package takes **no** dependency on this library, and the adapter ships
-in the Web composition layer: `AddAntiforgery(dataProtectionProvider)` in
+in the Web composition layer: `AntiforgeryBuilder.UseDataProtection(dataProtectionProvider)` in
 `Assimalign.Cohesion.Web.Antiforgery` derives a protector for the purpose chain
 `("Assimalign.Cohesion.Web.Antiforgery", "v1")` and maps `DataProtectionException` to an
 invalid token. This keeps request-path code free of service location and keeps each library's

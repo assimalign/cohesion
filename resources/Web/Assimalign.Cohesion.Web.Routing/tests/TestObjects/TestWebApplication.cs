@@ -53,13 +53,13 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
 
     /// <summary>
     /// Registers routing the way <c>builder.Services.AddRouting()</c> does: the feature
-    /// <see cref="RoutingComponents.CreateFeature"/> creates, through the raw <see cref="AddFeature(IHttpFeature)"/>
+    /// <see cref="RoutingBuilder.Build"/> creates, through the raw <see cref="AddFeature(IHttpFeature)"/>
     /// path. The verb itself is projected only into compilations that reference dependency injection,
     /// which this double composes without.
     /// </summary>
     public TestWebApplication AddRouting()
     {
-        AddFeature(RoutingComponents.CreateFeature());
+        AddFeature(new RoutingBuilder().Build());
         return this;
     }
 

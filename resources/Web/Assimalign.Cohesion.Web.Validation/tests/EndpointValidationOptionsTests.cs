@@ -5,8 +5,11 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.ObjectValidation;
 using Assimalign.Cohesion.Web.Testing;
+using Assimalign.Cohesion.Web.Validation.Internal;
 using Assimalign.Cohesion.Web.Validation.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Web.Validation.Tests;
@@ -113,16 +116,37 @@ public class EndpointValidationOptionsTests
         Should.Throw<ArgumentNullException>(() => options.AddProfile<Customer>(null!));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Registration: AddValidation rejects a null callback")]
-    public async Task AddValidation_NullConfigure_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Registration: AddValidation called bare registers one IHttpFeature singleton")]
+    public void AddValidation_CalledBare_ShouldRegisterOneFeatureSingleton()
     {
         // Arrange
-        await using WebApplicationTestFactory factory = new();
+        ServiceProviderBuilder services = new();
 
-        // Act
-        Action act = () => factory.Builder.Services.AddValidation(null!);
+        // Act — the builder template's callback is optional (owner decision 39); without validators the
+        // registration validates nothing.
+        IServiceProviderBuilder returned = services.AddValidation();
 
         // Assert
-        act.ShouldThrow<ArgumentNullException>();
+        returned.ShouldBeSameAs(services);
+        ServiceDescriptor descriptor = services.Container.ShouldHaveSingleItem();
+        descriptor.ServiceType.ShouldBe(typeof(IHttpFeature));
+        descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Registration: ValidationBuilder.Build snapshots the options")]
+    public void ValidationBuilderBuild_OptionsChangedAfterward_ShouldNotReachTheFeature()
+    {
+        // Arrange
+        ValidationBuilder validation = new();
+        validation.Options.Enabled = false;
+
+        // Act — the builder's options stay writable, but the feature Build returned is a snapshot.
+        EndpointValidationFeature feature = validation.Build().ShouldBeOfType<EndpointValidationFeature>();
+        validation.Options.Enabled = true;
+        validation.Options.AddProfile(new CustomerProfile());
+
+        // Assert
+        feature.Enabled.ShouldBeFalse();
+        feature.TryGetValidator(typeof(Customer), out _).ShouldBeFalse();
     }
 }

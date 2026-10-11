@@ -26,7 +26,9 @@ internal static class IntegrationSurface
     }
 
     // Owner decision 34 (#1380): every builder.Services.Add<Feature> verb and overload the Web feature
-    // packages declare, each registering an IHttpFeature singleton.
+    // packages declare, each registering an IHttpFeature singleton. Decision 39 (#1395): every
+    // builder-template verb takes an optional callback, so each is called both bare and with one.
+    // AddJsonSerialization is the one static factory left: its resolver is a required argument.
     internal static void ConfigureWeb(
         IServiceProviderBuilder builder,
         IDataProtectionProvider dataProtection,
@@ -34,22 +36,26 @@ internal static class IntegrationSurface
     {
         builder
             .AddAntiforgery()
-            .AddAntiforgery(antiforgery => antiforgery.HeaderName = "X-Canary-Token")
-            .AddAntiforgery(dataProtection)
-            .AddAntiforgery(dataProtection, antiforgery => antiforgery.HeaderName = "X-Canary-Token")
+            .AddAntiforgery(antiforgery => antiforgery.Options.HeaderName = "X-Canary-Token")
+            .AddAntiforgery(antiforgery => antiforgery.UseDataProtection(dataProtection))
+            .AddAuthentication()
             .AddAuthentication(authentication => authentication
                 .UseDataProtection(dataProtection)
                 .AddScheme(new AuthenticationScheme("canary", displayName: null, () => null!)))
             .AddAuthorization()
-            .AddAuthorization(authorization => authorization.FallbackPolicy = null)
+            .AddAuthorization(authorization => authorization.Options.FallbackPolicy = null)
+            .AddErrorHandling()
             .AddErrorHandling(errors => errors.OnError(
                 (context, exception, cancellationToken) => ValueTask.FromResult(false)))
             .AddOpenApi()
-            .AddOpenApi(document => { })
+            .AddOpenApi(openApi => openApi.Options.Title = "Canary")
             .AddRouting()
+            .AddRouting(routing => { })
+            .AddContentSerialization()
             .AddContentSerialization(serialization => serialization.AddJson(resolver))
             .AddJsonSerialization(resolver)
             .AddJsonSerialization(resolver, json => json.WriteIndented = true)
-            .AddValidation(validation => validation.Enabled = false);
+            .AddValidation()
+            .AddValidation(validation => validation.Options.Enabled = false);
     }
 }

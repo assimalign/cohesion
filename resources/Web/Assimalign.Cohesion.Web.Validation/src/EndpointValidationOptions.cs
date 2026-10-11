@@ -7,7 +7,8 @@ namespace Assimalign.Cohesion.Web.Validation;
 
 /// <summary>
 /// Configures request validation for an application: whether bound values are validated by default, and
-/// the validator for each model type.
+/// the validator for each model type. Configure them through <see cref="ValidationBuilder.Options"/> in the
+/// <c>builder.Services.AddValidation(validation => ...)</c> callback.
 /// </summary>
 /// <remarks>
 /// <para>

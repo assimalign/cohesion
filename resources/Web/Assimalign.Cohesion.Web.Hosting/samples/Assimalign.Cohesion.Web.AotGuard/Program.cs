@@ -49,12 +49,13 @@ string[] hostArgs = smoke
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(hostArgs);
 // The feature registration verbs are component integrations on the service registrations (#1380):
-// each registers one IHttpFeature singleton the host stamps onto every exchange.
+// each registers one IHttpFeature singleton the host stamps onto every exchange. Their configure
+// callbacks are optional (#1395), so a verb with nothing to configure is called bare.
 builder.Services
     .AddRouting()
     .AddJsonSerialization(GuardJsonContext.Default)
     // No OnError handler: every fault renders the RFC 9457 ProblemDetails default.
-    .AddErrorHandling(errors => { })
+    .AddErrorHandling()
     .AddAuthentication(authentication =>
     {
         authentication.Options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -67,10 +68,10 @@ builder.Services
                 options.ValidAudiences.Add(GuardSmoke.Audience);
             });
     })
-    .AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")))
+    .AddAuthorization(authorization => authorization.Options.AddPolicy("admins", policy => policy.RequireRole("admin")))
     .AddAntiforgery()
-    .AddOpenApi(options => options.Title = "Cohesion Web AOT guard")
-    .AddValidation(validation => validation.AddProfile(new GuardItemProfile()));
+    .AddOpenApi(openApi => openApi.Options.Title = "Cohesion Web AOT guard")
+    .AddValidation(validation => validation.Options.AddProfile(new GuardItemProfile()));
 
 await using WebApplication application = builder.Build();
 

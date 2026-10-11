@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// <remarks>
 /// <para>
 /// <c>builder.Services.AddOpenApi(...)</c>, a component integration the application's compilation receives
-/// (<see cref="OpenApiComponents"/>, owner decision 34), registers the document options as an application
+/// (<see cref="OpenApiBuilder"/>, owner decisions 34 and 39), registers the document options as an application
 /// feature, an <see cref="IHttpFeature"/> singleton; <c>MapOpenApi</c> maps
 /// a <c>GET</c> route that serves the document. The document describes the application's routes from the
 /// metadata they carry: the source-generated parameter and response descriptions of typed endpoints, the

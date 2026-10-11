@@ -56,8 +56,12 @@ layer, composing over the same seam.
   `Build()`, and registers the registry as an `IHttpFeature` singleton. `Build()` hands the registry
   a snapshot of the readers and writers, so it is immutable and the request path takes no lock.
   `builder.Services.AddJsonSerialization(resolver, configure)` is the static-factory shorthand
-  (`SerializationComponents`, `[EditorBrowsable(Never)]`), because the resolver is an argument the
-  template's single callback cannot carry. Until #1380 both were `extension(IWebApplicationBuilder)`
+  (`SerializationComponents`, `[EditorBrowsable(Never)]`), because the resolver is a required
+  argument. Since owner decision 39 (2026-10-10, #1395) the template's callback is optional and the
+  other Web registration verbs are builder templates, but the callback is still the template's only
+  argument: the resolver would become a builder method, and a missing one a registration-time throw
+  instead of a compile-time error. This is the one Web registration verb that keeps a static factory.
+  `AddContentSerialization` called bare registers an empty registry. Until #1380 both were `extension(IWebApplicationBuilder)`
   members that returned the builder, and the feature read copy-on-write arrays the builder kept
   mutating. Repeating a verb composes a fresh registry that replaces the old one (features are
   name-keyed) — call one, once. That is a break for code that chained onto the old return:

@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="HttpAntiforgeryOptions.Key"/> — a per-process random key by default, so it is for
 /// development only, and otherwise a hand-distributed static key with no rotation. Supplying an
 /// implementation backed by a persisted, rotating key ring (the Cohesion data-protection
-/// provider, which <c>AddAntiforgery(dataProtectionProvider)</c> in
+/// provider, which <c>AntiforgeryBuilder.UseDataProtection(dataProtectionProvider)</c> in
 /// <c>Assimalign.Cohesion.Web.Antiforgery</c> adapts to this seam) lets multi-node deployments
 /// stop copying raw key bytes: the ring persists and rotates keys, and its versioned payload
 /// header selects the right key on unprotect. This package deliberately takes no dependency on

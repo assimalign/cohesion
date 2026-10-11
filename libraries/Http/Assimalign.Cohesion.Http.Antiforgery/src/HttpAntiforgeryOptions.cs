@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Http;
 /// implementation backed by a persisted, rotating key ring (see the migration
 /// note on that property) rather than hand-distributing a shared
 /// <see cref="Key"/>. When <see cref="Protector"/> is set, <see cref="Key"/> is
-/// ignored. In a Web application, <c>AddAntiforgery(dataProtectionProvider)</c>
+/// ignored. In a Web application, <c>AntiforgeryBuilder.UseDataProtection(dataProtectionProvider)</c>
 /// in <c>Assimalign.Cohesion.Web.Antiforgery</c> sets a purpose-bound
 /// data-protection protector for you.
 /// </para>
@@ -65,7 +65,7 @@ public sealed class HttpAntiforgeryOptions
     /// HMAC-SHA256 protector over <see cref="Key"/>). To make tokens survive restarts and
     /// validate across nodes, set it at composition time to an implementation backed by a
     /// persisted, rotating key ring such as the Cohesion data-protection provider. A Web
-    /// application does this with <c>AddAntiforgery(dataProtectionProvider)</c> in
+    /// application does this with <c>AntiforgeryBuilder.UseDataProtection(dataProtectionProvider)</c> in
     /// <c>Assimalign.Cohesion.Web.Antiforgery</c>, which ships the adapter.
     /// </para>
     /// <para>

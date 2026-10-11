@@ -12,7 +12,7 @@ authentication schemes of `Web.Authentication` establish the principal and answe
 The package owns one interface (`IAuthorizationRequirement`), one sealed policy and its builder, one
 evaluation context, one options type, one sealed metadata carrier, and two extension containers
 (`UseAuthorization` with the `TryGetAuthorizationOptions` read accessor, and the endpoint verbs), plus the
-`AuthorizationComponents` factory behind the `builder.Services.AddAuthorization` registration verb.
+`AuthorizationBuilder` behind the `builder.Services.AddAuthorization` registration verb.
 Request-time work is a cached policy lookup, a requirement loop, and, for a policy that
 names schemes, one authentication per scheme.
 
@@ -84,21 +84,25 @@ otherwise widen access fail at registration instead:
   does, and a duplicate name throws. A mistyped name fails the request instead of resolving to a
   different policy.
 
-The options become read-only when the `AddAuthorization` callback returns; every mutator then throws
+The options become read-only when `AuthorizationBuilder.Build` runs, after the `AddAuthorization`
+callback returns; every mutator then throws
 `InvalidOperationException`. That is what makes it safe to cache each endpoint's effective policy and
 to read the options from concurrent requests without locks.
 
 ### Registration
 
-`builder.Services.AddAuthorization(options => ...)` captures the options as a typed application feature,
-an `IHttpFeature` singleton, which is the only channel between the builder and the pipeline. The verb is a
-component integration (owner decisions 34 and 35, 2026-10-09, #1380): the package declares
-`[assembly: ComponentIntegration]` over `AuthorizationComponents.CreateFeature` in
+`builder.Services.AddAuthorization(authorization => ...)` captures the options as a typed application
+feature, an `IHttpFeature` singleton, which is the only channel between the builder and the pipeline. The
+verb is a component integration (owner decisions 34 and 35, 2026-10-09, #1380): the package declares
+`[assembly: ComponentIntegration]` over the public `AuthorizationBuilder.Build` instance method in
 `src/Properties/ComponentIntegrations.cs`, and the generator projects `AddAuthorization` onto
 `IServiceProviderBuilder` in the application's compilation, so the package takes no dependency-injection
-reference. `AuthorizationComponents` is the static-factory shape, `[EditorBrowsable(Never)]` and in the
-package's root namespace, because the verb is called bare as often as with options; until #1380 the verb
-was an `extension(IWebApplicationBuilder)` member that called `AddFeature`. `UseAuthorization` uses
+reference. Naming an instance method selects the builder template. Its callback is optional (owner
+decision 39, 2026-10-10, #1395), because the verb is called bare as often as with policies, and the
+callback configures `AuthorizationBuilder.Options`. The builder owns the options and exposes them, as
+`AuthenticationBuilder` does, rather than repeating their members. Until #1395 the verb was a static
+factory behind a hidden `AuthorizationComponents` type taking `Action<AuthorizationOptions>`, and until
+#1380 an `extension(IWebApplicationBuilder)` member that called `AddFeature`. `UseAuthorization` uses
 the context-aware `Use` overload to read the options once, through `TryGetAuthorizationOptions`, when the
 pipeline is composed: a missing `AddAuthorization` fails application start rather than a request, and
 nothing is looked up per request. A second `AddAuthorization` replaces the first, matching the

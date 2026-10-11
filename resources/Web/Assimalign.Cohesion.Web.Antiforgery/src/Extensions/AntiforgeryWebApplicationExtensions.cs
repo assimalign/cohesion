@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Antiforgery;
 /// <remarks>
 /// <para>
 /// <c>builder.Services.AddAntiforgery(...)</c>, a component integration the application's compilation
-/// receives (<see cref="AntiforgeryComponents"/>, owner decision 34), creates the application's antiforgery
+/// receives (<see cref="AntiforgeryBuilder"/>, owner decisions 34 and 39), creates the application's antiforgery
 /// service once, over the
 /// <c>Assimalign.Cohesion.Http.Antiforgery</c> signed double-submit engine, and registers it as an
 /// application feature: every exchange carries it, so handlers mint tokens with

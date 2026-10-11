@@ -21,6 +21,22 @@ namespace Assimalign.Cohesion.Web.Routing.Tests;
 /// </summary>
 public class PerApplicationRouterStateTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - PerApp: Each RoutingBuilder.Build returns a feature with its own route table")]
+    public void RoutingBuilderBuild_CalledTwice_ShouldReturnIsolatedFeatures()
+    {
+        // Arrange — the builder behind builder.Services.AddRouting() (#1395).
+        RoutingBuilder routing = new();
+
+        // Act
+        IRouterFeature first = routing.Build();
+        IRouterFeature second = routing.Build();
+
+        // Assert — two registrations never share a route table (#789).
+        first.ShouldNotBeSameAs(second);
+        first.Builder.ShouldNotBeSameAs(second.Builder);
+        first.Name.ShouldBe(nameof(IRouterFeature));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - PerApp: Two applications in one process have isolated route tables")]
     public async Task TwoApplications_InOneProcess_ShouldHaveIsolatedRouteTables()
     {

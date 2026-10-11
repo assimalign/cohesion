@@ -194,27 +194,31 @@ dispatch, by design.
 
 ## Registration and protector selection
 
-`builder.Services.AddAntiforgery(...)` is a component integration (owner decision 34, #1380): the
-package declares `[assembly: ComponentIntegration]` over `AntiforgeryComponents.CreateFeature` in
-`src/Properties/ComponentIntegrations.cs`, and the generator projects both overloads onto
-`IServiceProviderBuilder` in the application's compilation, so the package takes no
-dependency-injection reference. `AntiforgeryComponents` is the static-factory shape because the verb is
-called bare or with an optional callback, and one overload takes the data-protection provider; it is
-`[EditorBrowsable(Never)]` and declares the package's root namespace, so the projected verb sits beside
-`UseAntiforgery`.
+`builder.Services.AddAntiforgery(antiforgery => ...)` is a component integration (owner decision 34,
+#1380): the package declares `[assembly: ComponentIntegration]` over the public `AntiforgeryBuilder.Build`
+instance method in `src/Properties/ComponentIntegrations.cs`, and the generator projects `AddAntiforgery`
+onto `IServiceProviderBuilder` in the application's compilation, so the package takes no
+dependency-injection reference. Naming an instance method selects the builder template, whose configure
+callback is optional (owner decision 39, 2026-10-10, #1395): `AddAntiforgery()` is the development
+default, and the data-protection provider is a builder method,
+`AddAntiforgery(antiforgery => antiforgery.UseDataProtection(dataProtectionProvider))`, because it is
+optional and the template's only argument is the callback. Until #1395 the verb was two static-factory
+overloads, `AddAntiforgery(configure)` and `AddAntiforgery(dataProtectionProvider, configure)`, behind a
+hidden `AntiforgeryComponents` type.
 
-The factory builds `HttpAntiforgeryOptions`, runs the caller's `configure`, selects the protector,
-creates the service with `HttpAntiforgery.Create(options)`, and the verb registers it as an
-`IHttpFeature` singleton (an `IHttpAntiforgeryFeature`), the only lifetime `Web.Hosting` accepts
-(decision 35). A composition surface without a container registers the factory's result through
-`IWebApplicationBuilder.AddFeature`. The host seeds application features onto every exchange, so the
+`AntiforgeryBuilder` owns the `HttpAntiforgeryOptions` and exposes them as `Options`, as
+`AuthenticationBuilder` does. `Build` selects the protector, creates the service with
+`HttpAntiforgery.Create(options)`, and the verb registers it as an `IHttpFeature` singleton (an
+`IHttpAntiforgeryFeature`), the only lifetime `Web.Hosting` accepts (decision 35). The service reads the
+options as they stand, so a builder is configured before `Build` and not reused. A composition surface
+without a container registers `Build`'s result through `IWebApplicationBuilder.AddFeature`. The host seeds application features onto every exchange, so the
 render path mints with `context.RequireAntiforgery.GetAndStoreTokens(context)` on any route, protected or
 not, and with or without `UseAntiforgery`.
 
 The protector is chosen in this order:
 
-1. **An explicit `options.Protector`** set in `configure` wins.
-2. **A data-protection provider** passed to `AddAntiforgery(dataProtectionProvider)` supplies the
+1. **An explicit `Options.Protector`** set in the callback wins.
+2. **A data-protection provider** passed to `UseDataProtection(dataProtectionProvider)` supplies the
    production default: an `IDataProtector` derived for the purpose chain
    `("Assimalign.Cohesion.Web.Antiforgery", "v1")` (under the provider's application discriminator),
    adapted to the engine's seam. The key ring persists and rotates its keys and names the producing key
@@ -225,8 +229,8 @@ The protector is chosen in this order:
    segment.
 3. **Otherwise** the engine's HMAC-SHA256 protector over a per-process random key. This is for
    development only: a restart invalidates every token, and instances behind a load balancer reject each
-   other's tokens. It is documented that way on `AntiforgeryComponents.CreateFeature()` (the
-   `AddAntiforgery()` verb), `HttpAntiforgeryOptions.Key`, and
+   other's tokens. It is documented that way on `AntiforgeryBuilder` (the bare `AddAntiforgery()`
+   verb), `HttpAntiforgeryOptions.Key`, and
    `IHttpAntiforgeryProtector`.
 
 The adapter maps `DataProtectionException` — every verification and key-lifecycle failure — to

@@ -65,7 +65,7 @@ throws). The engine calls only these two operations.
 
 This package takes **no dependency** on any data-protection library. The
 adapter from `IDataProtector` to `IHttpAntiforgeryProtector` ships in the Web
-composition layer: `AddAntiforgery(dataProtectionProvider)` in
+composition layer: `AntiforgeryBuilder.UseDataProtection(dataProtectionProvider)` in
 `Assimalign.Cohesion.Web.Antiforgery` derives a protector for its own purpose
 chain and adapts it, keeping this package lean and free of key-management
 concerns.

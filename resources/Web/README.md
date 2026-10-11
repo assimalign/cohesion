@@ -76,7 +76,8 @@ packaging shells rather than libraries: the Runtime producer references the whol
 
 ## Feature registration
 
-Owner decisions 34 and 35 (2026-10-09, #1380) set how a feature reaches an application:
+Owner decisions 34 and 35 (2026-10-09, #1380), and 39 (2026-10-10, #1395), set how a feature reaches
+an application:
 
 - **Registration verbs are component integrations on `builder.Services`.** Each feature package
   declares `[assembly: ComponentIntegration(...)]` targeting
@@ -96,20 +97,24 @@ Owner decisions 34 and 35 (2026-10-09, #1380) set how a feature reaches an appli
 
 | Package | Verb | Shape |
 | --- | --- | --- |
-| `Web.Routing` | `AddRouting()` | static factory (`RoutingComponents`) |
+| `Web.Routing` | `AddRouting()` | builder template (`RoutingBuilder`) |
 | `Web.Authentication` | `AddAuthentication(auth => auth.AddCookie().AddJwtBearer(...))` | builder template (`AuthenticationBuilder`) |
-| `Web.Authorization` | `AddAuthorization(options => ...)` | static factory (`AuthorizationComponents`) |
-| `Web.Antiforgery` | `AddAntiforgery(...)`, `AddAntiforgery(dataProtectionProvider, ...)` | static factory (`AntiforgeryComponents`) |
+| `Web.Authorization` | `AddAuthorization()`, `AddAuthorization(authorization => authorization.Options.AddPolicy(...))` | builder template (`AuthorizationBuilder`) |
+| `Web.Antiforgery` | `AddAntiforgery()`, `AddAntiforgery(antiforgery => antiforgery.UseDataProtection(provider))` | builder template (`AntiforgeryBuilder`) |
 | `Web.ErrorHandling` | `AddErrorHandling(errors => errors.OnError(...))` | builder template (`ErrorHandlingBuilder`) |
 | `Web.Serialization` | `AddContentSerialization(serialization => ...)`, `AddJsonSerialization(resolver, ...)` | builder template (`ContentSerializationBuilder`); static factory (`SerializationComponents`) |
-| `Web.Validation` | `AddValidation(validation => ...)` | static factory (`ValidationComponents`) |
-| `Web.OpenApi` | `AddOpenApi(options => ...)` | static factory (`OpenApiComponents`) |
+| `Web.Validation` | `AddValidation(validation => validation.Options.AddProfile(...))` | builder template (`ValidationBuilder`) |
+| `Web.OpenApi` | `AddOpenApi()`, `AddOpenApi(openApi => openApi.Options.Title = ...)` | builder template (`OpenApiBuilder`) |
 
-A verb whose callback configures a builder other packages graft onto is a builder template; a verb
-called bare, with an optional options callback, with a value argument, or with a required callback
-over an options type that has no `Build()` (`ValidationComponents`) is a static factory, so callers
-keep `builder.Services.AddRouting()`. The rule set is `.claude/rules/web-area.md`, "Builder
-verbs ship with their feature".
+Every registration verb is a builder template unless it has a required value argument. The
+template's configure callback is optional (owner decision 39, 2026-10-10, #1395), so a verb with
+nothing to configure is called bare: `builder.Services.AddRouting()`. A builder owns its feature's
+options and exposes them as `Options`, as `AuthenticationBuilder` does, and a value the verb used to
+take as an optional argument is a builder method: `antiforgery.UseDataProtection(provider)`. The one
+static factory left is `AddJsonSerialization(resolver)`, because a required resolver as a builder
+method would fail at registration instead of at compile time; `AddContentSerialization(serialization
+=> serialization.AddJson(resolver))` is the builder-template spelling of the same registration. The
+rule set is `.claude/rules/web-area.md`, "Builder verbs ship with their feature".
 
 ```csharp
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);

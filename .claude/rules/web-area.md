@@ -54,7 +54,7 @@ instead of the area matrix (`build-system.md`, "Framework producer projects").
 
 Composition verbs live in the package that owns the feature — never in `Web.Hosting`. Owner
 decisions 34 and 35 of 2026-10-09 (#1380, `docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4) split them
-by kind:
+by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' shape:
 
 - **Registration verbs are component integrations on `builder.Services`.** A feature package
   registers its `IHttpFeature` as `builder.Services.Add<Feature>(...)`, as other .NET hosting models
@@ -67,20 +67,26 @@ by kind:
   feature package declares an `extension(IWebApplicationBuilder)` registration verb.
   Precedents: the eight packages Antiforgery, Authentication, Authorization, ErrorHandling,
   OpenApi, Routing, Serialization and Validation.
-- **Choose the shape by the verb's arguments.** A verb whose callback configures a builder that
-  other packages graft onto uses the **builder template**: a public builder with a public
-  parameterless constructor and one zero-parameter instance `Build()` that returns the feature
-  (`AuthenticationBuilder`, `ErrorHandlingBuilder`, `ContentSerializationBuilder` →
-  `builder.Services.AddAuthentication(auth => auth.AddCookie(...))`). A verb with no arguments, an
-  optional options callback, a value argument the template cannot carry, or a required callback
-  over an options type that has no `Build()` uses the **static factory**: an
-  `[EditorBrowsable(Never)]` `<Feature>Components` class in a `ComponentModel/` folder that
-  declares the feature's **root namespace**, so the projected verb lands in the namespace callers
-  already import (`RoutingComponents` → `builder.Services.AddRouting()`, `AntiforgeryComponents` →
-  `AddAntiforgery(dataProtectionProvider, ...)`, `ValidationComponents` →
-  `AddValidation(validation => ...)` over `EndpointValidationOptions`). The builder template
-  always takes a required `Action<TBuilder>`, so it never fits a verb that is called bare, and it
-  needs a builder with `Build()`, so an options type does not get one just to fit the template.
+- **Every registration verb is a builder template unless it has a required value argument (owner
+  decision 39, 2026-10-10, #1395).** The feature ships a public `<Feature>Builder` with a public
+  parameterless constructor and one zero-parameter instance `Build()` that returns the feature, and
+  the generator projects `Add<Feature>(Action<<Feature>Builder>? configure = null)`. The callback is
+  optional, so a verb with nothing to configure is called bare (`builder.Services.AddRouting()`).
+  Precedents: `AuthenticationBuilder`, `AuthorizationBuilder`, `AntiforgeryBuilder`,
+  `ErrorHandlingBuilder`, `ContentSerializationBuilder`, `OpenApiBuilder`, `RoutingBuilder`,
+  `ValidationBuilder`.
+  - **The builder owns the feature's options and exposes them as `Options`** rather than repeating
+    their members (`authorization => authorization.Options.AddPolicy(...)`), and an options type
+    does not get a `Build()` of its own. `Build()` freezes or snapshots the options when the
+    feature reads them at request time.
+  - **An optional value argument is a builder method** that returns the builder:
+    `AddAntiforgery(antiforgery => antiforgery.UseDataProtection(provider))`.
+  - **A required value argument keeps the static factory**: an `[EditorBrowsable(Never)]`
+    `<Feature>Components` class in a `ComponentModel/` folder that declares the feature's **root
+    namespace**, so the projected verb lands in the namespace callers already import. As a builder
+    method, a missing required value would be a registration-time throw instead of a compile-time
+    error. The one instance is `SerializationComponents` → `AddJsonSerialization(resolver)`, whose
+    builder-template spelling is `AddContentSerialization(serialization => serialization.AddJson(resolver))`.
 - **Every request feature is a singleton (decision 35).** The host stamps one snapshot of the
   `IHttpFeature` aggregate onto every exchange, and middleware reads it while the pipeline is
   composed. `WebApplicationBuilder.Build` rejects an `IHttpFeature` registration that is scoped
