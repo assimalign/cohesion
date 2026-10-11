@@ -1552,8 +1552,8 @@ Numbering continues the plan of record's table. Each line is the question, then 
     the host runtime has no shutdown lifecycle yet at Build. Physical recovery and logical scrub
     observe cancellation and retain the classification journal after interruption.
 
-    The Release NativeAOT Q8 best-of-five invocation medians remain **0.0090 ms** for reconciliation
-    and **0.0099 ms** for post-open provisioning; all five reconciliation medians were below 0.012 ms.
+    The final Release NativeAOT Q8 best-of-five invocation medians are **0.0073 ms** for reconciliation
+    and **0.0081 ms** for post-open provisioning; all five reconciliation medians were below 0.012 ms.
 
     **Escalations recorded with the implementation:** the root adds only the model-neutral
     observation and construction cancellation vocabulary, rather than restoring schema capability

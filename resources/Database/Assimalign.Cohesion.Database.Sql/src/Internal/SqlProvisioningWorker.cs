@@ -36,7 +36,7 @@ internal sealed class SqlProvisioningWorker : DatabaseEngineWorker
         while (!cancellationToken.IsCancellationRequested && _pending.TryDequeue(out var migration))
         {
             // The migration reports a permanent step failure by taking its database
-            // offline. It never retries invalid data in this process.
+            // offline. It does not retry the step; a later reopen may schedule a new attempt.
             migration.Run(cancellationToken);
         }
     }

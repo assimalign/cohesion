@@ -347,3 +347,18 @@ running `Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot C:/cw/b2/_out/q49/src -Lab
 `-p:B2PhaseTimerSource=C:/cw/b2/_out/q49/phase-timer/current/SqlDeclaredDatabase.cs`.
 Run its native executable five times with `--cases Q8 --iterations 5 --rows 1`; retain the final
 five `already_applied=1` timing lines per invocation, as the helper's comments specify.
+
+The final campaign at `24691e207` repeats the same archive/publish/run procedure after the
+handoff-compensation correction. Its logs and metadata are under `_out/q49-final` (substitute
+that directory in the commands above); publication again emitted zero IL2xxx/IL3xxx diagnostics.
+
+| Round | Reconciliation inside Build | Post-open provisioning | Complete provisioning including open/recovery |
+|---|---:|---:|---:|
+| 1 | 0.0083 | 0.0092 | 12.6106 |
+| 2 | 0.0106 | 0.0117 | 39.9903 |
+| 3 | 0.0110 | 0.0120 | 14.1243 |
+| 4 | 0.0073 | 0.0081 | 11.9434 |
+| 5 | 0.0106 | 0.0116 | 12.6566 |
+
+The final best medians are **0.0073 ms** for reconciliation and **0.0081 ms** for post-open
+provisioning, below 1 ms in every invocation. Concurrent tests again shared the host.

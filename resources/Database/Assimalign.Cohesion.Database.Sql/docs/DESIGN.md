@@ -1130,6 +1130,8 @@ composite primary key, which the retained builder does not declare.
 
 If cancellation interrupts the handoff after cheap-step locks were released, compensation owns a
 fresh transaction. An ended reservation is never reused to acquire compensation locks.
+Hosting's existing offline-reopen policy still applies, including its backoff when the same
+database fails again. The provisioning worker itself makes one attempt per scheduled migration.
 
 Build probes each affected table for one stored record. It runs creation, nullable column
 addition, drops, and work on empty tables inline. Populated-table index creation, constraint
