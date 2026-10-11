@@ -55,6 +55,10 @@ forwards that scheme to an h2c backend can opt in with `options.AllowAlternateSc
 inside `Server.UseServer`, or with `Http:AllowAlternateSchemes` through `UseConfiguration`.
 The opt-out preserves the gateway's scheme in `Request.Scheme`.
 
+Every final response carries an automatic `Date` unless the application supplied one. To let a
+proxy add its own, set `options.AddDateHeader = false` in `Server.UseServer`, or configure
+`Http:AddDateHeader` through `UseConfiguration`. Interim responses carry no `Date`.
+
 ## Telemetry
 
 The default server traces and measures every request (#1064). Subscribe by name:

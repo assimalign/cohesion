@@ -14,6 +14,7 @@ internal sealed class Http3Connection : HttpConnection
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly int _featureCapacity;
+    private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
     private readonly Http3QPackOptions _qpackOptions;
     private Http3ConnectionContext? _openContext;
 
@@ -28,7 +29,8 @@ internal sealed class Http3Connection : HttpConnection
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
         int featureCapacity,
-        Http3QPackOptions qpackOptions)
+        Http3QPackOptions qpackOptions,
+        HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(isSecure)
     {
         _connection = connection;
@@ -36,6 +38,7 @@ internal sealed class Http3Connection : HttpConnection
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
+        _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _qpackOptions = qpackOptions;
     }
 
@@ -62,7 +65,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _qpackOptions);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, _qpackOptions, _responseHeaderPolicy);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

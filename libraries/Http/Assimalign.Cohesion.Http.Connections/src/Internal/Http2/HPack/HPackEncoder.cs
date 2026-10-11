@@ -12,31 +12,32 @@ internal static partial class HPackEncoder
 {
     /// <summary>
     /// Encodes the response field section for a <em>buffered</em> response: the section
-    /// <see cref="EncodeResponseHeaders(HttpStatusCode, IHttpHeaderCollection)"/> encodes, with a
+    /// <see cref="EncodeResponseHeaders(HttpStatusCode, IHttpHeaderCollection, HttpResponseDateHeader?)"/> encodes, with a
     /// <c>content-length</c> synthesized from <paramref name="bodyLength"/> when the application set none.
     /// The synthesized field is added to <paramref name="headers"/>.
     /// </summary>
     /// <param name="statusCode">The response status code.</param>
     /// <param name="headers">The response headers to emit.</param>
     /// <param name="bodyLength">The length of the buffered body.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
     /// <returns>The HPACK-encoded field section.</returns>
     /// <exception cref="HttpInvalidResponseFieldException">
     /// A field name is not a token, or a value holds a control character other than HTAB. The synthesized
     /// <c>content-length</c> is removed again first, so a response sent in this one's place is framed by its
     /// own body.
     /// </exception>
-    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, int bodyLength)
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, int bodyLength, HttpResponseDateHeader? dateHeader = null)
     {
         if (headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
-            return EncodeResponseHeaders(statusCode, headers);
+            return EncodeResponseHeaders(statusCode, headers, dateHeader);
         }
 
         headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
 
         try
         {
-            return EncodeResponseHeaders(statusCode, headers);
+            return EncodeResponseHeaders(statusCode, headers, dateHeader);
         }
         catch (HttpInvalidResponseFieldException)
         {
@@ -67,17 +68,37 @@ internal static partial class HPackEncoder
     /// </remarks>
     /// <param name="statusCode">The response status code.</param>
     /// <param name="headers">The response headers to emit.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
     /// <returns>The HPACK-encoded field section.</returns>
     /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
-    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers)
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, HttpResponseDateHeader? dateHeader = null)
     {
         using MemoryStream buffer = new();
         WriteStatusHeader(buffer, (int)statusCode);
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
+        bool permitsDate = !HttpInterimResponseRules.IsInformational(statusCode);
+        bool hasDate = false;
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
             HttpResponseFieldRules.EnsureValidName(header.Key);
+
+            if (header.Key == HttpHeaderKey.Date)
+            {
+                hasDate = true;
+                if (!permitsDate)
+                {
+                    HttpResponseFieldRules.EnsureValidValue(header.Key, header.Value.Value);
+                    continue;
+                }
+
+                if (dateHeader is not null && header.Value.Count == 1
+                    && string.Equals(header.Value.Value, dateHeader.Value, StringComparison.Ordinal))
+                {
+                    buffer.Write(dateHeader.Http2Field.Span);
+                    continue;
+                }
+            }
 
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
@@ -106,6 +127,11 @@ internal static partial class HPackEncoder
             {
                 WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), fieldValue);
             }
+        }
+
+        if (!hasDate && permitsDate && dateHeader is not null)
+        {
+            buffer.Write(dateHeader.Http2Field.Span);
         }
 
         return buffer.ToArray();
@@ -160,7 +186,7 @@ internal static partial class HPackEncoder
                 HttpResponseFieldRules.EnsureValidName(header.Key);
 
                 // RFC 9113 §8.2.2 — an interim response is a field section like any other.
-                bool sendable = HttpResponseFieldRules.IsSendable(header.Key, header.Value);
+                bool sendable = header.Key != HttpHeaderKey.Date && HttpResponseFieldRules.IsSendable(header.Key, header.Value);
 
                 foreach (string? value in header.Value)
                 {

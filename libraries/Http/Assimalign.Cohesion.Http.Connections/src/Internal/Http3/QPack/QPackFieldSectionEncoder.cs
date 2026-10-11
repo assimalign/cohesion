@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -31,8 +32,9 @@ internal static class QPackFieldSectionEncoder
     /// Encodes the supplied field lines, in order, into a fresh array.
     /// </summary>
     /// <param name="fields">The lowercase-name field lines to encode.</param>
+    /// <param name="encodedField">A cached field representation appended after <paramref name="fields"/>.</param>
     /// <returns>The encoded field section (prefix + field lines).</returns>
-    public static byte[] Encode(IEnumerable<(string Name, string Value)> fields)
+    public static byte[] Encode(IEnumerable<(string Name, string Value)> fields, ReadOnlyMemory<byte> encodedField = default)
     {
         using MemoryStream buffer = new();
 
@@ -47,6 +49,18 @@ internal static class QPackFieldSectionEncoder
             WriteField(buffer, lowered, value);
         }
 
+        buffer.Write(encodedField.Span);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Encodes one field representation, without a field-section prefix, for a reusable cache.</summary>
+    /// <param name="name">The field name.</param>
+    /// <param name="value">The field value.</param>
+    /// <returns>The encoded field representation.</returns>
+    public static byte[] EncodeField(string name, string value)
+    {
+        using MemoryStream buffer = new();
+        WriteField(buffer, name.ToLowerInvariant(), value);
         return buffer.ToArray();
     }
 

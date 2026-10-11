@@ -77,7 +77,8 @@ public static class WebHostingExtensions
         /// <see cref="WebApplicationServerBuilder.LimitConcurrentConnections(int)"/> set a cap. See
         /// <c>HttpServerConfiguration</c> for the expected section shape (Kestrel <c>appsettings</c>
         /// parity). <c>AllowAlternateSchemes</c> binds the listener's trusted-gateway opt-out from
-        /// rejecting an <c>https</c> scheme on cleartext HTTP/2.
+        /// rejecting an <c>https</c> scheme on cleartext HTTP/2. <c>AddDateHeader</c> controls automatic
+        /// response <c>Date</c> generation and defaults to <see langword="true"/>.
         /// </summary>
         /// <param name="configuration">The configuration to bind from.</param>
         /// <param name="sectionKey">The root section key. Defaults to <c>"Http"</c>.</param>

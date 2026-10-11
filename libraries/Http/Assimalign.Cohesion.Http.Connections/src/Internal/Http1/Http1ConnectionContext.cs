@@ -29,10 +29,13 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     private Http1Context? _exchangeInFlight;
     private Http1ReadTimeout? _pendingRead;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
+    private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
+
+    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(connection, isSecure)
     {
         _limits = limits;
+        _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _interceptors = interceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
@@ -79,6 +82,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // buffered fast path. An HTTP/1.1 exchange owns its whole connection, so its control
             // offers the full surface: interim (1xx) writes, the raw-stream takeover, and the
             // exchange abort.
+            context.Response.ConfigureDate(_responseHeaderPolicy);
             IHttpExchangeInterceptor[] responseInterceptors = context.ResolveResponseInterceptors(_responseInterceptors);
 
             if (responseInterceptors.Length > 0)
@@ -445,7 +449,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     {
         try
         {
-            await Http1MessageWriter.WriteErrorResponseAsync(Stream, statusCode, cancellationToken).ConfigureAwait(false);
+            await Http1MessageWriter.WriteErrorResponseAsync(Stream, statusCode, cancellationToken, _responseHeaderPolicy.GetDateHeader()).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsWireLevelFailure(ex) || ex is OperationCanceledException)
         {

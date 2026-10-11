@@ -22,6 +22,32 @@ differs is the *lifecycle* and the *eligibility rules*, not the representation.
   `IHttpTrailerCollection : IHttpHeaderCollection`, surfaced directly on
   `IHttpRequest.Trailers` / `IHttpResponse.Trailers`.
 
+### Small header collections and cached fields (#1417)
+
+A parameterless `HttpHeaderCollection` holds its first field in the collection
+itself. Subsequent distinct fields use a lazy dictionary, while the first field
+remains inline. Seeding a response with a process-cached `Date` therefore allocates
+nothing and consumes none of the dictionary capacity needed by application
+fields. The core knows no Date policy or clock; this is generic collection
+storage, and the transport owns the default field and its lifetime.
+
+The capacity constructor retains a preallocated dictionary. A constructor passed
+a dictionary retains that exact live store, including a caller's comparer and
+later external mutations. `AsReadOnly` points at the original collection, so a
+view created while it is empty follows later inline insertion, dictionary growth,
+removal and reuse. Mutations through the view still fail. `Add` retains an empty
+value as a present field; assigning an empty value through the indexer removes
+it. Enumeration visits the inline field and then the dictionary. Field-name order
+after removals and reinsertions is unspecified, as it was for dictionary storage;
+repeated values within a field retain their order.
+
+This changes no public contract from 10.0.0-preview.1. It removes the eager empty
+dictionary allocation and the first field's bucket/entry allocations. The
+collection itself carries the inline key/value and the live-view reference;
+larger collections still allocate their ordinary dictionary. The alternative,
+putting the first field into that dictionary when the second arrives, would make
+a default Date trigger an extra resize at ordinary field capacity boundaries.
+
 ### Why trailers belong on the core message interfaces (not behind a feature)
 
 Cookies, sessions, forms, and antiforgery are *layered application* semantics,

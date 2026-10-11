@@ -102,7 +102,7 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 
         try
         {
-            head = Http1MessageWriter.EncodeHead(_context.Response.StatusCode, headers);
+            head = Http1MessageWriter.EncodeHead(_context.Response.StatusCode, headers, _context.Response.GetDateHeader());
         }
         catch (HttpInvalidResponseFieldException)
         {

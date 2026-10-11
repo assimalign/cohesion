@@ -20,6 +20,33 @@ namespace Assimalign.Cohesion.Web.StaticFiles.Tests;
 /// </summary>
 public class StaticFilesMiddlewareTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: Evaluates modification conditions against the response Date")]
+    public async Task Invoke_ResponseDateBeforeModification_ShouldClampBeforeConditionalEvaluation()
+    {
+        // Arrange — the file is newer than the application's fixed response date, even though
+        // neither the source clock nor the time the test happens to run should decide the clamp.
+        using InMemoryFileSystem site = StaticSite.Create(("data.txt", "0123456789"));
+        const string responseDate = "Sun, 06 Nov 1994 08:49:37 GMT";
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site,
+            "/data.txt",
+            HttpMethod.Get,
+            prepare: ctx =>
+            {
+                ctx.Response.Headers[HttpHeaderKey.Date] = responseDate;
+                ctx.Request.Headers[HttpHeaderKey.IfModifiedSince] = responseDate;
+            });
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.NotModified);
+        context.ReadResponseBody().ShouldBeEmpty();
+        Header(context, HttpHeaderKey.Date).ShouldBe(responseDate);
+        Header(context, HttpHeaderKey.LastModified).ShouldBe(responseDate);
+        Header(context, HttpHeaderKey.ETag).ShouldNotBeEmpty();
+    }
+
     private static async Task<TestHttpContext> RunAsync(
         IFileSystem fileSystem,
         string path,

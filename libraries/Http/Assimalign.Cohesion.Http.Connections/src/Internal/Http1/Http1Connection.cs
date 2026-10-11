@@ -13,10 +13,11 @@ internal sealed class Http1Connection : HttpConnection
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly int _featureCapacity;
+    private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
     private readonly string? _altSvcHeaderValue;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue)
+    public Http1Connection(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(isSecure)
     {
         _connection = connection;
@@ -24,6 +25,7 @@ internal sealed class Http1Connection : HttpConnection
         _interceptors = interceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
+        _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _altSvcHeaderValue = altSvcHeaderValue;
     }
 
@@ -42,7 +44,7 @@ internal sealed class Http1Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits, _interceptors, _responseInterceptors, _featureCapacity, _altSvcHeaderValue);
+        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits, _interceptors, _responseInterceptors, _featureCapacity, _altSvcHeaderValue, _responseHeaderPolicy);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

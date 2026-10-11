@@ -37,12 +37,18 @@ internal static class Http1MessageWriter
     /// <param name="stream">The connection stream to write to.</param>
     /// <param name="statusCode">The status code to emit.</param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
     /// <returns>A task that completes when the response has been flushed.</returns>
-    public static async ValueTask WriteErrorResponseAsync(Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
+    public static async ValueTask WriteErrorResponseAsync(Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken, HttpResponseDateHeader? dateHeader = null)
     {
         await WriteAsciiAsync(stream, $"HTTP/1.1 {statusCode}\r\n", cancellationToken).ConfigureAwait(false);
         await WriteAsciiAsync(stream, "Content-Length: 0\r\n", cancellationToken).ConfigureAwait(false);
         await WriteAsciiAsync(stream, "Connection: close\r\n", cancellationToken).ConfigureAwait(false);
+        if (dateHeader is not null && !HttpInterimResponseRules.IsInformational(statusCode))
+        {
+            await stream.WriteAsync(dateHeader.Http1Field, cancellationToken).ConfigureAwait(false);
+        }
+
         await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -110,7 +116,7 @@ internal static class Http1MessageWriter
 
         try
         {
-            return (EncodeHead(context.Response.StatusCode, headers), bodyBytes);
+            return (EncodeHead(context.Response.StatusCode, headers, context.Response.GetDateHeader()), bodyBytes);
         }
         catch (HttpInvalidResponseFieldException)
         {
@@ -221,11 +227,12 @@ internal static class Http1MessageWriter
     /// </summary>
     /// <param name="statusCode">The response status code.</param>
     /// <param name="headers">The response headers to emit.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
     /// <returns>The encoded head.</returns>
     /// <exception cref="HttpInvalidResponseFieldException">
     /// A field name is not a token, or a value holds a control character other than HTAB.
     /// </exception>
-    public static ReadOnlyMemory<byte> EncodeHead(HttpStatusCode statusCode, HttpHeaderCollection headers)
+    public static ReadOnlyMemory<byte> EncodeHead(HttpStatusCode statusCode, HttpHeaderCollection headers, HttpResponseDateHeader? dateHeader = null)
     {
         // RFC 9110 §15.2 — a 1xx status is never a valid final response status. The one 1xx that ends
         // an exchange (101 Switching Protocols) is finalized out-of-band by the protocol-upgrade path,
@@ -236,10 +243,22 @@ internal static class Http1MessageWriter
         WriteStatusLine(head, statusCode);
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(statusCode);
         bool permitsTransferEncoding = HttpResponseContentRules.PermitsTransferEncoding(statusCode);
+        bool hasDate = false;
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
             HttpResponseFieldRules.EnsureValidName(header.Key);
+
+            if (header.Key == HttpHeaderKey.Date)
+            {
+                hasDate = true;
+                if (dateHeader is not null && header.Value.Count == 1
+                    && string.Equals(header.Value.Value, dateHeader.Value, StringComparison.Ordinal))
+                {
+                    head.Write(dateHeader.Http1Field.Span);
+                    continue;
+                }
+            }
 
             // RFC 9110 §8.6 and RFC 9112 §6.1 — a 204 carries neither Content-Length nor Transfer-Encoding,
             // not even one the application set (#1073). Only the wire loses the field.
@@ -268,6 +287,11 @@ internal static class Http1MessageWriter
             }
         }
 
+        if (!hasDate && dateHeader is not null)
+        {
+            head.Write(dateHeader.Http1Field.Span);
+        }
+
         WriteAscii(head, LineEnd);
 
         return head.WrittenMemory;
@@ -290,6 +314,12 @@ internal static class Http1MessageWriter
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
+                        if (header.Key == HttpHeaderKey.Date)
+                        {
+                            HttpResponseFieldRules.EnsureValidValue(header.Key, value);
+                            continue;
+                        }
+
                         WriteFieldLine(head, header.Key, value);
                     }
                 }

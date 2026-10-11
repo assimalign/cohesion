@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </summary>
 internal abstract class HttpConnectionFactory
 {
+    public virtual HttpResponseHeaderPolicy ResponseHeaderPolicy { get; set; } = HttpResponseHeaderPolicy.Default;
+
     /// <summary>
     /// The precomputed RFC 7838 <c>Alt-Svc</c> response-header value this stream protocol injects on
     /// its responses to advertise the listener's HTTP/3 endpoint, or <see langword="null"/> when

@@ -23,5 +23,5 @@ internal sealed class Http1ConnectionFactory : HttpConnectionFactory
     }
 
     public override HttpConnection Create(IConnection connection, bool isSecure)
-        => new Http1Connection(connection, isSecure, _limits, _interceptors, _responseInterceptors, _featureCapacity, AltSvcHeaderValue);
+        => new Http1Connection(connection, isSecure, _limits, _interceptors, _responseInterceptors, _featureCapacity, AltSvcHeaderValue, ResponseHeaderPolicy);
 }

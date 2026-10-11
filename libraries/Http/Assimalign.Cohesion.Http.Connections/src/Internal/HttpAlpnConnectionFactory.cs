@@ -50,6 +50,16 @@ internal sealed class HttpAlpnConnectionFactory : HttpConnectionFactory
         }
     }
 
+    public override HttpResponseHeaderPolicy ResponseHeaderPolicy
+    {
+        get => _http1.ResponseHeaderPolicy;
+        set
+        {
+            _http1.ResponseHeaderPolicy = value;
+            _http2.ResponseHeaderPolicy = value;
+        }
+    }
+
     public override HttpConnection? Create(IConnection connection, bool isSecure)
     {
         SslApplicationProtocol protocol = connection is ITlsConnectionInfo tls

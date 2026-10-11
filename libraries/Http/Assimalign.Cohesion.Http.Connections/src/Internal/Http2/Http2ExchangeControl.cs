@@ -140,7 +140,7 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
 
         try
         {
-            headerBlock = HPackEncoder.EncodeResponseHeaders(_context.Response.StatusCode, _context.Response.Headers);
+            headerBlock = HPackEncoder.EncodeResponseHeaders(_context.Response.StatusCode, _context.Response.Headers, _context.Response.GetDateHeader());
         }
         catch (HttpInvalidResponseFieldException)
         {

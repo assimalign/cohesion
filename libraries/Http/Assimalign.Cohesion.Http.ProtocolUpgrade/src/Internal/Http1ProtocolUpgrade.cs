@@ -32,8 +32,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <c>Upgrade: &lt;protocol&gt;</c> for an upgrade) directly to the surrendered raw stream.
 /// <c>Content-Length</c> / <c>Transfer-Encoding</c> are scrubbed unconditionally — RFC 9112 §6.3, RFC 9110 §15.2.2
 /// (a 101 has no body framing) and RFC 9110 §9.3.6 (a successful CONNECT response must not
-/// include them) — so the tunnel never starts with stale framing metadata. Any other response
-/// headers and cookies the application set before accepting are emitted with the transition
+/// include them) — so the tunnel never starts with stale framing metadata. A 101 also omits
+/// <c>Date</c> (#1417). Other response headers and cookies the application set before accepting are emitted with the transition
 /// response (for example <c>Sec-WebSocket-Accept</c> on a WebSocket handshake).
 /// </para>
 /// <para>
@@ -53,6 +53,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 
     private readonly IHttpExchangeControl _control;
     private readonly HttpHeaderCollection _responseHeaders;
+    private readonly HttpHeaderValue _initialDate;
     private int _accepted;
 
     /// <summary>
@@ -70,6 +71,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
     {
         _control = control;
         _responseHeaders = responseHeaders;
+        _initialDate = responseHeaders[HttpHeaderKey.Date];
         Kind = kind;
         Protocol = protocol;
     }
@@ -134,6 +136,8 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         switch (Kind)
         {
             case HttpProtocolUpgradeKind.Upgrade:
+                // #1417 — informational responses carry no Date, including a transport-seeded one.
+                _responseHeaders.Remove(HttpHeaderKey.Date);
                 // RFC 9110 §7.8 — a 101 response signals that the connection is switching to the
                 // listed protocol. The Connection header MUST list Upgrade as a
                 // connection-specific token; the Upgrade header MUST name the accepted protocol.
@@ -145,6 +149,11 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
                 break;
 
             case HttpProtocolUpgradeKind.Connect:
+                if (!_responseHeaders.ContainsKey(HttpHeaderKey.Date) && _initialDate.Count > 0)
+                {
+                    _responseHeaders[HttpHeaderKey.Date] = _initialDate;
+                }
+
                 // RFC 9110 §9.3.6 — once the 2xx response is sent, the connection becomes a
                 // tunnel and persists for the lifetime of the request. We must not advertise
                 // close even though the transport's keep-alive loop has ended (close applies to
@@ -173,9 +182,21 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         builder.Append("HTTP/1.1 ").Append(status.ToString()).Append("\r\n");
 
         bool replacesUpgrade = Kind == HttpProtocolUpgradeKind.Upgrade && !string.IsNullOrEmpty(Protocol);
+        bool hasDate = false;
 
         foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in _responseHeaders)
         {
+            if (header.Key == HttpHeaderKey.Date)
+            {
+                if (Kind == HttpProtocolUpgradeKind.Upgrade)
+                {
+                    ValidateFieldLine(header.Key, header.Value.Value);
+                    continue;
+                }
+
+                hasDate = true;
+            }
+
             // The fields ApplyTransitionFields removes or replaces are not the application's to send.
             if (header.Key == HttpHeaderKey.ContentLength
                 || header.Key == HttpHeaderKey.TransferEncoding
@@ -205,6 +226,13 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
             AppendFieldLine(builder, header.Key, header.Value.ToString());
         }
 
+        if (Kind == HttpProtocolUpgradeKind.Connect && !hasDate && _initialDate.Count > 0)
+        {
+            // The transport supplied the origination time before the response hook. Retain it if the
+            // application cleared its headers: the upgrade package has no clock or listener policy.
+            AppendFieldLine(builder, HttpHeaderKey.Date, _initialDate.Value);
+        }
+
         if (Kind == HttpProtocolUpgradeKind.Upgrade)
         {
             AppendFieldLine(builder, HttpHeaderKey.Connection, "Upgrade");
@@ -227,6 +255,12 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
     /// </summary>
     private static void AppendFieldLine(StringBuilder builder, HttpHeaderKey key, string value)
     {
+        ValidateFieldLine(key, value);
+        builder.Append(key.Value).Append(": ").Append(value).Append("\r\n");
+    }
+
+    private static void ValidateFieldLine(HttpHeaderKey key, string value)
+    {
         string name = key.Value ?? string.Empty;
 
         if (!HttpFieldNormalization.IsValidFieldName(name))
@@ -243,7 +277,5 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
             throw new HttpInvalidResponseFieldException(
                 $"RFC 9110 §5.5: the value of the response field '{name}' holds the control character 0x{(int)value[invalid]:X2} at index {invalid}; a field value holds no control character but HTAB. The transition response was not sent.");
         }
-
-        builder.Append(name).Append(": ").Append(value).Append("\r\n");
     }
 }

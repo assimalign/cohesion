@@ -128,9 +128,10 @@ internal static class RepresentationWriter
     /// <param name="context">The exchange.</param>
     /// <param name="representation">
     /// The representation the request is evaluated against. A <c>Last-Modified</c> later than the
-    /// current time is first replaced with the current time (RFC 9110 &#167; 8.8.2.1,
+    /// response's <c>Date</c> is first replaced with that date (RFC 9110 &#167; 8.8.2.1,
     /// <see cref="RepresentationMetadata.ClampLastModified"/>), so the caller passes the updated value
-    /// on to <see cref="WriteContentAsync"/>.
+    /// on to <see cref="WriteContentAsync"/>. Without a valid response date the modification time is
+    /// withheld: neither its emission nor date-based conditions can be validated safely.
     /// </param>
     /// <param name="slice">When this method returns <see langword="true"/>, the range to send, or <see langword="null"/> for the full representation.</param>
     /// <returns><see langword="true"/> when the caller should write the content; <see langword="false"/> when the response is complete.</returns>
@@ -138,11 +139,18 @@ internal static class RepresentationWriter
     {
         slice = null;
 
-        // One reading of the clock stands for the response's origination time (nothing upstream
-        // sets a response Date): the Last-Modified clamp and the If-Range strength test both use it,
-        // so every outcome below evaluates and emits the same Last-Modified.
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        representation = representation.ClampLastModified(now);
+        // The transport makes its default Date visible before dispatch; an application-provided
+        // Date wins. Use that exact origination time for both the clamp and the strength test.
+        // A proxy can own Date instead, or a custom response can have no valid date: without one,
+        // withhold Last-Modified and its conditions rather than inventing a second clock.
+        DateTimeOffset? responseDate = context.Response.Headers.TryGetValue(HttpHeaderKey.Date, out HttpHeaderValue dateValue)
+            && dateValue.Count == 1
+            && HttpDate.TryParse(dateValue[0], out DateTimeOffset parsedDate)
+                ? parsedDate
+                : null;
+        representation = responseDate is DateTimeOffset origination
+            ? representation.ClampLastModified(origination)
+            : representation with { LastModified = null };
 
         IHttpRequest request = context.Request;
         HttpMethod method = request.Method;
@@ -162,7 +170,7 @@ internal static class RepresentationWriter
         // If-Range, if present, still matches.
         if (method == HttpMethod.Get
             && representation.Length is long length
-            && TryGetRangeSelection(request, representation.ETag, representation.LastModified, length, now, out HttpRangeSelection selection))
+            && TryGetRangeSelection(request, representation.ETag, representation.LastModified, length, responseDate, out HttpRangeSelection selection))
         {
             if (selection.Status == HttpRangeSelectionStatus.Unsatisfiable)
             {
@@ -318,7 +326,7 @@ internal static class RepresentationWriter
         HttpEntityTag? etag,
         DateTimeOffset? lastModified,
         long length,
-        DateTimeOffset now,
+        DateTimeOffset? responseDate,
         out HttpRangeSelection selection)
     {
         selection = default;
@@ -331,13 +339,15 @@ internal static class RepresentationWriter
         // RFC 9110 §13.2.2 step 5: a present If-Range gates whether the Range is honored at
         // all. An unparseable If-Range cannot be validated, so the range is ignored; so is one
         // whose validator the representation does not have, a date that is not exactly the
-        // Last-Modified, and any date while Last-Modified is still within the current second
+        // Last-Modified, a date without a valid response Date, and any date while Last-Modified
+        // is still within the response's second
         // (HttpIfRange treats it as weak: the file can change again without changing it). A future
         // Last-Modified, clamped to the current second above, is one of those.
         if (request.Headers.TryGetValue(HttpHeaderKey.IfRange, out HttpHeaderValue ifRangeValue))
         {
             if (!HttpIfRange.TryParse((string?)ifRangeValue, out HttpIfRange ifRange)
-                || !ifRange.Matches(etag, lastModified, now))
+                || (ifRange.Date is not null && responseDate is null)
+                || !ifRange.Matches(etag, lastModified, responseDate.GetValueOrDefault()))
             {
                 return false;
             }

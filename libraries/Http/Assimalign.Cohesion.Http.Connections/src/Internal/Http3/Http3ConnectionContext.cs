@@ -127,6 +127,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     private long _idleSince;
     private bool _keepAliveStopped;
 
+    private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
+
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
@@ -138,12 +140,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         IHttpExchangeInterceptor[] requestInterceptors,
         IHttpExchangeInterceptor[] responseInterceptors,
         int featureCapacity,
-        Http3QPackOptions qpackOptions)
+        Http3QPackOptions qpackOptions,
+        HttpResponseHeaderPolicy? responseHeaderPolicy = null)
     {
         _connection = connection;
         _isSecure = isSecure;
         _tls = connection as ITlsConnectionInfo;
         _limits = limits;
+        _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _featureCapacity = featureCapacity;
@@ -2371,6 +2375,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // transport depending on any of those packages. The control's interim writes emit an
         // additional HEADERS frame on this request stream ahead of the final one (RFC 9114 §4.1);
         // its abort resets this stream, leaving the QUIC connection's other streams intact.
+        context.Response.ConfigureDate(_responseHeaderPolicy);
         IHttpExchangeInterceptor[] responseInterceptors = context.ResolveResponseInterceptors(_responseInterceptors);
 
         if (responseInterceptors.Length > 0)
@@ -2875,7 +2880,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         try
         {
             Stream stream = streamConnection.AsStream();
-            byte[] headerBlock = Http3HeaderCodec.EncodeStatusOnlyResponseHeaders(statusCode);
+            byte[] headerBlock = Http3HeaderCodec.EncodeStatusOnlyResponseHeaders(statusCode, _responseHeaderPolicy.GetDateHeader());
 
             await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
             await stream.FlushAsync(cancellationToken).ConfigureAwait(false);

@@ -91,6 +91,18 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
             protocols |= registration.Protocol;
         }
 
+        HttpResponseHeaderPolicy responseHeaderPolicy = options.AddDateHeader
+            ? new HttpResponseHeaderPolicy(HttpResponseDateCache.For(options.DateTimeProvider))
+            : HttpResponseHeaderPolicy.Disabled;
+        foreach ((HttpConnectionFactory factory, IConnectionListener _) in _streamListeners)
+        {
+            factory.ResponseHeaderPolicy = responseHeaderPolicy;
+        }
+        foreach ((HttpMultiplexedConnectionFactory factory, IMultiplexedConnectionListener _) in _multiplexedListeners)
+        {
+            factory.ResponseHeaderPolicy = responseHeaderPolicy;
+        }
+
         Protocols = protocols;
 
         // Snapshot advertisement configuration with the rest of the listener-wide options. The

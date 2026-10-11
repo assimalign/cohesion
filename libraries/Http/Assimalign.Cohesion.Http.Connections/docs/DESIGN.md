@@ -764,6 +764,49 @@ TLS-terminating gateways forwarding that scheme must enable the option or send
   is no renegotiation or post-handshake client authentication, which
   HTTP/2 forbids anyway (RFC 9113 §9.2.1, §9.2.3).
 
+## Automatic Date on final responses (#1417)
+
+The listener defaults `HttpConnectionListenerOptions.AddDateHeader` to true.
+HTTP/1.1 heads, HPACK response field sections and QPACK response field sections
+include `Date` in IMF-fixdate (RFC 9110 §5.6.7, §6.6.1) whenever the application
+supplies none. This includes streamed heads, successful tunnels and transport-built
+rejections. All final statuses, including 5xx, carry it: the RFC's 5xx MAY is taken
+so error responses have an origination time as well. Interim 1xx heads, including
+101 transitions, omit Date even when the application supplied one.
+
+A shared immutable cache holds the formatted value and its HTTP/1.1, HPACK and
+QPACK field encodings. Production uses one process-wide cache driven by
+`TimeProvider.System`; internal provider injection isolates deterministic tests.
+A UTC-second comparison is the fast path. Refresh is serialized and rechecks the
+clock under the lock, so concurrent callers format and encode only once in that
+second. A clock rollback refreshes too. There is no timer or background process.
+The snapshot, its string and all three encoded fields are reused across listeners
+and connections. Core Http's generic inline-first header storage avoids allocating
+a dictionary or consuming its capacity for this default field. Cache hits, header
+insertion and copying cached field bytes need no per-request scratch allocation;
+response output buffers still contain the additional wire bytes.
+
+The transport seeds response headers before response interceptors and application
+dispatch. This is the response's origination time (the RFC permits generation at
+any time during message origination); it stays stable while a slow handler runs.
+StaticFiles can therefore clamp Last-Modified and evaluate If-Range against the
+same timestamp that the head sends. Head writers regenerate the default if the
+application cleared its headers. An application value, including one different
+from the cached value, is never overwritten; ordinary syntax validation still
+applies. The matching cached value takes the pre-encoded path.
+
+Set `AddDateHeader = false`, or `Http:AddDateHeader = false` in Web.Hosting
+configuration, behind a proxy that supplies its own Date. This disables automatic
+generation only; an application Date still goes out on a final response. With no
+valid Date visible, StaticFiles conservatively omits its derived Last-Modified
+and cannot use a date-form If-Range; entity-tag conditions remain available.
+
+**Breaking behavior against 10.0.0-preview.1 (decision 15).** Final responses now
+carry an additional Date field by default, and the application sees it before
+dispatch. Applications asserting an exact header set must account for it. An
+explicit application Date remains authoritative. No existing public interface or
+assembly dependency changes.
+
 ## The TLS session on every exchange (`ITlsConnectionInfo` facet)
 
 ### What it is
@@ -5482,8 +5525,9 @@ lifecycle hooks and the abort/takeover directive re-checks, immediately before t
 head is serialized. Interim (1xx) responses are not decorated — only the final
 response head carries the advertisement.
 
-This is, by design, the **first server-injected response header** in this package
-(there is no automatic `Date`/`Server` injection); the guard-on-absence pattern and
+This was the first server-injected response header in this package. Automatic
+`Date` now follows the same guard-on-absence policy (#1417); there is no automatic
+`Server` injection. The guard-on-absence pattern and
 the shared injector are the seam a future auto-header would reuse.
 
 ### AOT posture

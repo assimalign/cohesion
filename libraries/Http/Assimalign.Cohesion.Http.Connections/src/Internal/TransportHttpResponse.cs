@@ -3,8 +3,8 @@ using System.IO;
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
-/// The response of a transport exchange, on every HTTP version: a <c>200</c> with an empty header
-/// collection and a buffered body until the application sets them.
+/// The response of a transport exchange, on every HTTP version: a <c>200</c> with a header
+/// collection seeded with the listener's optional Date and a buffered body until the application sets them.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,6 +23,31 @@ internal sealed class TransportHttpResponse : HttpResponse
 {
     private readonly bool _supportsTrailers;
     private HttpTrailerCollection? _trailers;
+    private HttpResponseHeaderPolicy _responseHeaderPolicy = HttpResponseHeaderPolicy.Default;
+    private HttpResponseDateHeader? _dateHeader;
+
+    internal void ConfigureDate(HttpResponseHeaderPolicy policy)
+    {
+        _responseHeaderPolicy = policy;
+        _ = GetDateHeader();
+    }
+
+    internal HttpResponseDateHeader? GetDateHeader()
+    {
+        if ((int)StatusCode < 200)
+        {
+            return null;
+        }
+        if (!Headers.ContainsKey(HttpHeaderKey.Date))
+        {
+            _dateHeader = _responseHeaderPolicy.GetDateHeader();
+            if (_dateHeader is not null)
+            {
+                Headers[HttpHeaderKey.Date] = _dateHeader.Value;
+            }
+        }
+        return _dateHeader;
+    }
 
     public TransportHttpResponse(TransportHttpContext context, bool supportsTrailers)
     {

@@ -210,10 +210,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
     private readonly bool _allowAlternateSchemes;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, bool allowAlternateSchemes = false)
+    private readonly HttpResponseHeaderPolicy _responseHeaderPolicy;
+
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, int featureCapacity, string? altSvcHeaderValue, bool allowAlternateSchemes = false, HttpResponseHeaderPolicy? responseHeaderPolicy = null)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
+        _responseHeaderPolicy = responseHeaderPolicy ?? HttpResponseHeaderPolicy.Default;
         _allowAlternateSchemes = allowAlternateSchemes;
         _floodGuard = new Http2FloodGuard(limits);
         _altSvcHeaderValue = altSvcHeaderValue;
@@ -356,6 +359,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
                 if (processed.Context is not null)
                 {
+                    processed.Context.Response.ConfigureDate(_responseHeaderPolicy);
                     // Expose the raw DATA-frame response body sink to registered response
                     // interceptors so a feature package (streaming / SSE) can wrap it and
                     // install a typed response feature — without this transport depending
@@ -818,8 +822,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     : null;
 
                 byte[] headerBlock = HttpResponseContentRules.SynthesizesContentLength(statusCode, method, bodyBytes.Length)
-                    ? HPackEncoder.EncodeResponseHeaders(statusCode, http2Context.Response.Headers, bodyBytes.Length)
-                    : HPackEncoder.EncodeResponseHeaders(statusCode, http2Context.Response.Headers);
+                    ? HPackEncoder.EncodeResponseHeaders(statusCode, http2Context.Response.Headers, bodyBytes.Length, http2Context.Response.GetDateHeader())
+                    : HPackEncoder.EncodeResponseHeaders(statusCode, http2Context.Response.Headers, http2Context.Response.GetDateHeader());
                 ReadOnlyMemory<byte> content = carriesContent ? bodyBytes : ReadOnlyMemory<byte>.Empty;
 
                 // Claim the stream's final response. The claim fails only when the transport has already
@@ -2399,7 +2403,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(
             statusCode,
             new HttpHeaderCollection(),
-            bodyLength: 0);
+            bodyLength: 0,
+            dateHeader: _responseHeaderPolicy.GetDateHeader());
 
         // The frame pump writes the 413, and the pump must never queue behind response DATA, so the
         // HEADERS go through the gate at control urgency. The 408 comes from the body reader
@@ -2963,7 +2968,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         // Encoded before the response is claimed: a field the head cannot carry (#1183, RFC 9113 §8.2.1)
         // throws with the stream unclaimed and nothing on the wire, so another response can still follow.
-        byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
+        byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers, context.Response.GetDateHeader());
 
         if (!stream.TryClaimResponse())
         {

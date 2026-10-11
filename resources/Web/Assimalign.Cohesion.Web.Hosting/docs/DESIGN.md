@@ -1326,6 +1326,7 @@ command-line configuration providers; it adds no reflection binder or
 ```json
 "Http": {
   "AllowAlternateSchemes": false,
+  "AddDateHeader": true,
   "Endpoints": {
     "Public":   { "Protocol": "Https", "Host": "0.0.0.0", "Port": 443,
                   "Certificate": { "Path": "certs/site.pem", "KeyPath": "certs/site.key" } },
@@ -1415,6 +1416,15 @@ HTTP/2 listener. The boolean is read on both explicit `UseConfiguration` and ent
 default binding, before endpoint registration; an invalid value fails startup. An absent key
 preserves the listener's current setting, and a later `UseServer` callback can override it.
 
+`AddDateHeader` binds the aggregate listener option controlling automatic response dates (#1417).
+It defaults to `true`: HTTP/1.1, HTTP/2, and HTTP/3 add IMF-fixdate `Date` to every final response,
+including `5xx`, while interim responses carry none. An application-provided date is preserved.
+The cached default is visible before dispatch so static-file validators use the response's own
+origination time. A deployment whose proxy adds dates can set `Http:AddDateHeader` to `false`;
+that suppresses only the automatic value. Both binding paths parse it as a boolean and reject an
+invalid value. This changes 10.0.0-preview.1's response header set, which contained no automatic
+`Date`. See `Http.Connections` DESIGN for the process-wide, once-per-second formatting cache.
+
 ### Why explicit, hand-rolled binding
 
 The binding is deliberately **not** reflection-based:
@@ -1491,7 +1501,8 @@ The binding is deliberately **not** reflection-based:
 ### Scope boundary
 
 `UseConfiguration` binds HTTP, HTTPS, and HTTP/3 endpoints, their protocol-specific server
-limits, their client-certificate mode, the connection cap, and `AllowAlternateSchemes`. Not bound: the HTTP/3
+limits, their client-certificate mode, the connection cap, `AllowAlternateSchemes`, and `AddDateHeader`.
+Not bound: the HTTP/3
 `MaxRequestHeadersFrameSize` and QPACK options, QUIC stream limits, and a client-certificate
 validation callback. The minimum request-body and response data rates are bound
 (`Limits:MinRequestBodyDataRate`, `Limits:MinResponseDataRate`; #1383, #1384).

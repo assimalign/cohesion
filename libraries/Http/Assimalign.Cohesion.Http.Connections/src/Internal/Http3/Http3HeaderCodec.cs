@@ -263,8 +263,9 @@ internal static class Http3HeaderCodec
     /// interceptor read the body (413, 408 below the minimum data rate, or 431 for its trailer section).
     /// </summary>
     /// <param name="statusCode">The final status code.</param>
+    /// <param name="dateHeader">The cached automatic Date field, or <see langword="null"/> when disabled.</param>
     /// <returns>The QPACK-encoded field section.</returns>
-    public static byte[] EncodeStatusOnlyResponseHeaders(HttpStatusCode statusCode)
+    public static byte[] EncodeStatusOnlyResponseHeaders(HttpStatusCode statusCode, HttpResponseDateHeader? dateHeader = null)
     {
         List<(string Name, string Value)> fields =
         [
@@ -272,7 +273,8 @@ internal static class Http3HeaderCodec
             ("content-length", "0"),
         ];
 
-        return QPackFieldSectionEncoder.Encode(fields);
+        return QPackFieldSectionEncoder.Encode(fields,
+            HttpInterimResponseRules.IsInformational(statusCode) ? default : dateHeader?.Http3Field ?? default);
     }
 
     /// <summary>
@@ -300,7 +302,7 @@ internal static class Http3HeaderCodec
                 HttpResponseFieldRules.EnsureValidName(header.Key);
 
                 // RFC 9114 §4.2 — an interim response is a field section like any other.
-                bool sendable = HttpResponseFieldRules.IsSendable(header.Key, header.Value);
+                bool sendable = header.Key != HttpHeaderKey.Date && HttpResponseFieldRules.IsSendable(header.Key, header.Value);
 
                 foreach (string? value in header.Value)
                 {
@@ -406,6 +408,7 @@ internal static class Http3HeaderCodec
     /// <exception cref="HttpInvalidResponseFieldException">A field name is not a token, or a value holds a control character other than HTAB.</exception>
     public static byte[] EncodeResponseHeaders(Http3Context context)
     {
+        HttpResponseDateHeader? dateHeader = context.Response.GetDateHeader();
         HttpHeaderCollection headers = context.Response.Headers;
 
         List<(string Name, string Value)> fields =
@@ -414,10 +417,30 @@ internal static class Http3HeaderCodec
         ];
 
         bool permitsContentLength = HttpResponseContentRules.PermitsContentLength(context.Response.StatusCode);
+        bool permitsDate = !HttpInterimResponseRules.IsInformational(context.Response.StatusCode);
+        bool hasDate = false;
+        ReadOnlyMemory<byte> encodedDate = default;
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
             HttpResponseFieldRules.EnsureValidName(header.Key);
+
+            if (header.Key == HttpHeaderKey.Date)
+            {
+                hasDate = true;
+                if (!permitsDate)
+                {
+                    HttpResponseFieldRules.EnsureValidValue(header.Key, header.Value.Value);
+                    continue;
+                }
+
+                if (dateHeader is not null && header.Value.Count == 1
+                    && string.Equals(header.Value.Value, dateHeader.Value, StringComparison.Ordinal))
+                {
+                    encodedDate = dateHeader.Http3Field;
+                    continue;
+                }
+            }
 
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
@@ -448,7 +471,12 @@ internal static class Http3HeaderCodec
             }
         }
 
-        return QPackFieldSectionEncoder.Encode(fields);
+        if (!hasDate && permitsDate && dateHeader is not null)
+        {
+            encodedDate = dateHeader.Http3Field;
+        }
+
+        return QPackFieldSectionEncoder.Encode(fields, encodedDate);
     }
 
     private static void AssignOncePseudoHeader(ref string? slot, string value, string name)

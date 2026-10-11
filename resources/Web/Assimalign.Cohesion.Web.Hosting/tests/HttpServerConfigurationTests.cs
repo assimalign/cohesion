@@ -21,6 +21,64 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public class HttpServerConfigurationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Applies automatic Date configuration on both binding paths")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Bind_OnConfiguredDateHeader_ShouldApplyListenerOption(bool useDefaultEndpoint, bool addDateHeader)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["ProxyHttp:AddDateHeader"] = addDateHeader.ToString(),
+        });
+        HttpConnectionListenerOptions options = new() { AddDateHeader = !addDateHeader };
+
+        // Act
+        if (useDefaultEndpoint)
+        {
+            HttpServerConfiguration.BindOrDefault(configuration, "ProxyHttp", options, HttpServerConfiguration.DevelopmentEndPoint);
+        }
+        else
+        {
+            HttpServerConfiguration.Bind(configuration, "ProxyHttp", options);
+        }
+
+        // Assert
+        options.AddDateHeader.ShouldBe(addDateHeader);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Refuses invalid automatic Date configuration")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bind_OnInvalidDateHeader_ShouldThrow(bool useDefaultEndpoint)
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:AddDateHeader"] = "proxy",
+        });
+        HttpConnectionListenerOptions options = new();
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() =>
+        {
+            if (useDefaultEndpoint)
+            {
+                HttpServerConfiguration.BindOrDefault(configuration, "Http", options, HttpServerConfiguration.DevelopmentEndPoint);
+            }
+            else
+            {
+                HttpServerConfiguration.Bind(configuration, "Http", options);
+            }
+        });
+
+        // Assert
+        error.Message.ShouldContain("Http:AddDateHeader", Case.Sensitive);
+        options.AddDateHeader.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Applies the configured alternate-scheme policy on both binding paths")]
     [InlineData(false, false)]
     [InlineData(false, true)]

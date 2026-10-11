@@ -50,6 +50,19 @@ public sealed class HttpConnectionListenerOptions
     /// </remarks>
     public bool AllowAlternateSchemes { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether the listener adds a Date field when the application supplies none.
+    /// Defaults to <see langword="true"/>. All final responses, including 5xx, carry the generated
+    /// IMF-fixdate; interim responses do not. An application-supplied Date is preserved.
+    /// </summary>
+    /// <remarks>
+    /// Disable when a trusted proxy supplies Date. The generated timestamp is available in response
+    /// headers before dispatch, so middleware can use the response's origination time.
+    /// </remarks>
+    public bool AddDateHeader { get; set; } = true;
+
+    internal TimeProvider DateTimeProvider { get; set; } = TimeProvider.System;
+
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
 
     /// <summary>

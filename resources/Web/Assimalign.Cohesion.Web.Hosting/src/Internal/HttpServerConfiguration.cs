@@ -197,19 +197,32 @@ internal static class HttpServerConfiguration
 
     private static void BindListenerOptions(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options)
     {
-        string path = $"{sectionKey}:AllowAlternateSchemes";
+        if (TryGetBool(configuration, $"{sectionKey}:AllowAlternateSchemes", out bool allowAlternateSchemes))
+        {
+            options.AllowAlternateSchemes = allowAlternateSchemes;
+        }
+
+        if (TryGetBool(configuration, $"{sectionKey}:AddDateHeader", out bool addDateHeader))
+        {
+            options.AddDateHeader = addDateHeader;
+        }
+    }
+
+    private static bool TryGetBool(IConfiguration configuration, string path, out bool value)
+    {
         string? raw = GetString(configuration, path);
         if (raw is null)
         {
-            return;
+            value = false;
+            return false;
         }
 
-        if (!bool.TryParse(raw, out bool allowAlternateSchemes))
+        if (!bool.TryParse(raw, out value))
         {
             throw new InvalidOperationException($"The configured value at '{path}' ('{raw}') is not a valid boolean.");
         }
 
-        options.AllowAlternateSchemes = allowAlternateSchemes;
+        return true;
     }
 
     /// <summary>
