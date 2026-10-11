@@ -371,12 +371,17 @@ public class ExceptionBoundaryMiddlewareTests
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: A cancelled request should propagate as a clean drain, not a fault")]
     public async Task InvokeAsync_OperationCanceledWhileRequestCancelled_ShouldRethrow()
     {
-        // Arrange
+        // Arrange — an existing-behavior pin: a transport cancellation bypasses the exception observer.
         using CancellationTokenSource cancellation = new();
         cancellation.Cancel();
+        int observed = 0;
 
         TestPipelineBuilder builder = new();
-        builder.UseErrorHandling();
+        builder.UseErrorHandling(options => options.OnException = (_, _) =>
+        {
+            observed++;
+            return ValueTask.CompletedTask;
+        });
         builder.Run(_ => throw new OperationCanceledException());
         IWebApplicationPipeline pipeline = builder.Build();
 
@@ -386,6 +391,7 @@ public class ExceptionBoundaryMiddlewareTests
         await Should.ThrowAsync<OperationCanceledException>(async () => await pipeline.ExecuteAsync(context));
         context.ResponseBodyText().ShouldBeEmpty();
         context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        observed.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - Boundary: Should pass a fault-free request straight through")]

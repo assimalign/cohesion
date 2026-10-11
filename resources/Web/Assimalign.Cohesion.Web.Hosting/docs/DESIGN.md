@@ -389,6 +389,14 @@ A client that resets its own request is not at fault on either version: the read
 cancellation with `RequestCancelled` already fired, so the pipeline ends as cancelled and the server resets
 the exchange (`request_canceled`) instead of staging a `500`.
 
+**HTTP/3 connection loss (#1430, owner decision 45).** A control-stream FIN or reset, forbidden
+control frame, or another connection error after dispatch cancels every affected exchange. Its body
+read throws `OperationCanceledException` with the exchange's `RequestCancelled` token and no client
+fault status. The existing host cancellation boundary ends it as `request_canceled`, with no Error
+log, `OnException`, or staged `500`; an unstarted response has no status on the server span. The
+transport's former `IOException` made this an application fault. That streaming-body behavior was
+introduced after 10.0.0-preview.1, which buffered the HTTP/3 body before dispatch.
+
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
 boundary around arbitrary user code** — middleware, completion callbacks, application

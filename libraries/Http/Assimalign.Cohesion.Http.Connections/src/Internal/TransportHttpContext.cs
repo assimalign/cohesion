@@ -38,7 +38,10 @@ internal abstract class TransportHttpContext : HttpContext
     /// <param name="streamAborted">
     /// A second transport token that aborts the exchange — the HTTP/3 request stream's
     /// <c>ConnectionClosed</c>, which fires when the client resets or stops the stream — or
-    /// <see langword="default"/> for none. Both tokens feed one linked source.
+    /// <see langword="default"/> for none. The transport tokens feed one linked source.
+    /// </param>
+    /// <param name="connectionAborted">
+    /// The multiplexed connection's closure token, or <see langword="default"/> for none.
     /// </param>
     protected TransportHttpContext(
         HttpVersion version,
@@ -47,7 +50,8 @@ internal abstract class TransportHttpContext : HttpContext
         CancellationToken requestAborted,
         int featureCapacity,
         IHttpFeatureCollection? features = null,
-        CancellationToken streamAborted = default)
+        CancellationToken streamAborted = default,
+        CancellationToken connectionAborted = default)
     {
         Version = version;
         // The request and response only store the reference; neither calls back into this context
@@ -60,7 +64,9 @@ internal abstract class TransportHttpContext : HttpContext
             this,
             supportsTrailers: (version is HttpVersion.Http20 or HttpVersion.Http30) && requestHead.Method != HttpMethod.Connect);
         ConnectionInfo = connectionInfo;
-        _abortedSource = streamAborted.CanBeCanceled
+        _abortedSource = connectionAborted.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(requestAborted, streamAborted, connectionAborted)
+            : streamAborted.CanBeCanceled
             ? CancellationTokenSource.CreateLinkedTokenSource(requestAborted, streamAborted)
             : CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors

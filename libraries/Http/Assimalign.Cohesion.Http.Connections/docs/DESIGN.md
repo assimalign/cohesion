@@ -2630,11 +2630,31 @@ application's fault observer, and recorded a `500` on the server span for a stre
   fault.
 - **A client that resets its own request is not at fault.** It cancels the request (RFC 9113 §8.1,
   RFC 9114 §4.1.1). See the next section.
-- **Open question for the owner:** an HTTP/3 connection lost after the exchange exists, to an error its
-  body read had no part in (the peer ending or resetting its control stream, `H3_CLOSED_CRITICAL_STREAM`),
-  surfaces at a pending read as an `IOException`, not as a client fault (`ClientFaultStatusCode` stays
-  `null`) or a cancellation, so the default Web server classifies it as an application fault;
-  `Http3ExchangeControlClientFaultTests` pins that contract until it is decided.
+- **Connection loss is cancellation (owner decision 45, #1430).** An HTTP/3 connection lost after
+  the exchange exists, to an error its body read had no part in, fires `RequestCancelled` even when
+  the application is not reading. This includes FIN or reset of the peer's control stream
+  (`H3_CLOSED_CRITICAL_STREAM`), a forbidden control frame, and a connection error elsewhere.
+  The exchange links the multiplexed connection's closure token as well as its request stream's.
+  A pending or later body read throws `OperationCanceledException` carrying that exact exchange
+  token; buffered content, partial trailers and blocked QPACK decoding cannot hide the loss.
+  `ClientFaultStatusCode` remains `null`. A body fault already latched still wins over cancellation.
+  Web.Hosting consequently records `request_canceled`, without an Error log, `OnException`, or a
+  staged `500`. The transport supplies the cancellation; the host's existing boundary handles it.
+
+**Behavior and advisory triage (#1430).** This replaces the post-preview streaming body's former
+`IOException` contract. The scoped defect is absent from 10.0.0-preview.1, which buffered the complete
+HTTP/3 body before publishing an exchange. On the current streaming implementation an unauthenticated
+peer could cause incorrect fault logs and error handling (CWE-755, low severity). There is no public
+signature change or new dependency.
+
+**Source-review findings across HTTP versions (#1430).** HTTP/1.1 still passes the receive-loop token to the exchange and
+body without linking the connection's closure; a reset can surface as raw I/O failure. Clean truncated
+HTTP/1.1 framing remains its separate `400` client-fault contract. HTTP/2 normally cancels a pending
+body before failing its channel, but the exception carries the stream token rather than the exchange's
+linked token; a channel completion racing cancellation can also escape as `IOException`. These
+remaining parity differences are recorded for follow-up; this change is scoped to HTTP/3.
+The HTTP/1.1 reset path and HTTP/2 channel-completion race are source-derived findings, not runtime
+reproductions in this session.
 
 ### The read reports the fault, not the reset
 
@@ -4190,8 +4210,8 @@ still needs lives until the QUIC connection itself closes
 decodes (a blocked dynamic-table wait included), the decoder-stream gate, and
 the control-stream and QPACK encoder drains that apply the insertions such a
 wait depends on. Nothing in that set is disposed when the enumeration ends. A
-body read the connection closes underneath fails with a clean `IOException`,
-not an unrequested cancellation, and `SendAsync` for a reset or cancelled
+body read the connection closes underneath throws the exchange's cancellation
+(decision 45, #1430), and `SendAsync` for a reset or cancelled
 exchange returns at once, without draining or finalizing anything.
 
 **The head read** (`Http3RequestStreamReader`) reads frame headers off the

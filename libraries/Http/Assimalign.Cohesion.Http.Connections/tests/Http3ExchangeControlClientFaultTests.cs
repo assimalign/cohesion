@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -23,11 +24,43 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// <see cref="IOException"/>, and <see cref="IHttpExchangeControl.ClientFaultStatusCode"/> reports the
 /// status, so a host can tell the client's fault from the application's. A client that resets its own
 /// request is not at fault: the read fails with the exchange's cancellation, as on HTTP/2. A connection
-/// lost to an error the body had no part in is neither: the read fails with an <see cref="IOException"/>.
+/// lost to an error the body had no part in also cancels the exchange and its reads (#1430).
 /// </summary>
 public class Http3ExchangeControlClientFaultTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>A connection failure raised outside the request-body reader.</summary>
+    public enum ConnectionFailure
+    {
+        /// <summary>The peer ends its control stream.</summary>
+        ControlFin,
+
+        /// <summary>The peer resets its control stream.</summary>
+        ControlReset,
+
+        /// <summary>The peer sends DATA on its control stream.</summary>
+        ForbiddenControlFrame,
+
+        /// <summary>The connection driver reports a failure directly.</summary>
+        DriverFailure
+    }
+
+    /// <summary>The application's body-read state when its connection is lost.</summary>
+    public enum BodyReadState
+    {
+        /// <summary>No application body read has started.</summary>
+        Unstarted,
+
+        /// <summary>A read waits for the next DATA frame.</summary>
+        WaitingForData,
+
+        /// <summary>A read waits inside a partial trailing HEADERS payload.</summary>
+        PartialTrailer,
+
+        /// <summary>A complete trailer waits for a QPACK dynamic-table insertion.</summary>
+        BlockedDynamicTrailer
+    }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Client Fault: A body over the size cap should be reported as a 413 client fault once the read fails")]
     public async Task ClientFaultStatusCode_OnBodyOverCap_ShouldReportContentTooLarge()
@@ -187,37 +220,124 @@ public class Http3ExchangeControlClientFaultTests
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Client Fault: A connection error raised outside the body read should report no client fault and fail the read with an IOException")]
-    public async Task ClientFaultStatusCode_OnConnectionErrorOutsideTheRead_ShouldReportNullAndFailTheReadWithIOException()
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Client Fault: A connection error outside the body should cancel the exchange and its pending and later reads")]
+    [InlineData(ConnectionFailure.ControlFin, BodyReadState.Unstarted)]
+    [InlineData(ConnectionFailure.ControlFin, BodyReadState.WaitingForData)]
+    [InlineData(ConnectionFailure.ControlFin, BodyReadState.PartialTrailer)]
+    [InlineData(ConnectionFailure.ControlFin, BodyReadState.BlockedDynamicTrailer)]
+    [InlineData(ConnectionFailure.ControlReset, BodyReadState.Unstarted)]
+    [InlineData(ConnectionFailure.ControlReset, BodyReadState.WaitingForData)]
+    [InlineData(ConnectionFailure.ControlReset, BodyReadState.PartialTrailer)]
+    [InlineData(ConnectionFailure.ControlReset, BodyReadState.BlockedDynamicTrailer)]
+    [InlineData(ConnectionFailure.ForbiddenControlFrame, BodyReadState.Unstarted)]
+    [InlineData(ConnectionFailure.ForbiddenControlFrame, BodyReadState.WaitingForData)]
+    [InlineData(ConnectionFailure.ForbiddenControlFrame, BodyReadState.PartialTrailer)]
+    [InlineData(ConnectionFailure.ForbiddenControlFrame, BodyReadState.BlockedDynamicTrailer)]
+    [InlineData(ConnectionFailure.DriverFailure, BodyReadState.Unstarted)]
+    [InlineData(ConnectionFailure.DriverFailure, BodyReadState.WaitingForData)]
+    [InlineData(ConnectionFailure.DriverFailure, BodyReadState.PartialTrailer)]
+    [InlineData(ConnectionFailure.DriverFailure, BodyReadState.BlockedDynamicTrailer)]
+    public async Task ClientFaultStatusCode_OnConnectionErrorOutsideTheRead_ShouldReportNullAndCancelReads(ConnectionFailure connectionFailure, BodyReadState bodyState)
     {
-        // Arrange — the client's control stream is open past its SETTINGS; part of the body arrived and was
-        // read, and the next read waits for more.
+        // Arrange — the priority update proves the control-stream drain is past SETTINGS before the
+        // failure. An exchange exists; its body either has a read waiting or has never been read.
+        using CancellationTokenSource timeout = new(_timeout);
         CodeRecordingMultiplexedConnection? server = null;
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            configure: http3 =>
+            {
+                if (bodyState == BodyReadState.BlockedDynamicTrailer)
+                {
+                    http3.QPack.MaxTableCapacity = 4096;
+                    http3.QPack.MaxBlockedStreams = 16;
+                }
+            },
             configureListener: static options => options.Interceptors.Add(new ControlCapturingInterceptor()),
             decorate: inner => server = new CodeRecordingMultiplexedConnection(inner));
-        Connection controlStream = await peer.OpenUnidirectionalStreamAsync();
-        await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 0)));
-        Connection request = await peer.OpenRequestStreamAsync();
+        await using Connection controlStream = await peer.OpenUnidirectionalStreamAsync();
+        await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
+            new (long, long)[] { (0x01, 0) },
+            ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1"))), timeout.Token);
+        await using Connection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(Combine(
             HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
-            HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello"))));
-        IHttpContext context = await peer.NextContextAsync();
+            HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello"))), timeout.Token);
+        await using IHttpContext context = await peer.NextContextAsync();
         IHttpExchangeControl control = GetControl(context);
-        await context.Request.Body.ReadExactlyAsync(new byte[5]).AsTask().WaitAsync(_timeout);
-        Task<int> pending = context.Request.Body.ReadAsync(new byte[256]).AsTask();
+        Http3ConnectionContext connectionContext = peer.ConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
+        while (!connectionContext.TryGetRequestStreamPriority(0, out _))
+        {
+            await Task.Delay(10, timeout.Token);
+        }
 
-        // Act — the client ends its control stream (RFC 9114 §6.2.1), a connection error the request stream
-        // and its body read had no part in.
-        await controlStream.Output.CompleteAsync();
-        await server!.ConnectionClosed.WhenCancelledAsync().WaitAsync(_timeout);
-        Exception? failure = await CaptureFailureAsync(pending);
+        Task<int>? pending = null;
+        if (bodyState != BodyReadState.Unstarted)
+        {
+            await context.Request.Body.ReadExactlyAsync(new byte[5], timeout.Token);
+            if (bodyState == BodyReadState.PartialTrailer)
+            {
+                // A two-octet QPACK field-section prefix cut off after its first octet.
+                await request.Output.WriteAsync(Combine(
+                    HttpProtocolPayloadFactory.CreateHttp3FrameHeader((long)Http3FrameType.Headers, 2),
+                    [0x00]), timeout.Token);
+            }
+            else if (bodyState == BodyReadState.BlockedDynamicTrailer)
+            {
+                // Entry 0 has not been inserted: encoded Required Insert Count 2 means one insert
+                // is required. The frame is complete, so only the dynamic-table decoder can wait.
+                await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
+                    encodedRequiredInsertCount: 2,
+                    deltaBaseByte: 0x00,
+                    literalFields: [],
+                    0), timeout.Token);
+            }
 
-        // Assert — the current contract: the connection's loss reaches the read as an IOException, neither
-        // a client fault nor a cancellation.
-        server.AbortErrorCode.ShouldBe((long)Http3ErrorCode.ClosedCriticalStream);
-        failure.ShouldBeAssignableTo<IOException>();
-        failure.ShouldNotBeAssignableTo<OperationCanceledException>();
+            pending = context.Request.Body.ReadAsync(new byte[256]).AsTask();
+            pending.IsCompleted.ShouldBeFalse();
+        }
+
+        CancellationToken requestCancelled = context.RequestCancelled;
+        TaskCompletionSource cancellationObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = requestCancelled.Register(() => cancellationObserved.TrySetResult());
+        requestCancelled.IsCancellationRequested.ShouldBeFalse();
+
+        // Act — none of these failures comes from reading this request's body.
+        server.ShouldNotBeNull();
+        Http3ErrorCode expectedCode = Http3ErrorCode.ClosedCriticalStream;
+        switch (connectionFailure)
+        {
+            case ConnectionFailure.ControlFin:
+                await controlStream.Output.CompleteAsync();
+                break;
+            case ConnectionFailure.ControlReset:
+                ((IMultiplexedStreamAbort)controlStream).AbortWrite((long)Http3ErrorCode.RequestCancelled);
+                break;
+            case ConnectionFailure.ForbiddenControlFrame:
+                expectedCode = Http3ErrorCode.UnexpectedFrame;
+                await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x00, []), timeout.Token);
+                break;
+            case ConnectionFailure.DriverFailure:
+                expectedCode = Http3ErrorCode.ProtocolError;
+                server.Abort((long)expectedCode, new Http3ConnectionException(expectedCode, "The connection failed outside the request body."));
+                break;
+        }
+
+        await server.ConnectionClosed.WhenCancelledAsync().WaitAsync(timeout.Token);
+        await Task.WhenAny(cancellationObserved.Task, Task.Delay(TimeSpan.FromSeconds(1), timeout.Token));
+
+        // Assert — cancellation is observable even when the application never touched the body. A
+        // pending read and subsequent reads fail with that exact exchange token, without a body fault.
+        server.AbortErrorCode.ShouldBe((long)expectedCode);
+        cancellationObserved.Task.IsCompleted.ShouldBeTrue();
+        requestCancelled.IsCancellationRequested.ShouldBeTrue();
+        if (pending is not null)
+        {
+            Exception? failure = await CaptureFailureAsync(pending);
+            failure.ShouldBeAssignableTo<OperationCanceledException>().ShouldNotBeNull().CancellationToken.ShouldBe(requestCancelled);
+        }
+
+        Exception? laterFailure = await CaptureFailureAsync(context.Request.Body.ReadAsync(new byte[256]).AsTask());
+        laterFailure.ShouldBeAssignableTo<OperationCanceledException>().ShouldNotBeNull().CancellationToken.ShouldBe(requestCancelled);
         control.ClientFaultStatusCode.ShouldBeNull();
     }
 

@@ -560,6 +560,9 @@ public class HttpResponseDataRateTests
         elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
         failure.CancellationToken.ShouldBe(context.RequestCancelled);
         context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        OperationCanceledException laterFailure = await Should.ThrowAsync<OperationCanceledException>(
+            () => context.Request.Body.ReadAsync(new byte[16]).AsTask().WaitAsync(_timeout));
+        laterFailure.CancellationToken.ShouldBe(context.RequestCancelled);
         server.RequestStreams.Single().WriteAbortCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
         ConnectionResetException reset = await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(request));
         reset.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);

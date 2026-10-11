@@ -2347,7 +2347,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             requestStreamId,
             body,
             _featureCapacity,
-            interception.Features)
+            interception.Features,
+            _connection.ConnectionClosed)
         {
             AddedResponseInterceptors = interception.ResponseInterceptors,
             RequestInterception = interception.Context,

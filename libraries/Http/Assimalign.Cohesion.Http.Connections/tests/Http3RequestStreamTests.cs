@@ -233,9 +233,10 @@ public class Http3RequestStreamTests
         context.Request.Trailers[new HttpHeaderKey("x-checksum")].Value.ShouldBe("abc123");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A body read should fail with a stream error when the connection closes underneath it")]
-    public async Task ReadBody_WhenConnectionCloses_ShouldFailWithStreamError()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A body read should be cancelled when the connection closes underneath it")]
+    public async Task ReadBody_WhenConnectionCloses_ShouldThrowExchangeCancellation()
     {
+        // Arrange
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync();
         Connection request = await peer.OpenRequestStreamAsync();
         await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"));
@@ -247,9 +248,10 @@ public class Http3RequestStreamTests
         // Act — the QUIC connection goes away while the read waits for DATA.
         await peer.Server.DisposeAsync();
 
-        // Assert — a clean stream error, promptly, rather than a hang or a cancellation nobody requested.
-        IOException failure = await Should.ThrowAsync<IOException>(() => pending.WaitAsync(_timeout));
-        failure.ShouldNotBeOfType<Http3ConnectionException>();
+        // Assert — connection loss cancels the exchange even after enumeration has ended (#1430).
+        OperationCanceledException failure = await Should.ThrowAsync<OperationCanceledException>(() => pending.WaitAsync(_timeout));
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        failure.CancellationToken.ShouldBe(context.RequestCancelled);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: SendAsync after CancelAsync on a started response should reset promptly")]

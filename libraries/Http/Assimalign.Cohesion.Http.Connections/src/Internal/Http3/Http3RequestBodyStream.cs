@@ -81,6 +81,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see cref="HttpContext.RequestCancelled"/> and throws an <see cref="OperationCanceledException"/>,
 /// as an HTTP/2 <c>RST_STREAM</c> does, so a host classifies the exchange as cancelled rather than as an
 /// application fault (#1378). Before dispatch, a request hook's read reports it as a stream failure.
+/// Loss of the whole connection after dispatch has the same cancellation contract (#1430); pending
+/// and later reads carry the exchange's exact token, including reads inside trailers or QPACK waits.
+/// An already reported client-body fault retains its original exception and status.
 /// </para>
 /// <para>
 /// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
@@ -477,6 +480,12 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
     private async ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
+        if (ClientFaultStatusCode is not null)
+        {
+            _failure?.Throw();
+        }
+
+        ThrowIfExchangeCancelled();
         _failure?.Throw();
 
         if (_endDelivered)
@@ -552,6 +561,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                 {
                     int toRead = (int)Math.Min(buffer.Length, _dataRemaining);
                     int read = await _reader.ReadDataAsync(buffer[..toRead], readToken).ConfigureAwait(false);
+                    ThrowIfExchangeCancelled();
                     _dataRemaining -= read;
                     _received += read;
                     delivered = read;
@@ -564,7 +574,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
                     continue;
                 }
 
-                if (await _reader.ReadFrameHeaderAsync(readToken).ConfigureAwait(false) is not { } frame)
+                Http3FrameHeader? next = await _reader.ReadFrameHeaderAsync(readToken).ConfigureAwait(false);
+                ThrowIfExchangeCancelled();
+                if (next is not { } frame)
                 {
                     EnsureContentLengthSatisfied();
                     _endDelivered = true;
@@ -573,6 +585,23 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
                 await ProcessFrameAsync(frame, readToken).ConfigureAwait(false);
             }
+        }
+        catch (Exception exception) when (_owner is { } owner
+            && (exception is OperationCanceledException || IsStreamFailure(exception))
+            && (_requestAborted.IsCancellationRequested || _connection.ConnectionClosed.IsCancellationRequested))
+        {
+            // A connection error elsewhere cancels this exchange, not its body. Preserve any rejection
+            // already recorded before the close, then expose the exact exchange token (#1430).
+            if (ClientFaultStatusCode is not null)
+            {
+                _failure?.Throw();
+                Fail(exception);
+                throw;
+            }
+
+            OperationCanceledException cancelled = owner.AbortRequestForPeer(exception);
+            Fail(cancelled);
+            throw cancelled;
         }
         catch (Http3StreamException exception)
         {
@@ -609,16 +638,6 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // #1085 — the allowance ran out while the read waited: the deadline stopped the stream (or
             // cancelled the read). RFC 9110 §15.5.9 — recorded as 408, which the send path answers.
             throw RejectTooSlow();
-        }
-        catch (OperationCanceledException) when (_connection.ConnectionClosed.IsCancellationRequested
-            && !cancellationToken.IsCancellationRequested
-            && !_requestAborted.IsCancellationRequested)
-        {
-            // The QUIC connection closed or aborted underneath the read — possibly long after the receive
-            // enumeration ended. That is a stream failure, not a cancellation anyone asked for.
-            IOException failure = new("The HTTP/3 connection closed while the request body was being read.");
-            Fail(failure);
-            throw failure;
         }
         catch (OperationCanceledException)
         {
@@ -749,8 +768,12 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         catch (OperationCanceledException exception)
         {
             // The trailing HEADERS frame's header is already consumed, so a read cancelled inside its field
-            // section cannot resume: every later read reports the body as unreadable.
-            Fail(new IOException("A read was cancelled inside the request's trailer section; the request body can no longer be read.", exception));
+            // section cannot resume. Exchange cancellation is normalized by the outer read; only a
+            // caller-only cancellation leaves an unreadable body rather than a cancelled exchange.
+            if (_owner is null || (!_requestAborted.IsCancellationRequested && !_connection.ConnectionClosed.IsCancellationRequested))
+            {
+                Fail(new IOException("A read was cancelled inside the request's trailer section; the request body can no longer be read.", exception));
+            }
             throw;
         }
         catch (Http3LimitExceededException exception)
@@ -935,7 +958,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// read met, or a <c>STOP_SENDING</c> the <c>100 Continue</c>'s write met. The QUIC driver reports either
     /// as <see cref="QuicError.StreamAborted"/>, the in-memory driver as a
     /// <see cref="ConnectionResetException"/> that carries the code. A stream this server reset or stopped
-    /// reading, the loss of the whole connection, and a body already rejected for the client's fault are not.
+    /// reading and a body already rejected for the client's fault are not. Native connection failures
+    /// also abandon the exchange, even before a closure callback fires (#1430).
     /// </summary>
     private bool IsPeerAbort(Exception exception)
     {
@@ -948,7 +972,25 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
 
         return exception is ConnectionResetException
-            || (exception is QuicException quic && Http3ConnectionContext.IsQuicStreamAborted(quic));
+            || (exception is QuicException quic
+                && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                && quic.QuicError is QuicError.StreamAborted or QuicError.ConnectionAborted
+                    or QuicError.ConnectionIdle or QuicError.ConnectionTimeout or QuicError.TransportError);
+    }
+
+    private void ThrowIfExchangeCancelled()
+    {
+        if (_owner is not { } owner)
+        {
+            return;
+        }
+
+        _requestAborted.ThrowIfCancellationRequested();
+        if (_connection.ConnectionClosed.IsCancellationRequested)
+        {
+            // The connection's callback can wake a read before it reaches the exchange's linked source.
+            throw owner.AbortRequestForPeer(new OperationCanceledException(_connection.ConnectionClosed));
+        }
     }
 
     private void Fail(Exception failure)

@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Routing;
@@ -804,6 +805,72 @@ public class WebServerTelemetryTests
         // Assert
         span.GetTagItem("error.type").ShouldBe("request_canceled");
         span.GetTagItem("http.response.status_code").ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: Losing an HTTP/3 connection mid-body should cancel the exchange without an Error log or a 500")]
+    public async Task ServerSpan_Http3ConnectionLostMidBody_ShouldReportRequestCanceledWithoutAnError()
+    {
+        // Arrange — the request body is still incoming when the peer ends its critical control stream.
+        // The handler supplies no read cancellation token, so cancellation must come from the transport.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+        RecordingLoggerProvider recorded = new();
+        TaskCompletionSource firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<(Exception Failure, CancellationToken RequestCancelled, CohesionHttpStatusCode? Fault)> failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        string path = $"/telemetry/h3-connection-lost-mid-body/{Guid.NewGuid():N}";
+
+        InMemoryMultiplexedConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Logging.AddProvider(recorded);
+        factory.Builder.Server.UseServer(options => options.UseHttp3(transport));
+        factory.Application.Use(async (context, next) =>
+        {
+            IWebClientFaultFeature? feature = context.Features.Get<IWebClientFaultFeature>();
+            CancellationToken requestToken = context.RequestCancelled;
+            byte[] buffer = new byte[256];
+
+            try
+            {
+                await context.Request.Body.ReadExactlyAsync(buffer.AsMemory(0, 5), CancellationToken.None);
+                firstRead.TrySetResult();
+
+                while (await context.Request.Body.ReadAsync(buffer, CancellationToken.None) > 0)
+                {
+                }
+            }
+            catch (Exception exception) when (exception is IOException or OperationCanceledException)
+            {
+                failed.TrySetResult((exception, requestToken, feature?.StatusCode));
+                throw;
+            }
+        });
+        await factory.StartAsync(cancellationToken);
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+        await using Connection controlStream = await client.OpenControlStreamAsync(cancellationToken);
+        await using Connection requestStream = await client.SendRequestAsync(
+            "POST",
+            path,
+            [],
+            [Http3RawClient.Data(Encoding.ASCII.GetBytes("hello"))],
+            endStream: false,
+            cancellationToken);
+        await firstRead.Task.WaitAsync(cancellationToken);
+
+        // Act — H3_CLOSED_CRITICAL_STREAM is raised outside the body reader (RFC 9114 §6.2.1).
+        await controlStream.Output.CompleteAsync();
+        (Exception failure, CancellationToken requestCancelled, CohesionHttpStatusCode? fault) = await failed.Task.WaitAsync(cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+        await factory.StopAsync(cancellationToken);
+
+        // Assert — this is an abandoned exchange, with no client-body fault or attempted error response.
+        OperationCanceledException canceled = failure.ShouldBeAssignableTo<OperationCanceledException>()!;
+        requestCancelled.IsCancellationRequested.ShouldBeTrue();
+        canceled.CancellationToken.ShouldBe(requestCancelled);
+        fault.ShouldBeNull();
+        span.GetTagItem("error.type").ShouldBe("request_canceled");
+        span.GetTagItem("http.response.status_code").ShouldBeNull();
+        recorded.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Error);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A cancelled exchange should report request_canceled and no status code")]

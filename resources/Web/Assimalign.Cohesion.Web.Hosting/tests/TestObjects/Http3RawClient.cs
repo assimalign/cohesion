@@ -34,6 +34,14 @@ internal sealed class Http3RawClient : IAsyncDisposable
         return new Http3RawClient(connection);
     }
 
+    /// <summary>Opens the client control stream and writes its empty SETTINGS frame, leaving it open.</summary>
+    public async Task<Connection> OpenControlStreamAsync(CancellationToken cancellationToken)
+    {
+        Connection stream = await _connection.OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken).ConfigureAwait(false);
+        await stream.Output.WriteAsync(new byte[] { 0x00, 0x04, 0x00 }, cancellationToken).ConfigureAwait(false);
+        return stream;
+    }
+
     /// <summary>
     /// Opens a request stream and writes the request head — <paramref name="method"/> for
     /// <paramref name="path"/> with the regular <paramref name="fields"/> — then each of

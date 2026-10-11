@@ -162,11 +162,13 @@ public class WebApplicationServerClientFaultTests
         if (fault == "content-length")
         {
             await client.SendHeadersAsync(1, "POST", "/upload", endStream: false, cancellationToken, ("content-length", "100"));
+            await observed.BeforeReadRecorded.Task.WaitAsync(cancellationToken);
             await client.SendDataAsync(1, Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}"), endStream: true, cancellationToken);
         }
         else
         {
             await client.SendHeadersAsync(1, "POST", "/upload", endStream: false, cancellationToken);
+            await observed.BeforeReadRecorded.Task.WaitAsync(cancellationToken);
             await client.SendDataAsync(1, Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}"), endStream: false, cancellationToken);
             await client.SendTrailersAsync(1, cancellationToken, ("content-length", "5"));
         }
@@ -482,6 +484,7 @@ public class WebApplicationServerClientFaultTests
             IWebClientFaultFeature? feature = context.Features.Get<IWebClientFaultFeature>();
             observed.FeaturePresent = feature is not null;
             observed.BeforeRead = feature?.StatusCode;
+            observed.BeforeReadRecorded.TrySetResult();
 
             try
             {
@@ -511,6 +514,9 @@ public class WebApplicationServerClientFaultTests
         public Exception? ReadFailure { get; set; }
 
         public CohesionHttpStatusCode? AfterRead { get; set; }
+
+        /// <summary>Completes once the pipeline captured the status before the client sends its malformed body.</summary>
+        public TaskCompletionSource BeforeReadRecorded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Completes once the pipeline has recorded the exchange.</summary>
         public TaskCompletionSource Recorded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

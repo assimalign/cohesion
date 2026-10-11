@@ -30,7 +30,8 @@ internal sealed class Http3Context : TransportHttpContext
     /// client resets the request stream (<c>RESET_STREAM</c>), stops the response
     /// (<c>STOP_SENDING</c>), or the stream is aborted or lost. RFC 9114 §4.1.1 — that is how a client
     /// cancels a request, so the application learns of it as an HTTP/2 <c>RST_STREAM</c> tells it,
-    /// without having to read or write (#1329).
+    /// without having to read or write (#1329). The multiplexed connection's closure also cancels
+    /// the exchange even if the driver has not yet signaled the request stream (#1430).
     /// </remarks>
     public Http3Context(
         in TransportHttpRequestHead requestHead,
@@ -40,8 +41,9 @@ internal sealed class Http3Context : TransportHttpContext
         long streamId,
         Http3RequestBodyStream requestBody,
         int featureCapacity,
-        IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, featureCapacity, features, streamConnection.ConnectionClosed)
+        IHttpFeatureCollection? features = null,
+        CancellationToken connectionAborted = default)
+        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, featureCapacity, features, streamConnection.ConnectionClosed, connectionAborted)
     {
         StreamConnection = streamConnection;
         StreamId = streamId;
