@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 /// <summary>
 /// Cross-transport parity for request-target percent-decoding (issue #895 / RFC 3986 §2.4). The
-/// HTTP/1.1 reader now surfaces <see cref="IHttpRequest.Path"/> from the origin-form request-target
-/// through the same <c>HttpPath.FromUriComponent</c> decode HTTP/2 and HTTP/3 run over the
+/// HTTP/1.1 reader now surfaces <see cref="IHttpRequest.Path"/> from the origin-form and absolute-form
+/// request-target through the same <c>HttpPath.FromUriComponent</c> decode HTTP/2 and HTTP/3 run over the
 /// <c>:path</c> pseudo-header (<c>Http2Stream.ParseQuery</c> / <c>Http3HeaderCodec.ParseQuery</c>),
 /// so identical wire bytes yield an identical decoded path on every transport: <c>%2e%2e</c> decodes
 /// to <c>..</c>, <c>%2F</c> stays encoded (never a separator — the routing <c>{**}</c> identity
@@ -67,6 +67,49 @@ public class HttpRequestTargetDecodeParityTests
         http2.Request.Query["q"].Value.ShouldBe("a b");
         http1.Request.Query["p"].Value.ShouldBe("/");
         http2.Request.Query["p"].Value.ShouldBe("/");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Decode parity: an h1 absolute-form request-target surfaces IHttpRequest.Path as origin-form and h2 do")]
+    [InlineData("/caf%C3%A9", "/café")]                     // a UTF-8 sequence decodes
+    [InlineData("/100%25", "/100%")]                        // an encoded '%' decodes once
+    [InlineData("/dir/a%2Fb", "/dir/a%2Fb")]                // %2F stays encoded (never a separator)
+    [InlineData("/hello%24world", "/hello$world")]          // an ordinary encoded octet decodes
+    [InlineData("/over%C0%AE", "/over%C0%AE")]              // an overlong UTF-8 sequence is left unencoded
+    [InlineData("/bad%zz", "/bad%zz")]                      // an invalid escape is left as written
+    public async Task AbsoluteFormRequestTargetPath_DecodesAsOriginFormAndHttp2Do(string rawPath, string expectedPath)
+    {
+        // Arrange — RFC 9112 §3.2.2: a server accepts the absolute-form of any request-target. Its path
+        // comes from System.Uri, which leaves escapes in place, so the reader decodes it as it decodes
+        // origin-form; otherwise "/caf%C3%A9" would reach middleware still encoded.
+        string absoluteForm = $"GET http://api.test{rawPath} HTTP/1.1\r\nHost: api.test\r\n\r\n";
+        string originForm = $"GET {rawPath} HTTP/1.1\r\nHost: api.test\r\n\r\n";
+
+        // Act
+        IHttpContext? absolute = await ReadHttp1ContextAsync(absoluteForm);
+        IHttpContext? origin = await ReadHttp1ContextAsync(originForm);
+        IHttpContext? http2 = await ReadHttp2ContextAsync(rawPath);
+
+        // Assert
+        absolute.ShouldNotBeNull();
+        origin.ShouldNotBeNull();
+        http2.ShouldNotBeNull();
+        absolute!.Request.Path.Value.ShouldBe(expectedPath);
+        origin!.Request.Path.Value.ShouldBe(expectedPath);
+        http2!.Request.Path.Value.ShouldBe(expectedPath);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: an absolute-form request-target whose decoded path holds an illegal character is rejected as malformed")]
+    public async Task Http1_AbsoluteFormRequestTargetPathDecodingToIllegalCharacter_DropsTheConnection()
+    {
+        // Arrange — the same rule the origin-form target is held to (below): a decoded space is not a
+        // legal path character, so the target is malformed rather than a path with a space in it.
+        const string requestText = "GET http://api.test/space%20name HTTP/1.1\r\nHost: api.test\r\n\r\n";
+
+        // Act
+        IHttpContext? context = await ReadHttp1ContextAsync(requestText);
+
+        // Assert
+        context.ShouldBeNull();
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: a request-target whose decoded path holds an illegal character is rejected as malformed")]

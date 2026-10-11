@@ -618,12 +618,12 @@ only when at least one interceptor is registered.
 `IHttpRequest.Path` is the **percent-decoded** path on every transport, produced by the same
 `HttpPath.FromUriComponent` decode (RFC 3986 §2.4). HTTP/2 and HTTP/3 run it over the `:path`
 pseudo-header (`Http2Stream.ParseQuery` / `Http3HeaderCodec.ParseQuery`); HTTP/1.1's
-`Http1MessageReader` runs it over the **origin-form** request-target path after
-`HttpRequestTarget` has split path from query (issue #895). Identical wire bytes therefore yield
-an identical `Path` on all three: `%2e%2e` decodes to `..` (so the encoded-traversal form a
-static-file or routing layer must reject reads the same everywhere), an ordinary octet like
-`%24` decodes to `$`, and an invalid or overlong escape (`%zz`, `%C0%AE`) is left intact per
-`UrlDecoder`.
+`Http1MessageReader` runs it over the **origin-form** and **absolute-form** request-target path
+after `HttpRequestTarget` has split path from query (issue #895; absolute-form since #1324).
+Identical wire bytes therefore yield an identical `Path` on all three: `%2e%2e` decodes to `..`
+(so the encoded-traversal form a static-file or routing layer must reject reads the same
+everywhere), an ordinary octet like `%24` decodes to `$`, and an invalid or overlong escape
+(`%zz`, `%C0%AE`) is left intact per `UrlDecoder`.
 
 Two invariants are load-bearing:
 
@@ -657,9 +657,17 @@ Two invariants are load-bearing:
 Why decode in the transport rather than in `HttpRequestTarget`: the value object is a purely
 syntactic RFC 9112 §3.2 parse whose `Path`/`RawValue` stay wire-faithful (its tests pin
 `/with%20space` as a literal), and h2/h3 already decode in their transport layer — so h1 matches
-them by decoding in `Http1MessageReader`, not by changing the shared parser. The other three
-request-target forms keep their existing handling (absolute-form's path is already normalized by
-`System.Uri`, authority-form/CONNECT carries none, asterisk-form is the literal `*`).
+them by decoding in `Http1MessageReader`, not by changing the shared parser.
+
+Absolute-form (RFC 9112 §3.2.2, which every server must accept) takes the same decode. Its
+`HttpRequestTarget.Path` comes from `System.Uri.AbsolutePath`, which removes dot segments and
+decodes escaped unreserved characters but leaves every other escape as written: `/caf%C3%A9` and
+`/100%25` stay encoded. Until #1324's review the reader passed that path through, so
+`GET http://example.com/caf%C3%A9` reached middleware as `/caf%C3%A9` while the origin-form request
+reached it as `/café`, and a redirect that encodes the decoded path (`HttpPath.ToUriComponent`)
+wrote `/caf%25C3%25A9`, another resource. `HttpRequestTargetDecodeParityTests` pins the two forms
+and HTTP/2 to the same `Path`. Authority-form (CONNECT) carries no path, and asterisk-form is the
+literal `*`.
 
 ## IsSecure: capability-derived, single-source
 

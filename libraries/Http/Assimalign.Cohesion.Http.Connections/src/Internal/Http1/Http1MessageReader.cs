@@ -151,11 +151,16 @@ internal static class Http1MessageReader
         // to "..", and leaves invalid/overlong sequences intact per UrlDecoder. A decoded octet that is
         // not a legal path character (a space, control, '?'/'#', or NUL) makes the target malformed —
         // the same outcome the shared decode reaches on h2/h3; surface it as the transport's existing
-        // malformed-request-target failure rather than letting it escape the read loop. The other three
-        // request-target forms keep their current handling: absolute-form's path is already normalized by
-        // System.Uri, authority-form (CONNECT) carries none, and asterisk-form is the literal '*'.
+        // malformed-request-target failure rather than letting it escape the read loop.
+        //
+        // RFC 9112 §3.2.2 — absolute-form takes the same decode. HttpRequestTarget reads its path from
+        // System.Uri.AbsolutePath, which removes dot segments and decodes escaped unreserved characters
+        // but leaves every other escape in place ("/caf%C3%A9", "/100%25"), so without it a request that
+        // names the same resource in absolute-form would reach middleware still encoded, and a redirect
+        // that encodes the path would encode it twice. Authority-form (CONNECT) carries no path, and
+        // asterisk-form is the literal '*'.
         HttpPath requestPath;
-        if (target.Form == HttpRequestTargetForm.Origin)
+        if (target.Form is HttpRequestTargetForm.Origin or HttpRequestTargetForm.Absolute)
         {
             try
             {
