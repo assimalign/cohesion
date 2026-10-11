@@ -11,13 +11,13 @@ on:
       - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
-      # Database template programs compose the Hosting, Sql and Sql.Schema builder APIs, and the
-      # template tests drive the Database clients over Connections.Tcp from source.
-      - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Sql/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Sql.Schema/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Client/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Sql.Client/**"
+      # Database template programs compose the Hosting, Sql and Sql.Schema builder APIs, the
+      # template run test executes the App.Database pack built from the whole Database family, and
+      # the template tests drive the Database clients over Connections.Tcp from source. Tests and
+      # docs of the Database projects reach neither the programs nor the pack.
+      - "resources/Database/Assimalign.Cohesion.Database*/**"
+      - "!resources/Database/**/tests/**"
+      - "!resources/Database/**/docs/**"
       - "libraries/Connections/**"
       - "build/**"
       - "installer/scripts/**"
@@ -32,11 +32,9 @@ on:
       - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Sql/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Sql.Schema/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Client/**"
-      - "resources/Database/Assimalign.Cohesion.Database.Sql.Client/**"
+      - "resources/Database/Assimalign.Cohesion.Database*/**"
+      - "!resources/Database/**/tests/**"
+      - "!resources/Database/**/docs/**"
       - "libraries/Connections/**"
       - "build/**"
       - "installer/scripts/**"

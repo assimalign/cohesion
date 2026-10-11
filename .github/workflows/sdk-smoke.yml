@@ -496,7 +496,10 @@ jobs:
             throw "ApplicationModel SDK package-boundary tests failed with exit code $LASTEXITCODE."
           }
 
+      # Independent of the base and ApplicationModel SDK tests above: a failure there must not
+      # hide whether the Database schema compiler and migrations still pass.
       - name: Run Database SDK tests
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           dotnet test `
