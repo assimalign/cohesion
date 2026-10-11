@@ -1,14 +1,15 @@
 using System;
+using System.Diagnostics;
 using System.Diagnostics.Tracing;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
-/// The Database hosting module's diagnostics: what the application does about a database its
-/// engine reports offline (owner decision 22 of 2026-10-06). Every reopen attempt and every
-/// outcome is one event.
+/// The Database hosting module's diagnostics: application lifecycle, resource commands, the
+/// admin endpoint, and each attempt to reopen a database its engine reports offline.
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>): a
@@ -125,6 +126,84 @@ internal sealed class DatabaseHostingEventSource : EventSource
         }
     }
 
+    [NonEvent]
+    public long LifecycleTimestamp()
+        => IsEnabled(EventLevel.Informational, EventKeywords.None) ? Stopwatch.GetTimestamp() : 0;
+
+    [NonEvent]
+    public void ApplicationBuilt(DatabaseApplicationContext context, int services)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ApplicationBuilt(context.HostId.ToString(), context.Engines.Count, context.Servers.Count, services);
+        }
+    }
+
+    [NonEvent]
+    public void ApplicationStarting(DatabaseApplicationContext context)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ApplicationStarting(context.HostId.ToString());
+        }
+    }
+
+    [NonEvent]
+    public void ApplicationStarted(DatabaseApplicationContext context, long started)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ApplicationStarted(context.HostId.ToString(), Elapsed(started));
+        }
+    }
+
+    [NonEvent]
+    public void ApplicationStopped(DatabaseApplicationContext context, long started)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ApplicationStopped(context.HostId.ToString(), Elapsed(started));
+        }
+    }
+
+    [NonEvent]
+    public void ApplicationDisposeFailed(DatabaseApplicationContext context, int failureCount, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            ApplicationDisposeFailed(context.HostId.ToString(), failureCount, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+        }
+    }
+
+    [NonEvent]
+    public void ResourceCommandHandled(ResourceCommand command, string operation)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ResourceCommandHandled(Bound(command.Kind), Bound(command.Key), operation);
+        }
+    }
+
+    [NonEvent]
+    public void ResourceCommandRejected(ResourceCommand command, string operation, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            // A command's message may repeat its payload. Keep only its type (plan D8).
+            ResourceCommandRejected(Bound(command.Kind), Bound(command.Key), operation, exception.GetType().FullName ?? exception.GetType().Name);
+        }
+    }
+
+    [NonEvent]
+    public void AdminEndpointFailed(Uri endpoint, string operation, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            AdminEndpointFailed(endpoint.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped), operation,
+                exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+        }
+    }
+
     [Event(1, Level = EventLevel.Warning, Message = "Database '{1}' of engine {0} is offline ({2}); the application reopens it in {3} ms, with backoff.")]
     private void OfflineDatabaseFound(string engineName, string database, string cause, long delayMilliseconds)
         => WriteEvent(1, engineName, database, cause, delayMilliseconds);
@@ -148,4 +227,54 @@ internal sealed class DatabaseHostingEventSource : EventSource
     [Event(6, Level = EventLevel.Error, Message = "The database reopen loop failed: {0}: {1}. It goes on.")]
     private void ReopenLoopFailed(string exceptionType, string exceptionMessage)
         => WriteEvent(6, exceptionType, exceptionMessage);
+
+    [Event(7, Level = EventLevel.Informational, Message = "Database application {0} built with {1} engine(s), {2} server(s) and {3} service(s).")]
+    private void ApplicationBuilt(string hostId, int engines, int servers, int services)
+        => WriteEvent(7, hostId, engines, servers, services);
+
+    [Event(8, Level = EventLevel.Informational, Message = "Database application {0} is starting.")]
+    private void ApplicationStarting(string hostId)
+        => WriteEvent(8, hostId);
+
+    [Event(9, Level = EventLevel.Informational, Message = "Database application {0} started in {1} ms.")]
+    private void ApplicationStarted(string hostId, double durationMilliseconds)
+        => WriteEvent(9, hostId, durationMilliseconds);
+
+    // Id 10 is reserved pending a startup-failure hook in the shared host (plan section 5).
+
+    [Event(11, Level = EventLevel.Informational, Message = "Database application {0} stopped in {1} ms.")]
+    private void ApplicationStopped(string hostId, double durationMilliseconds)
+        => WriteEvent(11, hostId, durationMilliseconds);
+
+    [Event(12, Level = EventLevel.Error, Message = "Database application {0} disposal had {1} failure(s); first: {2}: {3}")]
+    private void ApplicationDisposeFailed(string hostId, int failureCount, string exceptionType, string exceptionMessage)
+        => WriteEvent(12, hostId, failureCount, exceptionType, exceptionMessage);
+
+    [Event(13, Level = EventLevel.Informational, Message = "Handled resource command {0} '{1}' ({2}).")]
+    private void ResourceCommandHandled(string kind, string key, string operation)
+        => WriteEvent(13, kind, key, operation);
+
+    [Event(14, Level = EventLevel.Warning, Message = "Rejected resource command {0} '{1}' ({2}): {3}")]
+    private void ResourceCommandRejected(string kind, string key, string operation, string exceptionType)
+        => WriteEvent(14, kind, key, operation, exceptionType);
+
+    [Event(15, Level = EventLevel.Error, Message = "Database admin endpoint {0} failed during {1}: {2}: {3}")]
+    private void AdminEndpointFailed(string endpoint, string operation, string exceptionType, string exceptionMessage)
+        => WriteEvent(15, endpoint, operation, exceptionType, exceptionMessage);
+
+    // Ids 16-17 are reserved for HealthDegraded / HealthRestored after decision 49a.
+
+    private static double Elapsed(long started) => started == 0 ? 0 : Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
+    private static string Bound(string value)
+    {
+        const int maxLength = 256;
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        int length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return string.Concat(value.AsSpan(0, length), "...");
+    }
 }

@@ -18,6 +18,8 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     private readonly object _disposeGate = new();
     private Task? _disposeTask;
     private bool _startAttempted;
+    private long _startingTimestamp;
+    private long _stoppingTimestamp;
 
     internal DatabaseApplication(DatabaseApplicationComposition composition) : base(composition.Options)
     {
@@ -71,6 +73,29 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         }
 
         _startAttempted = true;
+        _startingTimestamp = DatabaseHostingEventSource.Log.LifecycleTimestamp();
+        DatabaseHostingEventSource.Log.ApplicationStarting(_context);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStartedAsync(CancellationToken cancellationToken = default)
+    {
+        DatabaseHostingEventSource.Log.ApplicationStarted(_context, _startingTimestamp);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStoppingAsync(CancellationToken cancellationToken = default)
+    {
+        _stoppingTimestamp = DatabaseHostingEventSource.Log.LifecycleTimestamp();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnStoppedAsync(CancellationToken cancellationToken = default)
+    {
+        DatabaseHostingEventSource.Log.ApplicationStopped(_context, _stoppingTimestamp);
         return Task.CompletedTask;
     }
 
@@ -103,6 +128,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         await _ownership.DisposeAsync(failures).ConfigureAwait(false);
         if (failures.Count > 0)
         {
+            DatabaseHostingEventSource.Log.ApplicationDisposeFailed(_context, failures.Count, failures[0]);
             throw new AggregateException("Database application disposal failed.", failures);
         }
     }

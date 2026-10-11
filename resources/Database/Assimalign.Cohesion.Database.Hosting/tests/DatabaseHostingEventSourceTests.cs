@@ -6,16 +6,19 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
 
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;
-
-using Shouldly;
-
-using Xunit;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
@@ -39,6 +42,196 @@ public class DatabaseHostingEventSourceCollection
 public sealed class DatabaseHostingEventSourceTests
 {
     private const string App = "app";
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: Should report build start and stop once for a real application")]
+    public async Task Application_StartedAndStopped_ShouldReportEachTransitionOnce()
+    {
+        // Arrange
+        using var recorder = new HostingEventRecorder(EventLevel.Informational);
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
+        builder.AddEngine("lifecycle", _ => SqlDatabaseEngine.Create("lifecycle", new SqlDatabaseEngineOptions()));
+        builder.AddService(new RecordingService([]));
+        await using var application = builder.Build();
+
+        // Act
+        await ((IHost)application).StopAsync(CancellationToken.None);
+        await ((IHost)application).StartAsync(CancellationToken.None);
+        await ((IHost)application).StartAsync(CancellationToken.None);
+        await ((IHost)application).StopAsync(CancellationToken.None);
+        await ((IHost)application).StopAsync(CancellationToken.None);
+
+        // Assert
+        string hostId = application.Context.HostId.ToString();
+        Event(recorder, 7, "ApplicationBuilt", "hostId", "engines", "servers", "services").Payload.ShouldBe([hostId, 1, 0, 1]);
+        Event(recorder, 8, "ApplicationStarting", "hostId").Payload.ShouldBe([hostId]);
+        var started = Event(recorder, 9, "ApplicationStarted", "hostId", "durationMilliseconds");
+        started.Payload![0].ShouldBe(hostId);
+        ((double)started.Payload[1]!).ShouldBeGreaterThanOrEqualTo(0);
+        var stopped = Event(recorder, 11, "ApplicationStopped", "hostId", "durationMilliseconds");
+        stopped.Payload![0].ShouldBe(hostId);
+        ((double)stopped.Payload[1]!).ShouldBeGreaterThanOrEqualTo(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationDisposeFailed: Should report aggregate disposal failure only once")]
+    public async Task DisposeAsync_FailedOwnedEngine_ShouldReportOnce()
+    {
+        // Arrange
+        var engine = new RecordingEngine { DisposeException = new IOException("dispose probe") };
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine(engine.Name, _ => engine);
+        var application = builder.Build();
+        using var recorder = new HostingEventRecorder(EventLevel.Error);
+
+        // Act
+        await Should.ThrowAsync<AggregateException>(async () => await ((IAsyncDisposable)application).DisposeAsync());
+        await Should.ThrowAsync<AggregateException>(async () => await ((IAsyncDisposable)application).DisposeAsync());
+
+        // Assert
+        engine.DisposeCount.ShouldBe(1);
+        var failed = Event(recorder, 12, "ApplicationDisposeFailed", "hostId", "failureCount", "exceptionType", "exceptionMessage");
+        failed.Payload![0].ShouldBe(application.Context.HostId.ToString());
+        failed.Payload[1].ShouldBe(1);
+        failed.Payload[2].ShouldBe(typeof(AggregateException).FullName);
+        failed.Payload[3].ShouldBeOfType<string>().ShouldContain("dispose probe", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Resource commands: Should report handled and rejected operations once with bounded identifiers")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResourceCommand_HandledOrRejected_ShouldReportOnce(bool delete)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("commands", new SqlDatabaseEngineOptions());
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine(engine);
+        await using var application = builder.Build();
+        var handler = new DatabaseResourceCommandHandler("database.add-database", application.Context);
+        var command = new ResourceCommand("id", handler.Kind, "owner", "commands/app", Encoding.UTF8.GetBytes("""{"database":"app","engine":"commands"}"""));
+        if (delete)
+        {
+            await handler.ExecuteAsync(command, CancellationToken.None);
+        }
+        using var recorder = new HostingEventRecorder(EventLevel.Informational);
+
+        // Act
+        if (delete)
+        {
+            await handler.DeleteAsync(command, CancellationToken.None);
+        }
+        else
+        {
+            await handler.ExecuteAsync(command, CancellationToken.None);
+        }
+        var refused = new DatabaseResourceCommandHandler("database.add-principal", application.Context);
+        var rejectedCommand = command with
+        {
+            Kind = refused.Kind,
+            Key = new string('k', 300),
+            Payload = Encoding.UTF8.GetBytes("""{"database":"app","name":"private-payload"}"""),
+        };
+        await Should.ThrowAsync<ResourceCommandRejectedException>(async () =>
+        {
+            if (delete) { await refused.DeleteAsync(rejectedCommand, CancellationToken.None); }
+            else { await refused.ExecuteAsync(rejectedCommand, CancellationToken.None); }
+        });
+
+        // Assert
+        string operation = delete ? "Delete" : "Execute";
+        Event(recorder, 13, "ResourceCommandHandled", "kind", "key", "operation").Payload.ShouldBe([handler.Kind, command.Key, operation]);
+        Event(recorder, 14, "ResourceCommandRejected", "kind", "key", "operation", "exceptionType").Payload
+            .ShouldBe([refused.Kind, new string('k', 256) + "...", operation, typeof(ResourceCommandRejectedException).FullName]);
+        recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain("private-payload");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AdminEndpointFailed: Should report a real listener bind failure once")]
+    public async Task AdminEndpoint_OccupiedPort_ShouldReportFailureOnce()
+    {
+        // Arrange
+        using var occupied = new TcpListener(IPAddress.Loopback, 0);
+        occupied.Start();
+        var endpoint = new Uri($"http://127.0.0.1:{((IPEndPoint)occupied.LocalEndpoint).Port}");
+        using var scope = ResourceRuntime.CreateScope(new ResourceContext(endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(DatabaseHostingEventSourceTests).Assembly);
+        var application = builder.Build();
+        using var recorder = new HostingEventRecorder(EventLevel.Error);
+
+        // Act: the background service may fail synchronously or after Start returned. Stop joins
+        // its task in either case; disposal retains the existing failure behavior.
+        try
+        {
+            try { await ((IHost)application).StartAsync(CancellationToken.None); }
+            catch (Exception) { }
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            while (!recorder.Events.Any(entry => entry.EventId == 15))
+            {
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+        finally
+        {
+            try { await ((IAsyncDisposable)application).DisposeAsync(); }
+            catch (AggregateException) { }
+        }
+
+        // Assert
+        var failed = Event(recorder, 15, "AdminEndpointFailed", "endpoint", "operation", "exceptionType", "exceptionMessage");
+        failed.Payload![0].ShouldBe(endpoint.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped));
+        failed.Payload[1].ShouldBe("Start");
+        failed.Payload[2].ShouldBeOfType<string>().ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Disabled tracing: Should allocate and time nothing")]
+    public async Task Writes_NoListener_ShouldAllocateAndTimeNothing()
+    {
+        // Arrange
+        await using var application = DatabaseApplication.CreateBuilder().Build();
+        var command = new ResourceCommand("id", "database.add-database", "owner", new string('k', 300), ReadOnlyMemory<byte>.Empty);
+        var endpoint = new Uri("http://localhost:12345");
+        var failure = new IOException("probe");
+        DatabaseHostingEventSource.Log.IsEnabled().ShouldBeFalse();
+        Write();
+
+        // Act
+        long allocated = long.MaxValue;
+        long timestamp = 0;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            timestamp |= Write();
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        // Assert
+        allocated.ShouldBe(0);
+        timestamp.ShouldBe(0);
+
+        long Write()
+        {
+            var log = DatabaseHostingEventSource.Log;
+            long started = log.LifecycleTimestamp();
+            for (int index = 0; index < 10_000; index++)
+            {
+                log.ApplicationBuilt(application.Context, 1);
+                log.ApplicationStarting(application.Context);
+                log.ApplicationStarted(application.Context, started);
+                log.ApplicationStopped(application.Context, started);
+                log.ApplicationDisposeFailed(application.Context, 1, failure);
+                log.ResourceCommandHandled(command, "Execute");
+                log.ResourceCommandRejected(command, "Execute", failure);
+                log.AdminEndpointFailed(endpoint, "Start", failure);
+            }
+            return started;
+        }
+    }
+
+    private static EventWrittenEventArgs Event(HostingEventRecorder recorder, int id, string name, params string[] payloadNames)
+    {
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
+        var written = recorder.Events.Where(entry => entry.EventId == id).ShouldHaveSingleItem();
+        written.EventName.ShouldBe(name);
+        written.PayloadNames.ShouldBe(payloadNames);
+        return written;
+    }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - DatabaseHostingEventSource: Should be named for its assembly")]
     public void GetName_DatabaseHostingEventSource_ShouldEqualAssemblyName()

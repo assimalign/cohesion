@@ -26,6 +26,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
     private X509Certificate2? _serverCertificate;
     private X509Certificate2Collection _serverCertificateChain = new();
     private readonly WebApplication _application;
+    private readonly Uri _endpoint;
 
     internal DatabaseAdminEndpointService(
         Uri endpoint,
@@ -35,6 +36,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         IReadOnlyList<IHealthContributor> healthContributors)
     {
         Uri.ThrowIfNotEndpoint(endpoint);
+        _endpoint = endpoint;
         ArgumentNullException.ThrowIfNull(controlPlane);
         ArgumentNullException.ThrowIfNull(resourceContext);
         ArgumentNullException.ThrowIfNull(applicationContext);
@@ -87,18 +89,35 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
 
     public new void Dispose()
     {
-        base.Dispose();
-        ((IDisposable)_application).Dispose();
-        _serverCertificate?.Dispose();
-        foreach (X509Certificate2 certificate in _serverCertificateChain)
+        try
         {
-            certificate.Dispose();
+            base.Dispose();
+            ((IDisposable)_application).Dispose();
+            _serverCertificate?.Dispose();
+            foreach (X509Certificate2 certificate in _serverCertificateChain)
+            {
+                certificate.Dispose();
+            }
+        }
+        catch (Exception exception)
+        {
+            // Record an infrastructure failure, preserving the existing disposal failure.
+            DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Dispose", exception);
+            throw;
         }
     }
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        await ((IHost)_application).StartAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ((IHost)_application).StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Start", exception);
+            throw;
+        }
 
         try
         {
@@ -109,7 +128,15 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         }
         finally
         {
-            await ((IHost)_application).StopAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await ((IHost)_application).StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Stop", exception);
+                throw;
+            }
         }
     }
 
@@ -121,6 +148,11 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             // cancelling the parking loop. ExecuteAsync's finally remains a fallback for
             // disposal and failed-start compensation, where no service-stop token exists.
             await ((IHost)_application).StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            DatabaseHostingEventSource.Log.AdminEndpointFailed(_endpoint, "Stop", exception);
+            throw;
         }
         finally
         {
