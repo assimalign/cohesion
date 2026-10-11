@@ -456,6 +456,18 @@ The server holds two signals (`Internal/WebApplicationServerDrain`). Each live
 connection registers on both once its context is open, so a connection accepted just
 as the stop begins is handled the same way as the rest.
 
+**QUIC delivery shares the stop budget (#1426).** The abort registration stays live until
+`connection.DisposeAsync` completes, including delivery of completed QUIC streams. Its graceful-close
+registration ends before context disposal, so a stop cannot call into an already-disposed context.
+QUIC's `CloseDeliveryTimeout` (five seconds by default) bounds its delivery wait independently;
+the host aborts that wait when the remaining stop budget expires first. Thus delivery receives
+the shorter of those two budgets. When the host budget expires, the server keeps its existing
+one-second abort-unwind allowance. A peer withholding receive credit cannot leave transport
+delivery waiting for five seconds after a shorter host budget expires. Previously the abort
+registration was disposed before connection disposal, so `StopAsync` could return after its abort grace while QUIC still
+waited. That ordering defect arose after 10.0.0-preview.1; the tag had neither the two-phase
+drain nor `CloseDeliveryTimeout`.
+
 | Signal | Fires | Carries |
 | --- | --- | --- |
 | `Draining` | when the stop begins | the accept loop, a bind still in progress, every connection's graceful close, and every exchange's `IWebServerDrainFeature` |

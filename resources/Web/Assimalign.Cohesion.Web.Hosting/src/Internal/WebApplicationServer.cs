@@ -428,6 +428,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 
     private async Task ServeConnectionAsync(IHttpConnection connection, long key, CancellationToken cancellationToken)
     {
+        WebApplicationServerDrain.Registration drainRegistration = default;
         try
         {
             await using (connection.ConfigureAwait(false))
@@ -435,9 +436,9 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 IHttpConnectionContext context = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
                 // Lame-duck drain: the context begins its graceful close when the stop begins, and the
-                // connection is aborted if the stop's budget runs out first. Held until the connection's
-                // streams have drained, so an abort still reaches a connection whose receive loop ended.
-                using WebApplicationServerDrain.Registration drainRegistration = _drain.Register(connection, context);
+                // connection is aborted if the stop's budget runs out first. The abort registration
+                // outlives connection disposal, which may still be awaiting QUIC stream delivery.
+                drainRegistration = _drain.Register(connection, context);
 
                 // The connection's concurrently served streams. Created by the first multiplexed
                 // exchange, so an HTTP/1.1 connection never allocates one.
@@ -501,6 +502,9 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                         await streams.WhenDrainedAsync().ConfigureAwait(false);
                     }
 
+                    // A context may no longer accept a graceful-close signal after disposal, even
+                    // while its underlying connection still needs the stop budget's abort signal.
+                    drainRegistration.UnregisterGracefulClose();
                     await DisposeContextAsync(context).ConfigureAwait(false);
                 }
             }
@@ -517,6 +521,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         }
         finally
         {
+            drainRegistration.Dispose();
             _connections.TryRemove(key, out _);
             ReleaseConnectionSlot();
         }

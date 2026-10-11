@@ -75,7 +75,7 @@ internal sealed class WebApplicationServerDrain : IDisposable
     /// </summary>
     /// <param name="connection">The accepted connection.</param>
     /// <param name="context">The connection's opened context.</param>
-    /// <returns>The registration; dispose it when the connection's service ends.</returns>
+    /// <returns>The registration; dispose it after the connection itself finishes disposal.</returns>
     public Registration Register(IHttpConnection connection, IHttpConnectionContext context)
     {
         return new Registration(
@@ -104,6 +104,12 @@ internal sealed class WebApplicationServerDrain : IDisposable
         {
             _gracefulClose = gracefulClose;
             _abort = abort;
+        }
+
+        /// <summary>Ends graceful-close notifications before the context is disposed, retaining abort.</summary>
+        public void UnregisterGracefulClose()
+        {
+            _gracefulClose.Dispose();
         }
 
         /// <inheritdoc />
