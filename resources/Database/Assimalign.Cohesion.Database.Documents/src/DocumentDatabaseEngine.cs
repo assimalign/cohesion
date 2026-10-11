@@ -394,7 +394,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
-    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
         => GetDatabase(name, create: true);
 
     /// <inheritdoc />

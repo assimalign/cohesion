@@ -88,7 +88,7 @@ public class EmbeddedDatabaseTests
 
         public override IReadOnlyList<DatabaseName> OfflineDatabases => [];
 
-        protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+        protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
             => throw new NotSupportedException();
 
         protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)

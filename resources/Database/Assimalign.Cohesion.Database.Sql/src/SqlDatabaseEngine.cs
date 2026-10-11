@@ -72,13 +72,6 @@ namespace Assimalign.Cohesion.Database.Sql;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class SqlDatabaseEngine : DatabaseEngine
 {
-    // The base NVI invokes CreateDatabaseCoreAsync synchronously, before it awaits or writes an
-    // event. Hand the model-only option to that invocation on this thread and consume it before
-    // any storage or listener code runs. No root API or cross-assembly diagnostics seam is needed;
-    // the handoff never crosses an await, flows into another task, or holds the registry lock.
-    [ThreadStatic]
-    private static Collation? _createCollation;
-
     private readonly SqlDatabaseEngineOptions _options;
     private readonly Dictionary<string, SqlDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
@@ -468,7 +461,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
     /// <remarks>
-    /// Both overloads go through the base's public member, including its lifecycle diagnostics.
+    /// Both overloads go through the base's creation lifecycle, including its diagnostics.
     /// This overload checks the name and null collation first, then disposal and cancellation,
     /// in the same order as the overload without a collation.
     /// </remarks>
@@ -482,19 +475,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         }
 
         ArgumentNullException.ThrowIfNull(defaultCollation);
-        ValueTask<DatabaseInstance> pending;
-        Collation? previous = _createCollation;
-        try
-        {
-            _createCollation = defaultCollation;
-            pending = base.CreateDatabaseAsync(name, cancellationToken);
-        }
-        finally
-        {
-            _createCollation = previous;
-        }
-
-        return (SqlDatabase)await pending.ConfigureAwait(false);
+        return (SqlDatabase)await base.CreateDatabaseAsync(name, defaultCollation, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -557,10 +538,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
-    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
-        Collation collation = _createCollation ?? Collation.Binary;
-        _createCollation = null;
+        Collation collation = (Collation?)creationState ?? Collation.Binary;
         return CreateDatabaseWithCollationAsync(name, collation);
     }
 

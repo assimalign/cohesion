@@ -3697,8 +3697,9 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
 
 - **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
   `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`SqlDatabase`) with `new` members over the
-  base's public members, and the collation overload of `CreateDatabaseAsync` makes the base's
-  checks itself (the name, a null collation, disposal, the token); a database re-exposes its
+  base's public members. The collation overload checks the name and null collation, then passes
+  the collation explicitly through the base's protected creation NVI, which owns disposal,
+  cancellation and lifecycle telemetry; a database re-exposes its
   `Engine` and `CreateSessionAsync` (`SqlDatabaseSession`); a session its `Database`,
   `CurrentTransaction` and both `BeginTransactionAsync` overloads (`SqlDatabaseTransaction`);
   the server its `Engine`; the server session overrides `DatabaseSession` covariantly. Each
@@ -3752,12 +3753,14 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
 
 ## Diagnostics
 
-Both SQL create overloads now enter the root NVI, so root events 9 and 13 cover default and explicit
-collations exactly once. The model-only collation uses a private, thread-local handoff consumed at
-the synchronous entry to `CreateDatabaseCoreAsync`, before storage or listener callbacks, and reset
-in a `finally` before any await. This avoids a public root option or diagnostics bridge, holds no
-registry lock across an event, and cannot flow into another task. Tests cover base/typed/collation
-calls and a listener that creates a default-collation database on the same or another thread.
+Both SQL create overloads enter the root NVI, so root events 9 and 13 cover default and explicit
+collations exactly once. The collation overload passes its existing `Collation` reference as the
+root's opaque creation state; `CreateDatabaseCoreAsync` uses it, or `Collation.Binary` for null.
+There is no ambient state, wrapper allocation or model-side event writer. Tests cover
+base/typed/collation calls, reentrant listeners on the same or another thread, and an already
+cancelled collation create whose first-chance exception callback creates a default binary database.
+The callback regression failed with one match for `'a'` after inserting `'A'` under the former
+thread-local handoff, and now finds zero.
 
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;

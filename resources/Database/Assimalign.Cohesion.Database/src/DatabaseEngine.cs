@@ -493,6 +493,25 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
     public ValueTask<DatabaseInstance> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        => CreateDatabaseAsync(name, creationState: null, cancellationToken);
+
+    /// <summary>
+    /// Creates a logical database with model-supplied state through the root lifecycle.
+    /// </summary>
+    /// <param name="name">The name of the database to create.</param>
+    /// <param name="creationState">Opaque model-owned state passed unchanged to the core, or null for the model's defaults.</param>
+    /// <param name="cancellationToken">Observed before the database is created.</param>
+    /// <returns>The newly created database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
+    /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    /// <remarks>
+    /// The model validates its state before calling this member. The root owns the common guards
+    /// and telemetry; it neither inspects nor stores the state. The default create passes null
+    /// without allocating, and reentrant calls each carry their own state.
+    /// </remarks>
+    protected ValueTask<DatabaseInstance> CreateDatabaseAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken = default)
     {
         ThrowIfEmpty(name);
         ThrowIfDisposed();
@@ -502,10 +521,10 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         // timing (event-sources plan, D5 a).
         if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            return CreateDatabaseCoreAsync(name, cancellationToken);
+            return CreateDatabaseCoreAsync(name, creationState, cancellationToken);
         }
 
-        return CreateDatabaseTraced(name, cancellationToken);
+        return CreateDatabaseTraced(name, creationState, cancellationToken);
     }
 
     /// <summary>
@@ -913,12 +932,13 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     protected void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
     /// <summary>
-    /// Creates a database whose name and engine state <see cref="CreateDatabaseAsync"/> checked.
+    /// Creates a database whose name and engine state the create NVI checked.
     /// </summary>
     /// <param name="name">The name of the database; never empty.</param>
+    /// <param name="creationState">The model-supplied state, unchanged; null selects model defaults.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
     /// <returns>The newly created database.</returns>
-    protected abstract ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken);
+    protected abstract ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken);
 
     /// <summary>
     /// Opens, or reopens when it is offline, a database whose name and engine state
@@ -1225,14 +1245,14 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     // that has not completed successfully is awaited, in a pooled wrapper. A failure is captured by
     // the filter, which catches nothing, and written from the finally, once the core's own finally
     // blocks released the locks they held.
-    private ValueTask<DatabaseInstance> CreateDatabaseTraced(DatabaseName name, CancellationToken cancellationToken)
+    private ValueTask<DatabaseInstance> CreateDatabaseTraced(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
         long started = Stopwatch.GetTimestamp();
         ValueTask<DatabaseInstance> pending;
         Exception? thrown = null;
         try
         {
-            pending = CreateDatabaseCoreAsync(name, cancellationToken);
+            pending = CreateDatabaseCoreAsync(name, creationState, cancellationToken);
         }
         catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
         {

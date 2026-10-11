@@ -1098,6 +1098,10 @@ their `Open` factories.
 
 ## Diagnostics
 
+The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
+This model's public create uses null/defaults; the root continues to own validation and
+create telemetry, with no per-call options allocation or additional model event.
+
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Graph` (`src/Internal/EventSource/GraphDatabaseEventSource.cs`;
 database event-sources plan, batch B5). It reports the wire server and its sessions, the index

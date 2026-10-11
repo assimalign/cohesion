@@ -145,9 +145,20 @@ internal sealed class TestEngine : DatabaseEngine
     /// <summary>The base's release of a worker no engine owns, as a model's builder reaches it.</summary>
     public static ValueTask Release(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
 
-    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+    /// <summary>A fixed create result for measuring the root lifecycle without storage allocations.</summary>
+    public DatabaseInstance? CreateResult { get; set; }
+
+    public ValueTask<DatabaseInstance> CreateCoreDirectly(DatabaseName name)
+        => CreateDatabaseCoreAsync(name, null, CancellationToken.None);
+
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (CreateResult is { } result)
+        {
+            return new ValueTask<DatabaseInstance>(result);
+        }
+
         lock (_databases)
         {
             if (_databases.ContainsKey(name) || _existing.Contains(name))
@@ -207,6 +218,11 @@ internal sealed class TestEngine : DatabaseEngine
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (CreateResult is { } result)
+        {
+            return new ValueTask<DatabaseInstance>(result);
+        }
+
         lock (_databases)
         {
             if (!_existing.Remove(name))
@@ -246,6 +262,11 @@ internal sealed class TestEngine : DatabaseEngine
     protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
         Interlocked.Increment(ref _coreCalls);
+        if (CreateResult is { } result)
+        {
+            return new ValueTask<DatabaseInstance>(result);
+        }
+
         lock (_databases)
         {
             bool found = _databases.TryGetValue(name, out var instance);

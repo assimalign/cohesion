@@ -79,6 +79,17 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   optional-capability case is unused: `DatabaseInstance` had one capability, schema provisioning
   (`SupportsSchemaProvisioning` over a virtual `ApplySchemaCoreAsync`), which owner decision 50 of
   2026-10-09 deleted with the root's schema types.
+- **Explicit model creation state** (#1349 review). The public, non-virtual
+  `CreateDatabaseAsync(DatabaseName, CancellationToken)` forwards null to the protected,
+  non-virtual overload `CreateDatabaseAsync(DatabaseName, object?, CancellationToken)`. That
+  overload owns the common name/disposal/cancellation checks and root telemetry, and passes
+  the opaque state unchanged to the protected abstract
+  `CreateDatabaseCoreAsync(DatabaseName, object?, CancellationToken)`. The model validates
+  its state and interprets it; the root never stores transient per-call state. All persistent
+  lifecycle state remains in the base's fields. SQL passes its existing `Collation` reference;
+  other models use null/defaults. Neither path needs an options wrapper or generic virtual
+  dispatch, and the default handoff allocates nothing. First-chance exception callbacks and
+  listeners can re-enter creation without inheriting another call's state.
 - **Engine composition is attached, then frozen** (§6.5 of the plan). A leaf's constructor attaches
   its built-in workers and its build path attaches the composed workers and servers through the
   protected, non-virtual `AttachWorker` and `AttachServer`, then calls `CompleteComposition()`;

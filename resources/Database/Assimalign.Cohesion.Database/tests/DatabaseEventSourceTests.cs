@@ -1247,6 +1247,49 @@ public sealed class DatabaseEventSourceTests
         DatabaseEventSource.Log.CurrentSessions.ShouldBe(before);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - CreateDatabaseAsync: Default creation state should add no allocation")]
+    public async Task CreateDatabaseAsync_DefaultState_ShouldAllocateNothingMoreThanTheCore()
+    {
+        // Arrange: a synchronous fixed result isolates the NVI's creation-state handoff.
+        DatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
+        await using var engine = new TestEngine();
+        await using var database = new TestDatabase("allocation", engine);
+        engine.CreateResult = database;
+        DatabaseName name = "allocation";
+        Func<ValueTask<DatabaseInstance>> baseline = () => engine.CreateCoreDirectly(name);
+        Func<ValueTask<DatabaseInstance>> create = () => engine.CreateDatabaseAsync(name, CancellationToken.None);
+        MeasureCreate(baseline, 100);
+        MeasureCreate(create, 100);
+
+        // Act: use the same minimum-of-three rule as the statement measurements below.
+        long baselineBytes = long.MaxValue;
+        long createBytes = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            baselineBytes = Math.Min(baselineBytes, MeasureCreate(baseline, 10_000));
+            createBytes = Math.Min(createBytes, MeasureCreate(create, 10_000));
+        }
+
+        // Assert
+        baselineBytes.ShouldBe(0);
+        createBytes.ShouldBe(baselineBytes);
+
+        static long MeasureCreate(Func<ValueTask<DatabaseInstance>> execute, int iterations)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < iterations; index++)
+            {
+                var pending = execute();
+                if (!pending.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException("The measured create did not complete synchronously.");
+                }
+                _ = pending.Result;
+            }
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: The statement path should allocate nothing more than its core while nobody listens")]
     public async Task ExecuteAsync_NoListener_ShouldAllocateNothingMoreThanTheCore()
     {
