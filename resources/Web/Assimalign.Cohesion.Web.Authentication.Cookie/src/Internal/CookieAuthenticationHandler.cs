@@ -302,9 +302,12 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     private bool IsApiEndpoint()
         => _context.GetEndpointMetadata<IApiEndpointMetadata>() is not null;
 
+    // The return URL is a URL: the login page redirects to it, so the path is written percent-encoded, as the
+    // request carried it. The transports hand the path over decoded, and "/café" or "/100%" in a Location is not
+    // a URI reference (RFC 9110 §10.2.2); the HTTP/1.1 writer would send "/caf?".
     private string CurrentRequestPath()
     {
-        string path = _context.Request.Path.Value;
+        string path = _context.Request.Path.ToUriComponent();
         return string.IsNullOrEmpty(path) ? "/" : path;
     }
 

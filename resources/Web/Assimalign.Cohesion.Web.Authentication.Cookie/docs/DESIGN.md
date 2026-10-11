@@ -89,7 +89,12 @@ reflection-free):
 
 This mirrors the .NET 10 cookie handler's `IApiEndpointMetadata`-keyed
 decision. The return URL is the request path; the query string is omitted
-in v1 (the redirect targets and the parameter name are configurable).
+in v1 (the redirect targets and the parameter name are configurable). The
+path is written percent-encoded (`HttpPath.ToUriComponent`, #1324's review):
+the transports hand it over decoded, and the login page redirects to the
+return URL, so `/caf%C3%A9` carried as `/café` ended in a `Location` the
+HTTP/1.1 writer sends as `/caf?`, and `/100%25` as `/100%`, which is not a URI
+reference (RFC 9110 §10.2.2).
 
 ## Cookie hardening defaults
 

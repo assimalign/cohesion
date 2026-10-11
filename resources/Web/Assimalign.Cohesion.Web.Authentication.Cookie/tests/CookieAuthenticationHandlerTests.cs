@@ -291,6 +291,42 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         location.ShouldContain(Uri.EscapeDataString("/secure/data"));
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Challenge should carry the request path percent-encoded in the return URL")]
+    [InlineData("/café", "/caf%C3%A9")]
+    [InlineData("/100%", "/100%25")]
+    [InlineData("/a%2Fb", "/a%2Fb")]
+    public async Task Challenge_PathNeedingEncoding_ShouldCarryEncodedReturnUrl(string decodedPath, string returnUrl)
+    {
+        // Arrange — the transports hand the handler the decoded path. The login page redirects to the return
+        // URL, so it must be the encoded path: "/café" written into a Location is sent as "/caf?".
+        CookieAuthenticationOptions options = CreateOptions();
+        TestHttpContext context = TestHttpContext.Create(decodedPath);
+        IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        await handler.ChallengeAsync(properties: null);
+
+        // Assert
+        string? location = context.Response.Headers.GetValue(HttpHeaderKey.Location);
+        location.ShouldBe($"{options.LoginPath}?{options.ReturnUrlParameter}={Uri.EscapeDataString(returnUrl)}");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Forbid should carry the request path percent-encoded in the return URL")]
+    public async Task Forbid_PathNeedingEncoding_ShouldCarryEncodedReturnUrl()
+    {
+        // Arrange
+        CookieAuthenticationOptions options = CreateOptions();
+        TestHttpContext context = TestHttpContext.Create("/café");
+        IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        await handler.ForbidAsync(properties: null);
+
+        // Assert
+        string? location = context.Response.Headers.GetValue(HttpHeaderKey.Location);
+        location.ShouldBe($"{options.AccessDeniedPath}?{options.ReturnUrlParameter}={Uri.EscapeDataString("/caf%C3%A9")}");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Challenge on an API endpoint returns 401 without redirect")]
     public async Task Challenge_ApiEndpoint_Returns401()
     {
