@@ -796,9 +796,10 @@ response. This is the isolation boundary the server keeps around application cod
   is personal data, and it depends on the same forwarded-headers question.
 - `server.address` and `server.port` on the metrics. They are opt-in there because they come from
   request headers, which makes them a cardinality attack vector.
-- Requests the transport rejects before dispatch (400, 408, 413, 414 and 431 answered by
-  `Http.Connections`). They never reach the server, so they have no span or measurement, and the
-  transport does not report them yet either (Http.Connections DESIGN, "Diagnostics").
+- Requests the transport rejects before dispatch (400, 408, 413, 414, 421, 431 and 501 answered by
+  `Http.Connections`; the 421 and 501 are HTTP/1.1-only). They never reach the server, so they have
+  no span or measurement, and the transport does not report them yet either (Http.Connections
+  DESIGN, "Diagnostics").
 - W3C `baggage`.
 
 **AOT.** `ActivitySource`, `Meter`, `TagList`, `ActivityContext.TryParse`, `FrozenSet`,
@@ -1474,7 +1475,8 @@ The binding is deliberately **not** reflection-based:
 `UseConfiguration` binds HTTP, HTTPS, and HTTP/3 endpoints, their protocol-specific server
 limits, their client-certificate mode, and the connection cap. Not bound: the HTTP/3
 `MaxRequestHeadersFrameSize` and QPACK options, QUIC stream limits, and a client-certificate
-validation callback. Data-rate limits are deferred with the transport's streaming-body rework.
+validation callback. The minimum request-body and response data rates are bound
+(`Limits:MinRequestBodyDataRate`, `Limits:MinResponseDataRate`; #1383, #1384).
 
 ### Entry-point defaults (#1047)
 
