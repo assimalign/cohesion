@@ -15,8 +15,11 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RequestTimeouts" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Rewrite" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
 	</ItemGroup>
 	<ItemGroup>

@@ -75,11 +75,18 @@ entry correlates via `ILoggerEntry.ParentId` — the Logging library's own corre
   behave exactly as without the middleware. The alternative (buffer-then-log, ASP.NET's
   `EnableBuffering`) would hold entire bodies in memory and fight the transport's
   consumption-driven window updates.
-- **Request-body interposition via the `HttpRequest` base, degrading gracefully.**
-  `IHttpRequest.Body` is get-only, but the abstract `HttpRequest` base (which every transport
-  derives from) has a settable `Body`. The middleware type-tests for the base; a hypothetical
-  `IHttpRequest` that isn't an `HttpRequest` simply gets no request-body capture or count. The
-  response side needs no such test — `IHttpResponse.Body` is settable by contract.
+- **Request-body interposition through an interface view (#1325).** `IHttpRequest.Body` is
+  get-only. When request capture or byte counting is armed, the middleware hands `next` an
+  internal context/request view whose body is the tee stream. It accepts every `IHttpRequest`,
+  including the views supplied by decompression and rewrite, and composes through request
+  timeouts. The request's `HttpContext` returns the logging view, so reads through that path
+  are observed too. Headers, trailers, path, query, features, response, items, connection info
+  and cancellation still delegate to the incoming exchange. No transport request is mutated
+  or restored, and logging does not dispose the request stream. Metadata is emitted from the
+  incoming context, preserving the path/query visible at logging's pipeline position.
+  The response body remains settable through `IHttpResponse` and is restored only when the
+  installed stream is still the logger's.
+
 - **Response capture decided at first write.** The response `Content-Type` does not exist when
   the middleware runs, so the content-type gate for response capture is a predicate the wrapper
   evaluates once, at the application's first body write — by which point the response head is
@@ -239,6 +246,15 @@ they need no position relative to `UseRouting`. Two consequences to be aware of:
 - Anything registered *before* it is invisible to the access log.
 - Captured bodies are whatever crosses the wire at its position: place it after a
   decompression middleware to capture decoded payloads, before it to capture the raw ones.
+
+**Behavior break from 10.0.0-preview.1 (#1325, decision 15).** The former `HttpRequest`
+downcast silently omitted request-body capture and byte counts behind request views. Those
+configured fields are now emitted there too. Capture stays opt-in, content-type gated and
+bounded, and only bytes consumed downstream are counted. After decompression the captured
+prefix and count describe decoded bytes; applications relying on the old omission should
+adjust their logging fields or limits explicitly. When capture or counting is armed, downstream
+code receives an `IHttpRequest` view instead of the concrete transport request and must use the
+interface contract.
 
 ## AOT posture
 

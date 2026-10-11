@@ -53,6 +53,11 @@ bodies are opt-in** because they routinely carry secrets. Header redaction is
 `Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` are never in the default
 allowlists.
 
+Request capture and byte counting work through request views, including decompression,
+rewrite and request timeouts. Logging after decompression observes decoded bytes. Capture
+is limited to the configured prefix and content types, while byte counts include all bytes
+consumed downstream. Logging leaves the original request body in place.
+
 Per-endpoint overrides attach an `HttpLoggingMetadata` to the route's metadata bag (last-wins),
 usually through the convention verb on a mapped route or a route group:
 `app.MapGroup("/probes").WithHttpLogging(HttpLoggingFields.None)`. `HttpLoggingFields.None`

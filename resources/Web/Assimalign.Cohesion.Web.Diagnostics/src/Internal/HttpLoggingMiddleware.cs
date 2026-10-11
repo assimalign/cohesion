@@ -70,20 +70,17 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         // bytes only - the body itself streams through, so h2 flow-control backpressure and the
         // transport's request-size limits are untouched.
         RequestBodyCaptureStream? requestCapture = null;
-        Stream? originalRequestBody = null;
-        HttpRequest? concreteRequest = context.Request as HttpRequest;
+        IHttpContext downstreamContext = context;
 
         bool wantBytes = (configured & HttpLoggingFields.BytesTransferred) != 0;
         bool captureRequestBody = (configured & HttpLoggingFields.RequestBody) != 0
-            && concreteRequest is not null
             && _snapshot.RequestBodyLimit > 0
             && _snapshot.IsBodyContentTypeLoggable(context.Request.Headers[HttpHeaderKey.ContentType].Value);
 
-        if (concreteRequest is not null && (captureRequestBody || wantBytes))
+        if (captureRequestBody || wantBytes)
         {
-            originalRequestBody = concreteRequest.Body;
-            requestCapture = new RequestBodyCaptureStream(originalRequestBody, captureRequestBody ? _snapshot.RequestBodyLimit : 0);
-            concreteRequest.Body = requestCapture;
+            requestCapture = new RequestBodyCaptureStream(context.Request.Body, captureRequestBody ? _snapshot.RequestBodyLimit : 0);
+            downstreamContext = new HttpLoggingHttpContext(context, requestCapture);
         }
 
         ResponseBodyCaptureStream? responseCapture = null;
@@ -116,7 +113,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         Exception? exception = null;
         try
         {
-            await next.Invoke(context).ConfigureAwait(false);
+            await next.Invoke(downstreamContext).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -125,14 +122,8 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         }
         finally
         {
-            // Restore the streams we installed - but only when they are still the installed
-            // ones. A downstream middleware that swapped in its own wrapper (compression, ...)
-            // owns its restoration; clobbering it here would detach that wrapper mid-chain.
-            if (requestCapture is not null && ReferenceEquals(concreteRequest!.Body, requestCapture))
-            {
-                concreteRequest.Body = originalRequestBody!;
-            }
-
+            // The request view never mutates the incoming request. Restore the response stream only
+            // if it is still ours; a downstream wrapper owns its own restoration.
             if (responseCapture is not null && ReferenceEquals(context.Response.Body, responseCapture))
             {
                 context.Response.Body = originalResponseBody!;
