@@ -123,6 +123,68 @@ public class EndpointBindingGeneratorTests
     private static string Describe(IEnumerable<Diagnostic> diagnostics)
         => string.Join(Environment.NewLine, diagnostics.Select(diagnostic => diagnostic.ToString()));
 
+    [Theory(DisplayName = "Cohesion Test [Web Generator] - Generate: query sequences compile and bind every occurrence")]
+    [InlineData("string[]")]
+    [InlineData("int[]")]
+    [InlineData("int?[]")]
+    [InlineData("System.DayOfWeek[]")]
+    [InlineData("System.DayOfWeek?[]")]
+    [InlineData("System.Collections.Generic.List<int>")]
+    [InlineData("System.Collections.Generic.IEnumerable<string>")]
+    [InlineData("System.Collections.Generic.IReadOnlyList<string>")]
+    [InlineData("System.Collections.Generic.IReadOnlyCollection<string>")]
+    [InlineData("System.Collections.Generic.ICollection<string>")]
+    [InlineData("System.Collections.Generic.IList<string>")]
+    public void Generate_QuerySequence_ShouldCompileAndReadEveryOccurrence(string type)
+    {
+        // Arrange
+        string endpoint = "app.MapGet(\"/search\", ([FromQuery(Name = \"a\\\"b\")] " + type + " values) => \"ok\");";
+
+        // Act
+        GeneratorRun run = Generate(endpoint, referenceSerialization: false);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        run.Generated.ShouldContain("Query.TryGetValue(\"a\\\"b\", out var __query0)", Case.Sensitive);
+        run.Generated.ShouldContain("__offset0 < __query0.Count", Case.Sensitive);
+        run.Generated.ShouldContain("__query0[__offset0]", Case.Sensitive);
+        run.Generated.ShouldContain("EndpointParameterSource.Query", Case.Sensitive);
+        run.Generated.ShouldNotContain("ReadContentAsync", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Generator] - Generate: an inferred scalar sequence binds from the query")]
+    public void Generate_InferredQuerySequence_ShouldCompileWithoutBodySerialization()
+    {
+        // Arrange
+        const string endpoint = """app.MapGet("/search", (int[] values) => "ok");""";
+
+        // Act
+        GeneratorRun run = Generate(endpoint, referenceSerialization: false);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        run.Generated.ShouldContain("Query.TryGetValue(\"values\", out var __query0)", Case.Sensitive);
+        run.Generated.ShouldNotContain("ReadContentAsync", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Generator] - Generate: an explicit collection body keeps body binding")]
+    public void Generate_ExplicitCollectionBody_ShouldKeepBodyBinding()
+    {
+        // Arrange
+        const string endpoint = """app.MapPost("/body", ([FromBody] int[] values) => "ok");""";
+
+        // Act
+        GeneratorRun run = Generate(endpoint);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        run.Generated.ShouldContain("ReadContentAsync<global::System.Int32[]>", Case.Sensitive);
+        run.Generated.ShouldNotContain("Query.TryGetValue", Case.Sensitive);
+    }
+
     // Every call in the source that binds a typed Map* placeholder (an overload taking System.Delegate)
     // must be rewritten by an interceptor in the output compilation; otherwise it would compile against
     // the placeholder, which throws when the endpoint is mapped.

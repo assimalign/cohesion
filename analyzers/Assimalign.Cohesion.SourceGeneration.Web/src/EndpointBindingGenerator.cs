@@ -923,6 +923,20 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         BindingSource? explicitSource = GetExplicitSource(parameter, out string? explicitName);
         string key = string.IsNullOrEmpty(explicitName) ? parameter.Name : explicitName!;
 
+        // Query sequences bind every occurrence under the key. An explicit body remains a body;
+        // route/header/form collections have no implicit query fallback.
+        if (explicitSource is null or BindingSource.Query
+            && TryGetQueryElement(type, out ITypeSymbol? element, out bool asList))
+        {
+            (ConversionKind elementConversion, string elementCoreType, bool _) = ClassifyConversion(element!, known.Parsable);
+            if (elementConversion != ConversionKind.Complex)
+            {
+                binding = new ParameterBinding(declaredType, elementCoreType, "", BindingSource.Query,
+                    elementConversion, key, false, describedType, element!.ToDisplayString(_fullyQualified), asList);
+                return null;
+            }
+        }
+
         BindingSource source;
         if (explicitSource is { } declared)
         {
@@ -969,6 +983,34 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         BindingSource.Body => "request body",
         _ => "route or query string"
     };
+
+    private static bool TryGetQueryElement(ITypeSymbol type, out ITypeSymbol? element, out bool asList)
+    {
+        asList = false;
+        if (type is IArrayTypeSymbol { Rank: 1 } array)
+        {
+            element = array.ElementType;
+            return true;
+        }
+
+        if (type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named)
+        {
+            asList = named.OriginalDefinition.MetadataName == "List`1"
+                && named.ContainingNamespace.ToDisplayString() == "System.Collections.Generic";
+            if (asList || named.OriginalDefinition.SpecialType is SpecialType.System_Collections_Generic_IEnumerable_T
+                or SpecialType.System_Collections_Generic_IReadOnlyCollection_T
+                or SpecialType.System_Collections_Generic_IReadOnlyList_T
+                or SpecialType.System_Collections_Generic_ICollection_T
+                or SpecialType.System_Collections_Generic_IList_T)
+            {
+                element = named.TypeArguments[0];
+                return true;
+            }
+        }
+
+        element = null;
+        return false;
+    }
 
     // Uploaded files (#1061) bind from the parsed multipart/form-data body, by their field name: an
     // IHttpFormFile is the first file sent under the name, a sequence of IHttpFormFile every file sent
@@ -1532,6 +1574,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
     private static void EmitParameter(StringBuilder builder, ParameterBinding parameter, int index, string indent)
     {
+        if (parameter.SequenceElementType.Length > 0)
+        {
+            EmitQuerySequence(builder, parameter, index, indent);
+            return;
+        }
+
         switch (parameter.Source)
         {
             case BindingSource.Context:
@@ -1713,6 +1761,61 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                 builder.Append(indent).AppendLine("else");
                 EmitBadRequest(builder, indent, parameter.Key, "The value could not be parsed.");
                 return;
+        }
+    }
+
+    private static void EmitQuerySequence(StringBuilder builder, ParameterBinding parameter, int index, string indent)
+    {
+        string values = "__query" + index;
+        string items = "__items" + index;
+        string item = "__item" + index;
+        string raw = "__raw" + index;
+        string offset = "__offset" + index;
+        builder.Append(indent).Append("context.Request.Query.TryGetValue(").Append(Literal(parameter.Key))
+            .Append(", out var ").Append(values).AppendLine(");");
+        builder.Append(indent).Append("var ").Append(items).Append(" = new ")
+            .Append(parameter.SequenceElementType).Append('[').Append(values).AppendLine(".Count];");
+        builder.Append(indent).Append("for (int ").Append(offset).Append(" = 0; ").Append(offset).Append(" < ")
+            .Append(values).Append(".Count; ").Append(offset).AppendLine("++)");
+        builder.Append(indent).AppendLine("{");
+        string inner = indent + "    ";
+        builder.Append(inner).Append("string ").Append(raw).Append(" = ").Append(values).Append('[').Append(offset).AppendLine("];");
+        builder.Append(inner).Append(parameter.SequenceElementType).Append(' ').Append(item).AppendLine(";");
+
+        switch (parameter.Conversion)
+        {
+            case ConversionKind.String:
+                builder.Append(inner).Append(item).Append(" = ").Append(raw).AppendLine(";");
+                break;
+
+            case ConversionKind.NullableParsable:
+            case ConversionKind.NullableEnum:
+                builder.Append(inner).Append("if (string.IsNullOrEmpty(").Append(raw).Append(")) { ").Append(item).AppendLine(" = null; }");
+                builder.Append(inner).Append("else if (")
+                    .Append(ParseExpression(parameter.Conversion, parameter.CoreType, raw, "var __parsed" + index))
+                    .Append(") { ").Append(item).Append(" = __parsed").Append(index).AppendLine("; }");
+                builder.Append(inner).AppendLine("else");
+                EmitBadRequest(builder, inner, parameter.Key, "The value could not be parsed.");
+                break;
+
+            default:
+                builder.Append(inner).Append("if (!")
+                    .Append(ParseExpression(parameter.Conversion, parameter.CoreType, raw, item)).AppendLine(")");
+                EmitBadRequest(builder, inner, parameter.Key, "The value could not be parsed.");
+                break;
+        }
+
+        builder.Append(inner).Append(items).Append('[').Append(offset).Append("] = ").Append(item).AppendLine(";");
+        builder.Append(indent).AppendLine("}");
+        builder.Append(indent).Append(parameter.DeclaredType).Append(" __arg").Append(index).Append(" = ");
+        if (parameter.SequenceAsList)
+        {
+            builder.Append("new global::System.Collections.Generic.List<").Append(parameter.SequenceElementType).Append(">(")
+                .Append(items).AppendLine(");");
+        }
+        else
+        {
+            builder.Append(items).AppendLine(";");
         }
     }
 

@@ -168,6 +168,91 @@ public class EndpointBindingTests
         (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("hello:2");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: repeated query values reach sequences in order and scalars read first")]
+    public async Task Binding_RepeatedQueryValues_ShouldBindEveryOccurrenceAndFirstScalar()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseRouting();
+        factory.Application.MapGet("/repeated", ([FromQuery(Name = "tag")] string[] tags,
+            [FromQuery(Name = "tag")] string first, int[] numbers, string other) =>
+            $"{string.Join('|', tags)}:{first}:{string.Join('|', numbers)}:{other}");
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync(
+            "/repeated?tag=first&numbers=1&other=kept&tag=&numbers=2&tag=last", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("first||last:first:1|2:kept");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: nullable query sequence elements retain empty occurrences")]
+    public async Task Binding_NullableQuerySequence_ShouldRetainEmptyOccurrences()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseRouting();
+        factory.Application.MapGet("/nullable-sequence", (List<int?> values) => string.Join('|', values));
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/nullable-sequence?values=1&values=&values=3", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("1||3");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: a malformed repeated element rejects the whole query sequence")]
+    public async Task Binding_InvalidQuerySequenceElement_ShouldReturnBadRequest()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseRouting();
+        bool invoked = false;
+        factory.Application.MapGet("/invalid-sequence", (int[] values) =>
+        {
+            invoked = true;
+            return string.Join('|', values);
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/invalid-sequence?values=1&values=bad&values=3", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
+        invoked.ShouldBeFalse();
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldContain("\"values\"", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: a missing query collection binds as an empty sequence")]
+    public async Task Binding_MissingQuerySequence_ShouldBindEmptySequence()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseRouting();
+        factory.Application.MapGet("/missing-sequence", (IReadOnlyList<string> values) => values.Count.ToString());
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/missing-sequence", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("0");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: missing required query yields 400 problem")]
     public async Task Binding_MissingRequiredQuery_ShouldReturnBadRequest()
     {

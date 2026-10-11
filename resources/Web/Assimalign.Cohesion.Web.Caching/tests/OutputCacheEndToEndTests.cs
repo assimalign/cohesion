@@ -121,6 +121,46 @@ public class OutputCacheEndToEndTests
         invocations.ShouldBe(2);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Caching] - E2E: Different repeated query values receive their own cached response")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UseOutputCache_RepeatedQueryValues_ShouldNotServeAnotherCollection(bool selectKey)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        await using WebApplicationTestFactory factory = new();
+        int invocations = 0;
+
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy =>
+        {
+            policy.Duration = _longDuration;
+            if (selectKey)
+            {
+                policy.VaryByQuery("tag");
+            }
+        }));
+        factory.Application.Use(async (context, next) =>
+        {
+            Interlocked.Increment(ref invocations);
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            string payload = string.Join<string>("|", context.Request.Query["tag"]);
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(payload), context.RequestCancelled);
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        string first = await client.GetStringAsync("/list?tag=one&tag=two", cancellationToken);
+        string second = await client.GetStringAsync("/list?tag=one&tag=three", cancellationToken);
+        string repeated = await client.GetStringAsync("/list?tag=one&tag=two", cancellationToken);
+
+        // Assert
+        first.ShouldBe("one|two");
+        second.ShouldBe("one|three");
+        repeated.ShouldBe("one|two");
+        invocations.ShouldBe(2);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - E2E: A response Vary keeps a client from receiving a foreign variant")]
     public async Task UseOutputCache_ResponseVary_ShouldNotServeForeignVariant()
     {

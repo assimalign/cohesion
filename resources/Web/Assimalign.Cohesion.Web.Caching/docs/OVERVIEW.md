@@ -17,6 +17,8 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
   on any protocol), so a cached page and a WebSocket can share a URL.
 - **Vary-correct**: the stored response's own `Vary` header partitions the cache key (RFC 9111 §4.1), so
   a compressed or content-negotiated variant is never served to a client that cannot accept it.
+- **Repeated query values stay distinct**: both the default query policy and `VaryByQuery` include all
+  values in their original order, including empty repeats.
 - **Tag-based invalidation** reachable from application code.
 
 ## Dependencies

@@ -31,6 +31,7 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
     /// Parses the query-string into a collection.
     /// </summary>
     /// <remarks>
+    /// Repeated names retain every value in arrival order. A scalar read returns the first value.
     /// A parameter with an empty name — <c>=1</c>, or a bare <c>=</c> — is skipped: a
     /// <see cref="HttpQueryKey"/> is never empty, and RFC 3986 §3.4 gives the query no syntax that
     /// would require one. The parameter stays in the raw <see cref="Value"/>. Skipping it, rather than
@@ -58,7 +59,7 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
             string key = Uri.UnescapeDataString(parts[0]);
             string rawValue = parts.Length == 2 ? Uri.UnescapeDataString(parts[1]) : string.Empty;
 
-            collection[key] = rawValue;
+            collection.Add(key, rawValue);
         }
 
         return collection;
@@ -71,8 +72,9 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
     /// <para>
     /// Every name and value is percent-encoded as UTF-8 except for the unreserved characters (RFC 3986 §2.3),
     /// so an <c>&amp;</c>, <c>=</c> or <c>+</c> inside one cannot split or change its entry. Entries are joined
-    /// with <c>&amp;</c> in the collection's enumeration order. An entry with an empty value is written as its
+    /// with <c>&amp;</c> in key enumeration order, with each key's values in arrival order. An empty value is written as its
     /// name alone, without <c>=</c>; <see cref="Parse"/> reads both forms as the same empty value.
+    /// A manually added key with zero occurrences is likewise written as one empty occurrence.
     /// </para>
     /// <para>
     /// The result is the query a redirect carries, not the bytes the request carried: a transport keeps only
@@ -94,18 +96,23 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
 
         foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> entry in query)
         {
-            if (builder.Length != 0)
+            // A manually supplied zero-occurrence value still names an empty parameter.
+            int count = Math.Max(1, entry.Value.Count);
+            for (int index = 0; index < count; index++)
             {
-                builder.Append('&');
-            }
+                if (builder.Length != 0)
+                {
+                    builder.Append('&');
+                }
 
-            UrlEncoder.AppendComponent(builder, entry.Key.Value);
+                UrlEncoder.AppendComponent(builder, entry.Key.Value);
 
-            string value = entry.Value.Value;
-            if (!string.IsNullOrEmpty(value))
-            {
-                builder.Append('=');
-                UrlEncoder.AppendComponent(builder, value);
+                string value = entry.Value.Count == 0 ? string.Empty : entry.Value[index];
+                if (!string.IsNullOrEmpty(value))
+                {
+                    builder.Append('=');
+                    UrlEncoder.AppendComponent(builder, value);
+                }
             }
         }
 

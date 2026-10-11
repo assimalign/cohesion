@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Caching.Internal;
@@ -74,6 +75,62 @@ public class OutputCacheKeyBuilderTests
 
         // Act / Assert
         PrimaryKey(a, policy).ShouldNotBe(PrimaryKey(b, policy));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Caching] - Key: Repeated query values partition every selected value in order")]
+    [InlineData(false, "tag=one&tag=two", "tag=one&tag=three")]
+    [InlineData(true, "tag=one&tag=two", "tag=one&tag=three")]
+    [InlineData(false, "tag=one&tag=two&tag=three", "tag=one&tag=three&tag=two")]
+    [InlineData(true, "tag=one&tag=two&tag=three", "tag=one&tag=three&tag=two")]
+    [InlineData(false, "tag=one&tag=", "tag=one")]
+    [InlineData(true, "tag=one&tag=", "tag=one")]
+    [InlineData(false, "tag=one&tag=two%1Ftag%3Dthree", "tag=one&tag=two&tag=three")]
+    [InlineData(true, "tag=one&tag=two%1Ftag%3Dthree", "tag=one&tag=two&tag=three")]
+    public void BuildPrimaryKey_RepeatedQueryValues_ShouldDiffer(bool selectKey, string firstQuery, string secondQuery)
+    {
+        // Arrange
+        OutputCachePolicy policy = new();
+        if (selectKey)
+        {
+            policy.VaryByQuery("tag");
+        }
+
+        OutputCacheTestContext first = new();
+        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> entry in new HttpQuery(firstQuery).Parse())
+        {
+            first.Request.QueryCollection.Add(entry);
+        }
+
+        OutputCacheTestContext second = new();
+        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> entry in new HttpQuery(secondQuery).Parse())
+        {
+            second.Request.QueryCollection.Add(entry);
+        }
+
+        // Act
+        string firstKey = PrimaryKey(first, policy);
+        string secondKey = PrimaryKey(second, policy);
+
+        // Assert
+        firstKey.ShouldNotBe(secondKey);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Key: A selected empty query value differs from a missing key")]
+    public void BuildPrimaryKey_SelectedEmptyQueryValue_ShouldDifferFromMissing()
+    {
+        // Arrange
+        OutputCachePolicy policy = new();
+        policy.VaryByQuery("tag");
+        OutputCacheTestContext missing = new();
+        OutputCacheTestContext empty = new();
+        empty.Request.QueryCollection.Add("tag", new HttpQueryValue(string.Empty));
+
+        // Act
+        string missingKey = PrimaryKey(missing, policy);
+        string emptyKey = PrimaryKey(empty, policy);
+
+        // Assert
+        missingKey.ShouldNotBe(emptyKey);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Key: VaryByQuery ignores unlisted query keys")]

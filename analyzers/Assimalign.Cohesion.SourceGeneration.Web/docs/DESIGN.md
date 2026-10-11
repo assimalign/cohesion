@@ -71,6 +71,21 @@ a string literal. Scalar-ness is decided by `System.IParsable<T>`,
 enum-ness, `string`, and `Nullable<>` of those. The model stores fully-qualified type strings so the
 emit phase needs no symbols and incremental caching stays value-based (via `EquatableArray<T>`).
 
+Query sequences (#1335) are classified before the scalar/complex convention: a one-dimensional
+array, `List<T>`, `IEnumerable<T>`, `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `IList<T>` or
+`ICollection<T>` of supported scalar elements binds from the query, by convention or `[FromQuery]`.
+An explicit `[FromBody]` preserves body binding. The model records the element type and conversion;
+the thunk reads `HttpQueryValue.Count` and its integer indexer, converts each occurrence in order,
+and creates the declared sequence without reflection. Empty strings remain elements; empty nullable
+value-type elements become null, as for nullable scalars. Missing sequences are empty and one invalid
+element rejects the whole parameter with 400. Scalar query binding continues to use `TryGetValue`
+and `.Value`, which now return the first occurrence (owner decision 31).
+
+This changes behavior relative to 10.0.0-preview.1: scalar query binding was last-wins, an inferred
+scalar sequence was a body, and an explicit query sequence failed generation. Applications that
+intend a collection body must write `[FromBody]`. The generator's scalar runtime is emitted inline;
+there is no separate runtime binder to update.
+
 ## Emission
 
 The generator emits one file, `EndpointBinding.Interceptors.g.cs`, containing a file-local

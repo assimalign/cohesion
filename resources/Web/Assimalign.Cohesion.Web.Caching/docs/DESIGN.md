@@ -88,10 +88,28 @@ inline policy → named policy → `Enabled` (base/default) → `Disabled` (no c
 The **primary key** is built before the endpoint runs from the request method, the effective scheme and
 host (below), and the path, plus the policy's `VaryBy*` rules: `VaryByHeaders` (request-header values),
 `VaryByRouteValues` (the route values of the published endpoint), and `VaryByQueryKeys` (empty folds
-the *entire*, sorted query string; non-empty selects listed keys). Components are fenced with the ASCII
-unit separator so boundaries are unambiguous without hashing; a distributed adapter may hash the string.
+the *entire* query with distinct names sorted; non-empty selects listed keys). Every repeated value is
+included in encounter order, including empty values. Query names and values are percent-escaped before
+components are fenced with the ASCII unit separator, so decoded separator characters cannot imitate
+another query entry. A distributed adapter may hash the string.
 
 The **variant key** folds in the stored response's own `Vary` header (see below).
+
+### Repeated query values (#1335)
+
+The endpoint can now receive every value of a repeated query key. Both the default query policy and
+`VaryByQuery` therefore include every value in order: `tag=one&tag=two` and `tag=one&tag=three` must
+never share a stored response merely because their scalar reads both return `one`. Sorting the values
+would also conflate collections whose order differs, so only distinct names are sorted.
+An absent selected key contributes no entry, while a present empty value contributes an empty entry:
+collection binding distinguishes an empty collection from one containing an empty string. The previous
+selected-key encoding conflated these requests, a collision made relevant by sequence binding.
+
+This is a behavioral breaking change from 10.0.0-preview.1 on decision 15's terms: that parser retained
+only the last value, and cache keys consequently included only that value. Repeated query values now
+produce separate entries, and escaping reserved characters changes those private cache keys. Ordinary
+single values made solely of unreserved URL characters keep their key encoding. No public policy or
+store contract changes.
 
 ### Scheme and host are the effective values (#1050)
 
@@ -320,7 +338,8 @@ Registration is dependency-free — options and the store are captured at builde
 ## Testing
 
 Unit tests cover the in-memory store (round-trip, miss, absolute time-to-live over a manual clock, tag
-eviction and the re-tag safety, oversized decline), the key builder (query order-independence, `VaryBy`
+eviction and the re-tag safety, oversized decline), the key builder (distinct query-name order independence,
+repeated values including their order and empty entries, separator escaping, `VaryBy`
 partitioning, the response-`Vary` variant partition), and the middleware bypass matrix over an in-memory
 context double (hit skips downstream + stamps `Age`, authenticated/`Set-Cookie`/`no-store`/non-200/over-cap
 bypass, non-cacheable method, a WebSocket handshake never served from the cache, a taken-over exchange
@@ -330,7 +349,8 @@ as `UseRouting` does: the published endpoint's metadata decides while the exchan
 on access (so a second match would fail the test), a published `Disabled` bypasses the base policy, and
 published route values partition `VaryByRouteValue`. End-to-end tests over `WebApplicationTestFactory`
 (in-memory HTTP/1.1) prove a hit skips the endpoint (downstream-invocation counting), a differing query
-misses, the response `Vary` keeps a client from a foreign variant, an authenticated request bypasses, tag
+misses (including a later repeated value under either query policy), the response `Vary` keeps a client
+from a foreign variant, an authenticated request bypasses, tag
 eviction forces a re-fetch, per-endpoint opt-in through the real router caches only the marked endpoint,
 and, registered ahead of `UseRouting`, a `Disabled` endpoint is never stored while a plain one still is.
 

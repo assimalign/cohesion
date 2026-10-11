@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 using Shouldly;
 
@@ -8,6 +10,27 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 public class HttpQueryCollectionTests
 {
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Add appends and indexer replaces all values")]
+    public void Add_OnRepeatedKey_ShouldAppendUntilReplacedOrRemoved()
+    {
+        // Arrange
+        HttpQueryCollection collection = new();
+
+        // Act
+        collection.Add("a", "first");
+        collection.Add(new KeyValuePair<HttpQueryKey, HttpQueryValue>("a", "second"));
+        HttpQueryValue snapshot = collection["a"];
+        collection["a"] = "replacement";
+
+        // Assert
+        snapshot.ToArray().ShouldBe(new[] { "first", "second" });
+        collection["a"].ToArray().ShouldBe(new[] { "replacement" });
+        collection.Count.ShouldBe(1);
+        collection.Remove("a").ShouldBeTrue();
+        collection.ContainsKey("a").ShouldBeFalse();
+        snapshot.ToArray().ShouldBe(new[] { "first", "second" });
+    }
+
     [Fact]
     public void Indexer_MissingKey_ShouldReturnEmptyValue()
     {

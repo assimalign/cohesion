@@ -89,22 +89,18 @@ internal static class OutputCacheKeyBuilder
 
         if (policy.VaryByQueryKeys.Count == 0)
         {
-            // Fold the whole query string, sorted so ordering differences do not fragment the cache.
-            List<KeyValuePair<string, string>> entries = new();
+            // Sort distinct names, but retain each name's value order: an endpoint can observe it.
+            List<KeyValuePair<string, HttpQueryValue>> entries = new();
             foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> pair in request.Query)
             {
-                entries.Add(new KeyValuePair<string, string>(pair.Key.ToString(), pair.Value.ToString()));
+                entries.Add(new KeyValuePair<string, HttpQueryValue>(pair.Key.ToString(), pair.Value));
             }
 
-            entries.Sort(static (a, b) =>
-            {
-                int byKey = string.CompareOrdinal(a.Key, b.Key);
-                return byKey != 0 ? byKey : string.CompareOrdinal(a.Value, b.Value);
-            });
+            entries.Sort(static (a, b) => string.CompareOrdinal(a.Key, b.Key));
 
-            foreach (KeyValuePair<string, string> entry in entries)
+            foreach (KeyValuePair<string, HttpQueryValue> entry in entries)
             {
-                builder.Append(Separator).Append(entry.Key).Append('=').Append(entry.Value);
+                AppendQueryValues(builder, entry.Key, entry.Value);
             }
 
             return;
@@ -117,11 +113,22 @@ internal static class OutputCacheKeyBuilder
 
         foreach (string key in keys)
         {
-            builder.Append(Separator).Append(key).Append('=');
             if (request.Query.TryGetValue(new HttpQueryKey(key), out HttpQueryValue value))
             {
-                builder.Append(value.ToString());
+                AppendQueryValues(builder, key, value);
             }
+        }
+    }
+
+    private static void AppendQueryValues(StringBuilder builder, string key, HttpQueryValue values)
+    {
+        // Escape decoded tokens so a value containing a separator cannot imitate another entry.
+        string encodedKey = Uri.EscapeDataString(key);
+        int count = Math.Max(values.Count, 1);
+        for (int index = 0; index < count; index++)
+        {
+            string value = values.Count == 0 ? string.Empty : values[index];
+            builder.Append(Separator).Append(encodedKey).Append('=').Append(Uri.EscapeDataString(value));
         }
     }
 

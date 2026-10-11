@@ -91,6 +91,57 @@ public class HttpQueryTests
         Describe(reparsed).ShouldBe(Describe(parsed));
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpQuery: Parse preserves repeated values and reads the first")]
+    [InlineData("?a=1&a=2", "1", "2")]
+    [InlineData("?a=1&b=other&a=2", "1", "2")]
+    [InlineData("?a=1&a=&a=2", "1", "", "2")]
+    [InlineData("?a=&b=other&a=2", "", "2")]
+    [InlineData("?a=1&A=2&%61=3", "1", "2", "3")]
+    [InlineData("?a=x%2Cy&a=z&a", "x,y", "z", "")]
+    public void Parse_OnRepeatedKey_ShouldKeepEveryValueAndReadFirst(string raw, params string[] expected)
+    {
+        // Arrange
+        HttpQuery query = new(raw);
+
+        // Act
+        IHttpQueryCollection parsed = query.Parse();
+        bool found = parsed.TryGetValue("a", out HttpQueryValue values);
+
+        // Assert
+        found.ShouldBeTrue();
+        values.ToArray().ShouldBe(expected);
+        values.Value.ShouldBe(expected[0]);
+        values.ToString().ShouldBe(expected[0]);
+        ((string)values).ShouldBe(expected[0]);
+        parsed["a"].ShouldBe(values);
+        parsed.Single(pair => pair.Key == "a").Value.ShouldBe(values);
+        parsed.Count.ShouldBe(raw.Contains("b=", StringComparison.Ordinal) ? 2 : 1);
+        if (parsed.ContainsKey("b"))
+        {
+            parsed["b"].Value.ShouldBe("other");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQuery: Create writes every retained occurrence")]
+    public void Create_OnRepeatedKey_ShouldWriteEveryValueInOrder()
+    {
+        // Arrange
+        HttpQueryCollection parsed = new();
+        parsed.Add("a", "x,y");
+        parsed.Add("b", "other");
+        parsed.Add("a", "");
+        parsed.Add("a", "z&=");
+
+        // Act
+        HttpQuery query = HttpQuery.Create(parsed);
+        HttpQueryCollection reparsed = query.Parse();
+
+        // Assert
+        query.Value.ShouldBe("a=x%2Cy&a&a=z%26%3D&b=other");
+        reparsed["a"].ShouldBe(parsed["a"]);
+        reparsed["b"].ShouldBe(parsed["b"]);
+    }
+
     /// <summary>The parameters as <c>name=value</c> pairs, ordered by name and joined with <c>;</c>.</summary>
     private static string Describe(HttpQueryCollection parameters)
     {

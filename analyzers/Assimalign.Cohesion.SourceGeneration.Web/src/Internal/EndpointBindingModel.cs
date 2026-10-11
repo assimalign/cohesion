@@ -104,6 +104,9 @@ internal enum ResultNullCheck
 /// <remarks>
 /// <c>DescribedType</c> is the declared type without nullable reference annotations, the form a
 /// <c>typeof(...)</c> in the endpoint's description metadata accepts.
+/// A nonempty <c>SequenceElementType</c> marks a query sequence: <c>Conversion</c> and
+/// <c>CoreType</c> describe each element. <c>SequenceAsList</c> selects a concrete <c>List&lt;T&gt;</c>;
+/// other supported sequence types receive an array.
 /// </remarks>
 internal readonly record struct ParameterBinding(
     string DeclaredType,
@@ -113,7 +116,9 @@ internal readonly record struct ParameterBinding(
     ConversionKind Conversion,
     string Key,
     bool Required,
-    string DescribedType) : IEquatable<ParameterBinding>;
+    string DescribedType,
+    string SequenceElementType = "",
+    bool SequenceAsList = false) : IEquatable<ParameterBinding>;
 
 /// <summary>
 /// The signature an interceptor needs to match the intercepted <c>Map*</c> call's receiver.
