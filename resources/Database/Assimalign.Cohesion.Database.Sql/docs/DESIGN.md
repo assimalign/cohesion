@@ -3752,6 +3752,13 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
 
 ## Diagnostics
 
+Both SQL create overloads now enter the root NVI, so root events 9 and 13 cover default and explicit
+collations exactly once. The model-only collation uses a private, thread-local handoff consumed at
+the synchronous entry to `CreateDatabaseCoreAsync`, before storage or listener callbacks, and reset
+in a `finally` before any await. This avoids a public root option or diagnostics bridge, holds no
+registry lock across an event, and cannot flow into another task. Tests cover base/typed/collation
+calls and a listener that creates a default-collation database on the same or another thread.
+
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;
 database event-sources plan, batch B5). It reports the wire server and its sessions. A
