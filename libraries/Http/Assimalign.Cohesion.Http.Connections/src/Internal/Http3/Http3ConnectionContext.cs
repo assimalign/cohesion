@@ -1438,12 +1438,23 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         return exception switch
         {
             // RESET_STREAM; a connection close or loss carries another QuicError.
-            QuicException quic => quic.QuicError == QuicError.StreamAborted,
+            QuicException quic => IsQuicStreamAborted(quic),
             // The in-memory driver's reset or abort of the peer's end.
             ConnectionException => true,
             // A stream released underneath, or a wire failure no driver attributes to the stream.
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Whether a <see cref="QuicException"/> reports the peer aborting the stream (<c>RESET_STREAM</c> or
+    /// <c>STOP_SENDING</c>). <see cref="QuicException.QuicError"/> exists only where System.Net.Quic does,
+    /// which is everywhere a QUIC stream can fail.
+    /// </summary>
+    private static bool IsQuicStreamAborted(QuicException exception)
+    {
+        return (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            && exception.QuicError == QuicError.StreamAborted;
     }
 
     /// <summary>
