@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Text;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Types;
@@ -10,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Runs a bound <c>CAST</c> (phase E3): the cast of the engine's registry chosen for the value's
 /// storage type (<see cref="SqlStandardCasts"/> and the application's), or the value unchanged when
 /// it has the target's storage type already; then the target's length, precision and scale; then a
-/// domain target's check. Loss of numeric precision or string content is an error.
+/// domain target's check. Numeric modifiers round to scale; explicit character casts truncate.
 /// </summary>
 internal static class SqlCastConverter
 {
@@ -20,7 +21,7 @@ internal static class SqlCastConverter
     /// <param name="cancellationToken">The statement's cancellation token, for a domain check's context.</param>
     /// <returns>The converted value; null for NULL.</returns>
     /// <exception cref="DatabaseException">
-    /// The conversion failed on the value or loses content; a <see cref="DatabaseException"/> a
+    /// The conversion failed on the value; a <see cref="DatabaseException"/> a
     /// conversion threw passes unchanged.
     /// </exception>
     /// <exception cref="SqlEvaluationException">
@@ -59,8 +60,12 @@ internal static class SqlCastConverter
 
                 if (converted is not null)
                 {
-                    converted = ApplyModifiers(converted, cast.Target.Storage);
+                    converted = ApplyModifiers(converted, cast.Target.Storage, isExplicit: true);
                 }
+            }
+            catch (SqlEvaluationException exception)
+            {
+                throw exception.WithContext($"CAST from {value.GetType().Name} to {cast.TargetText} failed");
             }
             catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
             {
@@ -88,41 +93,61 @@ internal static class SqlCastConverter
     }
 
     /// <summary>
-    /// Applies a target's length, precision and scale to a converted value, which never rounds or
-    /// truncates: PostgreSQL's length coercion, a step after the cast itself, and the bound a write to
-    /// a column of a domain applies too.
+    /// Applies the declared bounds after storage conversion, for CAST, column assignments and
+    /// DEFAULTs alike. Domains use the bounds of their base type before evaluating their check.
     /// </summary>
-    /// <param name="value">The converted value, of the target's storage type.</param>
+    /// <param name="value">The converted, non-null value of the target's storage type.</param>
     /// <param name="target">The target's storage type and constraints.</param>
-    /// <returns>The value.</returns>
-    /// <exception cref="InvalidCastException">A string or binary value is longer than the target, or a decimal has more scale.</exception>
-    /// <exception cref="OverflowException">A decimal exceeds the target's precision.</exception>
-    /// <remarks>
-    /// A precision or scale beyond what <see cref="decimal"/> holds (a scale of 28 or more, or more
-    /// than 28 integer digits, which DDL and <see cref="SqlType.Decimal(int, int)"/> accept) bounds
-    /// nothing the runtime can represent, so it is not checked: <see cref="decimal.Round(decimal, int)"/>
-    /// takes no scale beyond 28, and the limit 10^(p - s) overflows past 10^28.
-    /// </remarks>
-    internal static object ApplyModifiers(object value, DatabaseTypeInfo target)
+    /// <param name="isExplicit">Whether an explicit CAST permits character truncation.</param>
+    /// <returns>The bounded value, rounded or truncated where the coercion permits it.</returns>
+    /// <exception cref="SqlEvaluationException">A character assignment exceeds its length (22001), or a rounded numeric exceeds its precision (22003).</exception>
+    /// <exception cref="InvalidCastException">A binary value exceeds its declared length.</exception>
+    internal static object ApplyModifiers(object value, DatabaseTypeInfo target, bool isExplicit = false)
     {
         switch (value)
         {
             case string text when target.MaxLength is int length && text.Length > length:
-                throw new InvalidCastException($"String length exceeds {length}; truncation is not supported.");
+                // PostgreSQL varchar.c:605-643: lengths count characters, not encoded bytes;
+                // explicit CAST truncates, assignment only discards excess ASCII spaces.
+                int characters = 0;
+                int end = 0;
+                foreach (var rune in text.EnumerateRunes())
+                {
+                    if (characters == length)
+                    {
+                        if (!isExplicit && text.AsSpan(end).ContainsAnyExcept(' '))
+                        {
+                            throw SqlEvaluationException.StringDataRightTruncation(length);
+                        }
+                        return text[..end];
+                    }
+                    characters++;
+                    end += rune.Utf16SequenceLength;
+                }
+                return text;
             case byte[] bytes when target.MaxLength is int length && bytes.Length > length:
                 throw new InvalidCastException($"Binary length exceeds {length}; truncation is not supported.");
             case decimal number when target.Type == DatabaseType.Decimal:
-                if (target.Scale is int scale && scale < MaxDecimalScale && decimal.Round(number, scale) != number)
+                int? scale = target.Scale ?? (target.Precision is null ? null : 0);
+                if (target.Precision is < 1 || scale is < 0 || scale > target.Precision)
                 {
-                    throw new InvalidCastException($"Value exceeds scale {scale}; rounding is not supported.");
+                    throw new DatabaseException("Invalid decimal precision or scale.");
                 }
-                if (target.Precision is int precision && precision - (target.Scale ?? 0) is var digits && digits <= MaxDecimalScale)
+                // PostgreSQL numeric.c:7693-7750 rounds before checking the integer digits;
+                // round_var at numeric.c:11720-11748 rounds midpoint ties away from zero.
+                // System.Decimal cannot represent scale beyond 28, so larger scales are a no-op.
+                if (scale is >= 0 and < maxDecimalScale)
+                {
+                    number = decimal.Round(number, scale.Value, MidpointRounding.AwayFromZero);
+                }
+                if (target.Precision is int precision && precision - (scale ?? 0) is var digits && digits <= maxDecimalScale)
                 {
                     decimal limit = 1m;
                     for (int i = 0; i < digits; i++) { limit *= 10m; }
                     if (number <= -limit || number >= limit)
                     {
-                        throw new OverflowException($"Value exceeds precision {precision} and scale {target.Scale ?? 0}.");
+                        throw SqlEvaluationException.NumericValueOutOfRange(
+                            $"numeric field overflow: Value exceeds precision {precision} and scale {scale ?? 0}.");
                     }
                 }
                 return number;
@@ -132,7 +157,7 @@ internal static class SqlCastConverter
     }
 
     // The largest scale System.Decimal holds, and the most integer digits whose power of ten it holds.
-    private const int MaxDecimalScale = 28;
+    private const int maxDecimalScale = 28;
 
     /// <summary>
     /// The storage type of a value as the row holds it: exactly one of the codec's CLR types, so a

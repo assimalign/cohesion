@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
@@ -173,8 +172,8 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Converts a column's DEFAULT value using the same rules for backfill and omitted
-    /// INSERT values. Rejects string truncation, decimal rounding, nonfinite
-    /// floats, and nonzero floating values that underflow to zero.
+    /// INSERT values. Applies assignment bounds and rejects nonfinite floats and nonzero
+    /// floating values that underflow to zero.
     /// </summary>
     /// <param name="column">The column.</param>
     /// <param name="defaultValue">
@@ -196,12 +195,8 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             object? value = column.Type.Type == DatabaseType.Decimal
-                ? SqlCastConverter.ParseNumericLiteral(defaultValue)
+                ? CoerceForColumn(SqlCastConverter.ParseNumericLiteral(defaultValue), column)
                 : CoerceForColumn(defaultValue, column);
-            if (value is string text && column.Type.MaxLength is int length && text.Length > length)
-            {
-                throw new DatabaseException($"String length exceeds {length}; truncation is not supported.");
-            }
             if (value is float single && !float.IsFinite(single) || value is double number && !double.IsFinite(number))
             {
                 throw new DatabaseException("Floating-point defaults must be finite.");
@@ -219,28 +214,16 @@ internal sealed partial class SqlPlanExecutor
                     throw new DatabaseException("Nonzero floating-point default underflows to zero.");
                 }
             }
-            if (value is decimal decimalValue)
-            {
-                int? scale = column.Type.Scale ?? (column.Type.Precision is null ? null : 0);
-                if (scale is < 0 or > 28 || column.Type.Precision is < 1 || scale > column.Type.Precision)
-                {
-                    throw new DatabaseException("Invalid decimal precision or scale.");
-                }
-                if (scale is int digits && decimal.Round(decimalValue, digits) != decimalValue)
-                {
-                    throw new DatabaseException($"Value exceeds scale {digits}; rounding is not supported.");
-                }
-                if (column.Type.Precision is int precision)
-                {
-                    decimal integral = decimal.Truncate(decimalValue);
-                    int integerDigits = integral == 0m ? 0 : integral.ToString("0", CultureInfo.InvariantCulture).TrimStart('-').Length;
-                    if (integerDigits > precision - (scale ?? 0))
-                    {
-                        throw new DatabaseException($"Value exceeds precision {precision} and scale {scale ?? 0}.");
-                    }
-                }
-            }
             return value;
+        }
+        catch (SqlEvaluationException exception)
+        {
+            throw exception.WithContext($"Column '{column.Name}': DEFAULT value cannot be stored as {column.Type.Type}");
+        }
+        catch (OverflowException exception) when (column.Type.Type == DatabaseType.Decimal)
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"Column '{column.Name}': DEFAULT value cannot be stored as {column.Type.Type}. {exception.Message}", exception);
         }
         catch (Exception exception) when (exception is DatabaseException or FormatException or OverflowException or InvalidCastException)
         {

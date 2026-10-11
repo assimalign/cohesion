@@ -249,7 +249,7 @@ public sealed class SqlCastWireTests
         updated.ShouldHaveSingleItem()["value"].ShouldBeOfType<string>().ShouldBe("7");
     }
 
-    /// <summary>Invalid values, overflow, discarded fractions, and truncation fail through the client.</summary>
+    /// <summary>Invalid values, overflow, and fractional integer conversions fail through the client.</summary>
     /// <param name="expression">The invalid CAST expression.</param>
     /// <returns>The asynchronous test operation.</returns>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: invalid values return execution failures over the wire")]
@@ -267,10 +267,8 @@ public sealed class SqlCastWireTests
     [InlineData("CAST(0.00000000000000000000000000001 AS DECIMAL)")]
     [InlineData("CAST('1.5' AS INT)")]
     [InlineData("CAST(1.5 AS INT)")]
-    [InlineData("CAST('12.34' AS DECIMAL(3, 1))")]
+    [InlineData("CAST('99.95' AS DECIMAL(3, 1))")]
     [InlineData("CAST('123.4' AS DECIMAL(3, 1))")]
-    [InlineData("CAST(123 AS VARCHAR(2))")]
-    [InlineData("CAST('abc' AS VARCHAR(2))")]
     [InlineData("CAST(TRUE AS INT)")]
     [InlineData("CAST(1 AS BOOLEAN)")]
     public async Task QueryAsync_InvalidValue_ShouldReturnExecutionFailure(string expression)
@@ -285,6 +283,35 @@ public sealed class SqlCastWireTests
                 cancellationToken: SqlClientTestHarness.Timeout()));
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Message.ShouldContain("CAST", Case.Sensitive);
+    }
+
+    /// <summary>Explicit modifiers round decimals, truncate text, and preserve the precision-overflow evaluation code.</summary>
+    /// <returns>The asynchronous test operation.</returns>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: modifiers round and truncate while numeric overflow carries its code")]
+    public async Task QueryAsync_TypeModifiers_ShouldBoundValuesAndCodeOverflow()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlResultSet result = await connection.QueryAsync("SELECT CAST('12.34' AS DECIMAL(3, 1)), " +
+            "CAST('12.35' AS DECIMAL(3, 1)), CAST('-12.35' AS DECIMAL(3, 1)), " +
+            "CAST(123 AS VARCHAR(2)), CAST('abc' AS VARCHAR(2)) FROM users WHERE id = 1",
+            cancellationToken: SqlClientTestHarness.Timeout());
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
+            "SELECT CAST('99.95' AS DECIMAL(3, 1)) FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        SqlRow row = result.ShouldHaveSingleItem();
+        row[0].ShouldBe(12.3m);
+        row[1].ShouldBe(12.4m);
+        row[2].ShouldBe(-12.4m);
+        row[3].ShouldBe("12");
+        row[4].ShouldBe("ab");
+        error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        error.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        error.ConnectionUsable.ShouldBeTrue();
     }
 
     /// <summary>

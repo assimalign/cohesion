@@ -133,14 +133,14 @@ public sealed class SqlDomainTests
         // Act
         var converted = await RowsAsync(session, "SELECT CAST('ann@example.com' AS email), CAST(NULL AS email), CAST(id AS code) FROM t");
         var refused = await Should.ThrowAsync<SqlConstraintViolationException>(() => RowsAsync(session, "SELECT CAST('nobody' AS email) FROM t"));
-        var tooLong = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT CAST(id * 1000 AS code) FROM t"));
+        var truncated = await RowsAsync(session, "SELECT CAST(id * 1000 AS code) FROM t");
         await using var typed = (await ExecuteAsync(session, "SELECT CAST(id AS code) FROM t")).ShouldBeAssignableTo<QueryResultSet>();
 
         // Assert: the check's refusal is the one error kind a write to the domain raises.
         converted.ShouldBe([["ann@example.com", null, "12"]]);
         refused.Message.ShouldBe("CAST to email failed: the value violates the check of domain 'email' (is_email(TEXT)).");
         (refused.ConstraintKind, refused.ConstraintName, refused.Table).ShouldBe(("DOMAIN", "email", string.Empty));
-        tooLong.Message.ShouldContain("String length exceeds 3", Case.Sensitive);
+        truncated.ShouldBe([["120"]]);
         typed.Columns[0].Type.ShouldBe(DatabaseType.String);
     }
 
@@ -548,7 +548,7 @@ public sealed class SqlDomainTests
         await ExecuteAsync(session, "INSERT INTO m VALUES (1, 123.45, 'ABCDE')");
 
         // Act
-        var scale = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO m VALUES (2, 123.456, 'A')"));
+        await ExecuteAsync(session, "INSERT INTO m VALUES (2, 123.456, 'A')");
         var precision = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO m VALUES (3, 1234.5, 'A')"));
         var length = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO m VALUES (4, 1, 'ABCDEF')"));
         var update = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE m SET c = 'ABCDEF' WHERE id = 1"));
@@ -556,16 +556,16 @@ public sealed class SqlDomainTests
         var added = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE m ADD COLUMN extra code5 DEFAULT 'TOOLONG'"));
         var cast = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT CAST(1234.5 AS money2) FROM m"));
 
-        // Assert: nothing was written, and the column and a CAST bound the value alike.
-        scale.Message.ShouldBe("Column 'v' of table 'dbo.m' (domain 'money2', NUMERIC(5, 2)): Value exceeds scale 2; rounding is not supported.");
-        precision.Message.ShouldBe("COHSQLE002: Numeric value out of range: Column 'v' of table 'dbo.m' (domain 'money2', NUMERIC(5, 2)): " +
-            "Value exceeds precision 5 and scale 2.");
-        length.Message.ShouldBe("Column 'c' of table 'dbo.m' (domain 'code5', VARCHAR(5)): String length exceeds 5; truncation is not supported.");
+        // Assert: scale is rounded, and rejected statements write nothing; plain columns and domains share the codes.
+        precision.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        precision.Message.ShouldContain("domain 'money2'", Case.Sensitive);
+        length.Message.ShouldStartWith("COHSQLE012:", Case.Sensitive);
+        length.Message.ShouldContain("domain 'code5'", Case.Sensitive);
         update.Message.ShouldBe(length.Message);
-        select.Message.ShouldStartWith("COHSQLE002: Numeric value out of range: Column 'v' of table 'dbo.m' (domain 'money2'", Case.Sensitive);
-        added.Message.ShouldContain("String length exceeds 5", Case.Sensitive);
+        select.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        added.Message.ShouldStartWith("COHSQLE012:", Case.Sensitive);
         cast.Message.ShouldContain("Value exceeds precision 5 and scale 2", Case.Sensitive);
-        (await RowsAsync(session, "SELECT id, v, c FROM m")).ShouldBe([[1, 123.45m, "ABCDE"]]);
+        (await RowsAsync(session, "SELECT id, v, c FROM m ORDER BY id")).ShouldBe([[1, 123.45m, "ABCDE"], [2, 123.46m, "A"]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: a domain over NUMERIC beyond what System.Decimal bounds casts and stores")]
@@ -582,11 +582,11 @@ public sealed class SqlDomainTests
         // Act
         await ExecuteAsync(session, "INSERT INTO b VALUES (1, 12345678901234567890.5, 0.000000000000000000000000001)");
         var rows = await RowsAsync(session, "SELECT CAST(1 AS bignum), CAST('1.5' AS bignum), CAST('1.25' AS fine), v, f FROM b");
-        var scale = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT CAST('1.255' AS bignum) FROM b"));
+        var rounded = await RowsAsync(session, "SELECT CAST('1.255' AS bignum) FROM b");
 
         // Assert
         rows.ShouldBe([[1m, 1.5m, 1.25m, 12345678901234567890.5m, 0.000000000000000000000000001m]]);
-        scale.Message.ShouldContain("Value exceeds scale 2", Case.Sensitive);
+        rounded.ShouldBe([[1.26m]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Domains: GROUP BY matches a CAST to a domain whether its name is quoted or not")]
