@@ -74,7 +74,7 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **10 — Gated** | WebSockets, rewrite, OIDC, trailers/gRPC, distributed stores. | an ADR, a decision, or another program |
 | **11 — Close the remote-triggerable holes** *(Phase 2 follow-ups, opened 2026-10-09)* | Every advisory candidate in the follow-up backlog, plus defects any client can turn into a 5xx or a log flood. | Stage 10 approved |
 | **12 — Protocol conformance** | Response framing, HTTP/3 stream lifecycle, request-target and cookie rules, telemetry conformance. | Stage 11 reviewed |
-| **13 — Web correctness** | Host start, the response-starting hook, repeated query and form values, validation error keys, trace ids. | Stage 12 reviewed |
+| **13 — Web correctness** | Host start, the response-starting hook, repeated query and form values, validation error keys, trace ids, and Stage 12's protocol follow-ups (HTTP/3 stream release, `Date`, the h2c 421). | Stage 12 reviewed |
 | **14 — Performance, operations and DX** | Allocation and thread-hop costs, transport rejection telemetry, Web event sources, certificate authentication, template and docs gaps. | Stage 13 reviewed |
 
 **The single most important edge in the whole program:** **#762 (rewrite `WebApplicationServer`) is the gate for nearly all Web middleware.** It is a Stage-1, P001 item. Land it early. Until it merges, the only Web-side work that is safe is the Stage-0 deletions and pure-primitive Http-library items.
@@ -328,7 +328,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 12 — Protocol conformance
 
-**Status:** in progress (2026-10-10). The owner answered Stage 11's review questions on 2026-10-10 (decisions 37–40): #1384 goes ahead, and #1383 joins it. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
+**Status:** delivered 2026-10-11 on the Phase 2 branch and in owner review (§5). The owner answered Stage 11's review questions on 2026-10-10 (decisions 37–40): #1384 goes ahead, and #1383 joins it. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
 
 | Session | Issues (in order) | Wave |
 |---|---|---|
@@ -370,6 +370,15 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1388: a streamed response is reported as unstarted when the transport refuses its head.
 - #1410: every response-completion callback runs when an earlier one throws. Today the control plane's deferred stop can be acknowledged and never happen.
 - #1411: an exchange that ErrorHandling aborts reports as cancelled, not completed.
+- #1416: an invalid session or antiforgery cookie name fails when the application is composed.
+- #1426: the host's stop budget bounds QUIC stream delivery at connection disposal (verify the ordering first).
+
+**Protocol follow-ups from Stage 12** (lane A), in the same stage:
+- #1424 first (P002, advisory triage): each HTTP/3 request stream is released when its exchange ends, not when the connection closes.
+- #1415: an h2c request with `:scheme https` gets 421, with a trusted-gateway opt-out. Needs the owner's decision first (§5, Stage 12 questions).
+- #1417: every response carries `Date`.
+- #1423: QPACK encoder-stream inserts with the dynamic table disabled are connection errors.
+- #1428: application interim responses on HTTP/3 take the final-head claim.
 
 ### Stage 14 — Performance, operations and DX
 
@@ -382,6 +391,9 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1389: resolve a single per-exchange response interceptor without intermediate lists.
 - #1412: reuse the control plane's bootstrap-token verifier instead of building one per request.
 - #1413: document how an operator recognizes HttpsPolicy's proxy redirect loop.
+- #1414: `HttpStatusCode` accepts unregistered codes from 100 to 599.
+- #1425: an HTTP/3 `PRIORITY_UPDATE` beyond the stream limits is `H3_ID_ERROR`, once the QUIC driver publishes its limit.
+- #1427: the QUIC driver exposes a FIN it already holds, so bodiless HTTP/3 requests skip the response phase.
 - #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
 - **Lane G — Web event sources** (epic #1396, tasks #1397–#1408; scope in [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md)). 21 internal sources under `event-source.md`; #147's `ILogger` diagnostics move into `WebServerEventSource`.
   - #1397 (T0) is three owner decisions, taken at the Stage 12 review: (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT.
@@ -820,6 +832,91 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. That is an unauthenticated memory exhaustion on any `UseHttp3` endpoint.
     - Stage 5 fixed it (#1066), before decision 8 began the advisory practice, so no advisory was drafted.
     - Draft one now, on decision 24's terms?
+- **Stage 12 delivered (2026-10-11), in owner review.** Stage 12 brought the transports to the RFCs on the points the Phase 2 backlog listed. It also closed the slow-read hole (#1384) and the health-response exposure (#1409), and finished #1380's verb shapes (#1395). Ten sessions ran in two waves on Stage 11's pattern: each was built in an isolated worktree and reviewed, two skeptics challenged each serious finding, and confirmed findings were fixed. An integrator then cherry-picked each wave and an auditor three-way-checked every session-touched file. Every new regression test was shown to fail before its fix.
+  - **Wave 1** (13 issues):
+    - #1383 `44143b6b`, `411f1198`, `ed8aaf8a`: a request can change or disable its minimum request-body data rate before its first body read, on every protocol. `HttpMinDataRate` moved to core Http (decision 42).
+    - #1384 `56baa627`, `0db8407f`, `eba08f16`, `ada062be`: a minimum response data rate on every protocol. A stalled reader is reclaimed: HTTP/1.1 closes the connection, HTTP/2 resets the stream or sends `GOAWAY(ENHANCE_YOUR_CALM)`, and HTTP/3 resets with `H3_REQUEST_CANCELLED`. Every HTTP/2 output write, control frames included, is held to one connection-level allowance, and a wait is credited at most 16 KB.
+    - #1073 `0fa511b0`, `e2da46b3`: HEAD, 204 and 304 carry no content, and only a sanctioned `Content-Length`, on every writer.
+    - #1334 `0f935338`, `7321f4b6`: HTTP/2 and HTTP/3 reject malformed CONNECT and asterisk-form targets. A `:method` that `HttpMethod` cannot hold resets only its stream; HTTP/1.1 answers it with 400 or 501.
+    - #1387 `c64994ad`, `c9e4e302`: HPACK and QPACK decode field values as Latin-1. HTTP/3 trims only SP and HTAB from `Content-Length`.
+    - #1153 `57f5e6b9`, `3f46ebe2`, `81a6f510`: cookie `Path` and `Domain` follow the RFC 6265 grammar. Session and antiforgery cookie paths are checked when the application is composed.
+    - #1154 `d39cd834`: a 101 sends each `Set-Cookie` once, and Http.ProtocolUpgrade no longer depends on Http.Cookies.
+    - #1185 `757114ed`, `832a8588`, `b2e0827c`: a date-form `If-Range` matches exactly against a strong `Last-Modified`. StaticFiles sends a future `Last-Modified` as the response time.
+    - #1204 `c5b72b13`, `d8cd878e`: RFC 9110 reason phrases and 226 IM Used. 306 is obsolete.
+    - #1298 `385eef6c`, `62940b5b`: server spans carry a redacted `url.query`. `AllowQueryValuesInTelemetry` names the keys whose values are kept.
+    - #1299 `97093c30`, `5f7bc510`: traces continue from a future-version `traceparent`.
+    - #1324 `ffa48b4b` … `47802c37`:
+      - `Location` paths are percent-encoded in HttpsPolicy, StaticFiles, Rewrite and the cookie return URL, and a host that cannot be named gets 400.
+      - An `https` absolute-form target on cleartext HTTP/1.1 gets 421. An h2c `:scheme https` request is marked `http`.
+      - `OPTIONS *` redirects to the bare authority.
+    - #1395 `399663d8`, `617cca7a`, `d0e000e9`, `67ab7cdb`: builder-template verbs take an optional callback. Routing, Authorization, Antiforgery, OpenApi and Validation get public builders, and their hidden `*Components` types are deleted. `AddJsonSerialization` keeps its static factory because its resolver is required.
+  - **Wave 2** (6 issues):
+    - #1083 `aa3b6542`, `94d54289`, `0446aa80`, `7c4905b1`, `e8f760f0`: HTTP/3 control and QPACK streams are critical. Closing or resetting one, or sending a frame it forbids, is a connection error with its RFC code. `PRIORITY_UPDATE` state is bounded.
+    - #1306 `ac698a9a`, `e1675720`: a request stream opened after GOAWAY is reset with `H3_REQUEST_REJECTED` and never dispatched.
+    - #1330 `726dee0a`, `166581bb`, `a0113cfc`, `66ecdc75`: a QUIC stream half-closes, because completing one pipe ends only its own direction. `CloseDeliveryTimeout` (5 s) bounds how long connection disposal waits for delivery.
+    - #1378 `9c5a5c27` … `4582d1be`, `1582f1ce`: HTTP/2 and HTTP/3 report request-body faults as client faults (`ClientFaultStatusCode`, `CanHaveBody`). An HTTP/3 peer reset ends the exchange as a cancellation.
+    - #1385 `97cf4202`, `3e8c7aa5`, `e98caf65`: `Expect: 100-continue` works on HTTP/2 and HTTP/3. The HTTP/3 `100` is held to the response rate.
+    - #1409 `c80fce21`, `8b1ad1ab`, `99612a1a`, `03a68921`, `16e7d48a`: Web.Health's default writer and the control-plane probes publish no exception text. `IncludeDeveloperDetails` is the development opt-in.
+  - **Integration fixes:**
+    - `fa36cf00` moves the antiforgery cookie-path test to the new builder.
+    - `6eceaa09` regenerates the dependency graph.
+    - `85ddb810` completes the pre-dispatch answer lists.
+    - `6ecab53e` keeps one QuicError platform guard.
+    - The wave 2 audit found that an `Exception` in a contributor's `Data` still reached the control-plane probes. `03a68921` and `16e7d48a` closed it.
+    - `e98caf65` ended the HTTP/3 `100`'s exemption from the response rate.
+  - **Advisories** (decisions 24, 37 and 41): GHSA-836p-j378-vmxm (#1384, high) and GHSA-w3vm-ghvm-4585 (#1409, medium). Both are private drafts, fact-checked against the tag. Triage found five other defects real but harmful only to the requester, or controlled by the application, so they get none: #1324, #1185, #1334, #1073, and the cleartext request treated as https.
+  - **Verification at `16e7d48a`:** 83 suites and 7,195 tests, 0 failures.
+    - Http 1,574, Http.Connections 1,359, Web.Routing 387, Web.Hosting 342, ObjectValidation 283, StaticFiles 225 and Connections.Quic 46 (real QUIC).
+    - The whole Http, Connections and Web families, Hosting.Resources, Hosting.Health, the ComponentModel generator, App.Runtime and the 17 area Hosting suites are included.
+    - The guard passes 36/36 under JIT. The release inventory (221) and the dependency graph checks pass.
+    - The guard, published NativeAOT for win-arm64 from a clean worktree at `16e7d48a`, has no trim or AOT warnings. The native binary passes 36/36 smoke checks.
+    - Each wave was also verified when integrated: 30 suites for wave 1 and 24 for wave 2.
+  - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)):
+    - `3bb5ff4` syncs the Http, Connections, Hosting and Security pages.
+    - `27e2bab` syncs the Web pages and the 17 area framework tables, which drop Http.Cookies.
+    - `6021656` syncs the guides.
+    - `02fc1a9` corrects source paths and test listings that had drifted before the stage.
+  - **Source corrections** (`66ea7188`): two Web.Hosting DESIGN passages the docs-site check found stale (data-rate binding, the pre-dispatch 421 and 501).
+  - **Follow-ups filed:**
+    - Stage 13: #1424 (P002, advisory triage), #1415 (needs an owner decision), #1416, #1417, #1423, #1426 and #1428.
+    - Stage 14: #1414, #1425 and #1427.
+    - #1400 gained the control plane's contributor-failure event.
+    - Comments on #1324 and #1409 record their test coverage and scope.
+
+  Behavior changes for the review (decision 42):
+  - **Rates:**
+    - Responses are cut for a reader below 240 B/s after a 5 s grace, on every protocol, including HTTP/1.1's buffered path. On HTTP/2, an output that stops draining aborts the connection, and a connection window left uncredited becomes `GOAWAY(ENHANCE_YOUR_CALM)`.
+    - A rate failure throws `OperationCanceledException` carrying `RequestCancelled`, not `IOException`.
+    - `Limits:MinRequestBodyDataRate` and `Limits:MinResponseDataRate` bind as `{BytesPerSecond, GracePeriod}`, or as `none`. A bare number now fails startup.
+    - `HttpMinDataRate` is in `Assimalign.Cohesion.Http`, a source and binary break.
+  - **Response heads:** a 204 carries no `Content-Length`, a body written for a 204 or 304 is discarded, and HTTP/1.1 sends no `Content-Length: 0` for an empty HEAD.
+  - **Requests:**
+    - HTTP/2 and HTTP/3 reset `GET *`, `*foo`, a malformed classic CONNECT, and obs-text in `:path` or `:authority`.
+    - HTTP/1.1 answers an unusable method with 400 or 501.
+    - An `https` absolute-form target on cleartext HTTP/1.1 gets 421.
+  - **HTTP/3:** a peer that ends or resets a critical stream, or sends a forbidden control frame, loses the connection. Requests after GOAWAY are refused.
+  - **QUIC:** completing `Output` sends a FIN and keeps reading. `Output.Complete(exception)` resets the stream.
+  - **Cookies:**
+    - The `HttpCookieOptions.Path` and `Domain` setters throw for values outside the grammar, and the `Set-Cookie` parser drops such cookies.
+    - An invalid `CookiePath` fails composition.
+    - A consumer of Http.ProtocolUpgrade that used `HttpCookie` through it must reference Http.Cookies.
+  - **Conditional requests:** `HttpIfRange.Matches` takes the response date, a source and binary break. A date later than `Last-Modified`, or one inside the current second, gets 200, not 206.
+  - **Reason phrases:** status lines and default ProblemDetails titles change for 200, 307, 413, 414, 416, 422 and 505. 306 is `[Obsolete]`.
+  - **Redirects:** `Location` paths are percent-encoded. A host that cannot be named gets 400. `OPTIONS *` redirects to the bare authority.
+  - **Telemetry:** spans carry `url.query` with its values redacted. A cancelled exchange the transport answered with a 4xx records that status without an error.
+  - **Verbs (#1395):**
+    - The `AddAuthorization`, `AddAntiforgery`, `AddOpenApi` and `AddValidation` callbacks take the builder, for example `authorization => authorization.Options.AddPolicy(...)`.
+    - `AddAntiforgery(provider)` becomes `AddAntiforgery(antiforgery => antiforgery.UseDataProtection(provider))`.
+    - Every builder-template verb can be called bare.
+  - **Health:** default health responses and the control-plane probes carry fixed text instead of exception messages.
+
+  Questions for the review:
+  - **#1415, h2c `:scheme https`.** Recommended: 421 by default, with a listener opt-out for trusted gateways, and the 320 test fixtures move to `http`. The alternative is to keep marking the request `http`.
+  - **An HTTP/3 connection lost mid-body.** A pending read gets `IOException`, so the default server counts it as an application fault. Recommended: fire `RequestCancelled` and surface it as a cancellation, as a peer reset now is.
+  - **Standalone control planes.** With no gateway identity, `/cohesion/v1/stop` and `/cohesion/v1/commands` accept unauthenticated calls on the shared port. Is standalone execution meant for development only? Recommended: with no gateway identity, serve the control plane on loopback only and document it.
+  - **`AddJsonSerialization`** keeps one hidden static factory, `SerializationComponents`. Recommended: accept it. The alternative drops the shorthand in favor of `AddContentSerialization(s => s.AddJson(resolver))`, which breaks every JSON application.
+  - **HTTP/2 control frames when the listener sets no rate.** A `null` `MinResponseDataRate` leaves the HTTP/2 output unbounded. The session rejected a flat 2 s fallback because it would abort healthy slow readers. Recommended: accept.
+  - **Web event sources (#1397):** decisions (a), (d) and (f) from [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md).
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -947,7 +1044,7 @@ What works end to end:
 | Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Delivered in Stage 9: a server span and the HTTP server metrics from `Assimalign.Cohesion.Web.Hosting`, W3C trace context, a request id (`IWebRequestIdFeature`) and `http.route` | #1064 |
 | Hosting diagnostics; lame-duck drain | Delivered in Stage 9: bind failures, accept-loop faults, connection faults and cut-short drains are logged through `builder.Logging`, and a stop drains lame-duck style, cancelling only what outlives its budget | #147; #146 |
 | mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Delivered in Stage 9: client certificates and the session's TLS details reach handlers (`context.TlsConnection`, in Http.Tls since decision 20), `UseHttps` serves HTTP/2 and HTTP/1.1 per connection, and configuration binds HTTP/3, certificate files, the connection cap and the HTTP/2 limits. Authenticating a user from a client certificate is #1305 | #1065; #1063 |
-| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). Trailers delivered in Stage 10: HTTP/2 decodes and exposes request trailers like HTTP/1.1 and HTTP/3, and HTTP/2 and HTTP/3 send response trailers. HTTP/2 and HTTP/3 timeouts and request-body data rates delivered in Stage 11 (#1085); a minimum response data rate is #1384. | #1085, #1384; #1314, #1315; gRPC hosting stays outside the program |
+| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). Trailers delivered in Stage 10: HTTP/2 decodes and exposes request trailers like HTTP/1.1 and HTTP/3, and HTTP/2 and HTTP/3 send response trailers. HTTP/2 and HTTP/3 timeouts and request-body data rates delivered in Stage 11 (#1085). Stage 12 added a minimum response data rate on every protocol (#1384) and a per-request rate override (#1383). | #1085, #1383, #1384; #1314, #1315; gRPC hosting stays outside the program |
 | Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
 | A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
 | OIDC handler; JWT Bearer authority/JWKS discovery | Absent | blocked on IdentityModel #829/#830 |
@@ -1078,6 +1175,15 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
 39. **The component-integration generator may change (owner, 2026-10-10; #1395).** The builder-template shape takes an optional configure callback. The six Web verbs that #1380 put on static factories move to builder templates wherever a builder can carry them, and their hidden `*Components` types are deleted. This is the owner-approved exception to `component-integration.md`'s "the generator stays semantics-free" rule; the rule records it.
 40. **An advisory for #1066 (owner delegated, 2026-10-10).** In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. Stage 5 fixed it before the advisory practice began. It gets a private draft on decision 24's terms, published with the other Phase 2 advisories. Drafted as GHSA-jr9p-p9jq-pcv8.
 41. **#1409 joins Stage 12's second wave (owner delegated, 2026-10-10).** Scoping the Web event sources found that Web.Health's default JSON writer has published each check's exception message to any prober since 10.0.0-preview.1. That is a larger exposure than any event payload the scope designs. It touches Web.Health only, so it runs as session 10 instead of waiting for Stage 13, and it is triaged for an advisory with #1384. The event-source lane itself (#1396) is placed in Stage 14 as lane G; its owner decisions are #1397, taken at the Stage 12 review.
+42. **Stage 12's breaks follow decision 15 (recorded by the integrator on 2026-10-11; the owner confirms them at the Stage 12 review).** The breaks are listed in §5:
+    - `HttpMinDataRate` moves to core Http;
+    - `HttpIfRange.Matches` takes the response date;
+    - `HttpStatusCode.Unused` is `[Obsolete]`;
+    - the `AddAuthorization`, `AddAntiforgery`, `AddOpenApi` and `AddValidation` callback types change, and the antiforgery provider overloads are removed;
+    - Http.ProtocolUpgrade drops its Http.Cookies dependency;
+    - the behavior changes on every protocol.
+
+    Each is recorded in its package's DESIGN, as decisions 15 and 26 require.
 
 ### 7.5 Lineup
 
