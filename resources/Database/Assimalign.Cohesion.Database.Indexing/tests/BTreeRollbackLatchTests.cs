@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,19 @@ using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 /// <summary>
+/// Runs the rollback race tests alone: they keep a writer and three cursors busy and time a
+/// latch hold, so other tests running beside them would starve them on a small CI runner.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class BTreeRollbackRaceCollection
+{
+    /// <summary>
+    /// The collection name.
+    /// </summary>
+    public const string Name = "B-tree rollback races";
+}
+
+/// <summary>
 /// A rolled-back storage transaction restores the tree's pages in place, each cleared and then
 /// rewritten from its pre-image. Until #1371 it did so outside the tree latch, so a cursor reading
 /// the tree meanwhile could read a cleared leaf (an entry with reference zero, which a SQL seek
@@ -21,9 +35,16 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// Every page write of the tree now enlists the tree latch with its storage transaction, and the
 /// rollback restores while it holds that latch exclusively.
 /// </summary>
+[Collection(BTreeRollbackRaceCollection.Name)]
 public sealed class BTreeRollbackLatchTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+
+    /// <summary>The shortest time a race runs.</summary>
+    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+
+    /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
+    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Rollback: a rolled-back root split is restored only once the tree's reader has left (#1371)")]
     public async Task Rollback_WhileACursorHoldsTheTreeLatch_ShouldRestoreOnlyAfterTheCursorLeaves()
@@ -84,7 +105,7 @@ public sealed class BTreeRollbackLatchTests
 
         await harness.CommitAsync(setup);
         var committed = Enumerable.Range(0, 400).Select(i => (ulong)i).ToArray();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var stop = new CancellationTokenSource();
         Exception? failure = null;
         long rollbacks = 0;
         long reads = 0;
@@ -131,12 +152,25 @@ public sealed class BTreeRollbackLatchTests
                 }
             }
         })).ToArray();
+
+        // The race runs at least RaceMinimum, then until the writer has rolled back several split
+        // trees under the readers: Windows CI once ran its fixed two seconds without completing one
+        // rollback, so the race never happened and the test could not tell.
+        var elapsed = Stopwatch.StartNew();
+        while (Volatile.Read(ref failure) is null
+            && (elapsed.Elapsed < RaceMinimum
+                || ((Interlocked.Read(ref rollbacks) < 5 || Interlocked.Read(ref reads) < 20) && elapsed.Elapsed < RaceMinimum + RaceCeiling)))
+        {
+            await Task.Delay(50);
+        }
+
+        stop.Cancel();
         await Task.WhenAll([writer, .. readers]);
 
         // Assert
         failure.ShouldBeNull();
-        rollbacks.ShouldBeGreaterThan(0);
-        reads.ShouldBeGreaterThan(0);
+        rollbacks.ShouldBeGreaterThanOrEqualTo(5);
+        reads.ShouldBeGreaterThanOrEqualTo(20);
     }
 
     /// <summary>

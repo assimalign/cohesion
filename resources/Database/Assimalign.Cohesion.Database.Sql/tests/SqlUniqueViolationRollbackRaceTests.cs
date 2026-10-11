@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,19 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
+
+/// <summary>
+/// Runs the unique-violation rollback races alone: two writers, a committer and four readers
+/// would starve, or be starved by, other tests running beside them on a small CI runner.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SqlUniqueViolationRaceCollection
+{
+    /// <summary>
+    /// The collection name.
+    /// </summary>
+    public const string Name = "SQL unique-violation rollback races";
+}
 
 /// <summary>
 /// A multi-row INSERT that fails on a UNIQUE index rolls its statement bracket back, and the
@@ -23,10 +37,17 @@ using Assimalign.Cohesion.Database.Execution;
 /// reclaimed. The rollback now restores the tree's pages under the tree latch, and every page in
 /// one copy that a row read confirms against.
 /// </summary>
+[Collection(SqlUniqueViolationRaceCollection.Name)]
 public sealed class SqlUniqueViolationRollbackRaceTests
 {
     private const int SeededRows = 200;
     private const int RecentKeyBase = 2_000_000;
+
+    /// <summary>The shortest time a race runs.</summary>
+    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(3);
+
+    /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
+    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Two writers insert 40 fresh keys and then a committed one, which fails each statement after
@@ -40,7 +61,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         // Arrange: 200 committed keys under a unique index.
         await using var engine = CreateEngine();
         var database = await SeedAsync(engine);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var stop = new CancellationTokenSource();
         var race = new Race(stop, batchRows: 40);
 
         // Act
@@ -57,12 +78,13 @@ public sealed class SqlUniqueViolationRollbackRaceTests
             tasks.Add(Task.Run(() => race.ReadSeededAsync(database, seed)));
         }
 
+        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
         await Task.WhenAll(tasks);
 
         // Assert: no seek failed or missed its key, and the race ran on both sides.
         race.Failure.ShouldBeNull();
-        race.Rollbacks.ShouldBeGreaterThan(0);
-        race.Reads.ShouldBeGreaterThan(0);
+        race.Rollbacks.ShouldBeGreaterThanOrEqualTo(20);
+        race.Reads.ShouldBeGreaterThanOrEqualTo(50);
     }
 
     /// <summary>
@@ -79,7 +101,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         // Arrange
         await using var engine = CreateEngine();
         var database = await SeedAsync(engine);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var stop = new CancellationTokenSource();
         var race = new Race(stop, batchRows: 10);
 
         // Act
@@ -96,13 +118,14 @@ public sealed class SqlUniqueViolationRollbackRaceTests
             tasks.Add(Task.Run(() => race.ReadRecentAsync(database, seed)));
         }
 
+        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Commits >= 20 && race.Reads >= 50);
         await Task.WhenAll(tasks);
 
         // Assert
         race.Failure.ShouldBeNull();
-        race.Rollbacks.ShouldBeGreaterThan(0);
-        race.Commits.ShouldBeGreaterThan(0);
-        race.Reads.ShouldBeGreaterThan(0);
+        race.Rollbacks.ShouldBeGreaterThanOrEqualTo(20);
+        race.Commits.ShouldBeGreaterThanOrEqualTo(20);
+        race.Reads.ShouldBeGreaterThanOrEqualTo(50);
     }
 
     private static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create("unique-violation-rollback-race", new SqlDatabaseEngineOptions
@@ -140,8 +163,10 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         return values;
     }
 
-    private sealed class Race(CancellationTokenSource stop, int batchRows)
+    private sealed class Race
     {
+        private readonly CancellationTokenSource _stop;
+        private readonly int _batchRows;
         private Exception? _failure;
         private long _rollbacks;
         private long _commits;
@@ -151,6 +176,12 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         // The committer's keys are RecentKeyBase + n for n below this count, published once committed.
         private int _committed;
 
+        public Race(CancellationTokenSource stop, int batchRows)
+        {
+            _stop = stop;
+            _batchRows = batchRows;
+        }
+
         public Exception? Failure => Volatile.Read(ref _failure);
 
         public long Rollbacks => Interlocked.Read(ref _rollbacks);
@@ -159,7 +190,24 @@ public sealed class SqlUniqueViolationRollbackRaceTests
 
         public long Reads => Interlocked.Read(ref _reads);
 
-        private bool Running => !stop.IsCancellationRequested && Failure is null;
+        private bool Running => !_stop.IsCancellationRequested && Failure is null;
+
+        /// <summary>
+        /// Lets the race run at least <paramref name="minimum"/>, then until
+        /// <paramref name="exercised"/> holds or <paramref name="ceiling"/> more has passed, and
+        /// stops it. Windows CI once ran a fixed window without the workload reaching the race, so
+        /// the race's own counts decide when it has run long enough.
+        /// </summary>
+        public async Task RunUntilExercisedAsync(TimeSpan minimum, TimeSpan ceiling, Func<bool> exercised)
+        {
+            var elapsed = Stopwatch.StartNew();
+            while (Failure is null && (elapsed.Elapsed < minimum || (!exercised() && elapsed.Elapsed < minimum + ceiling)))
+            {
+                await Task.Delay(50);
+            }
+
+            _stop.Cancel();
+        }
 
         /// <summary>
         /// Inserts batches of fresh keys that end in a seeded key, so each statement fails on the
@@ -171,9 +219,9 @@ public sealed class SqlUniqueViolationRollbackRaceTests
             var random = new Random(seed);
             while (Running)
             {
-                int first = Interlocked.Add(ref _nextKey, batchRows) - batchRows;
+                int first = Interlocked.Add(ref _nextKey, _batchRows) - _batchRows;
                 int duplicate = random.Next(SeededRows);
-                var rows = Enumerable.Range(first, batchRows).Select(value => $"({value}, {value})").Append($"({duplicate}, {duplicate})");
+                var rows = Enumerable.Range(first, _batchRows).Select(value => $"({value}, {value})").Append($"({duplicate}, {duplicate})");
                 try
                 {
                     await session.ExecuteAsync($"INSERT INTO t (id, val) VALUES {string.Join(", ", rows)}", cancellationToken: TestTimeout.Token());
