@@ -1612,6 +1612,11 @@ the callback list, so a handler that catches the failure cannot retry an incompl
 transport aborts/reset the exchange before writing its final response, rather than sending a 500.
 This differs from completion callbacks, which isolate failures after a response is already sent.
 
+A starting callback may cancel its exchange and return normally. After `SendAsync` returns,
+finalization rechecks the exchange and shutdown tokens, reports cancellation instead of a sent
+response, and skips completion callbacks. The span and duration record `request_canceled` without
+an unsent status. This corrects the new hook's behavior; 10.0.0-preview.1 had no starting callbacks.
+
 A head refused by `InvalidResponseField` is still unstarted. Http.Streaming now reads the same
 transport commitment state for `HasStarted` (#1388), so a refused `StartAsync` or `CompleteAsync`
 can be retried, or the handler can stage a buffered replacement. This does not reopen starting

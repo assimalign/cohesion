@@ -569,7 +569,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             {
                 try
                 {
-                    responded = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                    (responded, outcome) = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
                 }
                 catch (HttpException exception) when (outcome == ExchangeOutcome.Completed && IsRefusedResponseHead(exception, exchange))
                 {
@@ -578,7 +578,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     // control character. That is an application fault like any other, so the exchange is
                     // finalized as one: a 500 in place of the refused response.
                     outcome = ExchangeOutcome.Faulted;
-                    responded = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
+                    (responded, outcome) = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
                 }
             }
             // Deviates from the specific-exception rule: arbitrary starting callbacks are application
@@ -662,8 +662,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     /// response started; otherwise — a cancelled exchange, or a fault after the response started,
     /// when a replacement could only complete a truncated response as if it were whole — a reset.
     /// </summary>
-    /// <returns><see langword="true"/> when a response was sent; <see langword="false"/> when the exchange was reset.</returns>
-    private static async Task<bool> FinalizeAsync(
+    /// <returns>Whether a response was sent, and the outcome after any cancellation during the send.</returns>
+    private static async Task<(bool Responded, ExchangeOutcome Outcome)> FinalizeAsync(
         IHttpConnectionContext context,
         IHttpContext exchange,
         ExchangeOutcome outcome,
@@ -672,7 +672,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         if (exchange.Features.Get<ResponseStartingFeature>() is { HasFailed: true })
         {
             await ResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
-            return false;
+            return (false, outcome);
         }
 
         if (outcome == ExchangeOutcome.Completed
@@ -681,12 +681,16 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             exchange.Features.Get<ResponseStartingFeature>()?.RestoreHeaders();
             await context.SendAsync(exchange, cancellationToken).ConfigureAwait(false);
 
-            return true;
+            // Buffered starting callbacks run inside SendAsync and may cancel without throwing.
+            // The transport then resets normally, so that return is not proof a response was sent.
+            return cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested
+                ? (false, ExchangeOutcome.Cancelled)
+                : (true, outcome);
         }
 
         await ResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
 
-        return false;
+        return (false, outcome);
     }
 
     /// <summary>
