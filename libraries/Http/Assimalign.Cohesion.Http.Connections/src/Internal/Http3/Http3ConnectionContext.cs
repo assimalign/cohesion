@@ -1727,9 +1727,12 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <summary>
     /// Whether a <see cref="QuicException"/> reports the peer aborting the stream (<c>RESET_STREAM</c> or
     /// <c>STOP_SENDING</c>). <see cref="QuicException.QuicError"/> exists only where System.Net.Quic does,
-    /// which is everywhere a QUIC stream can fail.
+    /// which is everywhere a QUIC stream can fail: System.Net.Quic runs on Windows, Linux and macOS only, and
+    /// the platform check is what lets the error be read on a build that targets every platform (CA1416).
+    /// The one guard for every HTTP/3 read of the error: the critical-stream drains (#1083) and the request
+    /// body's peer-abort check (#1378).
     /// </summary>
-    private static bool IsQuicStreamAborted(QuicException exception)
+    internal static bool IsQuicStreamAborted(QuicException exception)
     {
         return (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             && exception.QuicError == QuicError.StreamAborted;

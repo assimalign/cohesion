@@ -942,15 +942,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
 
         return exception is ConnectionResetException
-            || (exception is QuicException quic && IsStreamAborted(quic));
-    }
-
-    // System.Net.Quic runs on Windows, Linux and macOS only: the platform check is what lets the error be read
-    // on a build that targets every platform (CA1416). A QuicException cannot arise anywhere else.
-    private static bool IsStreamAborted(QuicException exception)
-    {
-        return (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            && exception.QuicError == QuicError.StreamAborted;
+            || (exception is QuicException quic && Http3ConnectionContext.IsQuicStreamAborted(quic));
     }
 
     private void Fail(Exception failure)
