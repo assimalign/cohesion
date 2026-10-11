@@ -53,8 +53,14 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 
         public TestPipeline(WebApplicationMiddleware middleware) => _middleware = middleware;
 
-        public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
-            => _middleware.Invoke(context);
+        public async Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
+        {
+            await _middleware.Invoke(context);
+            if (context.Features.Get<IWebResponseStartingFeature>() is FakeResponseStartingFeature starting)
+            {
+                await starting.CommitAsync();
+            }
+        }
     }
 }
 
@@ -110,6 +116,7 @@ internal sealed class CorsTestContext : IHttpContext
     {
         Request = new TestHttpRequest(this, method, path);
         Response = new TestHttpResponse(this);
+        Features.Set<IWebResponseStartingFeature>(new FakeResponseStartingFeature());
 
         if (origin is not null)
         {
@@ -220,17 +227,37 @@ internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
 }
 
 /// <summary>
-/// A response-streaming feature reporting whether the response head has been committed, as the streaming
-/// package does after a handler's first streamed write.
+/// Models the server's single callback pass at response commit, including a commit inside a handler.
+/// Refused-head replacement and preserved-header behavior are covered through the real transport.
 /// </summary>
-internal sealed class FakeResponseStreamingFeature : IHttpResponseStreamingFeature
+internal sealed class FakeResponseStartingFeature : IWebResponseStartingFeature
 {
-    public FakeResponseStreamingFeature(bool hasStarted) => HasStarted = hasStarted;
+    private readonly List<(Func<object?, Task> Callback, object? State)> _callbacks = new();
+    private bool _invoked;
 
-    public string Name => nameof(IHttpResponseStreamingFeature);
-    public bool HasStarted { get; set; }
-    public ValueTask StartAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public ValueTask FlushAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public ValueTask CompleteAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public string Name => nameof(IWebResponseStartingFeature);
+
+    public void OnStarting(Func<object?, Task> callback, object? state, IReadOnlyCollection<HttpHeaderKey>? preservedHeaders = null)
+    {
+        if (_invoked)
+        {
+            throw new InvalidOperationException("The response-starting callbacks already ran.");
+        }
+
+        _callbacks.Add((callback, state));
+    }
+
+    public async Task CommitAsync()
+    {
+        if (_invoked)
+        {
+            return;
+        }
+
+        _invoked = true;
+        for (int index = _callbacks.Count - 1; index >= 0; index--)
+        {
+            await _callbacks[index].Callback(_callbacks[index].State);
+        }
+    }
 }

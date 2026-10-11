@@ -69,6 +69,14 @@ by construction: the default server's `StartAsync` only schedules its accept loo
 completes synchronously. `StartAsync`/`StopAsync` remain public for tests that assert
 lifecycle behaviour itself.
 
+## Response-starting parity (#1156)
+
+The factory honors `IWebResponseStartingFeature` through the default Web.Hosting server and the
+real transport head hook. Buffered and streamed HTTP/1.1 and HTTP/2 tests therefore see the same
+reverse callback order, once-per-exchange lifetime, callback-failure abort and refused-head header
+carryover as production. It has no synthetic callback runner or independent response-start flag.
+Web.Hosting tests cover HTTP/3 separately with the multiplexed in-memory driver and raw QPACK.
+
 ## Client connection ownership
 
 `ConnectCallback` returns a `ClientConnectionStream` — the connection's duplex-pipe stream

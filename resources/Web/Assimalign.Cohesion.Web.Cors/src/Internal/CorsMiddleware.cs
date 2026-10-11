@@ -42,6 +42,14 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
     /// </summary>
     internal const string Verb = "UseCors";
 
+    private static readonly HttpHeaderKey[] _preservedHeaders =
+    [
+        HttpHeaderKey.AccessControlAllowOrigin,
+        HttpHeaderKey.AccessControlAllowCredentials,
+        HttpHeaderKey.AccessControlExposeHeaders,
+        HttpHeaderKey.Vary,
+    ];
+
     private readonly CorsPolicy? _defaultPolicy;
     private readonly FrozenDictionary<string, CorsPolicy> _policies;
 
@@ -103,22 +111,32 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         return Task.CompletedTask;
     }
 
-    private static async Task InvokeActualAsync(IHttpContext context, WebApplicationMiddleware next, CorsPolicy policy)
+    private static Task InvokeActualAsync(IHttpContext context, WebApplicationMiddleware next, CorsPolicy policy)
     {
+        IWebResponseStartingFeature starting = context.Features.Get<IWebResponseStartingFeature>()
+            ?? throw new InvalidOperationException(
+                "UseCors requires IWebResponseStartingFeature for actual responses. Use the default Web.Hosting " +
+                "server or implement the response-starting feature in the custom server.");
         string? allowedOrigin = CorsResponseHeaders.ResolveAllowedOrigin(policy, context.Request);
 
-        // Written before next, so a response that starts streaming downstream carries them.
-        CorsResponseHeaders.WriteActual(context.Response.Headers, policy, allowedOrigin);
-
-        await next.Invoke(context).ConfigureAwait(false);
-
-        // Middleware downstream may reset the response before writing its own: an exception boundary, a
-        // request timeout, an output-cache hit. Writing again while the head is unsent keeps those responses
-        // readable by the allowed origin; the policy is authoritative for the headers it governs.
-        if (context.Features.Get<IHttpResponseStreamingFeature>() is not { HasStarted: true })
+        // Output caching reads Vary before transport commit. Publish the cache partition now, while
+        // leaving the authoritative CORS grant and the final Vary merge to the starting callback.
+        if (policy.VariesByOrigin)
         {
-            CorsResponseHeaders.WriteActual(context.Response.Headers, policy, allowedOrigin);
+            CorsResponseHeaders.AppendVaryOrigin(context.Response.Headers);
         }
+
+        // The callback outlives this middleware's turn, including a fault caught by an outer boundary.
+        // The policy remains authoritative when a handler starts streaming or replaces buffered headers.
+        // Preserve its final fields even when they already matched, including the early Vary declaration.
+        starting.OnStarting(static state =>
+        {
+            var (exchange, selectedPolicy, origin) = ((IHttpContext, CorsPolicy, string?))state!;
+            CorsResponseHeaders.WriteActual(exchange.Response.Headers, selectedPolicy, origin);
+            return Task.CompletedTask;
+        }, (context, policy, allowedOrigin), preservedHeaders: _preservedHeaders);
+
+        return next.Invoke(context);
     }
 
     private CorsPolicy? ResolvePolicy(CorsMetadata? metadata)

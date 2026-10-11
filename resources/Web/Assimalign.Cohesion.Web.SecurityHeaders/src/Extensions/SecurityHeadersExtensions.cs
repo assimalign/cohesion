@@ -31,9 +31,9 @@ public static class SecurityHeadersExtensions
         /// <b>Register it at the front</b>, after <c>UseHttpLogging</c> and ahead of the exception boundary
         /// (<c>UseErrorHandling</c>), static files, and <c>UseRouting</c>; it reads no client identity, so it
         /// may also precede <c>UseForwardedHeaders</c>. A response a middleware ahead of it writes never
-        /// passes through it,
-        /// and the headers are staged when the response head is about to commit, after an inner exception
-        /// boundary has reset the response, so error pages carry them. Endpoint overrides
+        /// passes through it. The headers are staged through <see cref="IWebResponseStartingFeature"/>
+        /// when the head is about to commit, after any exception boundary has reset the response, so
+        /// error pages carry them. Custom servers must publish this feature. Endpoint overrides
         /// (<see cref="SecurityHeadersMetadata"/>) still apply from that position, because the endpoint is
         /// known by the time the headers are staged.
         /// </para>

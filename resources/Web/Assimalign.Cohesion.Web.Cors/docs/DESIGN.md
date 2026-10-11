@@ -24,7 +24,7 @@ needs the CORS decision.
 ## The protocol in one picture
 
 The middleware sorts each request into a preflight or an actual request and selects a policy. A preflight
-with a policy is answered on the spot. An actual request with a policy is stamped and continues. Without a
+with a policy is answered on the spot. An actual request registers a starting callback and continues. Without a
 policy, the middleware steps aside.
 
 ```mermaid
@@ -37,8 +37,8 @@ flowchart TD
     Evaluate -->|"yes"| Grant["204 with Allow-Origin, Allow-Credentials, Allow-Methods, Allow-Headers, Max-Age"]
     Evaluate -->|"no"| Deny["204 without CORS headers"]
     Select -->|"no policy or disabled"| Next
-    Select -->|"policy"| Stamp["Allowed origin: Allow-Origin, Allow-Credentials, Expose-Headers. Vary: Origin unless any origin"]
-    Stamp --> Run["Call next, then write the headers again unless the response started"]
+    Select -->|"policy"| Stamp["Register the allowed-origin decision; stage Vary for output caching"]
+    Stamp --> Run["Call next; callback writes grant headers when the response head commits"]
 ```
 
 Each step is described below: policy selection in "Policy selection", the preflight branch in "Preflights",
@@ -249,23 +249,46 @@ existing tokens are kept, `Origin` is never duplicated (case-insensitive), and `
 Web.Caching keys stored variants on the response's own `Vary`, so it keeps one variant per origin, and a
 cache hit restores headers that match the request.
 
-### Written before and after the rest of the pipeline
+### Written when the response starts
 
-The headers are written before `next`, so a response that starts streaming downstream carries them. They
-are written again after `next` returns, unless the response head has started
-(`IHttpResponseStreamingFeature.HasStarted`), because a write then would not reach the wire.
+Actual-response grant headers are written once through `IWebResponseStartingFeature`, the server-published
+contract in Web.Server. The server invokes callbacks in reverse registration order at its existing
+transport head-commit point, before serializing any byte. Buffered and streamed responses on HTTP/1.1,
+HTTP/2 and HTTP/3 use the same hook, and the in-memory Web.Testing transport honors it.
 
-The Web pipeline has no response-starting hook (ASP.NET Core's CORS middleware applies its headers through
-`OnStarting`), and the second write is the substitute. Middleware registered after `UseCors` that resets a
-response before writing its own (the exception boundary, a request timeout, an output-cache hit) clears the
-CORS headers, and the second write restores them, so a cross-origin caller can read a `500` problem
-response.
+The middleware captures the selected policy and allowed origin before calling `next`. Its callback applies
+that decision to the response about to commit, so a boundary registered ahead of `UseCors` can reset the
+response after CORS unwinds with a fault and the resulting error page still carries the grant. A handler
+cannot widen the grant by replacing headers before starting a streamed response.
 
-**Known limit.** A middleware registered *before* `UseCors` that rewrites the response after `UseCors` has
-returned writes a response without CORS headers. The typical case is an exception boundary at the top of the
-pipeline that catches a fault propagating through `UseCors`. When cross-origin callers must read fault
-responses, register `UseErrorHandling` after `UseCors`. A response-start hook in the Web root would remove the
-limit (see "Scope-creep candidates").
+`Vary: Origin` is also staged before `next` because output caching snapshots headers before transport
+commit and needs the origin partition then. The callback merges `Vary` again at commit, preserving the
+final response's other tokens. No grant field is emitted early.
+
+If encode-time validation refuses the head (`InvalidResponseField`), the server carries the callback's
+added, changed and removed fields to a replacement buffered response without invoking the callback again.
+The middleware also registers `Access-Control-Allow-Origin`, `Access-Control-Allow-Credentials`,
+`Access-Control-Expose-Headers` and `Vary` as explicitly preserved keys. The server snapshots those keys
+at registration and captures their final values or absence after every callback succeeds, including
+values that already matched the policy and the early `Vary` declaration. Other unchanged application
+fields are excluded; the replacement owns its status and body. A callback failure
+faults the exchange before bytes are sent. Custom servers must publish the starting feature; an actual
+response governed by a CORS policy fails explicitly with `InvalidOperationException` if it is missing.
+Preflights retain their immediate, grant-or-nothing `204` short-circuit. Transport-generated rejections
+and protocol-takeover heads do not run response-starting callbacks.
+
+### Compatibility against 10.0.0-preview.1 (#1156)
+
+The released tag contains only a CORS project scaffold, with no middleware implementation. No released
+implementation changes behavior. The integration requirements and behavior changes below apply to the
+post-tag development implementation.
+
+Actual-response grant fields now appear at head commit instead of before and after `next`. Boundaries on
+either side of `UseCors` preserve CORS on their fault responses. Streamed heads now enforce the policy
+after the handler's header changes. `UseCors` must now precede `UseOutputCache`, including when an older
+pipeline relied on a cached grant from CORS registered after the cache. The area's recommended order
+already satisfies this requirement. Custom servers must implement `IWebResponseStartingFeature`.
+Web.Server replaces the package's Http.Streaming dependency; Web.Server is already an App.Web member.
 
 ## Fail closed: `CorsMetadata` implements `IRouteMiddlewareMetadata` (decision)
 
@@ -320,9 +343,10 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
   authorization would answer it `401`, an antiforgery check `400`, and a rate limit `429`. `UseCors` answers
   preflights before any of them runs. Web.RateLimiting already skips a preflight's candidate for endpoint
   policies; with `UseCors` ahead of it, preflights also stay out of its global limiter.
-- **The exception boundary after `UseCors`** when cross-origin callers must read fault responses (see
-  "Known limit").
-- **Output caching** works on either side, because `Vary: Origin` keys the stored variants.
+- **Either side of the exception boundary** keeps CORS on fault responses once `UseCors` has run.
+- **Ahead of `UseOutputCache`**, so cache hits still register the response-starting callback. Cache
+  entries are captured before the head commits and do not contain the callback's CORS grant fields.
+  The early `Vary: Origin` declaration keeps stored variants partitioned by origin.
 - **Middleware that answers before `UseRouting`**, such as static files or a path branch, answers before a
   `UseCors` placed after `UseRouting` runs, so its responses carry no CORS headers.
 
@@ -333,7 +357,8 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
   negative max age, and `InvalidOperationException` for an invalid combination, a duplicate policy name or a
   second default policy.
 - **At request time**, the middleware throws `InvalidOperationException` for an endpoint that names an
-  unregistered policy, and routing throws it for an endpoint whose `CorsMetadata` `UseCors` never processed.
+  unregistered policy or a custom server missing the starting feature. Routing throws it for an endpoint
+  whose `CorsMetadata` `UseCors` never processed.
 - **No exception type of the package's own.** No failure is one a caller would handle differently.
 - **No error status.** A denied CORS request is still a successful HTTP exchange; the browser enforces the
   outcome.
@@ -365,8 +390,6 @@ the trim and AOT analyzers enabled (`IsAotCompatible`) and no warnings.
 
 ## Scope-creep candidates (recorded, not taken)
 
-- A response-start hook in the Web root, so the CORS headers survive an exception boundary registered ahead
-  of `UseCors` (the known limit above). Filed as #1156.
 - A public evaluation seam for applications that answer CORS on their own `OPTIONS` routes, which today write
   the headers by hand.
 
@@ -381,7 +404,8 @@ registrations, and the metadata's `RequiredMiddleware` in every form.
 double (`tests/TestObjects/`); a stage ahead of the middleware publishes a fake route match, which is what
 `UseRouting` does. It covers echoed, wildcard, credentialed and denied actual requests, exposed headers,
 `Vary: Origin` on denied and origin-less responses and its append rules, the authoritative removal of stale
-CORS headers, the second write after a downstream reset and its suppression once the response started;
+CORS headers, staging after a downstream reset, one callback pass at head commit, and the missing-feature
+error;
 preflight grants and denials, byte-exact methods with the safelisted ones always allowed, case-insensitive and
 malformed request headers, the any-method and any-header echoes, max age; and the preflight's policy source
 for a candidate, a disabled candidate, an `OPTIONS`-only route, a route that also serves the requested method
@@ -394,5 +418,5 @@ through its candidate, which never runs; named, group-level and route-level poli
 preflight with no candidate, with and without a default policy; a preflight for `patch`, which resolves no
 `PATCH` candidate; the explicit `OPTIONS` route; a same-origin
 request to an endpoint with a policy; `UseCors` registered ahead of `UseRouting` and missing altogether, both
-failing closed at dispatch; the real exception boundary behind `UseCors` keeping the CORS headers on its
-`500`; and a preflight over HTTP/2.
+failing closed at dispatch; the real exception boundary on either side of `UseCors` keeping the CORS
+headers on its `500`; streamed heads enforcing the policy after handler changes; and a preflight over HTTP/2.

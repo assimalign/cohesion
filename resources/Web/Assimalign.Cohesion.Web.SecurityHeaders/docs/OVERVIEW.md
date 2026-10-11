@@ -43,8 +43,8 @@ builder.Services.AddRouting();
 WebApplication app = builder.Build();
 
 // At the front of the pipeline (only UseHttpLogging goes ahead of it) and ahead of the exception
-// boundary: every response passes through it, and the fields are staged after the boundary has
-// written an error page.
+// boundary: every response passes through it. The server stages fields at head commit, including
+// on an error page produced by a boundary on either side of this middleware.
 app.UseSecurityHeaders(policy =>
 {
     policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
@@ -81,8 +81,12 @@ routes.MapGet("/embed", EmbedAsync)
   verbs extend.
 - `Assimalign.Cohesion.Http`: the header keys, the feature collection, and the Structured Field
   toolkit `Permissions-Policy` is serialized with.
-- `Assimalign.Cohesion.Http.Streaming`: the response-streaming feature, which the middleware stands in
-  for so a streamed response carries the fields too.
+- `Assimalign.Cohesion.Web.Server`: the response-starting contract covering buffered and streamed heads.
+
+The default Web.Hosting server and Web.Testing publish the required starting feature. A custom server
+must implement `IWebResponseStartingFeature`; otherwise the middleware throws at request time.
+The callback registers the security-policy fields for preservation on a refused head's buffered
+replacement, including application-owned values kept by no-clobber, without running again.
 
 No DI, configuration, or logging dependency: the policy is captured and compiled when the verb is
 called, and the middleware resolves nothing per request. Delivered to applications through the

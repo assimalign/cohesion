@@ -215,7 +215,7 @@ internal static class CorsResponseHeaders
 
     // Appends the Origin token to Vary, preserving existing tokens; never duplicates it or overrides
     // 'Vary: *' (the same append Web.Serialization, Web.StaticFiles and Web.Compression perform).
-    private static void AppendVaryOrigin(IHttpHeaderCollection headers)
+    internal static void AppendVaryOrigin(IHttpHeaderCollection headers)
     {
         if (!headers.TryGetValue(HttpHeaderKey.Vary, out HttpHeaderValue existing) || existing.IsEmpty)
         {

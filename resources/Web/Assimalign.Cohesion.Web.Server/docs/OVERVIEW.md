@@ -12,6 +12,10 @@ handlers read them from `context.Features`.
 - **Server activity** — `IWebRequestActivityFeature.Activity` is this exchange's server span,
   or `null` when no span was created. It is independent of `Activity.Current`, which may be a
   child or unrelated ambient activity. The server owns the activity's lifetime (#1297).
+- **Response starting** — `IWebResponseStartingFeature.OnStarting(callback, state)` queues work
+  before the final head. It runs once in reverse order; a failure aborts before serialization.
+  Callback header changes survive a refused head's buffered replacement without rerunning callbacks.
+  Optional `preservedHeaders` keys also retain policy fields accepted unchanged by the callbacks.
 - **Response completion** — `IWebResponseCompletionFeature.Register` queues callbacks that run in
   order after the response is written to the transport. Registration after completion throws.
   `Web.Hosting.Resources` defers a control-plane stop until its `202` is written this way.
@@ -27,8 +31,8 @@ handlers read them from `context.Features`.
   version. `Web.Diagnostics`, `Web.ErrorHandling` and
   `Web.Compression` read it.
 
-A custom `IWebApplicationServer` may omit any of the five, so every reader handles an absent
-feature.
+A custom `IWebApplicationServer` may omit any of the six, so every reader handles an absent
+feature. SecurityHeaders and CORS require starting callbacks and throw if the feature is absent.
 
 ## Namespace
 
@@ -49,6 +53,13 @@ string? requestId = context.Features.Get<IWebRequestIdFeature>()?.RequestId.ToHe
 
 // This exchange's server activity, or null when it has no span. Do not stop or dispose it.
 Activity? serverActivity = context.Features.Get<IWebRequestActivityFeature>()?.Activity;
+
+// Stage a final header. Callbacks must not start or write the response themselves.
+context.Features.Get<IWebResponseStartingFeature>()?.OnStarting(state =>
+{
+    ((IHttpContext)state!).Response.Headers[new HttpHeaderKey("x-example")] = "value";
+    return Task.CompletedTask;
+}, context);
 
 // Defer work until the response has reached the transport.
 context.Features.Get<IWebResponseCompletionFeature>()?.Register(() => ValueTask.CompletedTask);

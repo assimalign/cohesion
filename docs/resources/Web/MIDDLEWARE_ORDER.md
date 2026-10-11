@@ -35,12 +35,12 @@ flowchart TD
 | # | Verb | Package | Why it goes here |
 | --- | --- | --- | --- |
 | 1 | `UseHttpLogging` | Web.Diagnostics | First, so the exchanges every later middleware rejects are logged too. It writes its entry after the pipeline unwinds, when `UseForwardedHeaders` has already attached the forwarded identity, so running ahead of that middleware loses nothing. |
-| 2 | `UseSecurityHeaders` | Web.SecurityHeaders | Ahead of every middleware that writes a response, so rejections, redirects and the boundary's error page all carry the fields. It reads no client identity, so it may run ahead of `UseForwardedHeaders`. |
+| 2 | `UseSecurityHeaders` | Web.SecurityHeaders | Early enough to cover rejections and redirects from later middleware. Once registered, its starting callback also covers an error page from a boundary on either side. It reads no client identity, so it may run ahead of `UseForwardedHeaders`. |
 | 3 | `UseForwardedHeaders` | Web.ForwardedHeaders | Ahead of every middleware that reads the effective scheme, host or client address on the way in. Leave it out when no proxy sits in front of the application. |
 | 4 | `UseHostFiltering` | Web.HostFiltering | Validates the effective host, so it follows `UseForwardedHeaders`. It runs ahead of everything that uses the host: the redirect `Location`, absolute URLs, cache keys. |
 | 5 | `UseHttpsRedirection` | Web.HttpsPolicy | Redirects a plaintext request before anything does work for it, building the `Location` from the validated host. |
 | 6 | `UseHsts` | Web.HttpsPolicy | Ahead of the exception boundary, so the header survives a reset error response. |
-| 7 | `UseErrorHandling` | Web.ErrorHandling | The exception boundary: a fault anywhere after it becomes a problem-details response. See "The CORS trade-off" below. |
+| 7 | `UseErrorHandling` | Web.ErrorHandling | The exception boundary: a fault anywhere after it becomes a problem-details response. |
 | 8 | `UseStatusCodePages` | Web.ErrorHandling | Inside the boundary and ahead of the middleware whose bodyless `4xx`/`5xx` responses it fills in, including the `404` and `405` from routing. |
 | 9 | `UseRewrite` | Web.Rewrite | Ahead of everything that reads the path (static files, routing, the endpoint), so they all see the rewritten URL; middleware ahead of it, and the server's request telemetry, keep the client's. Inside the boundary and after status-code pages, so a fault in a rule becomes a problem-details response and its `400` gets a body. After `UseForwardedHeaders` and `UseHostFiltering`, so its canonicalization redirects read the client's scheme and a validated host. Inside it, register redirects ahead of internal rewrites. |
 | 10 | `UseCookiePolicy` | Web.CookiePolicy | Ahead of every middleware that writes a cookie: sessions, the authentication cookie, antiforgery. Its `Secure` decision reads the effective scheme. |
@@ -69,15 +69,14 @@ A `UseCookiePolicy` registered after `UseSessions`, or a `UseHostFiltering` regi
 `UseForwardedHeaders`, runs without error and quietly weakens what it protects. Enforced ordering
 is the open #26/#145 work.
 
-## The CORS trade-off
+## Response-starting headers
 
-A fault that propagates through `UseCors` to a boundary registered earlier (row 7) becomes an error
-page without CORS headers. A browser then hides the response from a cross-origin caller. An API
-whose cross-origin callers must read error responses registers `UseErrorHandling` directly after
-`UseCors` instead, which keeps the CORS headers on the error page
-(`CorsEndToEndTests.UseCors_ExceptionBoundaryBehindCors_ShouldKeepCorsHeadersOnFault`). The cost:
-middleware registered ahead of `UseCors` is then outside the boundary. A response-start hook in the
-Web root would remove the trade-off (Web.Cors DESIGN, "Known limit").
+`UseSecurityHeaders` and `UseCors` register callbacks on Web.Server's `IWebResponseStartingFeature`.
+The server applies them before committing a buffered or streamed head, after any boundary has replaced
+an error response. A boundary ahead of `UseCors` therefore keeps CORS headers on a fault response once
+CORS has processed that request. Responses that short-circuit before reaching either middleware do not
+register its callback. CORS still stages `Vary: Origin` before `next` so output caching can partition
+its stored responses before the transport commits their headers.
 
 ## Outside this order
 

@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Testing;
@@ -25,7 +27,7 @@ namespace Assimalign.Cohesion.Web.Cors.Tests;
 /// endpoint, which never runs; named, group-level and route-level policies; <c>DisableCors</c>; preflight
 /// grants and denials for methods and headers; exposed headers and max age; the preflight with no
 /// candidate; the explicit <c>OPTIONS</c> route; ordering against <c>UseRouting</c> and the fail-closed
-/// dispatch; and an exception boundary behind <c>UseCors</c>.
+/// dispatch; exception boundaries on either side of <c>UseCors</c>; and streamed policy enforcement.
 /// </summary>
 public class CorsEndToEndTests
 {
@@ -478,6 +480,144 @@ public class CorsEndToEndTests
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
         Header(response, "Access-Control-Allow-Origin").ShouldBe(App);
         Header(response, "Access-Control-Allow-Credentials").ShouldBe("true");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - E2E: An exception boundary ahead of UseCors should keep the CORS headers on the fault response")]
+    public async Task UseCors_ExceptionBoundaryAheadOfCors_ShouldKeepCorsHeadersOnFault()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseErrorHandling();
+        IRouterBuilder routes = factory.Application.UseRouting();
+        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        routes.Map(CohesionHttpMethod.Get, "/boom", new RouterRouteHandler(_ => throw new InvalidOperationException("fault")));
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(Request(NetHttpMethod.Get, "/boom", App), cancellation.Token);
+
+        // Assert — the callback survives CORS unwinding with the exception and the boundary's reset.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
+        Header(response, "Access-Control-Allow-Origin").ShouldBe(App);
+        Header(response, "Access-Control-Allow-Credentials").ShouldBe("true");
+        Header(response, "Vary").ShouldBe("Origin");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - E2E: A streamed head should enforce the CORS policy after the handler changes headers")]
+    public async Task UseCors_HandlerWidensStreamedHeaders_ShouldEnforcePolicyAtCommit()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App)));
+        factory.Application.Use(async (context, next) =>
+        {
+            context.Response.Headers[HttpHeaderKey.AccessControlAllowOrigin] = "*";
+            context.Response.Headers[HttpHeaderKey.AccessControlAllowCredentials] = "true";
+            context.Response.Headers[HttpHeaderKey.Vary] = "Accept";
+            await context.Response.Streaming.WriteAsync(Encoding.UTF8.GetBytes("streamed"), context.RequestCancelled);
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(Request(NetHttpMethod.Get, "/", App), cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("streamed");
+        Header(response, "Access-Control-Allow-Origin").ShouldBe(App);
+        Header(response, "Access-Control-Allow-Credentials").ShouldBeNull();
+        Header(response, "Vary").ShouldBe("Accept, Origin");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - E2E: A refused streamed head should preserve CORS on a buffered replacement")]
+    public async Task UseCors_RefusedStreamedHead_ShouldPreserveGrantAndVaryOnReplacement()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        int calls = 0;
+        HttpErrorCode? refusalCode = null;
+        factory.Application.Use(async (context, next) =>
+        {
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                calls++;
+                return Task.CompletedTask;
+            }, null);
+            context.Response.Headers[new HttpHeaderKey("X-Invalid")] = "bad\r\nfield";
+            HttpException refused = await Should.ThrowAsync<HttpException>(
+                () => context.Response.Streaming.StartAsync(context.RequestCancelled).AsTask());
+            refusalCode = refused.Code;
+            context.Response.Headers.Clear();
+            context.Response.StatusCode = CohesionHttpStatusCode.BadGateway;
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("replacement"), context.RequestCancelled);
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(Request(NetHttpMethod.Get, "/", App), cancellation.Token);
+
+        // Assert
+        refusalCode.ShouldBe(HttpErrorCode.InvalidResponseField);
+        response.StatusCode.ShouldBe(NetHttpStatusCode.BadGateway);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("replacement");
+        Header(response, "Access-Control-Allow-Origin").ShouldBe(App);
+        Header(response, "Access-Control-Allow-Credentials").ShouldBe("true");
+        Header(response, "Vary").ShouldBe("Origin");
+        Header(response, "X-Invalid").ShouldBeNull();
+        calls.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Cors] - E2E: A refused head should preserve unchanged accepted CORS fields on the server replacement")]
+    [InlineData(WebApplicationTestProtocol.Http1)]
+    [InlineData(WebApplicationTestProtocol.Http2)]
+    public async Task UseCors_RefusedHeadWithMatchingApplicationFields_ShouldPreserveGrantOnServerReplacement(WebApplicationTestProtocol protocol)
+    {
+        // Arrange — each field already has the value the policy will choose. Merely retaining
+        // the callback's changed fields would lose these accepted grants when the server clears
+        // the refused response to prepare its buffered 500.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
+        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        int calls = 0;
+        factory.Application.Use((context, next) =>
+        {
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                calls++;
+                return Task.CompletedTask;
+            }, null);
+            context.Response.StatusCode = CohesionHttpStatusCode.Found;
+            context.Response.Headers[HttpHeaderKey.AccessControlAllowOrigin] = App;
+            context.Response.Headers[HttpHeaderKey.AccessControlAllowCredentials] = "true";
+            context.Response.Headers[HttpHeaderKey.Vary] = "Accept-Encoding, Origin";
+            context.Response.Headers[new HttpHeaderKey("X-Invalid")] = "bad\r\nfield";
+            return Task.CompletedTask;
+        });
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage request = Request(NetHttpMethod.Get, "/", App);
+        request.Version = client.DefaultRequestVersion;
+        request.VersionPolicy = client.DefaultVersionPolicy;
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(request, cancellation.Token);
+
+        // Assert
+        response.Version.Major.ShouldBe(protocol == WebApplicationTestProtocol.Http2 ? 2 : 1);
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        (await response.Content.ReadAsByteArrayAsync(cancellation.Token)).ShouldBeEmpty();
+        Header(response, "Access-Control-Allow-Origin").ShouldBe(App);
+        Header(response, "Access-Control-Allow-Credentials").ShouldBe("true");
+        Header(response, "Vary").ShouldBe("Accept-Encoding, Origin");
+        Header(response, "X-Invalid").ShouldBeNull();
+        calls.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Cors] - E2E: A preflight over HTTP/2 should be answered like one over HTTP/1.1")]

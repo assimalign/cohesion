@@ -581,6 +581,15 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     responded = await FinalizeAsync(context, exchange, outcome, cancellationToken).ConfigureAwait(false);
                 }
             }
+            // Deviates from the specific-exception rule: arbitrary starting callbacks are application
+            // work even when a buffered send drives them.
+            // Their cancellation forbids a replacement head and completion callbacks alike.
+            catch (Exception) when (exchange.Features.Get<ResponseStartingFeature>() is { HasFailed: true })
+            {
+                outcome = ExchangeOutcome.Faulted;
+                await TryResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+                responded = false;
+            }
             // Deviates from the repo "catch specific exceptions" rule per design decision: on a
             // multiplexed connection a failed send belongs to this stream alone (a response body
             // that throws, a lifecycle hook that throws, a write cut off by an aborted drain). Resetting the
@@ -620,6 +629,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         {
             exchange.Features.Set(responseCompletion);
             exchange.Features.Set(_drainFeature);
+            exchange.Features.Get<ResponseStartingFeature>()?.Bind(exchange);
 
             await _pipeline.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
 
@@ -659,9 +669,16 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         ExchangeOutcome outcome,
         CancellationToken cancellationToken)
     {
+        if (exchange.Features.Get<ResponseStartingFeature>() is { HasFailed: true })
+        {
+            await ResetAsync(context, exchange, cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
         if (outcome == ExchangeOutcome.Completed
             || (outcome == ExchangeOutcome.Faulted && !exchange.HasResponseStarted && TryPrepareServerErrorResponse(exchange)))
         {
+            exchange.Features.Get<ResponseStartingFeature>()?.RestoreHeaders();
             await context.SendAsync(exchange, cancellationToken).ConfigureAwait(false);
 
             return true;
@@ -690,6 +707,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     /// <remarks>
     /// The staged headers and trailers are both dropped: they belong to the response the
     /// application failed to finish, and a field among them may be the one the transport refused.
+    /// FinalizeAsync subsequently restores starting-callback edits and preserved policy headers.
     /// </remarks>
     private static bool TryPrepareServerErrorResponse(IHttpContext exchange)
     {

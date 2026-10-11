@@ -13,30 +13,25 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 /// request was routed to (if any) is known.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The Web stack commits a response head in one of two places, and the middleware covers both:
-/// </para>
-/// <list type="bullet">
-/// <item><b>Buffered (the default).</b> The server runs the whole pipeline, then sends the response, so
-/// the head commits after this middleware returns. The fields are staged after <c>next</c> unwinds,
-/// which also puts them after an exception boundary registered inside this middleware has reset the
-/// headers and written its error response.</item>
-/// <item><b>Streamed.</b> A handler that writes through <see cref="IHttpResponseStreamingFeature"/>
-/// commits the head on its first start, write, flush or complete, before <c>next</c> returns. While
-/// <c>next</c> runs, the middleware puts a decorator in that feature's place which stages the fields
-/// immediately before the first such call.</item>
-/// </list>
-/// <para>
-/// Nothing is staged ahead of <c>next</c>. That keeps "a field is present when the headers are staged"
-/// equivalent to "something else set it", which is the whole no-clobber rule, and it leaves the endpoint
-/// override to be resolved once, when the endpoint is known. A head committed some other way (by a
-/// middleware ahead of this one, for instance) is left alone. A <c>304 Not Modified</c> gets no fields:
-/// it updates a stored response that already carries the fields of the response that created it, and a
-/// fresh nonce would no longer match the nonce attributes in that stored body.
-/// </para>
+/// The server invokes the registered callback before either a buffered or streamed head commits. The
+/// callback remains registered if an outer exception boundary replaces the response after this
+/// middleware unwinds. Endpoint overrides and application-owned fields are resolved at that moment.
 /// </remarks>
 internal sealed class SecurityHeadersMiddleware : IWebApplicationMiddleware
 {
+    private static readonly HttpHeaderKey[] _preservedHeaders =
+    [
+        HttpHeaderKey.XContentTypeOptions,
+        HttpHeaderKey.XFrameOptions,
+        HttpHeaderKey.ContentSecurityPolicy,
+        HttpHeaderKey.ContentSecurityPolicyReportOnly,
+        HttpHeaderKey.ReferrerPolicy,
+        HttpHeaderKey.CrossOriginOpenerPolicy,
+        HttpHeaderKey.CrossOriginEmbedderPolicy,
+        HttpHeaderKey.CrossOriginResourcePolicy,
+        HttpHeaderKey.PermissionsPolicy,
+    ];
+
     private readonly SecurityHeadersPolicy _policy;
     private readonly SecurityHeadersPlan _plan;
     private readonly ConcurrentDictionary<SecurityHeadersMetadata, SecurityHeadersPlan> _adjustedPlans = new();
@@ -47,47 +42,33 @@ internal sealed class SecurityHeadersMiddleware : IWebApplicationMiddleware
         _plan = SecurityHeadersPlan.Compile(policy);
     }
 
-    public async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
+    public Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
+        IWebResponseStartingFeature starting = context.Features.Get<IWebResponseStartingFeature>()
+            ?? throw new InvalidOperationException(
+                "UseSecurityHeaders requires IWebResponseStartingFeature. Use the default Web.Hosting server " +
+                "or implement the response-starting feature in the custom server.");
+
         // One nonce per exchange: a nested registration, or an application-supplied feature, is reused.
         ISecurityHeadersFeature feature = context.Features.Get<ISecurityHeadersFeature>() ?? InstallFeature(context);
-
-        SecurityHeadersStreamingFeature? streaming = null;
-        if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: false } transport)
+        // Preserve application-owned values kept by no-clobber, including both framing fields.
+        starting.OnStarting(static state =>
         {
-            streaming = new SecurityHeadersStreamingFeature(transport, this, context, feature);
-            context.Features.Set<IHttpResponseStreamingFeature>(streaming);
-        }
+            var (middleware, exchange, nonce) = ((SecurityHeadersMiddleware, IHttpContext, ISecurityHeadersFeature))state!;
+            middleware.Stage(exchange, nonce);
+            return Task.CompletedTask;
+        }, (this, context, feature), preservedHeaders: _preservedHeaders);
 
-        try
-        {
-            await next.Invoke(context).ConfigureAwait(false);
-        }
-        finally
-        {
-            // The decorator lives exactly as long as this middleware's turn on the stack.
-            if (streaming is not null)
-            {
-                context.Features.Set(streaming.Inner);
-            }
-        }
-
-        // A streamed head already carried the fields; a head committed any other way can carry no more.
-        if (streaming is { IsStaged: true } || context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
-        {
-            return;
-        }
-
-        Stage(context, feature);
+        return next.Invoke(context);
     }
 
     /// <summary>
     /// Stages the policy that applies to the exchange on its uncommitted response head.
     /// </summary>
-    internal void Stage(IHttpContext context, ISecurityHeadersFeature feature)
+    private void Stage(IHttpContext context, ISecurityHeadersFeature feature)
     {
         IHttpResponse response = context.Response;
 

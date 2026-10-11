@@ -26,12 +26,12 @@ public sealed class WebApplicationServerBuilder
     /// (one object carries <c>IHttpMaxRequestBodySizeFeature</c>, <c>IHttpMinRequestBodyDataRateFeature</c>
     /// and <c>IHttpMinResponseDataRateFeature</c>, #1383 and #1384; see
     /// <see cref="ApplyDefaultInterceptors"/>), and the request id, response
-    /// completion and drain features the server installs before the pipeline runs. The other default
+    /// starting, completion and drain features the server installs before the pipeline runs. The other default
     /// interceptors attach a feature only to an upgrade, an extended CONNECT, or an HTTP/1.1 request that
     /// declares a body (the client-fault feature, #1340). Each exchange's feature collection is sized for
     /// these plus the stamped application features (#1381).
     /// </summary>
-    internal const int HostFeatureCount = 4;
+    internal const int HostFeatureCount = 5;
 
     /// <summary>
     /// The sizes an unsized feature collection's dictionary passes through as it grows: three slots,
@@ -307,18 +307,20 @@ public sealed class WebApplicationServerBuilder
     /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1
     /// listener. The extended CONNECT interceptor follows, so <c>context.ExtendedConnect</c>, and
     /// with it a WebSocket over HTTP/2 or HTTP/3, is available on every HTTP/2 and HTTP/3 listener. The
-    /// client-fault interceptor comes last: it publishes the transport's client-fault report as
+    /// client-fault interceptor follows: it publishes the transport's client-fault report as
     /// <see cref="IWebClientFaultFeature"/> on a request that can have a body, on any version, so the HTTP
     /// logging middleware, the exception boundary and request decompression classify a malformed or
     /// over-limit body as the client's fault rather than the application's (#1340, #1378). A request that no
     /// application accepts is served exactly as before, and an ordinary exchange keeps the transport's
-    /// fast path under all four; a request that can have a body takes the response phase, for its
+    /// fast path under those four; a request that can have a body takes the response phase, for its
     /// exchange control. Over the QUIC driver nearly every HTTP/3 request reports a body, since the transport
     /// sees a request stream end only on a read. User configurations may still inspect or clear
     /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
     /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended
     /// CONNECT but no feature then surfaces it, and a malformed body is then classified as an
-    /// application fault again.
+    /// application fault again. The fifth interceptor publishes response-starting callbacks on every
+    /// exchange and uses the transport's shared buffered/streamed head hook (#1156). It requires
+    /// the response phase even for a plain GET; clearing it removes the starting feature.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
@@ -327,6 +329,7 @@ public sealed class WebApplicationServerBuilder
         options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
         options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor());
         options.Interceptors.Add(new WebClientFaultInterceptor());
+        options.Interceptors.Add(new WebResponseStartingInterceptor());
     }
 
     /// <summary>

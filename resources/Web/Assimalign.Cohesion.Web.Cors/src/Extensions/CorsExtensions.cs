@@ -38,10 +38,11 @@ public static class CorsExtensions
         /// dispatched, instead of running under the wrong policy.
         /// </para>
         /// <para>
-        /// The CORS headers are written before the rest of the pipeline runs and written again after it
-        /// returns, unless the response has started streaming. A response that a middleware registered
-        /// after <c>UseCors</c> resets and rewrites (an exception boundary, a request timeout) therefore keeps
-        /// them. One that a middleware registered before <c>UseCors</c> rewrites does not.
+        /// Actual-response headers are applied through <see cref="IWebResponseStartingFeature"/> when the
+        /// head commits, for buffered and streamed responses. An exception boundary on either side of
+        /// <c>UseCors</c> may reset the response without losing its CORS headers. Custom servers must
+        /// publish the response-starting feature, as the default Web.Hosting server does. Register
+        /// <c>UseCors</c> before <c>UseOutputCache</c>, so cache hits register this callback too.
         /// </para>
         /// </remarks>
         /// <param name="configure">An optional callback that registers the default policy and named policies.</param>

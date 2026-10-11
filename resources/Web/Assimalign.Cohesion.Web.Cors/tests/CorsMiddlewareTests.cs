@@ -17,8 +17,8 @@ namespace Assimalign.Cohesion.Web.Cors.Tests;
 /// wildcard, credentialed, denied, exposed, <c>Vary: Origin</c>), preflight evaluation (origin, byte-exact
 /// methods with the safelisted ones always allowed, case-insensitive headers, any-method and any-header
 /// echoes, max age), policy selection (default, named, inline, disabled, last-wins), the preflight policy
-/// source when routing published a candidate, an explicit route, or nothing, and the re-application of the
-/// headers after a downstream reset.
+/// source when routing published a candidate, an explicit route, or nothing, and response-start staging
+/// after a downstream reset.
 /// </summary>
 public class CorsMiddlewareTests
 {
@@ -38,6 +38,23 @@ public class CorsMiddlewareTests
 
         // Assert
         act.ShouldThrow<ArgumentNullException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - Actual: A custom server without the starting feature should fail explicitly")]
+    public async Task InvokeAsync_MissingStartingFeature_ShouldExplainRequiredServerContract()
+    {
+        // Arrange
+        await using CorsTestContext context = new(HttpMethod.Get, origin: App);
+        context.Features.Remove(nameof(IWebResponseStartingFeature));
+
+        // Act
+        Func<Task> act = () => CorsPipeline.InvokeAsync(context,
+            options => options.AddDefaultPolicy(policy => policy.WithOrigins(App)));
+
+        // Assert
+        InvalidOperationException exception = await act.ShouldThrowAsync<InvalidOperationException>();
+        exception.Message.ShouldContain(nameof(IWebResponseStartingFeature), Case.Sensitive);
+        exception.Message.ShouldContain("custom server", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Cors] - Actual: An allowed origin should be echoed, with Vary: Origin")]
@@ -188,8 +205,32 @@ public class CorsMiddlewareTests
         context.ResponseHeader(HttpHeaderKey.Vary).ShouldBe(expected);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Cors] - Actual: Headers reset downstream should be written again before the response starts")]
-    public async Task InvokeAsync_DownstreamResetsResponse_ShouldReapplyHeaders()
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - Actual: Cache partitioning should be visible before commit while the grant is deferred")]
+    public async Task InvokeAsync_BeforeCommit_ShouldPublishVaryWithoutGrantHeaders()
+    {
+        // Arrange
+        await using CorsTestContext context = new(HttpMethod.Get, origin: App);
+        string? varyBeforeCommit = null;
+        string? originBeforeCommit = null;
+
+        // Act
+        await CorsPipeline.InvokeAsync(context,
+            options => options.AddDefaultPolicy(policy => policy.WithOrigins(App)),
+            downstream: ctx =>
+            {
+                varyBeforeCommit = context.ResponseHeader(HttpHeaderKey.Vary);
+                originBeforeCommit = context.ResponseHeader(HttpHeaderKey.AccessControlAllowOrigin);
+                return Task.CompletedTask;
+            });
+
+        // Assert
+        varyBeforeCommit.ShouldBe("Origin");
+        originBeforeCommit.ShouldBeNull();
+        context.ResponseHeader(HttpHeaderKey.AccessControlAllowOrigin).ShouldBe(App);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Cors] - Actual: Headers reset downstream should be staged when the response starts")]
+    public async Task InvokeAsync_DownstreamResetsResponse_ShouldStageHeadersAtCommit()
     {
         // Arrange — the shape an exception boundary or a request timeout registered after UseCors produces.
         await using CorsTestContext context = new(HttpMethod.Get, origin: App);
@@ -223,11 +264,10 @@ public class CorsMiddlewareTests
         await CorsPipeline.InvokeAsync(
             context,
             options => options.AddDefaultPolicy(policy => policy.WithOrigins(App)),
-            downstream: ctx =>
+            downstream: async ctx =>
             {
+                await ((FakeResponseStartingFeature)ctx.Features.Get<IWebResponseStartingFeature>()!).CommitAsync();
                 ctx.Response.Headers.Clear();
-                ctx.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(hasStarted: true));
-                return Task.CompletedTask;
             });
 
         // Assert — the head is on the wire; a write now would have no effect, so none is made.

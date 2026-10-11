@@ -289,7 +289,7 @@ once, in one of three ways, chosen by how its pipeline ended:
 | --- | --- | --- |
 | Returned without cancellation | `SendAsync` | the application's response |
 | Returned, but the transport refused a field of its response (#1183) | as for a throw before the response started | `500 Internal Server Error` |
-| Threw, response not started | the staged status, headers, trailers, and body are replaced by a bodyless `500`, then `SendAsync` | `500 Internal Server Error` |
+| Threw, response not started | the staged status, headers, trailers, and body are replaced by a bodyless `500`, starting-callback edits are restored, then `SendAsync` | `500 Internal Server Error` |
 | Threw after the response started, or the exchange was cancelled | `IHttpContext.CancelAsync`, then `SendAsync` | a reset: HTTP/2 `RST_STREAM(CANCEL)`, HTTP/3 stream abort, HTTP/1.1 no further bytes and a connection that ends after the exchange |
 
 - **Cancelled, not faulted.** An `OperationCanceledException` counts as a cancellation
@@ -1026,7 +1026,7 @@ transport sizes every exchange's collection for that many features when it creat
 transport learns a number, not which features this module installs (owner decision 20).
 
 The count is the application features the pipeline stamps plus
-`WebApplicationServerBuilder.HostFeatureCount`, the four features every exchange of the default
+`WebApplicationServerBuilder.HostFeatureCount`, the five features every exchange of the default
 server carries:
 
 | Feature | Installed by |
@@ -1035,10 +1035,11 @@ server carries:
 | `IWebRequestIdFeature` | the server's exchange telemetry, before the pipeline runs |
 | `IWebResponseCompletionFeature` | the server, before the pipeline runs |
 | `IWebServerDrainFeature` | the server, before the pipeline runs |
+| `IWebResponseStartingFeature` | the response-starting interceptor, before the pipeline runs |
 
 - The pipeline build records how many features it stamps (`WebApplicationContext.StampedFeatureCount`).
   The default server resolves the pipeline before it composes the listener, so the count is known.
-  A pipeline passed to `AddPipeline` stamps none, so the count is the host's four.
+  A pipeline passed to `AddPipeline` stamps none, so the count is the host's five.
 - The count is set before user `UseServer` configurations run, as the default interceptors are, so a
   configuration sees it and can add to it. After the last configuration the server rounds the result
   up (see "Rounding" below) and hands that to the listener.
@@ -1596,6 +1597,39 @@ No reflection, no codegen, no dynamic activation. The binder is straight-line
 registration verbs, and certificate files load through the BCL's
 `X509Certificate2.CreateFromPemFile` / `X509CertificateLoader` APIs.
 
+## Response starting (#1156)
+
+`IWebResponseStartingFeature` lives in Web.Server beside completion. A default response interceptor
+publishes it, and the server binds its exchange before dispatch. The interceptor invokes callbacks
+through `TransportHttpContext.InvokeBeforeResponseHeadAsync`, the existing single gate used by
+buffered sends and streaming sinks on HTTP/1.1, HTTP/2 and HTTP/3. Web.Testing's in-memory factory
+uses this same path. There is no Web-owned `HasStarted` flag and no streaming-feature decorator.
+
+Callbacks run asynchronously, in reverse registration order, once per exchange. Registration closes
+when they begin; late registration throws. Callbacks stage the head only: they must not start, write,
+complete or take over the response recursively. A throwing callback cancels the exchange and stops
+the callback list, so a handler that catches the failure cannot retry an incomplete head. The
+transport aborts/reset the exchange before writing its final response, rather than sending a 500.
+This differs from completion callbacks, which isolate failures after a response is already sent.
+
+A head refused by `InvalidResponseField` is still unstarted. Successful starting callbacks do not
+run again. Their header edits (added/changed values and removals) are captured as a delta, and the
+server reapplies that delta immediately before an unstarted buffered send, after clearing a refused
+response for its own bodyless 500. This also covers a boundary or handler that clears the refused
+streamed head and stages a buffered replacement. Status and body are the replacement's; application
+fields that callbacks neither changed nor explicitly preserved are not carried into the server's 500. An invalid field added
+by a callback is still rejected; it is never sanitized or sent. The no-callback path takes no header
+snapshot. The optional `preservedHeaders` argument copies policy header keys at registration and
+retains their final values or absence after all callbacks succeed, even if unchanged. This covers
+SecurityHeaders' no-clobber framing and CORS' early cache-selection `Vary` and accepted grants,
+without a middleware-specific list in Hosting or copying unrelated application fields.
+
+Compared with 10.0.0-preview.1, the contract is additive. Callback exceptions abort the exchange;
+security/CORS fields now stage at commit, including error responses caught by an outer boundary.
+Custom servers must publish and drive the contract for middleware that requires it. Clearing the
+default interceptor list also removes this feature; SecurityHeaders and CORS fail explicitly when
+they need it. Web.Server is already an App.Web member and the Hosting closure gains no assembly.
+
 ## Default interceptors
 
 ### What it is
@@ -1603,7 +1637,7 @@ registration verbs, and certificate files load through the BCL's
 When the web host composes the `HttpConnectionListener`, it installs the
 default interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
-There are four, in this order:
+There are five, in this order:
 
 1. `Http.RequestLimits`' request-limits interceptor (`HttpRequestLimits.CreateInterceptor()`, request
    scope), in slot 0, described below.
@@ -1622,6 +1656,12 @@ There are four, in this order:
    `IWebClientFaultFeature`, so the pipeline can tell a malformed or over-limit request body from an
    application defect. The feature reads the control on each access, because the transport latches the
    status while the pipeline runs.
+
+5. `WebResponseStartingInterceptor` (#1156), which publishes `IWebResponseStartingFeature` and
+   runs callbacks through the transport's existing once-per-exchange head hook. Unlike the conditional
+   interceptors above, it joins every response, including plain GETs. This adds a response sink and
+   control to each exchange; the earlier fast-path measurements below describe the first four defaults
+   without this fifth interceptor.
 
 `Web.Hosting` references `Http.ProtocolUpgrade` and `Http.ExtendedConnect` for this, references
 outside the Web area (COHRES002 is about same-area references); both are private members of every
@@ -1653,7 +1693,7 @@ have a body and installs the feature there. The transport decides that from the 
 a `CONNECT`. Until #1378 the interceptor read the HTTP/1.1 framing fields itself and left HTTP/2 and HTTP/3
 alone, since their controls reported nothing; an HTTP/2 or HTTP/3 request need not declare its body, so
 those fields cannot answer it there. Its head hook allocates nothing, so a request without a body (a plain
-`GET`) keeps the fast path and carries no feature. `HostFeatureCount` stays four because the feature is not on
+`GET`) keeps the fast path and carries no feature. `HostFeatureCount` counts no client-fault slot because the feature is not on
 every exchange; when it overflows the rounded capacity, the collection grows as an unsized one would
 (see "Rounding: an overflow never costs more than not presizing"), so it never costs more than not
 presizing. That is not spare room: the rounding leaves a free slot only when the count falls between

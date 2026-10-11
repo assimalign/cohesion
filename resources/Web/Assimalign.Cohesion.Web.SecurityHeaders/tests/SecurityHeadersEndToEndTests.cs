@@ -174,11 +174,33 @@ public class SecurityHeadersEndToEndTests
     public async Task UseSecurityHeaders_AheadOfErrorHandling_ShouldCoverErrorResponse()
     {
         // Arrange — the boundary clears the faulted response's headers before writing its problem; the
-        // headers are staged after that, on the way out.
+        // headers are staged after that, when the server commits the head.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
         factory.Application.UseSecurityHeaders();
         factory.Application.UseErrorHandling();
+        factory.Application.Use((context, next) => throw new InvalidOperationException("Deliberate handler fault."));
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
+        Header(response, "X-Frame-Options").ShouldBe("DENY");
+        Header(response, "Content-Security-Policy").ShouldBe("frame-ancestors 'none'");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Coverage: An outer exception boundary should preserve the starting callback")]
+    public async Task UseSecurityHeaders_AfterErrorHandling_ShouldCoverErrorResponse()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Application.UseErrorHandling();
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => throw new InvalidOperationException("Deliberate handler fault."));
         using HttpClient client = factory.CreateClient();
 
@@ -456,11 +478,13 @@ public class SecurityHeadersEndToEndTests
         using HttpClient client = factory.CreateClient();
 
         // Act
-        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+        Func<Task> act = async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+        };
 
-        // Assert
-        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
-        Header(response, "Content-Security-Policy").ShouldBeNull();
+        // Assert — a throwing starting callback faults the exchange before any response head is sent.
+        await act.ShouldThrowAsync<HttpRequestException>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Streaming: A streamed response should carry the headers on its committed head")]
@@ -485,6 +509,87 @@ public class SecurityHeadersEndToEndTests
         Header(response, "X-Frame-Options").ShouldBe("DENY");
         Header(response, "Content-Security-Policy").ShouldBe("frame-ancestors 'none'");
         Header(response, "Cross-Origin-Opener-Policy").ShouldBe("same-origin");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Streaming: A refused head should retain security headers on a buffered replacement")]
+    public async Task UseSecurityHeaders_RefusedStreamedHead_ShouldPreserveHeadersOnReplacement()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory(streaming: true);
+        factory.Application.UseSecurityHeaders();
+        int calls = 0;
+        HttpErrorCode? refusalCode = null;
+        factory.Application.Use(async (context, next) =>
+        {
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                calls++;
+                return Task.CompletedTask;
+            }, null);
+            context.Response.Headers[new HttpHeaderKey("X-Invalid")] = "bad\r\nfield";
+            HttpException refused = await Should.ThrowAsync<HttpException>(
+                () => context.Response.Streaming.StartAsync(context.RequestCancelled).AsTask());
+            refusalCode = refused.Code;
+            context.Response.Headers.Clear();
+            await WriteTextAsync(context, "replacement");
+            context.Response.StatusCode = CohesionHttpStatusCode.BadGateway;
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+
+        // Assert
+        refusalCode.ShouldBe(HttpErrorCode.InvalidResponseField);
+        response.StatusCode.ShouldBe(NetHttpStatusCode.BadGateway);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("replacement");
+        Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
+        Header(response, "X-Frame-Options").ShouldBe("DENY");
+        Header(response, "Content-Security-Policy").ShouldBe("frame-ancestors 'none'");
+        Header(response, "X-Invalid").ShouldBeNull();
+        calls.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Coverage: A refused head should retain an accepted application framing policy on the server replacement")]
+    [InlineData(WebApplicationTestProtocol.Http1)]
+    [InlineData(WebApplicationTestProtocol.Http2)]
+    public async Task UseSecurityHeaders_RefusedHeadWithApplicationFraming_ShouldPreserveNoClobberPolicyOnServerReplacement(WebApplicationTestProtocol protocol)
+    {
+        // Arrange — the application owns framing, so the starting callback accepts SAMEORIGIN
+        // without changing it and omits its default frame-ancestors policy. The server's
+        // replacement must retain that accepted field as well as the protections the callback adds.
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
+        factory.Application.UseSecurityHeaders();
+        int calls = 0;
+        factory.Application.Use((context, next) =>
+        {
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                calls++;
+                return Task.CompletedTask;
+            }, null);
+            context.Response.StatusCode = CohesionHttpStatusCode.Found;
+            context.Response.Headers[HttpHeaderKey.XFrameOptions] = "SAMEORIGIN";
+            context.Response.Headers[new HttpHeaderKey("X-Invalid")] = "bad\r\nfield";
+            return Task.CompletedTask;
+        });
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+
+        // Assert
+        response.Version.Major.ShouldBe(protocol == WebApplicationTestProtocol.Http2 ? 2 : 1);
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        (await response.Content.ReadAsByteArrayAsync(cancellation.Token)).ShouldBeEmpty();
+        Header(response, "X-Frame-Options").ShouldBe("SAMEORIGIN");
+        Header(response, "Content-Security-Policy").ShouldBeNull();
+        Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
+        Header(response, "Referrer-Policy").ShouldBe("strict-origin-when-cross-origin");
+        Header(response, "X-Invalid").ShouldBeNull();
+        calls.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Streaming: Buffered and streamed HTTP/2 responses should both carry the headers")]

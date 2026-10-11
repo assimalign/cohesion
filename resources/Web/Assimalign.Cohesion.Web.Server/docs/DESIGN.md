@@ -4,8 +4,8 @@
 
 `Assimalign.Cohesion.Web.Server` holds the per-exchange contracts the Web server publishes:
 `IWebRequestIdFeature`, `IWebRequestActivityFeature`, `IWebResponseCompletionFeature`,
-`IWebServerDrainFeature` and `IWebClientFaultFeature`. It is a contracts-only feature package.
-The default server in `Web.Hosting` implements and installs all five; feature libraries and
+`IWebServerDrainFeature`, `IWebClientFaultFeature` and `IWebResponseStartingFeature`. It is a contracts-only feature package.
+The default server in `Web.Hosting` implements and installs all six; feature libraries and
 applications read them.
 
 The package exists because of two rules that point in opposite directions:
@@ -28,27 +28,28 @@ The packages that publish, declare and read the contracts, with every arrow mean
 flowchart LR
     Server["Assimalign.Cohesion.Web.Server"] --> Root["Assimalign.Cohesion.Web"]
     Server --> Http["Assimalign.Cohesion.Http"]
-    Hosting["Web.Hosting — publishes all five"] --> Server
+    Hosting["Web.Hosting — publishes all six"] --> Server
     WebSockets["Web.WebSockets — reads the drain"] --> Server
     Resources["Web.Hosting.Resources — reads completion"] --> Server
     Logging["Web.Diagnostics — reads correlation and client fault"] --> Server
     Faults["Web.ErrorHandling, Web.Compression — read the client fault"] --> Server
+    Headers["Web.SecurityHeaders and Web.Cors — stage headers"] --> Server
     WebSockets -.->|"COHRES001 ✗"| Hosting
 ```
 
 | Package | Role | Reference to `Web.Server` |
 |---|---|---|
-| `Assimalign.Cohesion.Web.Server` | declares the five contracts | — |
-| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all five (the client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
+| `Assimalign.Cohesion.Web.Server` | declares the six contracts | — |
+| `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all six (the client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | defers a control-plane stop until its `202` is written | project reference |
 | `Assimalign.Cohesion.Web.Diagnostics` | reads the request id and server activity for correlation; logs a client fault at the configured level with the status sent | project reference |
 | `Assimalign.Cohesion.Web.ErrorHandling` | skips `OnException` and the `500` problem for a client fault | project reference |
+| `Assimalign.Cohesion.Web.SecurityHeaders` and `Assimalign.Cohesion.Web.Cors` | stage policy headers immediately before commit | project reference |
 | `Assimalign.Cohesion.Web.Compression` | leaves the transport's framing failure under a decoder unrelabeled | project reference |
 
 The dotted edge is the reference COHRES001 rejects: a feature library may never reference the
-runtime module, which is why the contracts could not move into `Web.Hosting`. No other Web library
-reads these contracts today. `Web.Diagnostics` correlates its logs with the server's request id
+runtime module, which is why the contracts could not move into `Web.Hosting`. `Web.Diagnostics` correlates its logs with the server's request id
 and the activity published on this exchange (#1297).
 
 ## Why the contracts share one package
@@ -89,6 +90,31 @@ implementations need no new member. HTTP logging's behavior changes: its `span.i
 the exchange's server span, rather than the inbound parent span, and its `trace.id` reads the
 server's request-id feature even without an inbound header (decision 15).
 
+**`IWebResponseStartingFeature`** registers `OnStarting(Func<object?, Task>, object?)` callbacks
+before final-head serialization (#1156). They run once in reverse registration order, whether the
+response is buffered or streamed. The default server delegates timing to the transport's existing
+head-commit hook, shared by HTTP/1.1, HTTP/2 and HTTP/3; it maintains no second started flag.
+Registration after callbacks begin or the response starts throws. Callbacks stage status/headers;
+they must not recursively start, write, complete or take over the response. A callback failure stops
+the list and aborts the exchange before its head is written, even if middleware catches the failure.
+Protocol takeover and transport-generated rejection responses retain the transport hook's exclusions.
+
+If `InvalidResponseField` refuses the head, callbacks never rerun. Their added/changed header values
+and removals are reapplied before the server sends an unstarted buffered replacement, including its
+own 500 after discarding application headers. Replacement status/body remain the replacement's;
+invalid callback fields are refused again. The optional `preservedHeaders` registration argument
+also retains final values or absence of policy headers that a callback accepts without changing.
+Keys are copied at registration and values are captured after all callbacks succeed. SecurityHeaders
+declares its policy fields (including no-clobber framing), and CORS declares its grant fields and
+early cache-selection `Vary`. The server has no middleware-specific header list. An outer error
+boundary no longer removes their fields. A custom server must honor this lifetime to use those
+middleware; they throw explicitly when the feature is missing. There is no DI dependency.
+
+**Compatibility with 10.0.0-preview.1.** The new contract adds no members to existing interfaces.
+Header staging now happens at head commit and survives an outer boundary; custom servers using
+SecurityHeaders or CORS must provide the hook. Web.Server is already public in App.Web, so their
+new references require no framework-member change.
+
 **`IWebResponseCompletionFeature`** is the response-transmission seam. The default server installs
 it on every exchange and invokes callbacks in registration order after writing the response to the
 transport. Callback failures are isolated: every callback runs even if a preceding one throws,
@@ -128,8 +154,8 @@ content-length, or a malformed trailer section, resets the stream rather than dr
 feature reports `400` for it. The value is read through on each access, because the fault is latched while the pipeline
 runs.
 
-**Every contract is optional.** A custom `IWebApplicationServer` may omit any of them, so every
-reader handles an absent feature: the control plane falls back to a direct stop, WebSockets has
+**A custom server chooses which contracts it supports.** A custom `IWebApplicationServer` may omit any of them, so each
+reader handles an absent feature (SecurityHeaders and CORS require starting and throw without it): the control plane falls back to a direct stop, WebSockets has
 no drain-time close, so a socket ends by its own close or by the exchange's cancellation, and a
 reader of the client fault treats an absent feature as no fault reported. HTTP logging omits
 trace correlation when the request-id feature is absent and omits the span id when there is no

@@ -7,6 +7,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 	</ItemGroup>
 </Project>

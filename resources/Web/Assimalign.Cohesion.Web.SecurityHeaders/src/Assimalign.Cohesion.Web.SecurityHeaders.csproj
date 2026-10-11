@@ -7,10 +7,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<!-- IHttpResponseStreamingFeature is how a streamed response commits its head. The middleware
-		     stages the headers just before that commit and reads HasStarted as the response-started
-		     signal, the same wire-commit truth ErrorHandling, RequestTimeouts and RateLimiting read.
-		     Outside the Web area, so unconstrained by the hosting-isolation rule. -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 	</ItemGroup>
 </Project>
