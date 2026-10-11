@@ -66,6 +66,16 @@ interface since phase 2 of the concrete-types program
 
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
+### Recovery cancellation (49a)
+
+`TransactionRecovery.Analyze`, `TransactionCoordinator.AnalyzeAndScrub` and `CompleteRecovery`
+accept cancellation. Journal classification and the batched record scrub observe it between
+records; checkpoint entry observes it before its atomic checkpoint. Scrub commits may precede
+cancellation. A caller must preserve the classification journal until all recovery stages
+complete: SQL marks an interrupted open `RecoveryInterrupted` before closing the unpublished
+storage, preventing its normal shutdown checkpoint. The next open reclassifies and finishes
+scrubbing instead of treating the remaining abandoned stamps as committed.
+
 `TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. The split mirrors PostgreSQL's virtual-txid vs. xid distinction and keeps the public session surface free of MVCC mechanics.
 
 ## Snapshot semantics

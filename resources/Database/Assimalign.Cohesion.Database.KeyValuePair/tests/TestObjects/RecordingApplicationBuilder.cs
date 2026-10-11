@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
@@ -28,11 +29,12 @@ internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 
     public DatabaseEngine MaterializeEngine() => Factories[0](new EmptyContext());
 
-    public IDatabaseApplication Build()
+    public IDatabaseApplication Build(CancellationToken cancellationToken = default)
         => throw new NotSupportedException("The hosting layer builds applications.");
 
     private sealed class EmptyContext : IDatabaseApplicationContext
     {
+        public CancellationToken BuildCancellationToken => default;
         public IReadOnlyList<DatabaseEngine> Engines => [];
         public IReadOnlyList<DatabaseServer> Servers => [];
         public DatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);

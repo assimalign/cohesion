@@ -255,20 +255,23 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     /// <summary>Consumes this builder and constructs one complete application.</summary>
+    /// <param name="cancellationToken">Cancels construction, recovery and inline provisioning through engine factories.</param>
     /// <returns>The application owning factory products and borrowing supplied instances.</returns>
     /// <exception cref="InvalidOperationException">Build was already attempted or composition is invalid.</exception>
     /// <exception cref="AggregateException">Construction and compensation both failed.</exception>
+    /// <exception cref="OperationCanceledException">Construction was canceled; owned products were disposed.</exception>
     /// <remarks>
     /// Build runs each owned engine factory synchronously, in registration order. A SQL engine's
     /// factory provisions its declared databases here: open, recovery and schema migration run
     /// inside Build with no timeout (<see cref="DatabaseApplicationOptions.StartupTimeout"/> bounds
-    /// service start only) and no cancellation (owner decision 49 of 2026-10-09). A factory's
+    /// service start only). Decision 49a passes the caller's cancellation token and defers
+    /// data-scaling SQL migration steps to the engine's worker. A factory's
     /// exception, for example a SQL schema migration failure led by <c>COHSQLP001</c> to
     /// <c>COHSQLP005</c>, propagates unchanged after the products built before it are disposed.
     /// </remarks>
-    public DatabaseApplication Build()
+    public DatabaseApplication Build(CancellationToken cancellationToken = default)
     {
-        DatabaseApplicationComposition composition = BuildComposition();
+        DatabaseApplicationComposition composition = BuildComposition(cancellationToken);
         try
         {
             var application = new DatabaseApplication(composition);
@@ -292,7 +295,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
     }
 
-    internal DatabaseApplicationComposition BuildComposition()
+    internal DatabaseApplicationComposition BuildComposition(CancellationToken cancellationToken = default)
     {
         if (Interlocked.Exchange(ref _buildAttempted, 1) != 0)
         {
@@ -310,6 +313,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ownership.Infrastructure.Add(Configuration);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Disposed after the provider, so the services it disposes can still log. The provider
             // is built first, so service registration closes whatever fails later.
             var loggerFactory = (LoggerFactory)Logging.Build();
@@ -322,7 +326,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             // must not leave the snapshot disagreeing with the context.
             options.Environment = Environment.Name;
             options.ContentRootPath = Environment.ContentRootPath;
-            var context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory);
+            var context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory, cancellationToken);
 
             var products = new HashSet<object>(ReferenceEqualityComparer.Instance);
             var engines = new List<DatabaseEngine>(_engines.Count);
@@ -348,6 +352,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             foreach (var registration in _engines)
             {
                 DatabaseEngine engine;
+                cancellationToken.ThrowIfCancellationRequested();
                 if (registration.Instance is { } borrowed)
                 {
                     engine = borrowed;
@@ -376,6 +381,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 engines.Add(engine);
                 context.FreezeRegistries(engines, []);
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             foreach (DatabaseEngine engine in engines)
             {
@@ -623,7 +630,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
-    IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
+    IDatabaseApplication IDatabaseApplicationBuilder.Build(CancellationToken cancellationToken) => Build(cancellationToken);
 
     private static object? CreateConnectionFactory(string protocol) => string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase) ? new TcpConnectionFactory() : null;
 

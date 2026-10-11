@@ -1,5 +1,18 @@
 # Assimalign.Cohesion.Database — Design
 
+## Provisioning observations and construction cancellation (49a)
+
+The root base instance exposes a nullable immutable `DatabaseProvisioningProgress` through
+`Provisioning`, with a protected publisher for its model. The observation names the model's
+operation/object, step position/total, running state, row counts where available and failure code.
+It expresses database state, not a schema-execution capability. Hosting consumes it without
+knowing the model; the root worker inventory includes `DatabaseEngineWorkerKind.Provisioning`.
+
+`IDatabaseApplicationBuilder.Build(CancellationToken)` propagates construction cancellation through
+`IDatabaseApplicationContext.BuildCancellationToken` to owned engine factories. This token is
+supplied by the caller because the host runtime's shutdown lifecycle begins after construction.
+There is no added interface, model-shaped root member, or default interface implementation.
+
 The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
 Everything here must be true for *all five* data models — anything model-specific
 belongs in a model package. The root's job is to make engines substitutable at the

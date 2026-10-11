@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
@@ -93,9 +94,18 @@ internal static class StorageRecovery
         StorageJournal journal,
         bool forceDurable,
         IReadOnlySet<long>? protectedPages = null,
-        int cacheCapacity = Storage.DefaultBufferPoolCapacity)
+        int cacheCapacity = Storage.DefaultBufferPoolCapacity,
+        CancellationToken cancellationToken = default)
     {
-        IEnumerable<JournalRecord> ReadRecords() => journal.ReadSequential();
+        IEnumerable<JournalRecord> ReadRecords()
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var record in journal.ReadSequential())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return record;
+            }
+        }
 
         // Pass 1: which transactions committed, the highest sequence, and the checkpoint the
         // journal starts at.

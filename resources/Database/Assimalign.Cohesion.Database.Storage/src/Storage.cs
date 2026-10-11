@@ -1114,8 +1114,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// newest slot's checkpoint anchor chain does not verify.
     /// </exception>
     /// <exception cref="StorageIOException">The file is not a Cohesion storage file.</exception>
-    protected unsafe void OpenExisting(bool checkpointOnOpen = true)
+    /// <param name="cancellationToken">Cancels journal replay and page reconstruction between records.</param>
+    /// <exception cref="OperationCanceledException">Recovery was canceled; the journal remains available for retry.</exception>
+    protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var header = ReadHeader(out long[] anchor, out List<long> anchorChain);
         NameComponents();
         _checkpointActives = anchor;
@@ -1126,6 +1129,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // committed changes after it, which also overwrites the stolen writes of transactions that
         // never committed (#1253).
         AttachJournal();
+        _journal!.EnsureInitialized(cancellationToken);
         bool journalHadRecords = _journal!.LastLsn > 0;
 
         // LSNs resume above both the journal's last record and the floor the newest header
@@ -1140,7 +1144,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         long recoveryStarted = StorageEventSource.Log.RecoveryStart(this);
         try
         {
-            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity);
+            var recovery = StorageRecovery.Run(Data, _journal, RequiresDurableFlush, protectedPages, _bufferPool.Capacity, cancellationToken);
 
             // Sequence assignment resumes above both the journal's highest observed
             // sequence and the header floor persisted at the last checkpoint — the
@@ -1172,6 +1176,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             for (long i = 1; i < pageCount; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 Data.ReadPageHeader((PageId)i, pageHeader);
 
                 PageType type;

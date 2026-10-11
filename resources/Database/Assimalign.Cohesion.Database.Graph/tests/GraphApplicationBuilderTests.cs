@@ -259,11 +259,12 @@ public sealed class GraphApplicationBuilderTests
             Factory = factory;
             return this;
         }
-        public IDatabaseApplication Build() => throw new NotSupportedException();
+        public IDatabaseApplication Build(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class RecordingContext : IDatabaseApplicationContext
     {
+        public CancellationToken BuildCancellationToken => default;
         public IReadOnlyList<DatabaseEngine> Engines => [];
         public IReadOnlyList<DatabaseServer> Servers => [];
         public DatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);

@@ -38,12 +38,14 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         HostEnvironment environment,
         ConfigurationManager configuration,
         ServiceProvider services,
-        LoggerFactory loggerFactory)
+        LoggerFactory loggerFactory,
+        CancellationToken buildCancellationToken = default)
     {
         Configuration = configuration;
         Services = services;
         _environment = environment;
-        BuildContext = new DatabaseApplicationBuildContext(environment, configuration, services, loggerFactory);
+        BuildContext = new DatabaseApplicationBuildContext(environment, configuration, services, loggerFactory, buildCancellationToken);
+        BuildCancellationToken = buildCancellationToken;
         _engines = [];
         _servers = [];
     }
@@ -66,6 +68,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
     /// <inheritdoc />
     public IReadOnlyList<DatabaseEngine> Engines => _engines;
+
+    /// <inheritdoc />
+    public CancellationToken BuildCancellationToken { get; }
 
     /// <inheritdoc />
     public IReadOnlyList<DatabaseServer> Servers => _servers;
@@ -124,7 +129,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// the reopen attempts to the <c>Assimalign.Cohesion.Database.Hosting</c> event source, which
     /// the application's logging forwards (<c>docs/EVENT_SOURCES.md</c>).
     /// </remarks>
-    public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
         var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
         var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
@@ -154,6 +159,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         var failingWorkers = new List<string>();
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
+        var provisioningDatabases = new List<string>();
         int workerCount = 0;
 
         // The databases the application is reopening: a failed reopen left them closed, so their
@@ -217,6 +223,38 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             // report.
             if (state != EngineState.Disposed)
             {
+                int databaseIndex = 0;
+                await foreach (var database in engine.GetDatabasesAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    if (database.Provisioning is not { } progress)
+                    {
+                        continue;
+                    }
+                    string progressPrefix = $"engine.{engineIndex}.provisioning.{databaseIndex++}";
+                    data[$"{progressPrefix}.database"] = database.Name.ToString();
+                    data[$"{progressPrefix}.operation"] = progress.Operation;
+                    data[$"{progressPrefix}.object"] = progress.ObjectName;
+                    data[$"{progressPrefix}.position"] = progress.Position;
+                    data[$"{progressPrefix}.stepCount"] = progress.StepCount;
+                    data[$"{progressPrefix}.state"] = progress.FailureCode is not null ? "Failed" : progress.IsRunning ? "Running" : "Pending";
+                    if (progress.RowsProcessed is { } processed)
+                    {
+                        data[$"{progressPrefix}.rowsProcessed"] = processed;
+                    }
+                    if (progress.TotalRows is { } total)
+                    {
+                        data[$"{progressPrefix}.totalRows"] = total;
+                    }
+                    if (progress.FailureCode is { } code)
+                    {
+                        data[$"{progressPrefix}.failureCode"] = code;
+                    }
+                    provisioningDatabases.Add($"{engine.Name}/{database.Name}: {progress.Operation} {progress.ObjectName}, " +
+                        $"step {progress.Position} of {progress.StepCount}, " +
+                        (progress.RowsProcessed is { } rows ? $"{rows} of {progress.TotalRows?.ToString() ?? "unknown"} rows" : "pending") +
+                        (progress.FailureCode is { } failed ? $", {failed}" : string.Empty));
+                }
+                data[$"engine.{engineIndex}.provisioningDatabaseCount"] = databaseIndex;
                 List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];
                 foreach (ReopenState pending in reopening)
                 {
@@ -270,6 +308,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
         data["workerCount"] = workerCount;
         data["offlineDatabaseCount"] = offlineDatabases.Count;
+        data["provisioningDatabaseCount"] = provisioningDatabases.Count;
         data["reopenOfflineDatabases"] = ReopenService is not null;
 
         HealthContribution contribution;
@@ -302,6 +341,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
             contribution = HealthContribution.Degraded(description.ToString(), data);
         }
+        else if (provisioningDatabases.Count > 0)
+        {
+            contribution = HealthContribution.Degraded($"Provisioning databases: {string.Join("; ", provisioningDatabases)}.", data);
+        }
         else
         {
             contribution = HealthContribution.Healthy(
@@ -309,7 +352,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 data);
         }
 
-        return ValueTask.FromResult(contribution);
+        return contribution;
     }
 
     /// <summary>

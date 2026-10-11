@@ -1,5 +1,18 @@
 # Assimalign.Cohesion.Database.Storage — Design
 
+## Cancelable recovery and engine fences (49a)
+
+The protected `OpenExisting` accepts cancellation, observed during journal initialization, each
+physical recovery pass and the page-header scan. Replay retains its journal until completion,
+so cancellation can safely replay from the same records on the next open. Atomic checkpoint work
+is allowed to finish once entered. SQL also passes cancellation through its logical transaction
+classification and scrub. If that scrub is interrupted after committing a batch, it fences the
+unpublished storage with `StorageOfflineCause.RecoveryInterrupted` before disposal; ordinary
+shutdown must not checkpoint away the remaining classification records. The original cancellation
+or recovery error still reaches the caller. `ProvisioningFailure` is the other new engine cause:
+a deferred migration failed and its database must remain offline until reopened. Both reuse the
+existing offline write fence and add no new events or on-disk storage format.
+
 The physical layer of the Data Platform kernel (area architecture:
 [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). This document records the design
 decisions that shape the storage model; the program-level requirements it satisfies are

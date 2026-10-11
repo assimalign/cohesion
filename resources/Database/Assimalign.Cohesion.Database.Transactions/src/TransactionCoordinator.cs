@@ -601,18 +601,21 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <see cref="CompleteRecovery"/> — the checkpoint must come last because
     /// the truncation destroys the lifecycle records classification reads.
     /// </summary>
+    /// <param name="cancellationToken">Cancels classification and scrub between records.</param>
     /// <returns>The recovery classification, for the caller's own scrub passes.</returns>
+    /// <exception cref="OperationCanceledException">Recovery was interrupted; the caller must retain its classification journal.</exception>
     /// <remarks>
     /// The classification also covers the sequences the storage's checkpoint anchor names
     /// (<see cref="Storage.CheckpointActiveTransactions"/>): the writers a checkpoint
     /// truncated the begin records of, which stay classified when the checkpoint's own
     /// record was lost.
     /// </remarks>
-    public TransactionRecoveryPlan AnalyzeAndScrub()
+    public TransactionRecoveryPlan AnalyzeAndScrub(CancellationToken cancellationToken = default)
     {
-        var plan = TransactionRecovery.Analyze(_journal, _storage.CheckpointActiveTransactions);
+        cancellationToken.ThrowIfCancellationRequested();
+        var plan = TransactionRecovery.Analyze(_journal, _storage.CheckpointActiveTransactions, cancellationToken);
 
-        _versionStore.ScrubRecovered(plan.Aborted);
+        _versionStore.ScrubRecovered(plan.Aborted, cancellationToken);
 
         // Anchor the prune bound above every pre-restart stamp: the fresh
         // manager has assigned nothing yet, so its idle oldest-active bound
@@ -629,8 +632,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// open-time checkpoint deferred by the engine. No
     /// logical transactions exist yet, so the active list is empty.
     /// </summary>
-    public void CompleteRecovery()
+    /// <param name="cancellationToken">Observed before entering the atomic checkpoint.</param>
+    /// <exception cref="OperationCanceledException">The token was canceled before the checkpoint.</exception>
+    public void CompleteRecovery(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _storage.Checkpoint();
     }
 

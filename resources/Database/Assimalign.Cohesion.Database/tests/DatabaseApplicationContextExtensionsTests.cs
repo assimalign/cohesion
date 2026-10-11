@@ -118,6 +118,7 @@ public class DatabaseApplicationContextExtensionsTests
             _engines = engines;
         }
 
+        public CancellationToken BuildCancellationToken => default;
         public IReadOnlyList<DatabaseEngine> Engines => _engines;
 
         public IReadOnlyList<DatabaseServer> Servers => [];

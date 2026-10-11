@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -43,13 +44,16 @@ public interface IDatabaseApplicationBuilder
     IDatabaseApplicationBuilder AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine> factory);
 
     /// <summary>Consumes this builder and publishes a complete, disposable application.</summary>
+    /// <param name="cancellationToken">Cancels construction, recovery and inline provisioning.</param>
     /// <returns>The application with live engines and listeners awaiting Start.</returns>
     /// <exception cref="InvalidOperationException">Build was already attempted or composition is invalid.</exception>
+    /// <exception cref="OperationCanceledException">Construction was canceled and owned products were disposed.</exception>
     /// <remarks>
     /// Build runs each owned engine factory synchronously, in registration order. A model's factory
     /// can do I/O here: a SQL engine's opens, recovers and provisions the databases its builder
-    /// declares, with no timeout and no cancellation (owner decision 49 of 2026-10-09). A factory's
+    /// declares, with no timeout, observing this token through the application context (49a).
+    /// Data-scaling SQL steps run on the engine's provisioning worker. A factory's
     /// exception propagates after the products built before it are disposed.
     /// </remarks>
-    IDatabaseApplication Build();
+    IDatabaseApplication Build(CancellationToken cancellationToken = default);
 }

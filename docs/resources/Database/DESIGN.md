@@ -8,6 +8,22 @@ This document is the durable architecture record for the multi-model OLTP databa
 
 ## 1. What we are building
 
+### Provisioning state and Build cancellation (decision 49a)
+
+`DatabaseInstance.Provisioning` is an immutable, nullable `DatabaseProvisioningProgress` snapshot
+published by a model through a protected setter. Its vocabulary is operation, object name,
+position/total, running state, optional processed/total rows and failure code. It carries no SQL
+schema capability, executor, or interface. Hosting can report Degraded while an engine performs
+deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` worker. Failures
+use the existing database-offline channel; `StorageOfflineCause.ProvisioningFailure` identifies
+failed migration work, and `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
+
+The existing application Build contract accepts a caller cancellation token, exposed to factories
+on `IDatabaseApplicationContext.BuildCancellationToken`. SQL's composition passes it to its Build.
+The runtime host shutdown lifecycle starts later, so the application caller supplies the token
+when it needs shutdown during construction. This adds no model reference to Hosting, new public
+interface, friend assembly grant, capability flag, or implementation-only public bridge.
+
 A **multi-model OLTP database platform**: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — that share one durable kernel (storage, write-ahead logging, transactions, indexing) while keeping model semantics explicit and separate. Inspirations: PostgreSQL (relational engine discipline, MVCC, WAL), RavenDB (document model, embedded + server duality), Neo4j (native graph storage and traversal).
 
 The platform runs in two modes, matching Cohesion's identity:

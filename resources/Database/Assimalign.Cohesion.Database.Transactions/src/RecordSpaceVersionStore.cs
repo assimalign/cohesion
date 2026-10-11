@@ -348,7 +348,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     /// </summary>
     /// <param name="aborted">The sequences the journal cannot prove committed.</param>
     /// <returns>The number of versions physically undone.</returns>
-    internal long ScrubRecovered(IReadOnlySet<TransactionSequence> aborted)
+    internal long ScrubRecovered(IReadOnlySet<TransactionSequence> aborted, CancellationToken cancellationToken = default)
     {
         var mutations = new List<(PageId PageId, int SlotIndex, byte[]? Restored)>(MutationBatchSize);
         var prunable = new List<PrunableVersion>();
@@ -382,6 +382,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
         {
             while (iterator.MoveNext())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var unit = iterator.Current;
 
                 if (unit.Data.Length < RecordVersionStamp.HeaderSize)

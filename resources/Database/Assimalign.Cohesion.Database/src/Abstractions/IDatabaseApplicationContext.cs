@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -13,6 +14,9 @@ namespace Assimalign.Cohesion.Database;
 /// </remarks>
 public interface IDatabaseApplicationContext
 {
+    /// <summary>Gets the caller's cancellation token for application construction and engine recovery.</summary>
+    CancellationToken BuildCancellationToken { get; }
+
     /// <summary>Gets all distinct engines in composition order.</summary>
     IReadOnlyList<DatabaseEngine> Engines { get; }
 

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// </para>
 /// <para>
 /// The first three causes are the storage's own: a device operation failed in a way no retry may
-/// repair, and the cause tells an operator which one to investigate. The other five are its
+/// repair, and the cause tells an operator which one to investigate. The remaining causes are its
 /// engine's: a background worker's work on the storage kept failing past the engine's window
 /// (owner decision 42 of 2026-10-07), or the journal grew past the engine's hard cap while its
 /// checkpoints kept failing, so the engine gave up on the storage (owner decision 25 of
@@ -80,4 +80,10 @@ public enum StorageOfflineCause : byte
     /// kept failing (owner decision 25): the engine stopped it before the journal filled the device.
     /// </summary>
     JournalSizeLimit,
+
+    /// <summary>A required provisioning step failed; recovery must precede a retry.</summary>
+    ProvisioningFailure,
+
+    /// <summary>Open-time recovery was interrupted; closing must retain the journal for retry.</summary>
+    RecoveryInterrupted,
 }
