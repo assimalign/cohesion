@@ -57,7 +57,7 @@ The module composes the root bases, not interfaces: the area deleted every root 
 - **Health and the reopen service read every engine's offline cause** through `DatabaseEngine.GetOfflineError`; until phase 6 they did so only for an engine of the root base (`engine is DatabaseEngine`), and an engine of the interface alone reported none. The reopen service reads the engine's state without guarding it, because the base folds `State` from its own fields and never throws.
 - **Health no longer describes a worker whose loop failed.** It reported an engine `Faulted` with no failing worker as a registered worker whose loop escaped, "degraded until it is disposed". Only a worker that implemented the deleted `IDatabaseEngineWorker` without the base could do that; every worker derives from `DatabaseEngineWorker`, whose loop lets nothing escape. An engine reported `Faulted` with no failing worker (a worker that recovered between the two reads) is still degraded, with the generic description. Every worker now reports `failureCount`; only a failing one adds `consecutiveFailures` and `fault`.
 - **The engine base enforces the nested-server rules.** `DatabaseEngine.AttachServer` refuses a server that fronts another engine and a server attached twice, so Build no longer checks a nested server against its owner or against the other nested servers. Every server reaches the application through its engine since B1 deleted the borrowed `Options.Servers` input.
-- **The test doubles derive from the bases** and implement only the protected cores (`RecordingEngine`, `RecordingServer`, `RecordingEngineWorker`, the controlled-start servers; the `ProvisioningEngine` double left with the provisioner in B1). A double's state is the base's: a test faults an engine by failing a pass of its worker, and disposes it to make it `Disposed`; a double's server stop core runs once, and never after a failed start, so a host's rollback of a server whose start failed reaches no core.
+- **The test doubles derive from the bases** and implement only the protected cores (`RecordingEngine`, `RecordingServer`, `RecordingEngineWorker`, the controlled-start servers; the `ProvisioningEngine` double left with the provisioner in B1). Their create core accepts the root's non-generic `object? creationState` parameter, passed explicitly by the common create NVI; null selects model defaults. A double's state is the base's: a test faults an engine by failing a pass of its worker, and disposes it to make it `Disposed`; a double's server stop core runs once, and never after a failed start, so a host's rollback of a server whose start failed reaches no core.
 
 ## Nested servers and ownership
 
@@ -129,7 +129,7 @@ The module raises its own events through one internal event source, named for th
 | 7 | `ApplicationBuilt` | Informational | `hostId`, `engines`, `servers`, `services` (non-server hosted services) |
 | 8 | `ApplicationStarting` | Informational | `hostId` |
 | 9 | `ApplicationStarted` | Informational | `hostId`, `durationMilliseconds` |
-| 10 | `ApplicationStartFailed` (reserved) | — | Pending the shared host failure-hook boundary decision; no event is declared or emitted. |
+| 10 | `ApplicationStartFailed` | Error | `hostId`, `exceptionType`, `exceptionMessage` |
 | 11 | `ApplicationStopped` | Informational | `hostId`, `durationMilliseconds` |
 | 12 | `ApplicationDisposeFailed` | Error | `hostId`, `failureCount`, `exceptionType`, `exceptionMessage` (first collected failure) |
 | 13 | `ResourceCommandHandled` | Informational | `kind`, `key`, `operation` (`Execute` or `Delete`) |
@@ -138,7 +138,12 @@ The module raises its own events through one internal event source, named for th
 
 Batch D part 1 reserves **16-17** for `HealthDegraded` and `HealthRestored` after decision 49a.
 Build reports only after the resource integration hook succeeds. The existing host lifecycle hooks
-report actual start/stop transitions; repeated start/stop no-ops write nothing. Start and stop
+report actual start/stop transitions; repeated start/stop no-ops write nothing. The shared host's
+`OnStartFailedAsync` hook (#1441, owner decision 2026-10-11) writes event 10 once per failed start,
+after rollback and the host's transition to `Failed`, on direct start and complete-run paths. The
+hook receives the failure the caller receives, including a normalized startup timeout; it preserves
+that failure. A failure of the hook itself is attached by the shared host to the original exception's
+`Data` when writable (see the [Hosting DESIGN](../../../../libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md)), so diagnostics cannot replace the startup failure. Start and stop
 measure their own operation only while an Informational listener is attached; a listener attaching
 mid-operation sees zero duration. These are lifetime names, not EventSource Start/Stop activity pairs.
 Disposal reports its aggregate once, before throwing it; repeated disposal shares that same result.
@@ -149,6 +154,9 @@ return their original core directly; only enabled tracing enters a pooled async 
 Admin start/stop/disposal exceptions are recorded and rethrown unchanged; expected cancellation is
 silent. Disabled lifecycle, command and admin hooks allocate zero bytes and read no timestamp.
 
-No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, commands, disposal and admin bind failure, exact payloads, and disabled-write allocations.
+No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, commands, disposal and admin bind failure, exact payloads, and disabled-write allocations. The disabled-cost checks also drive real Execute
+and Delete command dispatch against an in-memory SQL engine, comparing each warmed path with its
+unchanged core baseline using the minimum of three allocation rounds. The internal handler exposes
+those cores only within its assembly and to its owning tests; no public diagnostics seam is added.
 
 The public static `CreateBuilder(name)` on each model engine provides deferred standalone composition and the bridge for hosting-aware engine factories that also need nested servers. It returns the model's sealed engine builder (`SqlDatabaseEngineBuilder`, …), whose `AddServer` and `AddWorker` factories receive the model's engine typed, since phase 4 of the concrete-types plan, and whose `Options` and `AddDatabase` are the same on every model since B3. Configuration and service reads still occur in the hosting callback, outside the model package.

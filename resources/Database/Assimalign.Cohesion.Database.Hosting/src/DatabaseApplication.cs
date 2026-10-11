@@ -86,6 +86,13 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     }
 
     /// <inheritdoc />
+    protected override Task OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)
+    {
+        DatabaseHostingEventSource.Log.ApplicationStartFailed(_context, exception);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     protected override Task OnStoppingAsync(CancellationToken cancellationToken = default)
     {
         _stoppingTimestamp = DatabaseHostingEventSource.Log.LifecycleTimestamp();

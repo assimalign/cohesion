@@ -158,6 +158,15 @@ internal sealed class DatabaseHostingEventSource : EventSource
     }
 
     [NonEvent]
+    public void ApplicationStartFailed(DatabaseApplicationContext context, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            ApplicationStartFailed(context.HostId.ToString(), exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+        }
+    }
+
+    [NonEvent]
     public void ApplicationStopped(DatabaseApplicationContext context, long started)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
@@ -240,7 +249,9 @@ internal sealed class DatabaseHostingEventSource : EventSource
     private void ApplicationStarted(string hostId, double durationMilliseconds)
         => WriteEvent(9, hostId, durationMilliseconds);
 
-    // Id 10 is reserved pending a startup-failure hook in the shared host (plan section 5).
+    [Event(10, Level = EventLevel.Error, Message = "Database application {0} failed to start: {1}: {2}")]
+    private void ApplicationStartFailed(string hostId, string exceptionType, string exceptionMessage)
+        => WriteEvent(10, hostId, exceptionType, exceptionMessage);
 
     [Event(11, Level = EventLevel.Informational, Message = "Database application {0} stopped in {1} ms.")]
     private void ApplicationStopped(string hostId, double durationMilliseconds)

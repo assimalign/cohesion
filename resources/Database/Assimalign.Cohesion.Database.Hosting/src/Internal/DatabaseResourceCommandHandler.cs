@@ -45,7 +45,8 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
     }
 
-    private async ValueTask<ReadOnlyMemory<byte>> ExecuteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
+    // Internal so the owning tests can measure the untraced dispatch baseline without copying it.
+    internal async ValueTask<ReadOnlyMemory<byte>> ExecuteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using JsonDocument document = JsonDocument.Parse(command.Payload);
@@ -119,7 +120,8 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
     }
 
-    private async ValueTask<ReadOnlyMemory<byte>> DeleteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
+    // Internal for the same allocation baseline as ExecuteCoreAsync.
+    internal async ValueTask<ReadOnlyMemory<byte>> DeleteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
     {
         using JsonDocument document = JsonDocument.Parse(command.Payload);
         string database = Required(document.RootElement, "database");
