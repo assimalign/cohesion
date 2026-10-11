@@ -22,6 +22,11 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     , IEqualityOperators<FileSystemPath, FileSystemPath, bool>
     , IAdditionOperators<FileSystemPath, FileSystemPath, FileSystemPath>
 {
+    // "\\?\" and "\\.\"
+    private const int devicePrefixLength = 4;
+    // "UNC\" after a device prefix
+    private const int deviceUncLength = 4;
+
     private readonly string _value;
 
     private FileSystemPath(string value)
@@ -552,15 +557,54 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     /// <summary>
     /// Parses a string value into a <see cref="FileSystemPath"/>.
     /// </summary>
-    /// <param name="value"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="ArgumentNullException"></exception>
+    /// <remarks>
+    /// A Win32 extended-length (<c>\\?\</c>) or device (<c>\\.\</c>) prefix is stripped when it
+    /// names a drive or a UNC share: <c>\\?\C:\a</c> parses as <c>C:/a</c> and
+    /// <c>\\?\UNC\server\share\a</c> as <c>//server/share/a</c>. Any other device target, such as
+    /// a volume GUID or a named pipe, is rejected.
+    /// </remarks>
+    /// <param name="input">The path to parse.</param>
+    /// <returns>The normalized path.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="input"/> contains an illegal character (including <c>?</c> outside a device
+    /// prefix), a parent-directory segment inside the path, or a device prefix that names neither a
+    /// drive nor a UNC share.
+    /// </exception>
     public static FileSystemPath Parse(ReadOnlySpan<char> input)
     {
         if (input.IsEmpty)
         {
             return Empty;
+        }
+
+        // Offset of the parsed span within the caller's input, so error indexes point at the
+        // caller's character after a device prefix is stripped.
+        int offset = 0;
+        bool isUnc = false;
+
+        if (HasDevicePrefix(input))
+        {
+            var target = input.Slice(devicePrefixLength);
+
+            if (HasDriveLetter(target) && (target.Length == 2 || IsPathSeparator(target[2])))
+            {
+                // "\\?\C:\a" -> "C:\a"
+                input = target;
+                offset = devicePrefixLength;
+            }
+            else if (HasDeviceUncTarget(target))
+            {
+                // "\\?\UNC\server\share" -> "\server\share", re-rooted as "//" below.
+                input = target.Slice(deviceUncLength - 1);
+                offset = devicePrefixLength + deviceUncLength - 1;
+                isUnc = true;
+            }
+            else
+            {
+                throw new ArgumentException(
+                    "Device paths are supported only when they name a drive ('\\\\?\\C:\\') or a UNC share ('\\\\?\\UNC\\server\\share').",
+                    nameof(input));
+            }
         }
 
         // Check if only root was passed
@@ -595,8 +639,14 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
             start += 2;
         }
 
+        // A UNC share reached through "\\?\UNC\" keeps its '//' root
+        if (isUnc)
+        {
+            shift = 2;
+        }
+
         // Check if path has valid drive, if so disregard shift
-        if (HasDriveLetter(input))
+        else if (HasDriveLetter(input))
         {
             shift = 0;
         }
@@ -698,7 +748,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
 
             ArgumentException.ThrowIf(
                 !IsValidPathChar(current),
-                $"Path contains illegal character '{current}' at index {i}.");
+                $"Path contains illegal character '{current}' at index {i + offset}.");
 
             previous = current;
 
@@ -1038,151 +1088,3 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     //    }
     //}
 }
-
-
-// STRATEGY 1
-//unsafe
-//{
-//    fixed (char* value = path)
-//    {
-//        var span = new Span<char>(value + start, ((end + 1) - start) + shift);
-
-//        for (int i = 0; i < shift; i++)
-//        {
-//            span[i] = Separator;
-//        }
-
-//        char previous = default;
-
-//        // Let's convert all backward slashes to forward slashes
-//        for (int i = start; i < (end + 1); i++)
-//        {
-//            var current = path[i];
-
-//            // Convert back slash to forward slash
-//            if (current == '\\')
-//            {
-//                current = Separator;
-//            }
-
-//            // Check for excessive slashes
-//            if (IsSeparator(previous) && IsSeparator(current))
-//            {
-//                reduce++;
-//                continue;
-//            }
-
-//            // Check for parent directory globing ".."
-//            if (IsDot(previous) && IsDot(current))
-//            {
-//                // scenario 1: ".." was only passed
-//                // scenario 2: "{directory}/../{directory}"
-//                // scenario 3: "../{directory}"
-//                // scenario 4: "/{directory}/.."
-
-//                var s = i - 2;
-//                var e = i + 1;
-
-//                var hasStart = (s > 0 && IsSeparator(path[s])) || s < 0;
-//                var hasEnd = (e < end && IsSeparator(path[e])) || e > end;
-
-//                if ((s < 0 && e > end) || (hasStart && hasEnd))
-//                {
-//                    ThrowHelper.ThrowArgumentException("Parent directory globing is not allowed - \"..\". The value must be an absolute or relative path.");
-//                }
-//            }
-//            if (!IsValidPathChar(current))
-//            {
-//                ThrowHelper.ThrowArgumentException($"Path contains illegal character '{current}' at index {i}.");
-//            }
-
-//            previous = current;
-
-//            span[(i + shift) - start - reduce] = current;
-//        }
-
-//        if (reduce > 0)
-//        {
-//            span = span.Slice(0, span.Length - reduce);
-//        }
-
-//        return new FileSystemPath(span.ToString());
-//    }
-//}
-
-
-// STRATEGY 2
-//string? error = null!;
-
-//var value = string.Create(((end + 1) - start) + shift, path, (span, value) =>
-//{
-//    for (int i = 0; i < shift; i++)
-//    {
-//        span[i] = Separator;
-//    }
-
-//    char previous = default;
-
-//    // Let's convert all backward slashes to forward slashes
-//    for (int i = start; i < (end + 1); i++)
-//    {
-//        var current = value[i];
-
-//        // Convert back slash to forward slash
-//        if (current == '\\')
-//        {
-//            current = Separator;
-//        }
-
-//        // Check for excessive slashes
-//        if (IsSeparator(previous) && IsSeparator(current))
-//        {
-//            reduce++;
-//            continue;
-//        }
-
-//        // Check for parent directory globbing ".."
-//        if (IsDot(previous) && IsDot(current))
-//        {
-//            // scenario 1: ".." was only passed
-//            // scenario 2: "{directory}/../{directory}"
-//            // scenario 3: "../{directory}"
-//            // scenario 4: "/{directory}/.."
-
-//            var s = i - 2;
-//            var e = i + 1;
-
-//            var hasStart = (s > 0 && IsSeparator(value[s])) || s < 0;
-//            var hasEnd = (e < end && IsSeparator(value[e])) || e > end;
-
-//            if ((s < 0 && e > end) || (hasStart && hasEnd))
-//            {
-//                error = "Parent directory globbing is not allowed - \"..\". The value must be an absolute or relative path.";
-//                break;
-//            }
-//        }
-//        if (!IsValidPathChar(current))
-//        {
-//            error = $"Path contains illegal character '{current}' at index {i}.";
-//            break;
-//        }
-
-//        previous = current;
-
-//        span[(i + shift) - start - reduce] = current;
-//    }
-//});
-
-//if (error is not null)
-//{
-//    ThrowHelper.ThrowArgumentException(error);
-//}
-
-//if (reduce > 0)
-//{
-//    return new FileSystemPath(value.Remove(value.Length - reduce));
-//}
-//else
-//{
-//    return new FileSystemPath(value);
-//}

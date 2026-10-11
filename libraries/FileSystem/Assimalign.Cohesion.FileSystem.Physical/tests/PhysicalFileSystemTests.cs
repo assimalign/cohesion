@@ -3,6 +3,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
+using Shouldly;
+
 namespace Assimalign.Cohesion.FileSystem.Physical.Tests;
 
 using Xunit;
@@ -197,6 +199,43 @@ public class PhysicalFileSystemTests
 
             Assert.NotNull(file);
             Assert.True(File.Exists(Path.Combine(root, "test.txt")));
+        }
+        finally
+        {
+            Cleanup(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [PhysicalFileSystem] - CreateFile: Should round-trip a file under an extended-length root past MAX_PATH")]
+    public void CreateFile_ExtendedLengthRootPastMaxPath_ShouldRoundTrip()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // "\\?\" is the Win32 extended-length prefix; other platforms have no such form.
+        }
+
+        // Arrange
+        var root = TestRoot;
+        var deepRoot = Path.Combine([root, .. Enumerable.Repeat("directory-segment-0123456789", 9)]);
+        Directory.CreateDirectory(deepRoot);
+        var fileSystem = CreateFileSystem(@"\\?\" + deepRoot);
+        var payload = Encoding.UTF8.GetBytes("extended-length");
+
+        try
+        {
+            // Act
+            var file = fileSystem.CreateFile("payload.txt");
+            using (var stream = file.Open(FileMode.Open, FileAccess.Write))
+            {
+                stream.Write(payload);
+            }
+
+            // Assert
+            var fullPath = Path.Combine(deepRoot, "payload.txt");
+            fullPath.Length.ShouldBeGreaterThan(260);
+            fileSystem.RootDirectory.Path.ToString().ShouldNotStartWith("//?/");
+            File.ReadAllBytes(fullPath).ShouldBe(payload);
+            fileSystem.Exists("payload.txt").ShouldBeTrue();
         }
         finally
         {
