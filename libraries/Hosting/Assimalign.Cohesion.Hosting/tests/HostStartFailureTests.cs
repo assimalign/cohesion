@@ -462,4 +462,69 @@ public class HostStartFailureTests
             TaskScheduler.UnobservedTaskException -= onUnobserved;
         }
     }
+
+    [Fact(DisplayName = displayPrefix + "A cancellation callback fault is observed even when reporting never settles")]
+    public async Task StartAsync_WhenReportingCancellationThrows_ShouldObserveFaultWithoutWaitingForHook()
+    {
+        // Arrange
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackFault = new WeakReference(null);
+        string callbackMessage = Guid.NewGuid().ToString();
+        int unobserved = 0;
+        int callbacks = 0;
+        var expectedFailure = new InvalidOperationException("startup failed");
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new DelegateHostService(_ => throw expectedFailure));
+        await using IHost host = new HookRecordingHost(options, _ => { }, (_, token) =>
+        {
+            token.Register(() =>
+            {
+                Interlocked.Increment(ref callbacks);
+                try
+                {
+                    var failure = new InvalidOperationException(callbackMessage);
+                    callbackFault.Target = failure;
+                    throw failure;
+                }
+                finally { cancelled.SetResult(); }
+            });
+            return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+        });
+        EventHandler<UnobservedTaskExceptionEventArgs> onUnobserved = (_, args) =>
+        {
+            if (args.Exception.GetBaseException().Message == callbackMessage)
+            {
+                Interlocked.Increment(ref unobserved);
+                args.SetObserved();
+            }
+        };
+        TaskScheduler.UnobservedTaskException += onUnobserved;
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<InvalidOperationException>(
+                () => host.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)));
+            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var watch = Stopwatch.StartNew();
+            int collections = 0;
+            do
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                collections++;
+                await Task.Delay(10, CancellationToken.None);
+                watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+            } while (watch.Elapsed < TimeSpan.FromMilliseconds(200) || callbackFault.IsAlive);
+
+            // Assert
+            failure.ShouldBeSameAs(expectedFailure);
+            callbacks.ShouldBe(1);
+            collections.ShouldBeGreaterThan(0);
+            unobserved.ShouldBe(0);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= onUnobserved;
+        }
+    }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -254,18 +254,24 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         }
         finally
         {
-            // CancelAsync isolates even a blocking/throwing cancellation callback. WhenAll
-            // observes each task's fault as it settles, including a late reporting fault.
-            // Its continuation observes the aggregate and owns disposal; no late completion
+            // CancelAsync isolates even a blocking/throwing cancellation callback. Observe
+            // each task independently: WhenAll alone retains faults until BOTH settle, so
+            // a never-completing hook could leave a cancellation fault unobserved at collection.
+            // The final continuation owns disposal; no late completion
             // mutates the returned exception or a newer attempt's diagnostic record.
             Task cancellation = reporting.IsCompleted ? Task.CompletedTask : reportingCancellation.CancelAsync();
-            _ = Task.WhenAll(reporting, cancellation).ContinueWith(static (completed, state) =>
+            _ = Task.WhenAll(ObserveStartFailureTaskAsync(reporting), ObserveStartFailureTaskAsync(cancellation))
+                .ContinueWith(static (completed, state) =>
             {
                 _ = completed.Exception;
                 ((CancellationTokenSource)state!).Dispose();
             }, reportingCancellation, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
     }
+
+    private static Task ObserveStartFailureTaskAsync(Task task)
+        => task.ContinueWith(static completed => { _ = completed.Exception; }, CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     async Task IHost.StopAsync(CancellationToken cancellationToken)
     {

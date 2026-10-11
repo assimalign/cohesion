@@ -55,7 +55,8 @@ when the next start is accepted. This avoids introducing a second public failure
 the general host to one application's diagnostics transport.
 
 An abandoned hook cannot be forcibly stopped. Its task and any asynchronous cancellation callback
-faults are observed when they settle; the cancellation source is disposed after both settle. A late
+faults are observed independently when they settle, even if the other task never completes;
+the cancellation source is disposed after both settle. A late
 fault does not mutate the exception already returned or the diagnostic record of a later start.
 Overrides should cooperate with cancellation and avoid touching resources that the caller may
 dispose after `StartAsync` returns. Reporting is best-effort; the original failure remains authoritative.
