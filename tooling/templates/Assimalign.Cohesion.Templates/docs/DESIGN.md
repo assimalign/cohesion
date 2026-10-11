@@ -202,8 +202,10 @@ names it fails. The standalone template reads
 their generated `Resource` accessors.
 
 This changes composition only; it adds no ApplicationModel declarations, manifests or resource
-control planes. Template acceptance explicitly builds all five emitted Database programs because
-resources-only changes do not trigger the Templates workflow, and it starts the generated
+control planes. Template acceptance explicitly builds all five emitted Database programs (the
+Templates workflow runs when Database.Hosting, Database.Sql, Database.Sql.Schema, Database.Client,
+Database.Sql.Client or libraries/Connections change, so an API change those programs compose
+reaches template CI), and it starts the generated
 `cohesion-database` once: a self-contained build for the host RID runs with a free loopback
 endpoint, and the test waits for the server to accept a connection, which happens only after the
 engine's build has provisioned `customers`. It then writes a full `Customer` row and reads it back

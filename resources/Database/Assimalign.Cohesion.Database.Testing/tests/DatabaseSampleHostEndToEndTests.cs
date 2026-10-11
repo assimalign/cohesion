@@ -420,10 +420,12 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
             .Trim()
             .ShouldBe(compiled.Hash);
 
-        // The SQL engine keeps a database as <root>/<database>/<database>.dat; the gateway
+        // The SQL engine keeps a database in <root>/<lower-case name>/, its data file set named for
+        // the model (sql.dat) beside its catalog set (catalog.dat) since #1392; the gateway
         // materialized the data mount somewhere under its state directory.
         string dataFile = Directory
-            .EnumerateFiles(_statePath, "sample.dat", SearchOption.AllDirectories)
+            .EnumerateFiles(_statePath, "sql.dat", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(Path.GetDirectoryName(path)) == "sample")
             .ShouldHaveSingleItem();
         string rootPath = Path.GetDirectoryName(Path.GetDirectoryName(dataFile)!)!;
 

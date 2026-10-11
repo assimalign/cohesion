@@ -98,9 +98,11 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
   declaration in `StudioEngines.Create` first.
 - A declared `studio` database that cannot be opened or provisioned (an older catalog format after
   a format bump, or a `studio` SQL database written before P7 whose `notes` table the declaration
-  did not create) leaves its model running without it. Delete `<data root>\<model>\studio` (and
-  `studio.catalog` beside it, for SQL and Key-Value), or pick another data root on the Workspace
-  page and Apply, to get the declared database back.
+  did not create, or a SQL or Key-Value `studio` directory written before #1392, which holds
+  `studio.dat` instead of `sql.dat`/`keyvalue.dat` and is refused as a leftover) leaves its model
+  running without it. Delete `<data root>\<model>\studio`, which holds the database's catalog set
+  (`catalog.dat`/`.log`/`.bak`) too, and any `studio.catalog` directory an older run left beside
+  it, or pick another data root on the Workspace page and Apply, to get the declared database back.
 - No statement parameters; no cancellation of a statement the engine does not observe.
 - Graph index creation is only `GraphSchema.CreateIndexAsync`, not exposed here (GQL has no index DDL).
 - Settings are not persisted between runs.

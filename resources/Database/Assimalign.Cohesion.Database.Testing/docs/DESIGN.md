@@ -155,5 +155,7 @@ provisioned; the program disposes the application. The standalone template still
 uses its ordinary local data path.
 This migration changes composition only; it adds no ApplicationModel declarations,
 manifests or resource control planes. Template acceptance explicitly builds all
-five emitted Database programs because resources-only changes do not trigger the
-Templates workflow.
+five emitted Database programs; the Templates workflow runs when Database.Hosting,
+Database.Sql, Database.Sql.Schema, Database.Client, Database.Sql.Client or
+libraries/Connections change (`tooling-templates.yml`), so an API change those
+programs compose reaches template CI.

@@ -371,7 +371,8 @@ public sealed class KeyValueEngineDeclarationTests : IDisposable
         string root = Path.Combine(_rootPath, "root");
         string victim = Path.Combine(_rootPath, "victim");
         Directory.CreateDirectory(victim);
-        await File.WriteAllTextAsync(Path.Combine(_rootPath, "victim.dat"), "kept", TestTimeout.Token());
+        string victimData = Path.Combine(victim, "keyvalue.dat");
+        await File.WriteAllTextAsync(victimData, "kept", TestTimeout.Token());
         await using var engine = KeyValueDatabaseEngine.Create("escape", new KeyValueDatabaseEngineOptions { RootPath = root });
 
         // Act
@@ -386,6 +387,7 @@ public sealed class KeyValueEngineDeclarationTests : IDisposable
         drop.Message.ShouldStartWith("A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots,", Case.Sensitive);
         Directory.Exists(Path.Combine(_rootPath, "escaped")).ShouldBeFalse();
         Directory.Exists(victim).ShouldBeTrue();
+        File.Exists(victimData).ShouldBeTrue();
     }
 
     private KeyValueDatabaseEngineBuilder CreateBuilder(string name)
