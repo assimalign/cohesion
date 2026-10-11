@@ -378,6 +378,63 @@ public sealed class ConfigurationStoreProtocolTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Health: an exception a custom control plane reports in data is absent from the unauthenticated probes")]
+    public async Task HealthProbes_WhenCustomControlPlaneReportsExceptionInData_ShouldNotPublishIt()
+    {
+        // Arrange — a custom IResourceControlPlane stands in for the default one and passes an exception in
+        // a contribution's data through unfiltered, so the endpoint's writer is the only thing between the
+        // exception and the probe.
+        const string message = "Failed to connect to db-primary.corp.internal:5432.";
+        string dataPath = CreateTemporaryDirectory();
+        try
+        {
+            using var identity = new TestBootstrapIdentity();
+            Uri endpoint = ConfigurationStoreTestHost.GetEndpoint();
+            ResourceContext context = ConfigurationStoreTestHost.CreateContext(
+                endpoint,
+                dataPath,
+                identity.Issue("configuration"),
+                identity.PublicKey);
+            using IDisposable scope = ResourceRuntime.CreateScope(context);
+            ConfigurationStoreTestHost.DecorateControlPlane(inner => new ExceptionDataControlPlane(
+                inner,
+                "database",
+                HealthContribution.Unhealthy(
+                    "database unreachable",
+                    new Dictionary<string, object> { ["error"] = new InvalidOperationException(message) })));
+            await using ConfigurationStoreApplication application = ConfigurationStoreTestHost.CreateBuilder().Build();
+            await ((IHost)application).StartAsync();
+
+            try
+            {
+                using var client = new HttpClient();
+                foreach (string path in new[] { "/healthz", "/readyz", "/livez" })
+                {
+                    // Act
+                    using HttpResponseMessage response = await client.GetAsync(new Uri(endpoint, path));
+                    string body = await response.Content.ReadAsStringAsync();
+
+                    // Assert
+                    response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, path);
+                    body.ShouldNotContain(message, Case.Insensitive, path);
+                    body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive, path);
+                    using JsonDocument document = JsonDocument.Parse(body);
+                    document.RootElement.GetProperty("contributions").GetProperty("database")
+                        .GetProperty("data").GetProperty("error").GetString()
+                        .ShouldBe("The contributor reported an exception.", path);
+                }
+            }
+            finally
+            {
+                await ((IHost)application).StopAsync();
+            }
+        }
+        finally
+        {
+            Directory.Delete(dataPath, recursive: true);
+        }
+    }
+
     private static string CreateTemporaryDirectory()
     {
         string path = Path.Combine(
@@ -402,5 +459,66 @@ public sealed class ConfigurationStoreProtocolTests
 
         public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(_contribution);
+    }
+
+    /// <summary>
+    /// A custom control plane over the default one that adds one contribution to every health, readiness
+    /// and liveness report as it is, without the default control plane's filtering.
+    /// </summary>
+    private sealed class ExceptionDataControlPlane : IResourceControlPlane
+    {
+        private readonly IResourceControlPlane _inner;
+        private readonly string _name;
+        private readonly HealthContribution _contribution;
+
+        internal ExceptionDataControlPlane(IResourceControlPlane inner, string name, HealthContribution contribution)
+        {
+            _inner = inner;
+            _name = name;
+            _contribution = contribution;
+        }
+
+        public IReadOnlyList<string> AcceptedCommandKinds => _inner.AcceptedCommandKinds;
+
+        public IReadOnlyList<Assimalign.Cohesion.Hosting.Resources.ResourceCommand> Commands => _inner.Commands;
+
+        public IReadOnlyDictionary<string, Uri> ObservedEndpoints => _inner.ObservedEndpoints;
+
+        public void RegisterCommandHandler(IResourceCommandHandler handler) => _inner.RegisterCommandHandler(handler);
+
+        public void AddHealthContributor(IHealthContributor contributor) => _inner.AddHealthContributor(contributor);
+
+        public void ObserveEndpoint(string name, Uri address) => _inner.ObserveEndpoint(name, address);
+
+        public async ValueTask<ResourceHealthReport> CheckHealthAsync(CancellationToken cancellationToken = default) =>
+            AddContribution(await _inner.CheckHealthAsync(cancellationToken));
+
+        public async ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default) =>
+            AddContribution(await _inner.CheckReadinessAsync(cancellationToken));
+
+        public async ValueTask<ResourceHealthReport> CheckLivenessAsync(CancellationToken cancellationToken = default) =>
+            AddContribution(await _inner.CheckLivenessAsync(cancellationToken));
+
+        public void AttachHost(IHost host) => _inner.AttachHost(host);
+
+        public ValueTask RequestStopAsync(CancellationToken cancellationToken = default) => _inner.RequestStopAsync(cancellationToken);
+
+        public ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(
+            Assimalign.Cohesion.Hosting.Resources.ResourceCommand command,
+            CancellationToken cancellationToken = default) => _inner.ExecuteCommandAsync(command, cancellationToken);
+
+        public ValueTask<ReadOnlyMemory<byte>> DeleteCommandAsync(
+            Assimalign.Cohesion.Hosting.Resources.ResourceCommand command,
+            CancellationToken cancellationToken = default) => _inner.DeleteCommandAsync(command, cancellationToken);
+
+        private ResourceHealthReport AddContribution(ResourceHealthReport report)
+        {
+            var contributions = new Dictionary<string, HealthContribution>(report.Contributions, StringComparer.Ordinal)
+            {
+                [_name] = _contribution,
+            };
+
+            return new ResourceHealthReport(HealthStatus.Unhealthy, contributions);
+        }
     }
 }

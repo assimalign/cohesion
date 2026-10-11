@@ -333,6 +333,14 @@ public static class ResourceControlPlaneMiddleware
             case decimal number:
                 writer.WriteNumberValue(number);
                 break;
+            case Exception:
+                // Defense in depth: the default control plane already replaces an exception in a
+                // contribution's data, but a custom IResourceControlPlane reaches this writer unfiltered,
+                // and an exception's ToString() is its type, message, inner exceptions and stack trace,
+                // published on probes that are never authorized. The text is
+                // DefaultResourceControlPlane.ContributorExceptionDataValue (Hosting.Resources, internal).
+                writer.WriteStringValue("The contributor reported an exception.");
+                break;
             default:
                 writer.WriteStringValue(value.ToString());
                 break;

@@ -187,6 +187,41 @@ public sealed class ResourceControlPlaneTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Health: an exception a custom control plane reports in data is absent from the unauthenticated probes")]
+    public async Task HealthProbes_WhenCustomControlPlaneReportsExceptionInData_ShouldNotPublishIt()
+    {
+        // Arrange — a custom IResourceControlPlane passes its report through unfiltered, unlike the default
+        // one, so the writer is the only thing between the exception and the probe.
+        const string message = "Failed to connect to db-primary.corp.internal:5432.";
+        await using var factory = new WebApplicationTestFactory();
+        var plane = new ReportingControlPlane(new ResourceHealthReport(
+            HealthStatus.Unhealthy,
+            new Dictionary<string, HealthContribution>
+            {
+                ["database"] = HealthContribution.Unhealthy(
+                    "database unreachable",
+                    new Dictionary<string, object> { ["error"] = new InvalidOperationException(message) }),
+            }));
+        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, new ResourceContext(), () => true);
+        using HttpClient client = factory.CreateClient();
+
+        foreach (string path in new[] { "/healthz", "/readyz", "/livez" })
+        {
+            // Act
+            using HttpResponseMessage response = await client.GetAsync(path, CancellationToken.None);
+            string body = await response.Content.ReadAsStringAsync();
+
+            // Assert
+            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, path);
+            body.ShouldNotContain(message, Case.Insensitive, path);
+            body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive, path);
+            using JsonDocument document = JsonDocument.Parse(body);
+            document.RootElement.GetProperty("contributions").GetProperty("database")
+                .GetProperty("data").GetProperty("error").GetString()
+                .ShouldBe("The contributor reported an exception.", path);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Bootstrap: verifies signature, identity, audience, lifetime, and rotation")]
     public async Task Authorization_WithManagedContext_ShouldVerifyJwtClaims()
     {
@@ -315,6 +350,32 @@ public sealed class ResourceControlPlaneTests
 
         public string Name => _name;
         public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) => ValueTask.FromException<HealthContribution>(_exception);
+    }
+
+    /// <summary>
+    /// A custom control plane that reports one fixed report for health, readiness and liveness, and
+    /// serves nothing else.
+    /// </summary>
+    private sealed class ReportingControlPlane : IResourceControlPlane
+    {
+        private readonly ResourceHealthReport _report;
+
+        public ReportingControlPlane(ResourceHealthReport report)
+        {
+            _report = report;
+        }
+
+        public IReadOnlyList<string> AcceptedCommandKinds => Array.Empty<string>();
+        public IReadOnlyDictionary<string, Uri> ObservedEndpoints => new Dictionary<string, Uri>();
+        public void AddHealthContributor(IHealthContributor contributor) { }
+        public void ObserveEndpoint(string name, Uri address) { }
+        public ValueTask<ResourceHealthReport> CheckHealthAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(_report);
+        public ValueTask<ResourceHealthReport> CheckReadinessAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(_report);
+        public ValueTask<ResourceHealthReport> CheckLivenessAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(_report);
+        public void AttachHost(IHost host) { }
+        public ValueTask RequestStopAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+        public ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class EchoHandler : IResourceCommandHandler

@@ -92,8 +92,11 @@ The same holds for an exception a contributor returns rather than throws. An `Ex
 writers serialize a data value they do not recognize through `ToString()`, and an exception's is
 its type, message, inner exceptions and stack trace, so through 10.0.0-preview.1 the probes
 published all of it. The control plane is the one place every shipped area's report passes, so the
-check lives here rather than in each writer, as it does for a thrown exception. Descriptions and
-string data are the contributor's own text and are reported as returned.
+check lives here, as it does for a thrown exception. The two area writers that serialize data
+(Web.Hosting.Resources' `ResourceControlPlaneMiddleware` and ConfigurationStore.Hosting's endpoint)
+also write the same text for an `Exception` value, as defense in depth for a custom
+`IResourceControlPlane`, whose report reaches them unfiltered. Descriptions and string data are the
+contributor's own text and are reported as returned.
 
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
