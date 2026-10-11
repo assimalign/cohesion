@@ -240,6 +240,42 @@ public sealed class SqlDeferredProvisioningTests
         engine.DeclaredDatabases.Single().Result.ShouldNotBeNull().OperationCount.ShouldBe(4);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: canceling Build after a pending reservation releases the worker transaction and retries on restart")]
+    public async Task BuildAsync_CanceledAfterReservation_ShouldRetainPendingAndConverge()
+    {
+        // Arrange: the second declaration cancels Build after the first reserved its table.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var cancellation = new CancellationTokenSource();
+        SqlSchema desired = Desired();
+        var storage = await SeedAsync(new CrashCaptureSqlStorageStrategy(), null, desired, timeout.Token);
+        int steps = 0;
+        var builder = Builder(storage);
+        builder.AddWorker(engine =>
+        {
+            engine.BeforeProvisioning = database =>
+            {
+                database.SchemaProvisioner.BeforeDeferredStep = (_, _) => Interlocked.Increment(ref steps);
+                if (database.Name.ToString() == "stop")
+                {
+                    cancellation.Cancel();
+                }
+            };
+            return new RecordingWorker(engine);
+        });
+
+        // Act: the queue is canceled before the construction barrier releases it.
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await builder.AddDatabase(desired).AddDatabase("stop").BuildAsync(cancellation.Token));
+        steps.ShouldBe(0);
+        await using var retry = await Builder(storage.CaptureDurableImages()).AddDatabase(desired).BuildAsync(timeout.Token);
+        var database = await retry.OpenDatabaseAsync("pending", timeout.Token);
+        await WaitDoneAsync(database, timeout.Token);
+
+        // Assert
+        database.Catalog.PendingMigration.ShouldBeNull();
+        database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(desired.Compile().Hash);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - 49a: cancellation after a recovery scrub batch retains classification and the next Build converges")]
     public async Task BuildAsync_CanceledDuringRecovery_ShouldKeepJournalAndConverge()
     {
