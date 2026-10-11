@@ -332,9 +332,17 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 }
             }
 
-            // No stream is accepted after this point, so the request-stream count is final; a
-            // graceful close waits for it before it announces its GOAWAY boundary.
+            // No request stream is accepted for processing after this point, so the request-stream count
+            // is final; a graceful close waits for it before it announces its GOAWAY boundary.
             _acceptStopped.TrySetResult();
+
+            // RFC 9114 §5.2 — a request stream the peer opens from here on is at or above that boundary.
+            // It is still accepted, until the connection closes, and refused at once, so its client can
+            // retry it elsewhere instead of waiting for the connection to close (#1306).
+            if (!_connection.ConnectionClosed.IsCancellationRequested)
+            {
+                _ = RejectLateStreamsAsync();
+            }
 
             // Release the loop's own reference, then wait for every stream it started: a head still
             // being read may yet publish a context, so the channel stays open until they are done.
@@ -360,6 +368,63 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         if (Interlocked.Decrement(ref _pendingStreamWork) == 0)
         {
             _streamWorkDrained.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Accepts the streams the peer opens once the accept loop has stopped — after a graceful close
+    /// (<see cref="BeginGracefulClose"/>) or the end of the receive enumeration — until the connection
+    /// closes (#1306). Never throws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RFC 9114 §5.2 — the request-stream count is final, so every request stream accepted here is at or
+    /// above the boundary the <c>GOAWAY</c> announces: the server SHOULD cancel it. It is reset with
+    /// <c>H3_REQUEST_REJECTED</c> (§4.1.1: not processed, so the client may retry it), without being read,
+    /// counted toward the boundary, keeping the connection busy, or reaching the receive enumeration. Its
+    /// wire ID continues the client-bidi numbering past the boundary, and keys the QPACK Stream
+    /// Cancellation that the reset owes when the dynamic table is enabled (RFC 9204 §4.4.2).
+    /// </para>
+    /// <para>
+    /// A unidirectional stream is typed and handled as before, against the connection's lifetime rather
+    /// than the ended enumeration's, so a late critical stream is still read and its rules still hold.
+    /// </para>
+    /// </remarks>
+    private async Task RejectLateStreamsAsync()
+    {
+        CancellationToken cancellationToken = _connection.ConnectionClosed;
+        long rejectedCount = 0;
+
+        while (true)
+        {
+            StreamAcceptOutcome accept = await TryAcceptInboundAsync(cancellationToken).ConfigureAwait(false);
+
+            if (accept.TerminateConnection)
+            {
+                return;
+            }
+
+            if (accept.StreamConnection is not { } streamConnection)
+            {
+                continue;
+            }
+
+            if (streamConnection.Direction == ConnectionDirection.Bidirectional)
+            {
+                long requestStreamId = 4L * (Volatile.Read(ref _processedRequestStreamCount) + rejectedCount++);
+
+                ResetRequestStream(
+                    streamConnection,
+                    requestStreamId,
+                    new Http3StreamException(
+                        Http3ErrorCode.RequestRejected,
+                        "The request stream was opened after the connection began to close (RFC 9114 §5.2)."),
+                    abandonsReading: true);
+            }
+            else
+            {
+                _ = HandleUnidirectionalStreamAsync(streamConnection, cancellationToken);
+            }
         }
     }
 
@@ -592,8 +657,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// streams until they finish.
     /// </para>
     /// <para>
-    /// A request stream the peer opens after this point is not accepted. It is closed with the QUIC
-    /// connection; the GOAWAY tells the peer it was not processed.
+    /// A request stream the peer opens after this point is at or above that boundary, so it is never
+    /// dispatched: until the connection closes, each one is accepted and reset with
+    /// <c>H3_REQUEST_REJECTED</c> at once, unread, and the peer may retry it on another connection
+    /// (RFC 9114 §5.2, #1306).
     /// </para>
     /// </remarks>
     public override void BeginGracefulClose()
@@ -877,9 +944,26 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             using CancellationTokenSource streamCancellation =
                 CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
 
+            await HandleUnidirectionalStreamAsync(streamConnection, streamCancellation.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndStreamWork();
+        }
+    }
+
+    /// <summary>
+    /// Types and handles one peer-initiated unidirectional stream, turning a connection-level violation into
+    /// a connection error. <paramref name="cancellationToken"/> bounds only the stream's opening — its type
+    /// and, for a control stream, its SETTINGS frame; the drains that follow live as long as the connection.
+    /// </summary>
+    private async Task HandleUnidirectionalStreamAsync(IConnection streamConnection, CancellationToken cancellationToken)
+    {
+        try
+        {
             Http3ConnectionException? violation = await TryHandleUnidirectionalStreamAsync(
                 streamConnection,
-                streamCancellation.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             if (violation is not null)
             {
@@ -891,14 +975,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // Teardown before the stream's opening octets arrived — nothing to process.
         }
         // Not swallowed: an unexpected fault (a programmer error) is forwarded to the consumer through
-        // the channel, and the enumeration rethrows it.
+        // the channel, and the enumeration rethrows it (once the enumeration has ended, nothing can).
         catch (Exception exception)
         {
             _readyContexts.Writer.TryComplete(exception);
-        }
-        finally
-        {
-            EndStreamWork();
         }
     }
 

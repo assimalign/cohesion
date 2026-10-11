@@ -154,6 +154,18 @@ internal sealed class Http3InMemoryPeer : IAsyncDisposable
     }
 
     /// <summary>
+    /// Accepts the next stream the server opened toward the client. The server opens its control stream
+    /// first (which <see cref="ReadGoAwayAsync"/> takes) and, with the QPACK dynamic table enabled, its
+    /// decoder stream second.
+    /// </summary>
+    /// <returns>The client end of the server's next unidirectional stream.</returns>
+    public async Task<Connection> AcceptServerStreamAsync()
+    {
+        using CancellationTokenSource timeout = new(_timeout);
+        return await _client.AcceptStreamAsync(timeout.Token);
+    }
+
+    /// <summary>
     /// Advances the server's receive enumeration, failing the test instead of hanging when nothing
     /// arrives in time.
     /// </summary>

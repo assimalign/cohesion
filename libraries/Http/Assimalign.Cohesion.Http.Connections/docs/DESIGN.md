@@ -246,7 +246,7 @@ of this package's contract, not implementation detail:
   | --- | --- | --- | --- |
   | HTTP/1.1 (RFC 9112 §9.6) | `Connection: close` on the response to the exchange in flight | not read; an idle keep-alive wait ends at once without a response, but a request whose head started to arrive is read and answered with `Connection: close` | after the exchange in flight, or at once when idle |
   | HTTP/2 (RFC 9113 §6.8) | `GOAWAY(NO_ERROR)` carrying the highest stream accepted | a new stream, or one whose header block was still arriving, is refused with `RST_STREAM(REFUSED_STREAM)` | once the contexts already queued are read |
-  | HTTP/3 (RFC 9114 §5.2) | `GOAWAY` carrying the first stream not accepted, once the accept loop has stopped | not accepted; a request whose head was still arriving is reset with `H3_REQUEST_REJECTED` | after the requests already published |
+  | HTTP/3 (RFC 9114 §5.2) | `GOAWAY` carrying the first request stream not processed, once the accept loop has stopped | a request whose head was still arriving is reset with `H3_REQUEST_REJECTED`, and so is every request stream opened later, unread, until the connection closes (#1306) | after the requests already published |
 
   The seam is a member of the context contract rather than a capability interface a host
   type-tests for: every context this package produces implements it, and a host that drains
@@ -4134,11 +4134,21 @@ that write before it closes the QUIC connection. The exchanges already
 published keep their request bodies and response streams, which live until
 the connection closes ("Exchanges outlive the enumeration").
 
-One RFC 9114 §5.2 recommendation is not met: a server SHOULD explicitly cancel
-requests that arrive after its GOAWAY. The accept loop has stopped by then, so
-such a stream is never accepted, and it ends with the QUIC connection; the
-GOAWAY has already told the peer it was not processed. Cancelling them would
-need an accept loop that keeps running after the enumeration ends.
+**Requests after the GOAWAY (#1306).** RFC 9114 §5.2 says a server SHOULD
+explicitly cancel requests that arrive after its GOAWAY. Once the accept loop
+has stopped — the boundary is final — `RejectLateStreamsAsync` keeps accepting
+streams until the connection closes. A request stream it accepts is at or above
+the boundary, so it is reset with `H3_REQUEST_REJECTED` at once (§4.1.1: not
+processed, the client may retry it elsewhere) without being read, counted
+toward the boundary, keeping the connection busy, or reaching the receive
+enumeration. Its wire ID continues the client-bidi numbering past the boundary
+and keys the QPACK Stream Cancellation the reset owes when the dynamic table is
+enabled. A unidirectional stream is handled as before, bounded by the
+connection rather than the ended enumeration. The same loop runs after the
+receive enumeration ends without a graceful close, until the host disposes the
+connection. Before #1306 such a stream was never accepted: its client waited
+until the QUIC connection closed — up to a host's whole drain window — before it
+could retry.
 
 ### Incremental reads off the PipeReader
 
