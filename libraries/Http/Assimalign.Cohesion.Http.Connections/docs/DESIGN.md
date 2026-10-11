@@ -2606,6 +2606,11 @@ application's fault observer, and recorded a `500` on the server span for a stre
   fault.
 - **A client that resets its own request is not at fault.** It cancels the request (RFC 9113 §8.1,
   RFC 9114 §4.1.1). See the next section.
+- **Open question for the owner:** an HTTP/3 connection lost after the exchange exists, to an error its
+  body read had no part in (the peer ending or resetting its control stream, `H3_CLOSED_CRITICAL_STREAM`),
+  surfaces at a pending read as an `IOException`, not as a client fault (`ClientFaultStatusCode` stays
+  `null`) or a cancellation, so the default Web server classifies it as an application fault;
+  `Http3ExchangeControlClientFaultTests` pins that contract until it is decided.
 
 ### The read reports the fault, not the reset
 

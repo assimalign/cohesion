@@ -22,7 +22,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// which closes the connection and is reported as <c>400</c> too — fails the read with an
 /// <see cref="IOException"/>, and <see cref="IHttpExchangeControl.ClientFaultStatusCode"/> reports the
 /// status, so a host can tell the client's fault from the application's. A client that resets its own
-/// request is not at fault: the read fails with the exchange's cancellation, as on HTTP/2.
+/// request is not at fault: the read fails with the exchange's cancellation, as on HTTP/2. A connection
+/// lost to an error the body had no part in is neither: the read fails with an <see cref="IOException"/>.
 /// </summary>
 public class Http3ExchangeControlClientFaultTests
 {
@@ -184,6 +185,40 @@ public class Http3ExchangeControlClientFaultTests
 
         context.Cancel();
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Client Fault: A connection error raised outside the body read should report no client fault and fail the read with an IOException")]
+    public async Task ClientFaultStatusCode_OnConnectionErrorOutsideTheRead_ShouldReportNullAndFailTheReadWithIOException()
+    {
+        // Arrange — the client's control stream is open past its SETTINGS; part of the body arrived and was
+        // read, and the next read waits for more.
+        CodeRecordingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            configureListener: static options => options.Interceptors.Add(new ControlCapturingInterceptor()),
+            decorate: inner => server = new CodeRecordingMultiplexedConnection(inner));
+        Connection controlStream = await peer.OpenUnidirectionalStreamAsync();
+        await controlStream.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 0)));
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(Combine(
+            HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
+            HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello"))));
+        IHttpContext context = await peer.NextContextAsync();
+        IHttpExchangeControl control = GetControl(context);
+        await context.Request.Body.ReadExactlyAsync(new byte[5]).AsTask().WaitAsync(_timeout);
+        Task<int> pending = context.Request.Body.ReadAsync(new byte[256]).AsTask();
+
+        // Act — the client ends its control stream (RFC 9114 §6.2.1), a connection error the request stream
+        // and its body read had no part in.
+        await controlStream.Output.CompleteAsync();
+        await server!.ConnectionClosed.WhenCancelledAsync().WaitAsync(_timeout);
+        Exception? failure = await CaptureFailureAsync(pending);
+
+        // Assert — the current contract: the connection's loss reaches the read as an IOException, neither
+        // a client fault nor a cancellation.
+        server.AbortErrorCode.ShouldBe((long)Http3ErrorCode.ClosedCriticalStream);
+        failure.ShouldBeAssignableTo<IOException>();
+        failure.ShouldNotBeAssignableTo<OperationCanceledException>();
+        control.ClientFaultStatusCode.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Client Fault: A well-formed body should report no client fault")]
