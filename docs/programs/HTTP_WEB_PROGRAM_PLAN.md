@@ -328,7 +328,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 12 — Protocol conformance
 
-**Status:** delivered 2026-10-11 on the Phase 2 branch and in owner review (§5). The owner answered Stage 11's review questions on 2026-10-10 (decisions 37–40): #1384 goes ahead, and #1383 joins it. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
+**Status:** delivered 2026-10-11 on the Phase 2 branch and approved by the owner the same day (§5; decisions 43–49). The owner answered Stage 11's review questions on 2026-10-10 (decisions 37–40): #1384 goes ahead, and #1383 joins it. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
 
 | Session | Issues (in order) | Wave |
 |---|---|---|
@@ -361,7 +361,22 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 ### Stage 13 — Web correctness
 
-**Status:** lined up. Gate: Stage 12 reviewed.
+**Status:** in progress (2026-10-11). The owner approved Stage 12 and every recommendation from its review (decisions 43–49). From this stage on, sessions run in the Codex CLI on Astra 6 at ultra effort, by the owner's instruction of 2026-10-11. Each session works in its own worktree, and the main session integrates and audits the result as before. Sessions in one row edit the same files, so each runs as one serial session; the rows run in parallel.
+
+| Session | Issues (in order) | Wave |
+|---|---|---|
+| 1 | #1424 → #1423 → #1428 → #1430: HTTP/3 stream release, QPACK encoder-stream inserts, interim-response ordering, and a lost connection as a cancellation | 1 |
+| 2 | #1415 → #1417: 421 for an h2c `:scheme https` with a trusted-gateway opt-out (decision 44), then `Date` on every response | 1 |
+| 3 | #1079 → #1078 → #1410 → #1411 → #1426: a failed host start, late `Use`, completion-callback isolation, the boundary's abort outcome, and QUIC delivery within the stop budget | 1 |
+| 4 | #1335 → #1211: repeated query and form values; a single read returns the first value (decision 31) | 1 |
+| 5 | #1208 → #1209: validation errors kept, and keyed by JSON name and index | 1 |
+| 6 | #1297 → #1325: HTTP logging trace ids, and body capture behind a request view | 1 |
+| 7 | #1416: invalid session and antiforgery cookie names fail at composition | 1 |
+| 8 | #1431: a control plane without a gateway identity answers loopback callers only (decision 46; P002, advisory triage) | 1 |
+| 9 | #1397: the `event-source.md` amendment, the not-instrumented list and the canonical recorder (decision 49) | 1 |
+| 10 | #1156 → #1388: the response-starting hook, then streamed-head state after a refused head. Wave 2, because both edit the server's response path that session 3 changes | 2 |
+
+The issue list:
 - #1079 → #1078: a failed host start, and late middleware throws.
 - #1156: the response-starting hook.
 - #1335 → #1211: repeated query and form values; a single read returns the first value (decision 31).
@@ -375,7 +390,9 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 
 **Protocol follow-ups from Stage 12** (lane A), in the same stage:
 - #1424 first (P002, advisory triage): each HTTP/3 request stream is released when its exchange ends, not when the connection closes.
-- #1415: an h2c request with `:scheme https` gets 421, with a trusted-gateway opt-out. Needs the owner's decision first (§5, Stage 12 questions).
+- #1415: an h2c request with `:scheme https` gets 421, with a trusted-gateway opt-out (decision 44).
+- #1430: an HTTP/3 connection lost mid-body is a cancellation (decision 45).
+- #1431: a control plane without a gateway identity answers loopback callers only (decision 46; P002, advisory triage).
 - #1417: every response carries `Date`.
 - #1423: QPACK encoder-stream inserts with the dynamic table disabled are connection errors.
 - #1428: application interim responses on HTTP/3 take the final-head claim.
@@ -396,7 +413,7 @@ Project #13 has no Wave option past W06, so items in these stages keep W06. This
 - #1427: the QUIC driver exposes a FIN it already holds, so bodiless HTTP/3 requests skip the response phase.
 - #1202 and #1217's Web.OpenApi follow-up, once the OpenApi program fixes its model.
 - **Lane G — Web event sources** (epic #1396, tasks #1397–#1408; scope in [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md)). 21 internal sources under `event-source.md`; #147's `ILogger` diagnostics move into `WebServerEventSource`.
-  - #1397 (T0) is three owner decisions, taken at the Stage 12 review: (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT.
+  - #1397 (T0) records three owner decisions, taken at the Stage 12 review (decision 49): (a) a default forwarder replaces #147's default visibility; (d) payload hygiene and an `event-source.md` amendment; (f) Sdk.Web turns on `EventSourceSupport` for NativeAOT. Its rule amendment runs in Stage 13 (session 9), so this lane opens with no gate.
   - Wave 1: #1398 (Web.Hosting) serial after #1389, with #1400–#1407 in parallel. Wave 2: #1399 (forwarding and AOT) with #1398, then #1408 (conformance and docs).
   - Stage 13 rewrites code these sources instrument (#1079 → #1078, #1156, #1388, #1297 → #1325), which is why the lane waits for Stage 14.
 
@@ -832,7 +849,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - In 10.0.0-preview.1, HTTP/3 buffered each whole request stream in memory with no size cap. That is an unauthenticated memory exhaustion on any `UseHttp3` endpoint.
     - Stage 5 fixed it (#1066), before decision 8 began the advisory practice, so no advisory was drafted.
     - Draft one now, on decision 24's terms?
-- **Stage 12 delivered (2026-10-11), in owner review.** Stage 12 brought the transports to the RFCs on the points the Phase 2 backlog listed. It also closed the slow-read hole (#1384) and the health-response exposure (#1409), and finished #1380's verb shapes (#1395). Ten sessions ran in two waves on Stage 11's pattern: each was built in an isolated worktree and reviewed, two skeptics challenged each serious finding, and confirmed findings were fixed. An integrator then cherry-picked each wave and an auditor three-way-checked every session-touched file. Every new regression test was shown to fail before its fix.
+- **Stage 12 delivered (2026-10-11), approved by the owner the same day with every recommendation (decisions 43–49).** Stage 12 brought the transports to the RFCs on the points the Phase 2 backlog listed. It also closed the slow-read hole (#1384) and the health-response exposure (#1409), and finished #1380's verb shapes (#1395). Ten sessions ran in two waves on Stage 11's pattern: each was built in an isolated worktree and reviewed, two skeptics challenged each serious finding, and confirmed findings were fixed. An integrator then cherry-picked each wave and an auditor three-way-checked every session-touched file. Every new regression test was shown to fail before its fix.
   - **Wave 1** (13 issues):
     - #1383 `44143b6b`, `411f1198`, `ed8aaf8a`: a request can change or disable its minimum request-body data rate before its first body read, on every protocol. `HttpMinDataRate` moved to core Http (decision 42).
     - #1384 `56baa627`, `0db8407f`, `eba08f16`, `ada062be`: a minimum response data rate on every protocol. A stalled reader is reclaimed: HTTP/1.1 closes the connection, HTTP/2 resets the stream or sends `GOAWAY(ENHANCE_YOUR_CALM)`, and HTTP/3 resets with `H3_REQUEST_CANCELLED`. Every HTTP/2 output write, control frames included, is held to one connection-level allowance, and a wait is credited at most 16 KB.
@@ -1184,6 +1201,29 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
     - the behavior changes on every protocol.
 
     Each is recorded in its package's DESIGN, as decisions 15 and 26 require.
+43. **Stage 12 is approved (owner, 2026-10-11).** Decision 42's breaks are confirmed, and Stage 13 opens.
+44. **An h2c `:scheme https` gets 421 (owner, 2026-10-11; #1415).**
+    - Cleartext HTTP/2 answers a request whose `:scheme` is `https` with 421 before dispatch, as HTTP/1.1 answers an `https` absolute-form target.
+    - A listener option lets a trusted gateway forward `:scheme https` to an h2c backend. Under it, `Request.Scheme` reports what the gateway sent.
+    - Test fixtures that send `:scheme https` over plaintext move to `http` or to a TLS listener.
+45. **An HTTP/3 connection lost mid-body is a cancellation (owner, 2026-10-11; #1430).** `RequestCancelled` fires and the read throws `OperationCanceledException`, as it does for a peer reset since #1378. The default server records the exchange as cancelled, not as an application fault.
+46. **A control plane without a gateway identity answers loopback callers only (owner, 2026-10-11; #1431).** Standalone execution is for development. The fix is triaged for an advisory on decision 24's terms.
+47. **`AddJsonSerialization` keeps its static factory (owner, 2026-10-11).** Its resolver is required, so `SerializationComponents` stays the one hidden `*Components` type (`web-area.md`).
+48. **HTTP/2 output stays unbounded when the listener sets no rate (owner, 2026-10-11).** A `null` `MinResponseDataRate` is the explicit opt-out, with no flat fallback deadline.
+49. **The Web event-source decisions (owner, 2026-10-11; #1397; [`WEB_EVENT_SOURCES_SCOPE.md`](WEB_EVENT_SOURCES_SCOPE.md) §3).**
+    - **(a)** #147's `ILogger` diagnostics move into `WebServerEventSource`. `WebApplicationBuilder.Build` registers a default forwarder, with an opt-out, under these conditions:
+      - only for the entry-point builder (`CreateBuilder(args)`);
+      - only when the application registered no forwarder;
+      - for the `Assimalign.Cohesion.Web.` prefix only, after `Sources.Clear()`.
+
+      The owner accepts these costs:
+      - Logging.EventSource joins Web.Hosting's closure.
+      - `ILoggerFactoryBuilder` gains a probe.
+      - Per-host attribution and stack traces are lost.
+      - The category and attribute keys change.
+    - **(d)** One `event-source.md` amendment covers throttling, attacker-chosen identifiers, the `requestId` correlation payload, type-only exception carve-outs, prefix overlap, and a wider `paths:`. The owner accepts that a default `UseErrorHandling()` under forwarding writes application exception messages to the configured sinks.
+    - **(f)** Sdk.Web defaults `EventSourceSupport=true` when unset, after the binary-size delta is measured, with an evaluation test.
+    - #1397 makes the rule amendment in Stage 13. The sources stay in Stage 14's lane G.
 
 ### 7.5 Lineup
 

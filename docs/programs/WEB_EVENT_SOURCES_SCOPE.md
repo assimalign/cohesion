@@ -1,6 +1,7 @@
 # Web Event Sources: Scope
 
-**Date:** 2026-10-10. **Status:** scoped. Three owner decisions, (a), (d) and (f), are open.
+**Date:** 2026-10-10. **Status:** scoped. The owner approved decisions (a), (d) and (f) as recommended on 2026-10-11
+(`HTTP_WEB_PROGRAM_PLAN.md` §7.4, decision 49).
 **Standard:** `.claude/rules/event-source.md`. **Catalog:** `docs/EVENT_SOURCES.md`.
 **Program:** HTTP/Web (`docs/programs/HTTP_WEB_PROGRAM_PLAN.md`). Recommended placement: Stage 14, lane G.
 **Tracking:** epic #1396, tasks #1397–#1408, side defects #1409–#1413.
