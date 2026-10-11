@@ -1227,9 +1227,20 @@ final head before writing it.
 
 Each interim flush uses the response minimum data rate, including its per-request
 override, through the same helper as automatic `100` (#1384). Reading that setting
-does not freeze it. Each interim has its own rate gate, so the final head's wait
-does not double-charge the response's gate. Exceeding the allowance resets the
-request stream and throws the exchange's cancellation.
+does not freeze it. The active interim's own rate gate bounds the final head's
+claim wait, including the interim frame's byte credit: a 2 KB `103` at 1,000 B/s
+with 300 ms grace can legitimately wait 800 ms for credit. The final head must not
+impose a separate zero-byte gate that expires after grace alone. Caller and
+exchange cancellation still end the claim wait, and an interim that exceeds its
+allowance resets the request stream and cancels the waiting head. With the rate
+disabled, the claim waits until the interim finishes or cancellation occurs.
+
+After the handoff, the final response resolves its own rate gate at its first
+write and credits its own bytes. The interim's wait is not charged again. This
+corrects a post-preview.1 regression in the claim's rate enforcement; preview.1
+had neither the claim nor the response rate gate. Automatic `100 Continue` uses
+the same handoff and accounting, superseding the separate final-wait gate
+described in the earlier #1385 section above.
 
 **Breaking behavior from 10.0.0-preview.1 (decision 15):** concurrent application
 interims and final heads now serialize or reject the interim cleanly instead of

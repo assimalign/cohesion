@@ -2995,9 +2995,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// flush is held to the minimum data rate its response is held to (#1384): the request's own
     /// (<see cref="HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>), else the listener's. The rate
     /// is read without freezing it (<see cref="TransportHttpContext.PeekResponseDataRate"/>), so the request
-    /// may still change it until the response's first write, and the <c>100</c> gets a gate of its own, so a
-    /// stall that the final head's wait for it (<see cref="ClaimFinalResponseHeadAsync"/>) shares is charged
-    /// to the response's allowance only once. A peer that withholds the credit the <c>100</c> needs past the
+    /// may still change it until the response's first write. The <c>100</c> gets a gate of its own, whose
+    /// allowance also bounds a final head waiting for it (<see cref="ClaimFinalResponseHeadAsync"/>), without
+    /// charging the wait to the final response. A peer that withholds the credit the <c>100</c> needs past the
     /// allowance has the request stream reset with <c>H3_REQUEST_CANCELLED</c> (<see cref="FailSlowResponse"/>),
     /// and the read that solicited it throws the exchange's cancellation. The request-body rate does not
     /// reclaim such a peer: on a driver that stops a stream with a code it stops the receiving direction
@@ -3072,19 +3072,16 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Takes the request stream's writer for an exchange's final response head
-    /// (<see cref="Http3Context.ClaimFinalResponseHeadAsync"/>) before the head's HEADERS frame is written: an
-    /// automatic <c>100 Continue</c> (#1385) the first body read is still writing is waited for, so the two
-    /// never share the writer. The wait is held to the response's minimum data rate (#1384), as the head's own
-    /// write would be: a peer that withholds the credit the <c>100</c> needs would stall the head too, and a
-    /// spent allowance resets the request stream (<see cref="FailSlowResponse"/>). The <c>100</c>'s own write
-    /// is held to the rate as well (<see cref="WriteContinueAsync"/>), and its allowance started first, so it
-    /// is usually the <c>100</c> that resets the stream, which ends this wait; the head then fails the same
-    /// way, since no stream is left for it to go out on.
+    /// (<see cref="Http3Context.ClaimFinalResponseHeadAsync"/>) after any active interim response finishes.
+    /// The interim's own minimum data rate allowance bounds this wait, including the credit for its
+    /// encoded frame. A separate zero-byte allowance here would cancel a valid large interim after only
+    /// the grace period (#1428). Caller and exchange cancellation still end the wait. The final response
+    /// starts its rate accounting at its first write after the handoff, without charging this wait again.
     /// </summary>
     /// <param name="context">The exchange whose final head is about to be written.</param>
     /// <param name="cancellationToken">The caller's token.</param>
     /// <returns>A task that completes once the head may be written.</returns>
-    /// <exception cref="OperationCanceledException">The peer did not take the <c>100</c> at the rate; the exchange was aborted.</exception>
+    /// <exception cref="OperationCanceledException">The caller or exchange was cancelled, including an interim that exceeded its rate allowance.</exception>
     internal async ValueTask ClaimFinalResponseHeadAsync(Http3Context context, CancellationToken cancellationToken)
     {
         ValueTask claimed = context.ClaimFinalResponseHeadAsync();
@@ -3094,25 +3091,23 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
-        Task continueWritten = claimed.AsTask();
-        MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
-
-        if (gate is null)
+        using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, context.RequestCancelled);
+        try
         {
-            await continueWritten.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await claimed.AsTask().WaitAsync(cancellation.Token).ConfigureAwait(false);
         }
-        else if (!await MinDataRateWait.TryRunAsync(
-            gate,
-            continueWritten,
-            static (written, token) => new ValueTask(written.WaitAsync(token)),
-            cancellationToken).ConfigureAwait(false))
+        catch (OperationCanceledException)
         {
-            throw FailSlowResponse(context);
+            // Preserve the originating token instead of exposing the temporary linked token.
+            context.RequestCancelled.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
         }
 
+        context.RequestCancelled.ThrowIfCancellationRequested();
         if (context.RequestBody.IsReset)
         {
-            // The 100's write ran out of its allowance and reset the request stream (WriteContinueAsync).
+            // The interim exceeded its allowance and reset the request stream before releasing the claim.
             throw context.AbortSlowResponse();
         }
     }

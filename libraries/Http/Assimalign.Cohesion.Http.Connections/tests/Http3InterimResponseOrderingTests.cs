@@ -49,6 +49,90 @@ public class Http3InterimResponseOrderingTests
         (await ReadStatusesAsync(exchange.Request)).ShouldBe(["103", "200"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 interim: A large within-rate 103 should finish before the final head receives its own rate allowance")]
+    public async Task WriteInterimResponseAsync_LargeWithinRateInterimRacingFinalHead_ShouldPreserveBothAllowances()
+    {
+        // Arrange — the 2 KB interim earns more than the grace period at 1,000 B/s.
+        using CancellationTokenSource cancellation = new(_timeout);
+        HttpMinDataRate rate = new(1_000, TimeSpan.FromMilliseconds(300));
+        await using Exchange exchange = await Exchange.OpenAsync(cancellation.Token, rate: rate);
+        HttpHeaderCollection hints = new();
+        hints.Add("link", new string('a', 2_048));
+        exchange.Writer.Stall();
+
+        // Act — final waits longer than its own grace, but within the active interim's allowance.
+        Task interim = exchange.Interim.SendInterimResponseAsync(HttpStatusCode.EarlyHints, hints, cancellation.Token).AsTask();
+        await WaitForAsync(() => exchange.Writer.IsFlushWaiting, cancellation.Token);
+        long interimOctets = exchange.Writer.Written;
+        Task head = exchange.Context.Response.Streaming.FlushAsync(cancellation.Token).AsTask();
+        await WaitForAsync(() => exchange.Context.HasResponseStarted, cancellation.Token);
+        await Task.Delay(800, cancellation.Token);
+        bool finalWaited = !head.IsCompleted;
+        exchange.Writer.Grant(interimOctets);
+        await interim.WaitAsync(cancellation.Token);
+
+        // The final head must also get a fresh allowance once the interim releases the writer.
+        await WaitForAsync(() => exchange.Writer.Written > interimOctets || head.IsCompleted, cancellation.Token);
+        await Task.Delay(100, cancellation.Token);
+        bool finalWaitedForOwnCredit = !head.IsCompleted;
+        exchange.Writer.Grant(1 << 20);
+        await head.WaitAsync(cancellation.Token);
+        await exchange.Peer.ConnectionContext.SendAsync(exchange.Context, cancellation.Token);
+
+        // Assert
+        finalWaited.ShouldBeTrue();
+        finalWaitedForOwnCredit.ShouldBeTrue();
+        exchange.Context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
+        exchange.ServerStream.WriteAbortCode.ShouldBeNull();
+        exchange.Writer.ConcurrentUseObserved.ShouldBeFalse();
+        (await ReadStatusesAsync(exchange.Request)).ShouldBe(["103", "200"]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 interim: A final head waiting on an unbounded interim should honor caller and exchange cancellation")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClaimFinalResponseHeadAsync_CancelledWhileInterimStalled_ShouldCancelWithoutWriting(bool cancelExchange)
+    {
+        // Arrange — caller cancellation pins existing behavior; exchange cancellation must work independently.
+        using CancellationTokenSource cancellation = new(_timeout);
+        using CancellationTokenSource callerCancellation = new();
+        await using Exchange exchange = await Exchange.OpenAsync(cancellation.Token);
+        exchange.Writer.Stall();
+        Task interim = exchange.Interim.SendInterimResponseAsync(HttpStatusCode.EarlyHints, cancellationToken: cancellation.Token).AsTask();
+        await WaitForAsync(() => exchange.Writer.IsFlushWaiting, cancellation.Token);
+        long interimOctets = exchange.Writer.Written;
+        Task head = exchange.Context.Response.Streaming.FlushAsync(callerCancellation.Token).AsTask();
+        await WaitForAsync(() => exchange.Context.HasResponseStarted, cancellation.Token);
+
+        // Act
+        if (cancelExchange)
+        {
+            exchange.Context.Cancel();
+        }
+        else
+        {
+            callerCancellation.Cancel();
+        }
+
+        OperationCanceledException failure;
+        try
+        {
+            failure = await Should.ThrowAsync<OperationCanceledException>(() => head.WaitAsync(TimeSpan.FromSeconds(2), cancellation.Token));
+        }
+        finally
+        {
+            callerCancellation.Cancel();
+            exchange.Writer.Grant(1 << 20);
+            await interim.WaitAsync(cancellation.Token);
+        }
+
+        // Assert — cancellation releases the claim wait without writing a final head or resetting the stream.
+        failure.CancellationToken.ShouldBe(cancelExchange ? exchange.Context.RequestCancelled : callerCancellation.Token);
+        exchange.Writer.Written.ShouldBe(interimOctets);
+        exchange.ServerStream.WriteAbortCode.ShouldBeNull();
+        exchange.Writer.ConcurrentUseObserved.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 interim: An application 103 after the final head started should be refused cleanly")]
     public async Task WriteInterimResponseAsync_AfterStreamedFinalHeadStarted_ShouldThrowWithoutWriting()
     {
