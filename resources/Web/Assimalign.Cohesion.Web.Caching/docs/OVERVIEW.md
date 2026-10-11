@@ -18,7 +18,8 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
 - **Vary-correct**: the stored response's own `Vary` header partitions the cache key (RFC 9111 §4.1), so
   a compressed or content-negotiated variant is never served to a client that cannot accept it.
 - **Repeated query values stay distinct**: both the default query policy and `VaryByQuery` include all
-  values in their original order, including empty repeats.
+  values in their original order, including empty repeats. A projected key with zero occurrences,
+  an absent key, and one empty occurrence each get a separate cache entry.
 - **Tag-based invalidation** reachable from application code.
 
 ## Dependencies

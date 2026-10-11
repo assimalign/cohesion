@@ -124,11 +124,17 @@ internal static class OutputCacheKeyBuilder
     {
         // Escape decoded tokens so a value containing a separator cannot imitate another entry.
         string encodedKey = Uri.EscapeDataString(key);
-        int count = Math.Max(values.Count, 1);
-        for (int index = 0; index < count; index++)
+        if (values.Count == 0)
         {
-            string value = values.Count == 0 ? string.Empty : values[index];
-            builder.Append(Separator).Append(encodedKey).Append('=').Append(Uri.EscapeDataString(value));
+            // A projected key can be present without occurrences. '#' is escaped in query tokens,
+            // so this marker cannot alias an absent key or any key=value occurrence.
+            builder.Append(Separator).Append(encodedKey).Append("#0");
+            return;
+        }
+
+        for (int index = 0; index < values.Count; index++)
+        {
+            builder.Append(Separator).Append(encodedKey).Append('=').Append(Uri.EscapeDataString(values[index]));
         }
     }
 

@@ -101,14 +101,18 @@ The endpoint can now receive every value of a repeated query key. Both the defau
 `VaryByQuery` therefore include every value in order: `tag=one&tag=two` and `tag=one&tag=three` must
 never share a stored response merely because their scalar reads both return `one`. Sorting the values
 would also conflate collections whose order differs, so only distinct names are sorted.
-An absent selected key contributes no entry, while a present empty value contributes an empty entry:
-collection binding distinguishes an empty collection from one containing an empty string. The previous
-selected-key encoding conflated these requests, a collision made relevant by sequence binding.
+An absent selected key contributes no entry. A present key with zero occurrences contributes its escaped
+name followed by `#0`, while one empty occurrence contributes `name=`. The literal `#` is reserved here:
+query names and values escape it, so neither can imitate the zero-occurrence marker. A rewrite projection
+such as `query["tag"] = context.Query["tag"]` can produce a present zero-occurrence key from `/list`,
+while `/list?tag=` produces one empty occurrence. Collection binding distinguishes `[]` from `[""]`,
+so both query policies keep separate entries for these states and for an absent key.
 
 This is a behavioral breaking change from 10.0.0-preview.1 on decision 15's terms: that parser retained
 only the last value, and cache keys consequently included only that value. Repeated query values now
-produce separate entries, and escaping reserved characters changes those private cache keys. Ordinary
-single values made solely of unreserved URL characters keep their key encoding. No public policy or
+produce separate entries, and escaping reserved characters changes those private cache keys. The Stage 13
+review also gives projected zero-occurrence keys their own encoding; preview.1 had no sequence-valued
+query model. Ordinary single values made solely of unreserved URL characters keep their key encoding. No public policy or
 store contract changes.
 
 ### Scheme and host are the effective values (#1050)
@@ -339,11 +343,14 @@ Registration is dependency-free — options and the store are captured at builde
 
 Unit tests cover the in-memory store (round-trip, miss, absolute time-to-live over a manual clock, tag
 eviction and the re-tag safety, oversized decline), the key builder (distinct query-name order independence,
-repeated values including their order and empty entries, separator escaping, `VaryBy`
+repeated values including their order and empty entries, zero occurrences versus absent keys and single
+empty occurrences under both query policies, separator escaping, `VaryBy`
 partitioning, the response-`Vary` variant partition), and the middleware bypass matrix over an in-memory
 context double (hit skips downstream + stamps `Age`, authenticated/`Set-Cookie`/`no-store`/non-200/over-cap
 bypass, non-cacheable method, a WebSocket handshake never served from the cache, a taken-over exchange
-never stored, an extended CONNECT neither). `tests/OutputCacheWebSocketTests.cs` runs a cached page and a
+never stored, an extended CONNECT neither). Middleware tests exercise projected zero and single empty
+query occurrences in both arrival orders under both query policies, and verify that repeats hit only
+their own cached response. `tests/OutputCacheWebSocketTests.cs` runs a cached page and a
 WebSocket echo on one URL end to end (the test project references `Http.WebSockets`). Middleware tests also publish a fake route match ahead of the middleware,
 as `UseRouting` does: the published endpoint's metadata decides while the exchange's router feature throws
 on access (so a second match would fail the test), a published `Disabled` bypasses the base policy, and

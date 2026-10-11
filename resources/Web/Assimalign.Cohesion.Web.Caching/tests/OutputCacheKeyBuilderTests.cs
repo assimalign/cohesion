@@ -133,6 +133,35 @@ public class OutputCacheKeyBuilderTests
         missingKey.ShouldNotBe(emptyKey);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Caching] - Key: Zero query occurrences differ from absent and empty values")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildPrimaryKey_ZeroQueryOccurrences_ShouldDifferFromAbsentAndEmpty(bool selectKey)
+    {
+        // Arrange
+        OutputCachePolicy policy = new();
+        if (selectKey)
+        {
+            policy.VaryByQuery("tag");
+        }
+
+        OutputCacheTestContext absent = new();
+        OutputCacheTestContext zero = new();
+        zero.Request.QueryCollection["tag"] = HttpQueryValue.Empty;
+        OutputCacheTestContext empty = new();
+        empty.Request.QueryCollection["tag"] = new HttpQueryValue(string.Empty);
+
+        // Act
+        string absentKey = PrimaryKey(absent, policy);
+        string zeroKey = PrimaryKey(zero, policy);
+        string emptyKey = PrimaryKey(empty, policy);
+
+        // Assert
+        zeroKey.ShouldNotBe(emptyKey);
+        zeroKey.ShouldNotBe(absentKey);
+        emptyKey.ShouldNotBe(absentKey);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Key: VaryByQuery ignores unlisted query keys")]
     public void BuildPrimaryKey_VaryByQuerySubset_ShouldIgnoreOtherKeys()
     {

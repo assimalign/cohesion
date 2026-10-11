@@ -74,6 +74,52 @@ public class OutputCacheMiddlewareTests
         secondContext.Response.Headers.ContainsKey(HttpHeaderKey.Age).ShouldBeTrue();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Caching] - Middleware: Projected zero and empty query values keep separate responses")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Invoke_ProjectedZeroQueryOccurrences_ShouldNotServeEmptyOccurrence(bool selectKey, bool emptyFirst)
+    {
+        // Arrange
+        OutputCacheMiddleware middleware = CreateMiddleware(out InMemoryOutputCacheStore store, options =>
+        {
+            if (selectKey)
+            {
+                options.BasePolicy!.VaryByQuery("tag");
+            }
+        });
+        using InMemoryOutputCacheStore ownedStore = store;
+        Counter counter = new();
+        WebApplicationMiddleware handler = async context =>
+        {
+            counter.Count++;
+            string body = context.Request.Query["tag"].Count == 0 ? "zero" : "empty";
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(body), context.RequestCancelled);
+        };
+
+        static OutputCacheTestContext Project(bool empty)
+        {
+            OutputCacheTestContext context = new() { Request = { Path = new HttpPath("/list") } };
+            // A rewrite can project a missing source key into a present key with no occurrences.
+            context.Request.QueryCollection["tag"] = new HttpQuery(empty ? "tag=" : string.Empty).Parse()["tag"];
+            return context;
+        }
+
+        // Act
+        string first = await RunAsync(middleware, Project(emptyFirst), handler);
+        string second = await RunAsync(middleware, Project(!emptyFirst), handler);
+        string firstHit = await RunAsync(middleware, Project(emptyFirst), handler);
+        string secondHit = await RunAsync(middleware, Project(!emptyFirst), handler);
+
+        // Assert
+        first.ShouldBe(emptyFirst ? "empty" : "zero");
+        second.ShouldBe(emptyFirst ? "zero" : "empty");
+        firstHit.ShouldBe(first);
+        secondHit.ShouldBe(second);
+        counter.Count.ShouldBe(2);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: An authenticated request bypasses the cache by default")]
     public async Task Invoke_AuthorizationHeader_ShouldBypass()
     {
