@@ -2787,10 +2787,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
             await WriteResponseHeaderBlockAsync(context, headerBlock, endStream: headersEndStream, cancellationToken).ConfigureAwait(false);
 
+            int maxFrameSize = GetMaxDataFrameSize(context);
             int offset = 0;
             while (offset < content.Length)
             {
-                int desired = Math.Min((int)_remoteSettings.MaxFrameSize, content.Length - offset);
+                int desired = Math.Min(maxFrameSize, content.Length - offset);
                 int granted = TryReserveSendWindow(stream, desired);
 
                 if (granted == 0)
@@ -3010,11 +3011,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     internal async Task WriteStreamingDataAsync(Http2Context context, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {
         Http2Stream stream = context.Stream;
+        int maxFrameSize = GetMaxDataFrameSize(context);
         int offset = 0;
 
         while (offset < data.Length)
         {
-            int maxChunk = Math.Min((int)_remoteSettings.MaxFrameSize, data.Length - offset);
+            int maxChunk = Math.Min(maxFrameSize, data.Length - offset);
             int granted = await AcquireSendWindowAsync(stream, maxChunk, cancellationToken, context).ConfigureAwait(false);
             if (granted == 0)
             {

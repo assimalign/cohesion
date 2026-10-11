@@ -21,6 +21,27 @@ internal sealed partial class Http2ConnectionContext
     private volatile bool _outputStalled;
 
     /// <summary>
+    /// Gets the most octets one DATA frame carries: the peer's <c>SETTINGS_MAX_FRAME_SIZE</c>, capped at
+    /// <see cref="MinDataRateWait.MaxWriteSize"/> while the output or the response is held to a rate
+    /// (#1384). A frame is credited whole as it is handed over, and the peer chooses its frame size, up to
+    /// 16 MiB: uncapped, a peer that stops reading would be credited a 16 MiB frame up front, a stall the
+    /// allowance would bound only after hours. Since <see cref="MinDataRateWait.MaxWriteSize"/> is the
+    /// smallest frame size a peer may advertise (RFC 9113 §6.5.2), the cap is the default frame size.
+    /// </summary>
+    /// <param name="response">
+    /// The exchange whose final response the frame carries, or <see langword="null"/> for a tunnel.
+    /// </param>
+    /// <returns>The DATA frame size to split on.</returns>
+    private int GetMaxDataFrameSize(Http2Context? response)
+    {
+        int maxFrameSize = (int)_remoteSettings.MaxFrameSize;
+
+        return _outputDataRate is not null || response?.GetResponseDataRateGate(_http2Limits.MinResponseDataRate, _timeProvider) is not null
+            ? Math.Min(maxFrameSize, MinDataRateWait.MaxWriteSize)
+            : maxFrameSize;
+    }
+
+    /// <summary>
     /// Writes one frame, with its payload, to the connection's output, within the output's allowance
     /// (<see cref="WriteOutputAsync"/>). For the pump's control frames, the transport's own answers and
     /// tunnel octets; a final response's frames go through <see cref="WriteResponseFrameAsync"/>.

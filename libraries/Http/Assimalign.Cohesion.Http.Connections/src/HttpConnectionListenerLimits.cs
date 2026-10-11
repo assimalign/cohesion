@@ -211,11 +211,11 @@ public abstract class HttpConnectionListenerLimits
     /// As with <see cref="MinRequestBodyDataRate"/>, the rate is an average measured only over time
     /// spent waiting on the peer to accept octets; see <see cref="HttpMinDataRate"/>. The octets a write
     /// hands to the transport count toward the allowance as they are handed over, so a reader draining a
-    /// large response at a healthy pace is never mistaken for a slow one. A buffered body is handed over
-    /// in pieces (16 KB on HTTP/1.1 and HTTP/3, a DATA frame within the flow-control windows on HTTP/2),
-    /// so a peer that reads none of it is reclaimed within the grace period plus the octets already
-    /// handed over, over the rate (about 73 seconds by default for one 16 KB piece), not plus the whole
-    /// body.
+    /// large response at a healthy pace is never mistaken for a slow one. Every write is handed over in
+    /// pieces of at most 16 KB (on HTTP/2, DATA frames capped at 16 KB whatever frame size the peer
+    /// advertises), buffered and streamed alike, so a peer that reads none of it is reclaimed within the
+    /// grace period plus, over the rate, the octets the transport buffers and one piece (about 73 seconds
+    /// by default for the piece), not plus the whole write.
     /// </para>
     /// <list type="bullet">
     /// <item><description><b>HTTP/1.1</b> — every write and flush of the head, the body and the chunked

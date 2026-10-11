@@ -164,7 +164,8 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         }
 
         // The octets count toward the allowance as they are handed over (MinDataRateWait), so a reader
-        // draining a large write at a healthy pace is not held to the bare grace period.
+        // draining a large write at a healthy pace is not held to the bare grace period, and a large write
+        // goes over in pieces, so a reader of none of it is not credited the whole write up front.
         if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, data, _gate, cancellationToken).ConfigureAwait(false))
         {
             throw Http1ConnectionContext.FailSlowResponse(_connection, _context);

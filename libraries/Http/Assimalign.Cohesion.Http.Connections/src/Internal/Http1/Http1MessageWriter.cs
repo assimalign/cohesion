@@ -165,40 +165,48 @@ internal static class Http1MessageWriter
             return false;
         }
 
-        if (writeBody)
+        if (writeBody && body.Length > 0 && !await TryWriteWithinRateAsync(stream, body, gate, cancellationToken).ConfigureAwait(false))
         {
-            for (int offset = 0; offset < body.Length; offset += MinDataRateWait.MaxWriteSize)
-            {
-                ReadOnlyMemory<byte> piece = body.AsMemory(offset, Math.Min(MinDataRateWait.MaxWriteSize, body.Length - offset));
-
-                if (!await TryWriteWithinRateAsync(stream, piece, gate, cancellationToken).ConfigureAwait(false))
-                {
-                    return false;
-                }
-            }
+            return false;
         }
 
         return await TryWriteWithinRateAsync(stream, ReadOnlyMemory<byte>.Empty, gate, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Hands <paramref name="data"/> to the transport, or flushes when it is empty, crediting its octets to
-    /// <paramref name="gate"/> first and bounding the wait by what is left of the allowance
-    /// (<see cref="MinDataRateWait"/>). Shared by the buffered path and the streaming sink
-    /// (<see cref="Http1ResponseBodyStream"/>).
+    /// Hands <paramref name="data"/> to the transport, or flushes when it is empty, bounding each wait by
+    /// what is left of <paramref name="gate"/>'s allowance (<see cref="MinDataRateWait"/>). The octets are
+    /// handed over in pieces of at most <see cref="MinDataRateWait.MaxWriteSize"/>, each credited as it
+    /// goes: crediting a whole write up front would hand a peer that reads none of it the write's size over
+    /// the rate (a megabyte at the default rate is over an hour). Shared by the buffered path and the
+    /// streaming sink (<see cref="Http1ResponseBodyStream"/>), whose handler writes can be any size.
     /// </summary>
     /// <param name="stream">The connection stream to write to.</param>
     /// <param name="data">The octets to hand over, or empty to flush.</param>
     /// <param name="gate">The gate holding the response to its minimum data rate.</param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
     /// <returns><see langword="false"/> when the allowance ran out before the transport accepted the octets.</returns>
-    internal static ValueTask<bool> TryWriteWithinRateAsync(Stream stream, ReadOnlyMemory<byte> data, MinDataRateGate gate, CancellationToken cancellationToken)
+    internal static async ValueTask<bool> TryWriteWithinRateAsync(Stream stream, ReadOnlyMemory<byte> data, MinDataRateGate gate, CancellationToken cancellationToken)
     {
-        gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
+        if (data.IsEmpty)
+        {
+            return await MinDataRateWait.TryRunAsync(gate, stream, static (output, token) => new ValueTask(output.FlushAsync(token)), cancellationToken).ConfigureAwait(false);
+        }
 
-        return data.IsEmpty
-            ? MinDataRateWait.TryRunAsync(gate, stream, static (output, token) => new ValueTask(output.FlushAsync(token)), cancellationToken)
-            : MinDataRateWait.TryRunAsync(gate, (Output: stream, Data: data), static (state, token) => state.Output.WriteAsync(state.Data, token), cancellationToken);
+        do
+        {
+            ReadOnlyMemory<byte> piece = data.Length > MinDataRateWait.MaxWriteSize ? data[..MinDataRateWait.MaxWriteSize] : data;
+            data = data[piece.Length..];
+            gate.Record(ticksWaited: 0, bytesTransferred: piece.Length);
+
+            if (!await MinDataRateWait.TryRunAsync(gate, (Output: stream, Data: piece), static (state, token) => state.Output.WriteAsync(state.Data, token), cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+        while (!data.IsEmpty);
+
+        return true;
     }
 
     /// <summary>

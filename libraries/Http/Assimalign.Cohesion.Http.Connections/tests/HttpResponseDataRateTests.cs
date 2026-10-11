@@ -122,6 +122,29 @@ public class HttpResponseDataRateTests
         fixture.Transport.IsAborted.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Response Rate: One large streamed write the peer never reads should be reclaimed within a piece of its allowance")]
+    public async Task Http1_OnLargeStreamedWriteNeverRead_ShouldCloseConnectionWithinOnePiece()
+    {
+        // Arrange — a 100 KB/s minimum over a 300 ms grace, and identity framing, so the handler's write is
+        // the first thing the stall holds. One 16 KB piece buys about 0.16 s; the whole megabyte, 10 s.
+        HttpMinDataRate rate = new(bytesPerSecond: 100_000, gracePeriod: TimeSpan.FromMilliseconds(300));
+        await using Http1Fixture fixture = await Http1Fixture.StartAsync(rate, streaming: true);
+        IHttpContext context = fixture.Context;
+        context.Response.Headers[HttpHeaderKey.ContentLength] = "1000000";
+        await context.Response.Streaming.FlushAsync().AsTask().WaitAsync(_timeout);
+        fixture.Transport.Writer.Stall();
+
+        // Act
+        Stopwatch elapsed = Stopwatch.StartNew();
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => context.Response.Streaming.WriteAsync(new byte[1_000_000]).AsTask().WaitAsync(_timeout));
+
+        // Assert — the write is credited a piece at a time, not a megabyte up front.
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
+        fixture.Transport.IsAborted.ShouldBeTrue();
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Response Rate: A response whose request disabled the rate should wait for a peer that does not read")]
     public async Task Http1_OnRateDisabledForRequest_ShouldWaitForPeer()
     {
@@ -290,6 +313,39 @@ public class HttpResponseDataRateTests
         transport.IsAborted.ShouldBeTrue();
         exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
         await peer.WaitForReceiveEndAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response Rate: A peer that advertises 16 MiB frames and stops reading should be reclaimed within a piece of its allowance")]
+    public async Task Http2_OnLargeFramesAdvertisedAndOutputNeverDrained_ShouldAbortWithinOnePiece()
+    {
+        // Arrange — the peer opens both windows past the body and advertises the largest frame size RFC 9113
+        // §6.5.2 allows, then stops reading the connection once the response head is out. A 100 KB/s minimum
+        // over a 300 ms grace: one 16 KB DATA frame buys about 0.16 s; one frame carrying the whole megabyte,
+        // 10 s.
+        HttpMinDataRate rate = new(bytesPerSecond: 100_000, gracePeriod: TimeSpan.FromMilliseconds(300));
+        StallingConnection? transport = null;
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
+            CreateOptions(streaming: true),
+            http2 => http2.Limits.MinResponseDataRate = rate,
+            initialWindowSize: 1 << 21,
+            decorate: inner => transport = new StallingConnection(inner));
+        await peer.SendAsync(Http2TestSettings.RawFrame(0x4, 0, 0, Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.MaxFrameSize, 16_777_215u))));
+        await peer.SendWindowUpdateAsync(0, 1 << 21);
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/large"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        await exchange.Response.Streaming.FlushAsync().AsTask().WaitAsync(_timeout);
+        await peer.SyncAsync();
+        transport!.Writer.Stall();
+
+        // Act
+        Stopwatch elapsed = Stopwatch.StartNew();
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => exchange.Response.Streaming.WriteAsync(Http2TestPeer.CreateBody(1_000_000)).AsTask().WaitAsync(_timeout));
+
+        // Assert — the frames are capped at 16 KB while a rate applies, whatever size the peer advertised.
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
+        transport.IsAborted.ShouldBeTrue();
+        exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response Rate: A PING acknowledgement the peer never reads should end the connection, not park a streamed response behind the write gate")]

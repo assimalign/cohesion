@@ -84,6 +84,7 @@ internal sealed partial class Http2ConnectionContext
     internal async ValueTask WriteTunnelDataAsync(Http2Context context, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {
         Http2Stream stream = context.Stream;
+        int maxFrameSize = GetMaxDataFrameSize(response: null);
         int offset = 0;
 
         while (offset < data.Length)
@@ -93,7 +94,7 @@ internal sealed partial class Http2ConnectionContext
                 throw CreateTunnelUnwritableException(stream);
             }
 
-            int desired = Math.Min((int)_remoteSettings.MaxFrameSize, data.Length - offset);
+            int desired = Math.Min(maxFrameSize, data.Length - offset);
             int granted = await AcquireSendWindowAsync(stream, desired, cancellationToken).ConfigureAwait(false);
 
             if (granted == 0)

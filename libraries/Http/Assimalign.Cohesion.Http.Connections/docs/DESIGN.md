@@ -2162,13 +2162,19 @@ large write that a healthy reader drained above the rate, but for longer than th
 reclaimed as a slow reader. Crediting first fixes that, and is what "unify" means for the sink: every
 version and both paths now share one accounting.
 
-Crediting a whole buffered body up front would hand a peer that reads nothing the body's size over the
-rate (a megabyte at the default rate is over an hour). So a buffered body is handed over in pieces of
-`MinDataRateWait.MaxWriteSize` (16 KB), each credited as it goes, and a peer that reads none of it is
-reclaimed within the grace period plus about one piece over the rate, some 73 seconds by default. On
-HTTP/2 the pieces are the DATA frames the flow-control windows admit, so a peer that grants no credit
-gets the grace period alone. The pieces cost an HTTP/1.1 or HTTP/3 response one flush per 16 KB, and
-only when a rate applies; a pipe flush that the reader keeps up with does not wait.
+Crediting a whole write up front would hand a peer that reads nothing the write's size over the rate (a
+megabyte at the default rate is over an hour, and the operation clamp of an hour then bounds the stall).
+So every write held to a rate is handed over in pieces of at most `MinDataRateWait.MaxWriteSize` (16 KB),
+each credited as it goes: a buffered body and a streamed handler write alike on HTTP/1.1
+(`Http1MessageWriter.TryWriteWithinRateAsync`, which the sink shares) and HTTP/3. On HTTP/2 the pieces are
+DATA frames, and while a rate applies they are capped at 16 KB (`GetMaxDataFrameSize`) whatever
+`SETTINGS_MAX_FRAME_SIZE` the peer advertises, up to 16 MiB; 16 KB is also the smallest frame size a peer
+may advertise and the default, so the cap changes no framing a default peer sees. A peer that grants no
+credit gets the grace period alone. A peer that reads none of a response is reclaimed within the grace
+period plus, over the rate, the octets the transport buffers before a write waits and one piece, not plus
+the whole write: some 73 seconds by default for the piece. The pieces cost an HTTP/1.1 or HTTP/3 response
+one write per 16 KB, and only when a rate applies; a pipe write that the reader keeps up with does not
+wait.
 
 ### The per-request knob
 
