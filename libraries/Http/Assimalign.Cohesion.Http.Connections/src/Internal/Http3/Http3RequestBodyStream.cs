@@ -51,6 +51,13 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// tunnel's DATA is not a request body and may idle, so it is not held to the rate.
 /// </para>
 /// <para>
+/// <b><c>Expect: 100-continue</c> (#1385).</b> A request that declared the expectation, and whose stream
+/// had not ended with its head, has its content solicited at the first read, as HTTP/1.1 does: once the
+/// cap and the rate are resolved, <c>100 Continue</c> goes out as an interim HEADERS frame on the request
+/// stream, unless the final response has started, so a handler that answers without reading the body never
+/// invites it.
+/// </para>
+/// <para>
 /// <b>Errors.</b> A malformed request detected in the body (a Content-Length the DATA frames contradict,
 /// a malformed trailer section) is an <c>H3_MESSAGE_ERROR</c> stream error (RFC 9114 §4.1.2); an
 /// oversized trailer section an <c>H3_FRAME_ERROR</c> stream error; either resets the request stream
@@ -95,6 +102,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     // The exchange this body belongs to, once it exists: an oversized trailer section asks it whether
     // the response has started. Null while a request hook reads the body before dispatch.
     private Http3Context? _owner;
+    // Whether the first read still has to solicit the content with 100 Continue (#1385). Read-path only.
+    private bool _solicitContinue;
     private CancellationToken _requestAborted;
     private bool _started;
     private long? _cap;
@@ -158,6 +167,10 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// read, applies instead (#1383). Not applied to a tunnel.
     /// </param>
     /// <param name="timeProvider">The monotonic clock the rate is measured on; the system clock when <see langword="null"/>.</param>
+    /// <param name="solicitContinue">
+    /// Whether the request declared <c>Expect: 100-continue</c> and its stream had not ended with its head,
+    /// so the first read solicits the content with <c>100 Continue</c> (RFC 9110 §10.1.1, #1385).
+    /// </param>
     public Http3RequestBodyStream(
         Http3ConnectionContext connection,
         Http3RequestStreamReader reader,
@@ -170,8 +183,10 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         int maxHeadersFrameSize,
         CancellationToken requestAborted,
         HttpMinDataRate? minDataRate = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool solicitContinue = false)
     {
+        _solicitContinue = solicitContinue;
         _connection = connection;
         _reader = reader;
         _streamConnection = streamConnection;
@@ -467,6 +482,16 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             return 0;
         }
 
+        // RFC 9110 §10.1.1 — the client declared Expect: 100-continue and withholds the content until it is
+        // solicited. The first read solicits it, as HTTP/1.1 does (#1385), after the cap and the rate are
+        // resolved, so a Content-Length over the cap is refused (413) rather than invited, and a handler that
+        // answers without reading the body never invites it onto the wire.
+        if (_solicitContinue)
+        {
+            _solicitContinue = false;
+            await SolicitContinueAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         // #1085 — the read may wait for the peer no longer than what is left of its allowance. Where the
         // stream carries a code, the deadline stops it with STOP_SENDING(H3_NO_ERROR), which fails the read
         // (RFC 9114 §4.1: the server needs no more of the request and will answer it); elsewhere it
@@ -760,6 +785,25 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         {
             throw Reject($"Content-Length value '{declared}' exceeds the configured maximum request body size ({cap} octets).");
         }
+    }
+
+    /// <summary>
+    /// Sends <c>100 Continue</c> (RFC 9110 §10.1.1) as a HEADERS frame on the request stream, ahead of the
+    /// final response (RFC 9114 §4.1), through the connection's interim-response path — unless an interim
+    /// response can no longer precede the final one: the final response has started, the exchange was
+    /// cancelled, or the stream was reset or is no longer read. The response direction is written only from
+    /// the exchange's own flow, which this read is part of, so nothing races the write.
+    /// </summary>
+    private async ValueTask SolicitContinueAsync(CancellationToken cancellationToken)
+    {
+        if (IsReset
+            || Volatile.Read(ref _closed)
+            || _owner is { HasFinalResponseStarted: true } or { CancelRequested: true })
+        {
+            return;
+        }
+
+        await _connection.WriteInterimResponseAsync(_streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
     }
 
     private void EnsureContentLengthSatisfied()

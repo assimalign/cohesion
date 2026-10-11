@@ -23,10 +23,10 @@ namespace Assimalign.Cohesion.Http;
 /// package — it only invokes the <see cref="IHttpResponseInterceptor"/> and exposes the control.
 /// </para>
 /// <para>
-/// The HTTP/1.1 transport additionally emits <c>100 Continue</c> automatically for a request that
-/// carries <c>Expect: 100-continue</c> with a framed body (a wire-level interop concern), independent
-/// of this package — so the large-upload handshake works even when this interceptor is not
-/// registered.
+/// The transport additionally emits <c>100 Continue</c> automatically, on HTTP/1.1, HTTP/2 and HTTP/3, for
+/// a request that carries <c>Expect: 100-continue</c> and still has content to send (a wire-level interop
+/// concern), independent of this package — so the large-upload handshake works even when this interceptor
+/// is not registered.
 /// </para>
 /// </remarks>
 public static class HttpInterimResponses

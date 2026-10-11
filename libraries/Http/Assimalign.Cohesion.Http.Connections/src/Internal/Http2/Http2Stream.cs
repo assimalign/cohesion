@@ -1307,11 +1307,16 @@ internal sealed class Http2Stream
         // it when its reader reaches the end (PublishTrailers). A request body is held
         // to the minimum data rate; a CONNECT's DATA is tunnel traffic, which may idle.
         _requestTrailers = new HttpTrailerCollection(isSupported: true);
+        // RFC 9110 §10.1.1 — a client that declared Expect: 100-continue withholds the content until it is
+        // solicited; the body solicits it at its first read, as HTTP/1.1 does (#1385). A head that ended the
+        // stream has no content to solicit, and a CONNECT's DATA is tunnel traffic.
+        bool solicitContinue = !isConnect && !InputCompleted && HttpInterimResponseRules.ExpectsContinue(decodedHeaders.Headers);
         Http2RequestBodyStream body = new(
             this,
             _bodyChannel.Reader,
             onBodyConsumed,
-            isConnect ? null : requestBodyDataRate);
+            isConnect ? null : requestBodyDataRate,
+            solicitContinue);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
@@ -1393,6 +1398,9 @@ internal sealed class Http2Stream
             AddedResponseInterceptors = interception.ResponseInterceptors,
             RequestInterception = interception.Context,
         };
+
+        // The body solicits the content through the exchange's interim-response path (#1385).
+        body.AttachExchange(context);
 
         return context;
     }

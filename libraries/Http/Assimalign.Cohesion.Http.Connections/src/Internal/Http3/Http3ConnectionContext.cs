@@ -2236,6 +2236,16 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         // RFC 9110 §9.3.6 / RFC 9114 §4.4 — a CONNECT's DATA frames are tunnel octets, not a message body.
         bool isConnect = requestHead.Method == HttpMethod.Connect;
+
+        // RFC 9114 §4.1 — content may follow the HEADERS frame until the stream ends. Only an end that already
+        // arrived rules it out, and a CONNECT's DATA is tunnel traffic, not content. The stream is probed only
+        // when the answer is read: by a request hook (HttpExchangeInterceptorRequestContext.CanHaveBody), or for
+        // a request that declared Expect: 100-continue, whose content the body solicits at its first read
+        // unless there is none (RFC 9110 §10.1.1, #1385).
+        bool expectsContinue = !isConnect && HttpInterimResponseRules.ExpectsContinue(requestHead.Headers);
+        bool canHaveBody = !isConnect
+            && ((_requestInterceptors.Length == 0 && !expectsContinue) || !reader.IsEndBuffered());
+
         Http3RequestBodyStream body = new(
             this,
             reader,
@@ -2248,7 +2258,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             maxHeadersFrameSize: _limits.MaxRequestHeadersFrameSize,
             headToken,
             _limits.MinRequestBodyDataRate,
-            _timeProvider);
+            _timeProvider,
+            solicitContinue: expectsContinue && canHaveBody);
         requestHead = requestHead with { Body = body };
 
         HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);
@@ -2278,10 +2289,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 connectionInfo,
                 _limits,
                 isConnect,
-                // RFC 9114 §4.1 — content may follow the HEADERS frame until the stream ends. Only an end
-                // that already arrived rules it out; a CONNECT's DATA is tunnel traffic, not content. Probed
-                // only when a hook can read the answer.
-                canHaveBody: !isConnect && (_requestInterceptors.Length == 0 || !reader.IsEndBuffered()),
+                canHaveBody,
                 _featureCapacity).ConfigureAwait(false);
         }
         catch (HttpRequestRejectedException)
@@ -2925,13 +2933,32 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
     /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
-    internal async Task WriteInterimResponseAsync(
+    internal Task WriteInterimResponseAsync(
         Http3Context http3Context,
         HttpStatusCode statusCode,
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)
     {
-        Stream stream = http3Context.StreamConnection.AsStream();
+        return WriteInterimResponseAsync(http3Context.StreamConnection, statusCode, headers, cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes an interim (<c>1xx</c>) response on <paramref name="streamConnection"/>, a request stream
+    /// whose final response has not started — the path <see cref="WriteInterimResponseAsync(Http3Context, HttpStatusCode, IHttpHeaderCollection?, CancellationToken)"/>
+    /// takes, open to the request body, which solicits a withheld body with <c>100 Continue</c> at its first
+    /// read even when a request hook reads it before the exchange exists (#1385).
+    /// </summary>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    internal async Task WriteInterimResponseAsync(
+        IConnection streamConnection,
+        HttpStatusCode statusCode,
+        IHttpHeaderCollection? headers,
+        CancellationToken cancellationToken)
+    {
+        Stream stream = streamConnection.AsStream();
         byte[] headerBlock = Http3HeaderCodec.EncodeInterimResponseHeaders(statusCode, headers);
 
         await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);

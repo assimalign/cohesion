@@ -29,9 +29,10 @@ depending on this package.
 
 ## Relationship to `Expect: 100-continue`
 
-The HTTP/1.1 transport emits `100 Continue` **automatically** for a request that
-carries `Expect: 100-continue` with a framed body — a wire-level interop concern
-(a large-upload client withholds its body until it is solicited). That behavior
+The transport emits `100 Continue` **automatically**, on HTTP/1.1, HTTP/2 and HTTP/3
+(#1385), for a request that carries `Expect: 100-continue` and still has content to
+send — a wire-level interop concern (a large-upload client withholds its body until it
+is solicited). That behavior
 lives in the transport and works whether or not this package is registered. This
 package covers the **application-initiated** interim responses: `103 Early Hints`
 and an explicit, handler-driven `100 Continue`.

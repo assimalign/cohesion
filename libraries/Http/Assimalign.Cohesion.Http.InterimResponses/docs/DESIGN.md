@@ -69,9 +69,10 @@ least one response interceptor is registered).
 ## Not in scope here
 
 - **The automatic `Expect: 100-continue` handshake.** That is a wire-level interop
-  concern the HTTP/1.1 transport handles unconditionally (it solicits the body with
-  `100 Continue` before reading it, so a withholding client does not deadlock),
-  independent of this package. See the transport's `docs/DESIGN.md`.
+  concern the transport handles unconditionally on HTTP/1.1, HTTP/2 and HTTP/3 (it
+  solicits the body with `100 Continue` at its first read, so a withholding client does
+  not deadlock; HTTP/2 and HTTP/3 since #1385), independent of this package. See the
+  transport's `docs/DESIGN.md`.
 - **The `1xx`-as-final-status guard.** Rejecting a `1xx` set as the final
   `Response.StatusCode` is enforced in the transport's response write paths, not
   here.

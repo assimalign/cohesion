@@ -34,6 +34,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// with a 0-octet read (RFC 9113 §8.1, #1327).
 /// </para>
 /// <para>
+/// <b><c>Expect: 100-continue</c> (#1385).</b> A request that declared the expectation and left its stream
+/// open has its content solicited at the first read, as HTTP/1.1 does: <c>100 Continue</c> goes out as an
+/// interim HEADERS block through the exchange's interim-response path, unless the final response has
+/// started, so a handler that answers without reading the body never invites it.
+/// </para>
+/// <para>
 /// <b>Client faults (#1378).</b> When the transport rejects the body for the client's fault — over the
 /// size cap, below the minimum data rate, or malformed — the stream latches the fault
 /// (<see cref="Http2Stream.LatchClientFault"/>) before it fails the pipe and before the stream is
@@ -87,6 +93,10 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     private readonly Http2RequestBodyDataRate? _dataRate;
     // The request-parse context whose rate knob freezes at the first read, or null on the fast path.
     private HttpExchangeInterceptorRequestContext? _interception;
+    // Whether the first read still has to solicit the content with 100 Continue (#1385), and the exchange
+    // whose interim-response path it goes out on.
+    private bool _solicitContinue;
+    private Http2Context? _exchange;
     // Whether the first read resolved the rate (and froze the knob).
     private bool _rateResolved;
     // The rate the body is held to, resolved at the first read; null when it is held to none.
@@ -117,11 +127,17 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
     /// unbounded in time (a CONNECT tunnel). With a policy, the body is held to the listener's rate unless
     /// its request changed its own before the first read (<see cref="AttachInterception"/>).
     /// </param>
+    /// <param name="solicitContinue">
+    /// Whether the request declared <c>Expect: 100-continue</c> and left its stream open for content, so the
+    /// first read solicits the content with <c>100 Continue</c> (RFC 9110 §10.1.1, #1385) through the
+    /// exchange attached with <see cref="AttachExchange"/>.
+    /// </param>
     public Http2RequestBodyStream(
         Http2Stream owner,
         ChannelReader<Http2DataChunk> reader,
         Func<int, int, CancellationToken, ValueTask> onConsumed,
-        Http2RequestBodyDataRate? dataRate = null)
+        Http2RequestBodyDataRate? dataRate = null,
+        bool solicitContinue = false)
     {
         _owner = owner;
         _reader = reader;
@@ -129,6 +145,17 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
         _streamId = owner.StreamId;
         _requestAborted = owner.RequestAborted;
         _dataRate = dataRate;
+        _solicitContinue = solicitContinue;
+    }
+
+    /// <summary>
+    /// Attaches the exchange this body belongs to, whose interim-response path the first read solicits
+    /// the content through (<c>100 Continue</c>, #1385). Called once, when the exchange is built.
+    /// </summary>
+    /// <param name="exchange">The owning exchange.</param>
+    public void AttachExchange(Http2Context exchange)
+    {
+        _exchange = exchange;
     }
 
     /// <inheritdoc />
@@ -173,6 +200,15 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
         if (!_rateResolved)
         {
             ResolveRate();
+        }
+
+        // RFC 9110 §10.1.1 — the client declared Expect: 100-continue and withholds the content until it is
+        // solicited. The first read solicits it, as HTTP/1.1 does (#1385), so a handler that answers without
+        // reading the body never invites it onto the wire.
+        if (_solicitContinue)
+        {
+            _solicitContinue = false;
+            await SolicitContinueAsync(cancellationToken).ConfigureAwait(false);
         }
 
         while (true)
@@ -251,6 +287,27 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
 
     /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The HTTP/2 request body stream is read-only.");
+
+    /// <summary>
+    /// Sends <c>100 Continue</c> (RFC 9110 §10.1.1) on the exchange's interim-response path — a HEADERS
+    /// block without <c>END_STREAM</c> ahead of the final response (RFC 9113 §8.1) — unless an interim
+    /// response can no longer precede the final one: the final response has started, the exchange was
+    /// cancelled, or the stream was reset. The interim path discards the write itself when the stream's final
+    /// response is claimed, or it is reset, before the write gets the connection, so a response that wins the
+    /// race is never preceded by a <c>100</c>.
+    /// </summary>
+    private async ValueTask SolicitContinueAsync(CancellationToken cancellationToken)
+    {
+        if (_exchange is not { Connection: { } connection } exchange
+            || exchange.HasFinalResponseStarted
+            || exchange.CancelRequested
+            || _requestAborted.IsCancellationRequested)
+        {
+            return;
+        }
+
+        await connection.WriteInterimResponseAsync(exchange, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Resolves, at the first read, the rate the body is held to and starts its gate: the request's own

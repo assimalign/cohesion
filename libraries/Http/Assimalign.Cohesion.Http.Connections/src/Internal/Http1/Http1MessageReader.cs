@@ -530,7 +530,7 @@ internal static class Http1MessageReader
     /// </summary>
     private static bool ShouldSolicitContinue(HttpHeaderCollection headers)
     {
-        return HeaderContainsToken(headers, HttpHeaderKey.Expect, "100-continue")
+        return HttpInterimResponseRules.ExpectsContinue(headers)
             && RequestHasBody(headers);
     }
 

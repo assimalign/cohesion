@@ -977,8 +977,9 @@ neither an application nor the transport itself could put a `1xx` on the wire.
 
 Two capabilities are added, and they are independent:
 
-1. **Automatic `Expect: 100-continue`** on HTTP/1.1 — a transport behavior, no
-   application involvement (below).
+1. **Automatic `Expect: 100-continue`** on every version — a transport behavior, no
+   application involvement (below). HTTP/1.1 had it first; HTTP/2 and HTTP/3 followed
+   in #1385.
 2. **Application-emitted interim responses** through the response-interceptor seam,
    on all three versions (below).
 
@@ -1109,6 +1110,52 @@ being solicited**. Three boundary rules keep the handshake legal:
   longer be sent, and whether the peer will transmit the body regardless is
   indeterminate. The connection closes instead of being reused
   (`Http1RequestBodyStream.DrainAsync` returns `false`).
+
+### Automatic `Expect: 100-continue` on HTTP/2 and HTTP/3 (#1385)
+
+**The gap.** Only HTTP/1.1 answered the expectation. A client that sent
+`expect: 100-continue` over HTTP/2 or HTTP/3 and waited for `100 Continue` before
+sending a large body stalled until its own timeout (about a second for `curl` and
+`HttpClient`) and then sent the body anyway; a client that waited longer met the
+minimum request-body data rate first and got `408`. RFC 9110 §10.1.1 applies to every
+version, and RFC 9113 §8.1 and RFC 9114 §4.1 both let interim responses precede the
+final one.
+
+**The same lazy model.** The decision is made when the request is dispatched and the
+`100` is sent at the **first body read**, through the interim-response path the
+exchange control's `WriteInterimResponseAsync` already uses — so the rules above hold
+on all three versions, and a handler that answers `401` or `417` from the head never
+invites the body:
+
+- **Which requests.** The request carries `Expect: 100-continue`
+  (`HttpInterimResponseRules.ExpectsContinue`, shared with HTTP/1.1's
+  `ShouldSolicitContinue`: an element of the `Expect` list, compared
+  case-insensitively, trimmed of SP and HTAB only), it is not a CONNECT, and it still
+  has content to solicit. On HTTP/2 that is a head without `END_STREAM`. On HTTP/3 it
+  is a request stream whose FIN was not already buffered behind its HEADERS frame
+  (`Http3RequestStreamReader.IsEndBuffered`, the probe `CanHaveBody` uses); a stream
+  whose end the transport has not seen yet is solicited, which costs nothing if the
+  content turns out to be empty.
+- **HTTP/2.** `Http2RequestBodyStream` sends it after resolving the rate at its first
+  read, through `Http2ConnectionContext.WriteInterimResponseAsync` on the exchange
+  `Http2Stream.CreateContextAsync` attaches (`AttachExchange`): a HEADERS block
+  without `END_STREAM`, under the connection write gate. It skips the write when the
+  final response has started, the exchange was cancelled, or the stream was reset, and
+  the interim path itself discards it when the stream's final response is claimed or
+  the stream reset before it gets the gate, so a response that wins the race is never
+  preceded by a `100`.
+- **HTTP/3.** `Http3RequestBodyStream` sends it after `EnsureStarted` at its first
+  read, so a Content-Length over the cap is refused (`413`) rather than invited, through
+  the request-stream overload of `Http3ConnectionContext.WriteInterimResponseAsync`: an
+  interim HEADERS frame on the request stream. It skips the write when the final
+  response has started, the exchange was cancelled, or the stream was reset or stopped.
+  The read and the response are both on the exchange's own flow, so nothing races the
+  write. A request hook that reads the body before dispatch solicits it too, as on
+  HTTP/1.1.
+- **Once.** The first read clears the decision, so a later read sends nothing. As on
+  HTTP/1.1, an explicit `100` the application sent through `Http.InterimResponses`
+  before its first read is not remembered, so the automatic one may follow it: a
+  second interim response is legal (RFC 9110 §15.2), and every version behaves alike.
 
 ### AOT posture
 
@@ -2012,9 +2059,9 @@ octets delivered extend the allowance. When the allowance runs out:
 - **A per-request opt-out from `MinRequestBodyDataRate`.** Closed by #1383: a request can lower,
   raise or disable its own rate until the first read of its body, on all three versions (see
   "Per-request data rates (#1383)").
-- **Automatic `Expect: 100-continue` on HTTP/2 and HTTP/3.** The body rate starts at the first
-  read, as on HTTP/1.1, so a client that waits for `100 Continue` gets the grace period and then
-  a `408`. `curl` and `HttpClient` stop waiting after about a second.
+- **Automatic `Expect: 100-continue` on HTTP/2 and HTTP/3.** Closed by #1385: the first read
+  sends `100 Continue`, as on HTTP/1.1, before the rate charges any wait for the content (see
+  "Automatic `Expect: 100-continue` on HTTP/2 and HTTP/3").
 - **Unidirectional streams.** A peer stream whose type octets never arrive is not timed. It
   holds one of the peer's few unidirectional-stream credits, and the keep-alive closes a
   connection that carries nothing else.
@@ -4421,11 +4468,10 @@ queue is a `System.Threading.Channels` channel.
   only as the application asks for it, so QUIC's per-stream window is the
   backpressure, and the concurrent-stream limit bounds how many request heads
   can be waiting at once.
-- **`Expect: 100-continue` on HTTP/3.** The automatic `100 Continue` is sent on
-  HTTP/1.1 only. With the body read lazily, HTTP/3 can adopt the same
-  first-read solicitation; that is follow-up work. The connection timeouts and
-  the request-body data rate are enforced (see "HTTP/2 and HTTP/3 connection
-  timeouts and data rates (#1085)").
+- **`Expect: 100-continue` on HTTP/3.** No longer a gap: #1385 gave HTTP/3 the
+  same first-read solicitation (see "Automatic `Expect: 100-continue` on HTTP/2
+  and HTTP/3"). The connection timeouts and the request-body data rate are
+  enforced (see "HTTP/2 and HTTP/3 connection timeouts and data rates (#1085)").
 - **Error codes on a driver without the code-carrying facets.** The transport
   decides every RFC 9114 §8.1 code (see the table under "Request streams") and
   puts it on the wire through `IMultiplexedStreamAbort` and
