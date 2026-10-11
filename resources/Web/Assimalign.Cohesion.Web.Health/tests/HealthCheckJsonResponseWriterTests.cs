@@ -137,6 +137,51 @@ public class HealthCheckJsonResponseWriterTests
         entry.GetProperty("description").GetString().ShouldBe(HostMessage);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should withhold the text of an exception placed in data by default")]
+    public async Task WriteAsync_WhenDataHoldsException_ShouldWithholdExceptionText()
+    {
+        // Arrange: the exception sits only in data, with an inner exception and a stack trace.
+        Exception exception = ThrownException();
+        HealthReport report = ReportWithData(exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.Instance.WriteAsync(context, report);
+
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(HostName, Case.Sensitive);
+        body.ShouldNotContain(InnerMessage, Case.Sensitive);
+        body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive);
+        body.ShouldNotContain(nameof(ThrownException), Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("entries").GetProperty("db").GetProperty("data")
+            .GetProperty("error").GetString().ShouldBe(HealthCheckJsonResponseWriter.ReportedExceptionDescription);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Health] - JsonWriter: Should write only the message of an exception placed in data with developer details")]
+    public async Task WriteAsync_WithDeveloperDetails_WhenDataHoldsException_ShouldWriteMessageOnly()
+    {
+        // Arrange
+        Exception exception = ThrownException();
+        HealthReport report = ReportWithData(exception);
+        TestHttpContext context = new("/healthz", HttpMethod.Get);
+
+        // Act
+        await HealthCheckJsonResponseWriter.DeveloperDetails.WriteAsync(context, report);
+
+        // Assert
+        string body = context.ReadResponseBody();
+        body.ShouldNotContain(InnerMessage, Case.Sensitive);
+        body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive);
+        body.ShouldNotContain(nameof(ThrownException), Case.Sensitive);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("entries").GetProperty("db").GetProperty("data")
+            .GetProperty("error").GetString().ShouldBe(HostMessage);
+    }
+
+    private const string InnerMessage = "Socket error 10061 from 10.20.30.40.";
+
     private const string HostName = "db-primary.corp.internal";
 
     private const string HostMessage = "Failed to connect to db-primary.corp.internal:5432.";
@@ -157,5 +202,27 @@ public class HealthCheckJsonResponseWriterTests
             ["db"] = new(HealthStatus.Unhealthy, description, TimeSpan.Zero, exception, data: null, tags: null),
         };
         return new HealthReport(entries, TimeSpan.Zero);
+    }
+
+    private static HealthReport ReportWithData(Exception exception)
+    {
+        var data = new Dictionary<string, object> { ["error"] = exception };
+        var entries = new Dictionary<string, HealthReportEntry>
+        {
+            ["db"] = new(HealthStatus.Unhealthy, "Primary database unavailable.", TimeSpan.Zero, exception: null, data, tags: null),
+        };
+        return new HealthReport(entries, TimeSpan.Zero);
+    }
+
+    private static Exception ThrownException()
+    {
+        try
+        {
+            throw new InvalidOperationException(HostMessage, new System.IO.IOException(InnerMessage));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return exception;
+        }
     }
 }

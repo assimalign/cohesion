@@ -67,8 +67,8 @@ request and does not mutate registrations after the service is built.
 The default JSON writer publishes each check's status, duration, description, tags and data, and
 no exception text. A check that throws or times out is described by fixed text
 (`The check threw an exception.` or `The check timed out.`), and a returned description that
-contains its exception's message is replaced. Keep connection detail out of the descriptions and
-data a check returns.
+contains its exception's message, or an exception placed in `data`, is replaced. Keep connection
+detail out of the descriptions and data a check returns.
 
 In development, opt in to the exception messages per endpoint:
 
@@ -77,9 +77,11 @@ pipeline.MapHealthChecks(health, options =>
     options.IncludeDeveloperDetails = builder.Environment.IsDevelopment());
 ```
 
-`IncludeDeveloperDetails` adds an `exception` member with each failed entry's exception message
-and writes descriptions as the checks returned them. It writes no exception type or stack trace,
-and it does not affect a custom `ResponseWriter`. The exception object itself is always available
+`IncludeDeveloperDetails` adds an `exception` member with each failed entry's exception message,
+writes descriptions as the checks returned them, and writes an exception in `data` as its message.
+It writes no exception type or stack trace, and it does not affect a custom `ResponseWriter`. It
+does not restore the 10.0.0-preview.1 output: a thrown or timed-out check keeps its fixed
+description either way ([breaking changes](DESIGN.md#exception-detail)). The exception object itself is always available
 in process, through `IHttpHealthFeature.Report` or a custom `IHealthResponseWriter`
 ([DESIGN](DESIGN.md#exception-detail)).
 

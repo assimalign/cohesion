@@ -44,15 +44,26 @@ public sealed class HealthEndpointOptions
     /// <c>The check timed out.</c>), and a description the check returned that contains the message
     /// of its result's exception, or of an exception in that exception's
     /// <see cref="Exception.InnerException"/> chain, is replaced with
-    /// <c>The check reported an exception.</c>
+    /// <c>The check reported an exception.</c> An <see cref="Exception"/> placed in the entry's
+    /// <see cref="HealthReportEntry.Data"/> is written as that same text.
     /// </para>
     /// <para>
-    /// When <see langword="true"/>, the writer exposes exactly two more things per entry: the
-    /// description as the check returned it, and an <c>exception</c> member holding the
+    /// When <see langword="true"/>, the writer exposes exactly three more things per entry: the
+    /// description the check returned, unchanged; an <c>exception</c> member holding the
     /// <see cref="Exception.Message"/> of the entry's <see cref="HealthReportEntry.Exception"/> —
     /// the exception a check threw, the <see cref="OperationCanceledException"/> of a timed-out
-    /// check, or the exception a check returned in its result. The exception's type, stack trace,
-    /// inner exceptions and <see cref="Exception.Data"/> are never written.
+    /// check, or the exception a check returned in its result; and the
+    /// <see cref="Exception.Message"/> of an exception placed in
+    /// <see cref="HealthReportEntry.Data"/>. An exception's type, stack trace, inner exceptions and
+    /// <see cref="Exception.Data"/> are never written.
+    /// </para>
+    /// <para>
+    /// The option does not reproduce the 10.0.0-preview.1 output. A thrown or timed-out check keeps
+    /// the fixed description under either setting, where preview.1 wrote the exception's message or
+    /// <c>The health check '&lt;name&gt;' timed out after &lt;timeout&gt;.</c>; a timed-out check
+    /// now also carries the cancellation's message in <c>exception</c>, which preview.1 omitted; and
+    /// an exception in <see cref="HealthReportEntry.Data"/> is written as its message, where
+    /// preview.1 wrote its <see cref="Exception.ToString"/> form.
     /// </para>
     /// <para>
     /// The setting applies only to the default writer. When <see cref="ResponseWriter"/> is a

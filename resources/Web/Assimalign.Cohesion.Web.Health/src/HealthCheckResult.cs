@@ -68,6 +68,13 @@ public readonly struct HealthCheckResult
     /// Gets the key/value diagnostic data associated with the result. Never <see langword="null"/>;
     /// an empty dictionary is used when no data was supplied.
     /// </summary>
+    /// <remarks>
+    /// The default JSON writer publishes the data to every caller of the health endpoint, so a
+    /// value should not name hosts, databases, users or credentials. The writer withholds an
+    /// <see cref="System.Exception"/> value's text unless
+    /// <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/> is set; a string value is
+    /// published as given.
+    /// </remarks>
     public IReadOnlyDictionary<string, object> Data { get; }
 
     /// <summary>

@@ -92,24 +92,44 @@ which the service set to the same message when a check threw (#1409).
   result's exception or of any exception in that exception's `InnerException` chain. Then the
   writer writes `The check reported an exception.` instead. That covers the common
   `HealthCheckResult.Unhealthy(exception.Message, exception)` idiom and a message formatted into
-  a longer description. A description that paraphrases the exception, or the check's `data`, is
-  the check author's text and is published as returned, so a check must not put connection detail
-  there.
+  a longer description. A description that paraphrases the exception is the check author's text
+  and is published as returned.
+- For a `data` value that is an `Exception`, the writer writes `The check reported an exception.`
+  rather than the `ToString()` fallback it uses for other values outside the closed primitive set,
+  because an exception's `ToString()` carries its type, message, inner exceptions and stack trace.
+  Strings and other values in `data` are the check author's text and are published as returned,
+  so a check must not put connection detail there.
 
 **The opt-in.** `HealthEndpointOptions.IncludeDeveloperDetails`, `false` by default, is meant for a
-development environment. It selects the writer's developer instance, which exposes exactly two
+development environment. It selects the writer's developer instance, which exposes exactly three
 more things per entry:
 
 - the description exactly as the entry carries it, including one that repeats an exception message;
 - an `exception` member holding the `Message` of the entry's `Exception`: the exception the check
   threw, the `OperationCanceledException` of a timed-out check, or the exception the check
-  returned in its result.
+  returned in its result;
+- the `Message` of an exception placed in `data`.
 
-It never writes the exception's type, stack trace, inner exceptions or `Data`. The output matches
-10.0.0-preview.1's, so a client that read the `exception` member can be restored by opting in.
-The option governs the default writer only; a custom `ResponseWriter` ignores it, as
-`Web.ErrorHandling`'s `IncludeDeveloperDetails` governs only that boundary's own fallback. The
-endpoint resolves its writer once, when the pipeline is composed.
+It never writes an exception's type, stack trace, inner exceptions or `Data`. The option governs
+the default writer only; a custom `ResponseWriter` ignores it, as `Web.ErrorHandling`'s
+`IncludeDeveloperDetails` governs only that boundary's own fallback. The endpoint resolves its
+writer once, when the pipeline is composed.
+
+**Breaking changes from 10.0.0-preview.1.** Opting in restores the `exception` member and returned
+descriptions verbatim. It does not restore the preview.1 output:
+
+- A thrown check's `description` is `The check threw an exception.` under either setting;
+  preview.1 wrote the exception's message there. A client that parsed `description` for the
+  failure reason now reads the fixed text, and finds the message only in `exception`, with the
+  option on.
+- A timed-out check's `description` is `The check timed out.` under either setting; preview.1
+  wrote `The health check '<name>' timed out after <timeout>.`, so the timeout value is no longer
+  published. With the option on, a timed-out check also gets an `exception` member holding the
+  `OperationCanceledException`'s message; preview.1 wrote none.
+- With the option off, the `exception` member is gone, and a returned description that contains
+  an exception message is replaced by `The check reported an exception.`
+- An `Exception` in `data` is written as that fixed text, or as its message with the option on;
+  preview.1 wrote its `ToString()`.
 
 **Server-side detail.** The exception object stays on the in-process report. An application reads
 it through `IHttpHealthFeature.Report` on the exchange, from `IHealthCheckService.CheckHealthAsync`

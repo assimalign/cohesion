@@ -18,17 +18,21 @@ using Assimalign.Cohesion.Http;
 /// Serialization is fully hand-written — no reflection-based <c>JsonSerializer</c> — so the
 /// writer is trim- and NativeAOT-safe (mirrors the <c>OpenApiJsonWriter</c> precedent). Diagnostic
 /// <see cref="HealthReportEntry.Data"/> values are written through a closed type switch; anything
-/// outside the known primitive set falls back to its <see cref="object.ToString"/> form rather
-/// than pulling in a runtime serializer.
+/// outside the known primitive set, other than an <see cref="Exception"/>, falls back to its
+/// <see cref="object.ToString"/> form rather than pulling in a runtime serializer.
 /// </para>
 /// <para>
 /// <see cref="Instance"/> publishes no exception text (CWE-209): it never writes an entry's
-/// <see cref="HealthReportEntry.Exception"/>, and it replaces a description that contains the
+/// <see cref="HealthReportEntry.Exception"/>, it replaces a description that contains the
 /// message of that exception or of any exception in its <see cref="Exception.InnerException"/>
-/// chain with <see cref="ReportedExceptionDescription"/>. <see cref="DeveloperDetails"/>, which
-/// <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/> selects, writes each description as
-/// the entry carries it and the top-level exception's <see cref="Exception.Message"/> as an
-/// <c>exception</c> member — the 10.0.0-preview.1 output.
+/// chain with <see cref="ReportedExceptionDescription"/>, and it writes the same text for an
+/// <see cref="Exception"/> placed in <see cref="HealthReportEntry.Data"/>.
+/// <see cref="DeveloperDetails"/>, which <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/>
+/// selects, writes each description as the entry carries it, the top-level exception's
+/// <see cref="Exception.Message"/> as an <c>exception</c> member, and an exception in
+/// <see cref="HealthReportEntry.Data"/> as its message only. The service's fixed descriptions for a
+/// thrown or timed-out check apply to both instances, so neither reproduces the 10.0.0-preview.1
+/// output exactly (see <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/>).
 /// </para>
 /// </remarks>
 internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
@@ -157,10 +161,16 @@ internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
         return description;
     }
 
-    private static void WriteDataValue(Utf8JsonWriter writer, object? value)
+    private void WriteDataValue(Utf8JsonWriter writer, object? value)
     {
         switch (value)
         {
+            case Exception exception:
+                // ToString() would write the type, message, inner exceptions and stack trace. The
+                // default instance withholds all of it; the developer instance writes the message
+                // only, as it does for the entry's own exception.
+                writer.WriteStringValue(_includeDeveloperDetails ? exception.Message : ReportedExceptionDescription);
+                break;
             case null:
                 writer.WriteNullValue();
                 break;
