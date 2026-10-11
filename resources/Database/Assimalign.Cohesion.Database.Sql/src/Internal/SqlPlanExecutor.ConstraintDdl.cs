@@ -33,105 +33,105 @@ internal sealed partial class SqlPlanExecutor
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         // Rebind after waiting: a parent definition might have changed while acquiring its lock.
         constraints = BindConstraints(provisional, plan.Constraints);
-            // Durable, but not a self-commit the session counts (#1272): the reservation persists only
-            // the object-id counter, and the table stays invisible until the publish.
-            var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
-                statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
+        // Durable, but not a self-commit the session counts (#1272): the reservation persists only
+        // the object-id counter, and the table stays invisible until the publish.
+        var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+            statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+            statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
 
-            // Lock before publication, and retain the apply's owner through its final marker
-            // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
-            // AccessExclusiveLock on the newly created relation through transaction end.
-            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
-                LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        // Lock before publication, and retain the apply's owner through its final marker
+        // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
+        // AccessExclusiveLock on the newly created relation through transaction end.
+        await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+            LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
-            // Bind the persisted definitions of the version about to be published, from their
-            // stored text, so no write to the new table ever parses them.
-            _definitions.Get(table);
-            await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false).ConfigureAwait(false);
-        }
+        // Bind the persisted definitions of the version about to be published, from their
+        // stored text, so no write to the new table ever parses them.
+        _definitions.Get(table);
+        await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false).ConfigureAwait(false);
+    }
 
-        private async Task LockReferencedTablesAsync(IReadOnlyList<SqlCatalogConstraint> constraints, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task LockReferencedTablesAsync(IReadOnlyList<SqlCatalogConstraint> constraints, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var parents = new SortedSet<ulong>();
+        foreach (var constraint in constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference))
         {
-            var parents = new SortedSet<ulong>();
-            foreach (var constraint in constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference))
+            if (_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
             {
-                if (_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
-                {
-                    parents.Add(parent.ObjectId);
-                }
-            }
-
-            foreach (ulong parent in parents)
-            {
-                await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
-                    LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                parents.Add(parent.ObjectId);
             }
         }
 
-        // Empty CREATE trees and ALTER backfills are durable before the single catalog
-        // publish. A crash can leak unpublished tree pages, but cannot expose a table
-        // whose declared uniqueness has no enforcing index.
-        private async Task PublishConstrainedTableAsync(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
-            SqlStatementContext statement, CancellationToken cancellationToken, bool replaceExisting)
+        foreach (ulong parent in parents)
         {
-            var indexes = new List<SqlCatalogIndex>();
-            bool primaryCreated = false;
-            for (int i = 0; i < definitions.Count; i++)
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
+                LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // Empty CREATE trees and ALTER backfills are durable before the single catalog
+    // publish. A crash can leak unpublished tree pages, but cannot expose a table
+    // whose declared uniqueness has no enforcing index.
+    private async Task PublishConstrainedTableAsync(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
+        SqlStatementContext statement, CancellationToken cancellationToken, bool replaceExisting)
+    {
+        var indexes = new List<SqlCatalogIndex>();
+        bool primaryCreated = false;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            var definition = definitions[i];
+            if (definition.Kind is not (SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey))
             {
-                var definition = definitions[i];
-                if (definition.Kind is not (SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey))
-                {
-                    continue;
-                }
-
-                if (definition.Kind == SqlConstraintKind.PrimaryKey && primaryCreated)
-                {
-                    continue;
-                }
-
-                if (definition.Kind == SqlConstraintKind.PrimaryKey)
-                {
-                    primaryCreated = true;
-                }
-
-                var columns = definition.Kind == SqlConstraintKind.PrimaryKey ? table.PrimaryKeyColumns : definition.Columns;
-                indexes.Add(new SqlCatalogIndex(table.ObjectId, ConstraintName(table, definition, i), columns, true, table.Owner, table.OwningSchema, isPrimaryKey: definition.Kind == SqlConstraintKind.PrimaryKey));
-            }
-            if (!replaceExisting && !primaryCreated && table.PrimaryKeyColumns.Count > 0)
-            {
-                indexes.Add(new SqlCatalogIndex(table.ObjectId, $"PrimaryKey_{table.Name}", table.PrimaryKeyColumns, true, table.Owner, table.OwningSchema, isPrimaryKey: true));
+                continue;
             }
 
-            foreach (var metadata in indexes)
+            if (definition.Kind == SqlConstraintKind.PrimaryKey && primaryCreated)
             {
-                foreach (string name in metadata.ColumnNames)
+                continue;
+            }
+
+            if (definition.Kind == SqlConstraintKind.PrimaryKey)
+            {
+                primaryCreated = true;
+            }
+
+            var columns = definition.Kind == SqlConstraintKind.PrimaryKey ? table.PrimaryKeyColumns : definition.Columns;
+            indexes.Add(new SqlCatalogIndex(table.ObjectId, ConstraintName(table, definition, i), columns, true, table.Owner, table.OwningSchema, isPrimaryKey: definition.Kind == SqlConstraintKind.PrimaryKey));
+        }
+        if (!replaceExisting && !primaryCreated && table.PrimaryKeyColumns.Count > 0)
+        {
+            indexes.Add(new SqlCatalogIndex(table.ObjectId, $"PrimaryKey_{table.Name}", table.PrimaryKeyColumns, true, table.Owner, table.OwningSchema, isPrimaryKey: true));
+        }
+
+        foreach (var metadata in indexes)
+        {
+            foreach (string name in metadata.ColumnNames)
+            {
+                var column = table.Columns[FindColumnOrdinal(table, name)];
+                if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Json
+                    && !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
                 {
-                    var column = table.Columns[FindColumnOrdinal(table, name)];
-                    if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Json
-                        && !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
+                    throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{name}' cannot have an index or indexed constraint.");
+                }
+            }
+        }
+
+        var created = new List<string>();
+        try
+        {
+            if (indexes.Count > 0)
+            {
+                if (statement.ProvisioningProgress is not null)
+                {
+                    foreach (var metadata in indexes)
                     {
-                        throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{name}' cannot have an index or indexed constraint.");
+                        await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
+                            metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
+                            () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
                     }
                 }
-            }
-
-            var created = new List<string>();
-            try
-            {
-                if (indexes.Count > 0)
+                else
                 {
-                    if (statement.ProvisioningProgress is not null)
-                    {
-                        foreach (var metadata in indexes)
-                        {
-                            await BuildDeferredIndexAsync(table, new IndexDefinition(metadata.Name, IndexKind.BTree, true),
-                                metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray(), statement,
-                                () => created.Add(metadata.Name), cancellationToken).ConfigureAwait(false);
-                        }
-                    }
-                    else
-                    {
                     // Durable, but not a self-commit the session counts (#1272): the trees are orphaned
                     // pages until the publish below describes them.
                     await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
