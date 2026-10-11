@@ -61,6 +61,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
     private readonly SqlQueryExecutor _executor;
     private readonly SqlQueryParserOptions _parserOptions;
     private readonly string? _provisioningSchema;
+    private readonly TransactionSequence? _ddlLockOwner;
 
     // The isolation level of an auto-commit statement and of a BEGIN statement. The SQL
     // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
@@ -76,12 +77,14 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// a typed request nested deeper is refused (#1151).
     /// </param>
     /// <param name="provisioningSchema">The schema the provisioner's session owns, if any.</param>
+    /// <param name="ddlLockOwner">The apply's retained DDL lock owner, if any.</param>
     internal SqlDatabaseSession(
         SqlDatabase database,
         TransactionCoordinator coordinator,
         SqlQueryExecutor executor,
         SqlQueryParserOptions parserOptions,
-        string? provisioningSchema = null)
+        string? provisioningSchema = null,
+        TransactionSequence? ddlLockOwner = null)
         : base(database)
     {
         _database = database;
@@ -89,6 +92,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         _executor = executor;
         _parserOptions = parserOptions;
         _provisioningSchema = provisioningSchema;
+        _ddlLockOwner = ddlLockOwner;
     }
 
     /// <summary>
@@ -201,6 +205,8 @@ public sealed class SqlDatabaseSession : DatabaseSession
         var previousMetrics = _lastStatementMetrics;
         try
         {
+            using var ddl = _provisioningSchema is null && IsSelfCommitting(request)
+                ? _database.DdlInterlock.EnterStatement(_database.Name.ToString()) : null;
             return await ExecuteStatementAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
@@ -374,7 +380,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), CaptureSystemViewSnapshot(request));
+                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);

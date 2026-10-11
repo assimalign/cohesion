@@ -12,13 +12,15 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlProvisioningCollisionTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: compensation preserves an ad-hoc table created between provisioning steps")]
-    public async Task ApplySchemaAsync_TableCreatedBetweenSteps_ShouldRefuseAndPreserveAdhocTable()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: table DDL between provisioning steps is refused before compensation")]
+    public async Task ApplySchemaAsync_TableDdlBetweenSteps_ShouldRefuseAndCompensateOnlyItsOwnWork()
     {
         // Arrange: the callback injects the exact interleaving without racing threads.
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("collisions", CancellationToken.None);
         await using var adhoc = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await adhoc.ExecuteAsync("CREATE TABLE preserved (id INT)", cancellationToken: CancellationToken.None);
+        await adhoc.ExecuteAsync("INSERT INTO preserved (id) VALUES (42)", cancellationToken: CancellationToken.None);
         var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "collisions", false, [],
             [Table("a_first"), Table("z_collision")], []);
         int completed = 0;
@@ -38,15 +40,16 @@ public sealed class SqlProvisioningCollisionTests
         // Assert: only the completed schema-owned step was compensated.
         completed.ShouldBe(1);
         failure.Message.ShouldStartWith("COHSQLP004:");
-        failure.InnerException.ShouldNotBeNull().Message.ShouldContain("schema provisioning cannot adopt it");
+        failure.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
         database.Catalog.TryGetTable("dbo", "a_first", out _).ShouldBeFalse();
-        database.Catalog.TryGetTable("dbo", "z_collision", out var preserved).ShouldBeTrue();
+        database.Catalog.TryGetTable("dbo", "z_collision", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "preserved", out var preserved).ShouldBeTrue();
         preserved.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
         database.Catalog.SchemaState.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: compensation preserves an ad-hoc index created between provisioning steps")]
-    public async Task ApplySchemaAsync_IndexCreatedBetweenSteps_ShouldRefuseAndPreserveAdhocIndex()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - B2: index DDL between provisioning steps is refused and existing indexes survive compensation")]
+    public async Task ApplySchemaAsync_IndexDdlBetweenSteps_ShouldRefuseAndPreserveExistingAdhocIndex()
     {
         // Arrange: keep the owning table from an earlier apply, so compensating
         // the added column must preserve an independently added index on id.
@@ -60,6 +63,8 @@ public sealed class SqlProvisioningCollisionTests
                 [new("id", DatabaseType.Int32, false), new("note", DatabaseType.String, true)],
                 null, [new CompiledSchemaIndex("ix_orders_id", ["id"])], [])], []);
         await using var adhoc = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await adhoc.ExecuteAsync("CREATE INDEX ix_preserved ON orders (id)", cancellationToken: CancellationToken.None);
+        await adhoc.ExecuteAsync("INSERT INTO orders (id) VALUES (42)", cancellationToken: CancellationToken.None);
         int completed = 0;
         database.SchemaProvisioner.StepApplied = step =>
         {
@@ -76,10 +81,11 @@ public sealed class SqlProvisioningCollisionTests
         // Assert
         completed.ShouldBe(1);
         failure.Message.ShouldStartWith("COHSQLP004:");
-        failure.InnerException.ShouldNotBeNull().Message.ShouldContain("schema provisioning cannot adopt it");
+        failure.InnerException.ShouldBeOfType<DatabaseObjectLockedException>();
         database.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.FindColumn("note").ShouldBeNull();
-        database.Catalog.TryGetIndex(table.ObjectId, "ix_orders_id", out var preserved).ShouldBeTrue();
+        database.Catalog.TryGetIndex(table.ObjectId, "ix_orders_id", out _).ShouldBeFalse();
+        database.Catalog.TryGetIndex(table.ObjectId, "ix_preserved", out var preserved).ShouldBeTrue();
         preserved.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
         database.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(initial.Hash);
     }

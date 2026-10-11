@@ -39,6 +39,12 @@ internal sealed partial class SqlPlanExecutor
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
             statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
 
+        // Lock before publication, and retain the apply's owner through its final marker
+        // or compensation. PostgreSQL tablecmds.c:1112-1118,1390-1394 likewise retains
+        // AccessExclusiveLock on the newly created relation through transaction end.
+        await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+            LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
         _definitions.Get(table);
@@ -58,7 +64,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (ulong parent in parents)
         {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(parent),
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner, LockResource.Object(parent),
                 LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
     }

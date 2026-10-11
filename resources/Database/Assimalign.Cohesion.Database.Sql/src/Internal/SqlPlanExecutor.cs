@@ -884,7 +884,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
@@ -915,7 +915,7 @@ internal sealed partial class SqlPlanExecutor
         // in-flight row writer (IntentExclusive holders) to finish before the
         // table is dropped — and blocks new ones until this transaction ends.
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable current = ReadCurrentTable(table);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
@@ -970,7 +970,7 @@ internal sealed partial class SqlPlanExecutor
         if (_catalog.TryGetTable(schema, name, out var table))
         {
             await statement.Coordinator.LockManager.AcquireAsync(
-                statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
             SqlCatalogTable current = ReadCurrentTable(table);
             EnsureCanChange(current.Owner, current.Name, current.OwningSchema, operation, statement);
@@ -1011,7 +1011,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         var ordinals = new int[plan.ColumnNames.Count];
         for (int i = 0; i < ordinals.Length; i++)
@@ -1099,7 +1099,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            statement.DdlLockOwner, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable currentTable = ReadCurrentTable(plan.Table);
         if (!_catalog.TryGetIndex(currentTable.ObjectId, plan.IndexName, out metadata))

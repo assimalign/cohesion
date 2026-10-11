@@ -1048,7 +1048,8 @@ marker does not advance it. An older database is refused by the existing format 
 upgrade or legacy counter reader. If catalog decoding fails before reaching an older database's
 format marker, the engine reads only the unchanged marker tuple and invokes that same gate. This
 failure-only read adds no traversal to a successful open and preserves the actionable `Unavailable`
-wire refusal. A current, missing, malformed or ambiguous marker leaves the catalog error intact.
+wire refusal. A marker-free catalog containing one genuine old counter tuple is refused as format 1;
+duplicate counters, unknown record kinds, and malformed or ambiguous markers remain corruption.
 
 The marker retains the canonical document for migration history, alongside `{hash, generation}`.
 Equal declared hash and current generation return immediately: no ownership scan, snapshot,
@@ -1092,9 +1093,9 @@ length, precision and scale bounds. Conversion failures and values outside those
 Build with `COHSQLP001` before either file set exists; finite and underflow checks for floating
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
-and `DEFAULT NULL` has the same live
-meaning as absence. Null defaults are omitted from canonical JSON, preserving existing defaultless
-v3 identities. A non-null literal can backfill an added required column, subject to the planner's
+and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
+`cohesion/database-schema/v4`, because strict v3 readers cannot read `defaultLiteral`. Null defaults
+are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction preserves the same text and hash.
 
 `SqlProvisioningHardeningTests` captures Sql's crash-storage strategy after every committed step of
@@ -1104,7 +1105,7 @@ engine Build's plan must equal the remaining suffix and its final marker must eq
 hash and current generation. A separate compiled-schema test covers unique-index creation and a
 composite primary key, which the retained builder does not declare.
 
-**49a remains unimplemented.** If accepted later, its classification/scheduling point belongs
+**49a was accepted on 2026-10-11 and lands next on this branch.** Its classification/scheduling point belongs
 between plan rendering and the statement loop in `SqlSchemaProvisioner.ApplyAsync`; the final
 marker must still be withheld until every required step completes. B2 adds no deferred worker,
 pending-step records or Degraded progress.
@@ -1205,6 +1206,25 @@ those identifier forms. The mapper uses the same retained names, so its quoted
 DML binds the objects deployed by this renderer without another naming convention.
 
 Each DDL request remains self-committing under the catalog's established rule.
+An apply holds the database's internal DDL admission interlock from its initial catalog check
+through its final marker, compensation and lock cleanup. Ordinary session DDL is refused with
+`DatabaseObjectLockedException` while it is held; an apply likewise refuses before changing
+anything if ordinary DDL is already running. This fail-fast admission avoids a second waiting
+graph outside the lock manager. It excludes unrelated DDL too, an intentional cost of protecting
+names that do not have an object id yet and keeping the planning snapshot stable.
+
+The apply also owns a read-only coordinator context solely for table locks. Each DDL statement
+uses that context's sequence for Exclusive table locks (including referenced parents), while
+its data and catalog work keep their original per-statement commits. A new table is locked
+after id reservation and before catalog publication. Those locks stay held through every step,
+the final marker, and reverse compensation, then the read-only context rolls back to release
+them. PostgreSQL likewise takes `AccessExclusiveLock` on a new relation and retains it to
+transaction end (`src/backend/commands/tablecmds.c:1112-1118,1390-1394` in the reference clone).
+This engine's simple MVCC readers remain lock-free; writers to an affected table wait on its
+existing table-lock protocol. Readers and writers on unrelated tables continue, and no coordinator
+apply gate is held between statements. The lifetime protects compensation: no other session can
+commit a row or a dependent index on a newly created table before compensation can drop it.
+
 Provisioning refuses a table or index that appears after planning, even when its
 generated CREATE uses `IF NOT EXISTS`: an operation that created nothing must not
 enter the compensation list and later delete an independently created object.
@@ -2459,6 +2479,11 @@ writes the operating system already dropped. The engine stops the database, not 
   2026-10-06, #1272: `SqlDatabase.CreateUnconfirmedCommit`, through the root's
   `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)`); before #1272
   these paths carried the kernel's message alone.
+- Every failure after a commit record was appended fences storage, including an exception from
+  the grouped durability callback or a handle losing durable-flush support. Catalog commits and
+  schema-state saves use this same storage fail-stop path; cached catalog reads also refuse once
+  offline, so stale counter or chunk locations cannot be reused before recovery. A failure before
+  the commit record rolls the bracket back and leaves its counters unchanged and online.
 - A DDL statement that meets the offline storage is classified exactly (#1272). DDL commits
   durable brackets in the catalog and data file sets as it goes (catalog writes, and
   `ApplyStatementAsync(..., durable: true)` for index builds), so a prefix of it may survive the

@@ -59,6 +59,7 @@ public sealed class SqlDatabase : DatabaseInstance
 
     // Internal diagnostics/fault-injection seam for this project's own tests.
     internal SqlSchemaProvisioner SchemaProvisioner => _schemaProvisioner;
+    internal SqlDdlInterlock DdlInterlock { get; } = new();
     private readonly SqlBoundTableCache _definitions;
     private readonly SqlDatabaseEngine _engine;
 
@@ -512,13 +513,14 @@ public sealed class SqlDatabase : DatabaseInstance
     /// Creates the provisioner's private session. Only this path stamps schema ownership
     /// and authorizes schema-owned DDL; ordinary sessions have no ownership bypass.
     /// </summary>
-    internal SqlDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken)
+    internal SqlDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken,
+        TransactionSequence? ddlLockOwner = null)
     {
         ThrowIfDisposed();
         ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
-        return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema);
+        return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema, ddlLockOwner);
     }
 
     /// <summary>
@@ -537,6 +539,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <exception cref="DatabaseObjectLockedException">
     /// The engine's builder declared the database with another schema: the declaration owns the
     /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
+    /// Also thrown before changes when an ordinary session DDL statement is already running.
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
     /// The schema targets another database, declares what the engine has no DDL for (principals),

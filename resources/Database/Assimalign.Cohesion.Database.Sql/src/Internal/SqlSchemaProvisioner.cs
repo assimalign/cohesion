@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -42,8 +43,11 @@ internal sealed class SqlSchemaProvisioner
     {
         ArgumentNullException.ThrowIfNull(schema);
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        TransactionContext? locks = null;
+        IDisposable? ddl = null;
         try
         {
+            ddl = _database.DdlInterlock.EnterApply(schema.Name);
             ValidateSupportedSchema(schema);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             string targetHash = schema.Hash;
@@ -71,7 +75,10 @@ internal sealed class SqlSchemaProvisioner
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
 
-            await using SqlDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken);
+            // This read-only context owns table locks across self-committing statements.
+            // Its rollback only releases locks: no schema/data changes enlist in it.
+            locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+            await using SqlDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken, locks.Sequence);
             try
             {
                 foreach (SqlMigrationScriptStep step in script.Steps)
@@ -138,7 +145,18 @@ internal sealed class SqlSchemaProvisioner
         }
         finally
         {
-            _applyGate.Release();
+            try
+            {
+                if (locks?.State == TransactionState.Active && !_database.IsOffline)
+                {
+                    await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ddl?.Dispose();
+                _applyGate.Release();
+            }
         }
     }
 

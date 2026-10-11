@@ -1650,3 +1650,7 @@ The typed schema's `table.Default(selector, literal)` emits the existing literal
 It accepts the same SQL literals as DDL, with quoted text for string values; functions and other
 expressions remain unsupported. `DEFAULT NULL` has the same stored meaning as no default.
 This adds no SQL grammar or new default-expression semantics.
+
+While a compiled-schema apply runs, ordinary session DDL is refused with
+`DatabaseObjectLockedException`. Writers to tables the apply creates or alters wait until the
+apply, including any compensation, finishes; unrelated table reads and writes continue.
