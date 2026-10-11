@@ -32,7 +32,8 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 
     /// <summary>
     /// The root of the migration folders: a database's migrations are written to the folder under it
-    /// named for the database, so each database numbers its own.
+    /// named for the database, so each database numbers its own. The folder's name compares ignoring
+    /// case, as database names do, so a declaration renamed only in case keeps its folder.
     /// </summary>
     [Required]
     public string MigrationsRoot { get; set; } = string.Empty;
@@ -157,7 +158,24 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             }
 
             string schemaPath = Path.Combine(schemaDirectory, declaredName + CompileDatabaseSchemaTask.SchemaFileSuffix);
-            string migrationsRoot = Path.Combine(ResolvePath(MigrationsRoot, projectDirectory), declaredName);
+            string allMigrations = ResolvePath(MigrationsRoot, projectDirectory);
+            string? migrationsRoot = FindMigrationsDirectory(allMigrations, declaredName, out string[] matches);
+            if (migrationsRoot is null)
+            {
+                Log.LogError(
+                    null,
+                    "COHDBSDK208",
+                    null,
+                    allMigrations,
+                    0,
+                    0,
+                    0,
+                    0,
+                    $"Database '{declaredName}' has more than one migrations folder ({string.Join(", ", matches.Select(Path.GetFileName))}): " +
+                    "database names compare ignoring case, so its migrations belong in one folder. Merge them into one.");
+                return false;
+            }
+
             Directory.CreateDirectory(migrationsRoot);
             BaselineFile? latest = FindLatestBaseline(migrationsRoot);
             SqlCompiledSchema desired = SqlCompiledSchemaSerializer.Read(schemaPath);
@@ -219,6 +237,27 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             Log.LogError(null, "COHDBSDK206", null, null, 0, 0, 0, 0, exception.Message);
             return false;
         }
+    }
+
+    // A database's migrations folder: the one folder under the root whose name equals the
+    // database's ignoring case, as database names compare, so a declaration renamed only in case
+    // keeps its history on a case-sensitive file system too (#1392); a new folder named as the
+    // database is declared when there is none. Null when more than one folder matches, which only
+    // a case-sensitive file system can hold; matches then holds them.
+    private static string? FindMigrationsDirectory(string root, string databaseName, out string[] matches)
+    {
+        matches = Directory.Exists(root)
+            ? Directory.EnumerateDirectories(root)
+                .Where(directory => string.Equals(Path.GetFileName(directory), databaseName, StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.Ordinal)
+                .ToArray()
+            : [];
+        return matches.Length switch
+        {
+            0 => Path.Combine(root, databaseName),
+            1 => matches[0],
+            _ => null,
+        };
     }
 
     private static BaselineFile? FindLatestBaseline(string migrationsRoot)

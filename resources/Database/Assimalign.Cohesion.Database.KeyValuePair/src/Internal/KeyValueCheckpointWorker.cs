@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>
 /// The engine-owned checkpointer: checkpoints a database's file set — the data set and the
-/// <c>.catalog</c> set, each on its own — when its journal reaches
+/// catalog set, each on its own — when its journal reaches
 /// <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/>, or when
 /// <see cref="KeyValueDatabaseEngineOptions.CheckpointInterval"/> has passed since its last checkpoint
 /// and its journal received records since (#1254). A checkpoint durably flushes all page state

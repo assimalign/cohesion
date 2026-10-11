@@ -52,7 +52,9 @@ can select a server, another database, or another graph.
 
 ## Physical records and adjacency
 
-Each logical database owns `graph.dat`, `graph.log` and `graph.bak`. All records start with the
+Each logical database owns `graph.dat`, `graph.log` and `graph.bak`, in the directory
+`<RootPath>/<storage name>` when it is file-backed (see "Database names and directories" below).
+All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
 kind, byte 17 is format version 1, and bytes 18–25 are a nonzero unsigned 64-bit identity. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
@@ -104,6 +106,39 @@ integral, decimal and finite floating point values through double conversion. Fu
 filter index candidates, preserving exact integral/decimal comparisons despite key collisions.
 Comparisons involving a floating point operand use double precision, including subnormal values.
 All node creation/deletion paths maintain property indexes. Graph has no property-update verb.
+
+### Database names and directories
+
+A file-backed database's directory is `<RootPath>/<storage name>`, where the storage name is the
+invariant lower case of the database's name (#1392). Database names compare ignoring case, so every
+spelling reaches that one directory on every OS: on Linux an open of `SALES` finds `sales`, a create
+of `SALES` after `sales` is refused as existing, and a drop of `SALES` drops `sales`.
+
+- **Why a pure function, not a scan.** Before #1392 the engine scanned the root for a directory
+  whose name matched ignoring case. That cost a directory scan per open, create and drop, and on a
+  case-sensitive file system it was ambiguous when `sales` and `Sales` both existed. The directory
+  is now computed from the name by `DatabaseFileNames`, the function every model shares (the area
+  design, §3.3, has the rejected alternatives).
+- **One name rule on every OS.** 1 to 128 ASCII letters, digits, `_`, `-` and `.`; no leading,
+  trailing or doubled dot; no Windows device name before the first dot. The rule used to be the
+  platform's invalid file-name characters, so `a:b` was valid on Linux and refused on Windows.
+- **Enumeration** takes each directory under the root that is a lower-case valid name holding
+  `graph.dat`, so it skips a case-variant directory made outside the engine. Such a directory is
+  outside the contract: on Windows and macOS the file system resolves an open's lower-case path to
+  it.
+- **A database is its data file.** An open needs `graph.dat` too, so a directory without it, left
+  by an interrupted create or drop, is not found (`DatabaseNotFoundException`). A create claims
+  the directory, so it refuses that one with a message that names the leftover, and a drop
+  removes it. `TryGetDatabase` is a lookup, so a name that breaks the rule is not found rather
+  than refused.
+- **The reported name** is the spelling the storage header kept from the database's create,
+  whatever spelling opened or listed it.
+- **In memory** the engine's `DatabaseMemoryFiles` keys the `graph` file set by the same storage
+  name.
+
+`GraphDatabaseNameTests` pins each case in memory and on disk, asserting the exact directory names
+it leaves with ordinal comparison, so the tests prove the mapping on Windows, whose file system
+folds case, as on Linux.
 
 ## Transactions, atomicity and recovery
 

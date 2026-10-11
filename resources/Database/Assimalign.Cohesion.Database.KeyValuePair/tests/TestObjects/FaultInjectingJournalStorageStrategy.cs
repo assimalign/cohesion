@@ -98,15 +98,15 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// </summary>
     /// <param name="flushes">The number of durable flushes to fail.</param>
     /// <param name="skip">The number of durable flushes to let through before the first failure.</param>
-    /// <param name="storageName">
-    /// Only the journal of this file set (the database name, or with <c>.catalog</c>) fails and
-    /// counts; null for every journal.
+    /// <param name="databaseName">
+    /// Only a journal of this database fails and counts; null for every journal.
     /// </param>
+    /// <param name="catalog">With <paramref name="databaseName"/>: true for its catalog file set's journal, false for its data set's.</param>
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
-    internal static FailureScope FailJournalFlushes(int flushes, int skip = 0, string? storageName = null)
+    internal static FailureScope FailJournalFlushes(int flushes, int skip = 0, string? databaseName = null, bool catalog = false)
     {
         var previous = s_flushFailures.Value;
-        var budget = new Budget { Skip = skip, Fail = flushes, StorageName = storageName };
+        var budget = new Budget { Skip = skip, Fail = flushes, StorageName = databaseName is null ? null : Key(databaseName, catalog) };
         s_flushFailures.Value = budget;
         return new FailureScope(s_flushFailures, previous, budget);
     }
@@ -114,29 +114,31 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// <summary>
     /// Gets the bytes a file set's data and journal streams hold right now.
     /// </summary>
-    /// <param name="storageName">The file set's storage name (the database name, or with <c>.catalog</c>).</param>
-    internal (byte[] Data, byte[] Journal) Capture(string storageName)
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
+    internal (byte[] Data, byte[] Journal) Capture(string databaseName, bool catalog = false)
     {
         lock (_sync)
         {
-            var files = _storages[storageName];
+            var files = _storages[Key(databaseName, catalog)];
             return (files.Data.ToArray(), files.Journal.ToArray());
         }
     }
 
     /// <inheritdoc />
-    public override KeyValueStorage CreateStorage(string databaseName)
+    public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
     {
+        string key = Key(databaseName, catalog);
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
         {
-            if (!_storages.TryAdd(databaseName, files))
+            if (!_storages.TryAdd(key, files))
             {
-                throw new DatabaseException($"Fault-injecting storage for '{databaseName}' already exists.");
+                throw new DatabaseException($"Fault-injecting storage for '{key}' already exists.");
             }
         }
 
-        return KeyValueStorage.Create(DataStream(files, databaseName), JournalStream(files, databaseName), new StorageStream(files.Backup), databaseName);
+        return KeyValueStorage.Create(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), GetLabel(databaseName, catalog));
     }
 
     /// <summary>
@@ -144,12 +146,13 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
     /// <inheritdoc />
-    public override KeyValueStorage OpenStorage(string databaseName)
+    public override KeyValueStorage OpenStorage(string databaseName, bool catalog)
     {
+        string key = Key(databaseName, catalog);
         Files files;
         lock (_sync)
         {
-            if (!_storages.TryGetValue(databaseName, out var closed))
+            if (!_storages.TryGetValue(key, out var closed))
             {
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
             }
@@ -162,10 +165,10 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
 
             journal.ConfirmedLength = journal.Length;
             files = new Files(Copy(closed.Data, new MemoryStream()), journal, Copy(closed.Backup, new MemoryStream()));
-            _storages[databaseName] = files;
+            _storages[key] = files;
         }
 
-        return KeyValueStorage.Open(DataStream(files, databaseName), JournalStream(files, databaseName), new StorageStream(files.Backup), checkpointOnOpen: false);
+        return KeyValueStorage.Open(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), checkpointOnOpen: false);
     }
 
     /// <inheritdoc />
@@ -173,16 +176,17 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     {
         lock (_sync)
         {
-            _storages.Remove(databaseName);
+            _storages.Remove(Key(databaseName, catalog: false));
+            _storages.Remove(Key(databaseName, catalog: true));
         }
     }
 
     /// <inheritdoc />
-    public override bool StorageExists(string databaseName)
+    public override bool StorageExists(string databaseName, bool catalog)
     {
         lock (_sync)
         {
-            return _storages.ContainsKey(databaseName);
+            return _storages.ContainsKey(Key(databaseName, catalog));
         }
     }
 
@@ -191,26 +195,34 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// workers included (#1268). They apply to the file sets of a durable strategy, and survive a
     /// reopen of the file set.
     /// </summary>
-    /// <param name="storageName">The file set's storage name (the database name, or with <c>.catalog</c>).</param>
-    internal DeviceFaults Faults(string storageName)
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
+    internal DeviceFaults Faults(string databaseName, bool catalog = false) => FaultsOf(Key(databaseName, catalog));
+
+    // A file set's key: the database's lower-case storage name and the set, as the file-based
+    // strategy finds it in the database's directory (#1392).
+    private static string Key(string databaseName, bool catalog)
+        => DatabaseFileNames.GetStorageName(databaseName) + "/" + GetFileSet(catalog);
+
+    private DeviceFaults FaultsOf(string key)
     {
         lock (_sync)
         {
-            if (!_faults.TryGetValue(storageName, out var faults))
+            if (!_faults.TryGetValue(key, out var faults))
             {
                 faults = new DeviceFaults();
-                _faults.Add(storageName, faults);
+                _faults.Add(key, faults);
             }
 
             return faults;
         }
     }
 
-    private StorageStream DataStream(Files files, string storageName)
-        => _durable ? new StorageStream(Faults(storageName).WrapData(new DurableMemoryHandle(files.Data, null, null))) : new StorageStream(files.Data);
+    private StorageStream DataStream(Files files, string key)
+        => _durable ? new StorageStream(FaultsOf(key).WrapData(new DurableMemoryHandle(files.Data, null, null))) : new StorageStream(files.Data);
 
-    private StorageStream JournalStream(Files files, string storageName)
-        => _durable ? new StorageStream(Faults(storageName).WrapJournal(new DurableMemoryHandle(files.Journal, files.Journal, storageName))) : new StorageStream(files.Journal);
+    private StorageStream JournalStream(Files files, string key)
+        => _durable ? new StorageStream(FaultsOf(key).WrapJournal(new DurableMemoryHandle(files.Journal, files.Journal, key))) : new StorageStream(files.Journal);
 
     private static T Copy<T>(MemoryStream source, T target)
         where T : MemoryStream

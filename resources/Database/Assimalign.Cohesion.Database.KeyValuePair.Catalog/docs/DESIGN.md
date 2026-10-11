@@ -14,7 +14,7 @@ that has none.
 ## Why-this-not-that
 
 - **A dedicated catalog file set, not records mixed into the data file.** The SQL
-  family precedent (`<name>` + `<name>.catalog`) holds: catalog writes are
+  family precedent (a data set and a `catalog` set in the database's directory) holds: catalog writes are
   self-committing storage transactions with no MVCC layer above them, and mixing
   self-committing records into a data file whose journal carries logical
   transaction lifecycles would entangle recovery classification with metadata

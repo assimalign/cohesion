@@ -84,7 +84,7 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   a data or catalog file set in another storage format with `StorageFormatException`
   (`COHDBS001`) before its journal is read, and the engine names the database and the
   file set: `DatabaseException` "Database 'x' cannot be opened: its catalog file set
-  'x.catalog' was refused. COHDBS001: …" (or its data file set 'x'), the files left
+  'x/catalog' was refused. COHDBS001: …" (or its data file set 'x'), the files left
   byte-identical (`KeyValueEngineLifecycleTests`).
   With entries ordered by location, a PUT's tombstone of the key's previous
   version descends to it instead of walking the key's dead versions; the unique
@@ -609,14 +609,60 @@ workers.
 
 ## Two file sets per database
 
-`<name>` (entries + primary index pages — index pages ride the data storage's
-transactional page surface, no separate index file) and `<name>.catalog`
+The data set (entries + primary index pages — index pages ride the data storage's
+transactional page surface, no separate index file) and the catalog set
 (registrations + format marker), both via the internal `KeyValueStorageStrategy`
 base — file-backed under `RootPath`, in-memory otherwise, the SQL strategy pattern.
 The strategy is `internal abstract` since the concrete-types plan's phase 4 (D9):
 no shipped code outside this assembly supplied one, so the public interface and the
 public option property went, and this assembly's durability and fault-injecting
 test strategies derive through its test-only grant.
+
+### Names and files (#1392)
+
+Every strategy maps a database's name through the area's one shared function,
+`DatabaseFileNames` (root design, "A database's name maps to its files through one
+shared function"). On disk a database is one directory under `RootPath`, named for
+the invariant lower case of its name:
+
+```
+<RootPath>/
+└── sales/             database created as "Sales", "sales" or "SALES"
+    ├── keyvalue.dat   data file set
+    ├── keyvalue.log
+    ├── keyvalue.bak
+    ├── catalog.dat    catalog file set
+    ├── catalog.log
+    └── catalog.bak
+```
+
+- **Every spelling is one database.** Before #1392 `FileSystemKeyValueStorageStrategy`
+  built `<RootPath>/<name>/<name>.dat` from the spelling it was given, so on Linux the
+  declaration of `SALES` did not find a database an earlier build created as `sales`
+  and created a second, empty one: Ubuntu CI failed
+  `KeyValueEngineDeclarationTests.BuildAsync_DeclaredDatabaseExists_ShouldOpenItWithItsData`
+  exactly so. Create, open, drop, declarations and existence checks now all reach the
+  same directory, and a create of `SALES` after `sales` is refused as existing whether
+  `sales` is open or not.
+- **The catalog is a file set, not a name.** A strategy member takes the database
+  name and a `catalog` flag. The catalog used to be the storage named
+  `<name>.catalog`, so a database named `sales.catalog` was the catalog of `sales`;
+  now it is `catalog.*` inside the database's own directory, and a drop deletes the
+  directory, both sets at once. An open whose data set exists without a catalog set
+  still creates the catalog set, as before. A directory without the data set, which an
+  interrupted create or drop leaves, is no database: an open does not find it, a
+  create refuses it with a message that names the remedy (a stale catalog set must
+  never meet a new data set), and a drop deletes it.
+- **The reported name.** A created database reports the name its create used; an
+  opened one reports the spelling its data set's storage header kept from the create
+  (`DatabaseFileNames.GetOpenedName`), whatever spelling opened or declared it. The
+  catalog set's header is labeled `<name>/catalog`.
+- **In memory** the engine's `DatabaseMemoryFiles` keys each set by the database's
+  storage name and the set, with the same rules.
+
+`KeyValueDatabaseNameTests` pins each case in memory and on disk, asserting the exact
+directory and file names it leaves with ordinal comparison, so the tests prove the
+mapping on Windows, whose file system folds case, as on Linux.
 The primary index bootstraps at database creation inside a durably-committed
 bracket (the self-committing DDL posture), then persists the format marker and
 then its registration as catalog self-commits — in that order, so a registered
@@ -778,8 +824,10 @@ Application Build executes its callback. The builder has the SQL builder's engin
   same name (ignoring case) is refused at the call, and the built engine refuses to drop a declared
   database with `DatabaseObjectLockedException` (owner decision 56 of 2026-10-09), through the
   wording the SQL engine uses (`DatabaseDeclarations`, compiled from the root's shared source).
-  A name that is not a single file-name component (`..`, `a/b`, a name holding a character the
-  platform refuses in a file name) is refused at the call too, before the engine exists.
+  A name that breaks the area's one name rule (#1392: 1 to 128 ASCII letters, digits, `_`, `-`
+  and `.`; no leading, trailing or doubled dot; no Windows device name before the first dot) is
+  refused at the call too, before the engine exists, with the same verdict on every OS: `..`,
+  `a/b` and `a:b` alike.
 - The engine applies that name rule in its create, open and drop cores, after the root base's
   checks (`DatabaseFileNames`, shared with every model; the B3 review). A database's files live in
   a directory named for it under `RootPath`, so before the rule `CreateDatabaseAsync("../x")` wrote

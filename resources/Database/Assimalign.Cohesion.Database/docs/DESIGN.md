@@ -19,7 +19,7 @@ surface. Child roots never reference the root.
 
 The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(DatabaseEngine)`, owned and named `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, and one-shot `Build()`. The owned overload names the engine as its first argument, so the hosting layer reserves the name, and refuses a duplicate, when a model verb registers the engine, before any factory runs (owner decision 52 of 2026-10-09): a model's factory can open and provision databases, which a duplicate engine must never reach. The nameless factory overload is deleted. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine (`IReadOnlyList<DatabaseEngine> Engines`), nested servers (`IReadOnlyList<DatabaseServer> Servers`), and ordinal `GetEngine(name)` lookup, which returns the root base; the static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine` (`Extensions/DatabaseApplicationContextExtensions.cs`) returns a model's engine typed, refusing an engine of another type with `InvalidOperationException`. These three are three of the area's five kept interfaces (`database-area.md`); since phase 6 of the concrete-types plan (#1262) they name the root bases, and every other root interface is deleted. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
 
-Each model ships a sealed engine builder (`SqlDatabaseEngineBuilder` and its siblings) with typed `AddWorker(Func<TEngine, DatabaseEngineWorker>)` and `AddServer(Func<TEngine, DatabaseServer>)`; the former root `IDatabaseEngineBuilder` they implemented is deleted (row 6 of the plan). Shared construction/rollback source is owned in this project's `shared/` (`DatabaseEngineBuilderState<TEngine>`) and compiled by each model through `CohesionSharedSource`. Since B3 of the engine extensibility design the state also holds the databases a non-SQL builder declares (`AddDatabase(name)`), hands them to the built engine and opens or creates each before the build returns, disposing the engine on a failure; `shared/DatabaseDeclarations.cs` words the duplicate-declaration and drop refusals for all five models (the SQL builder keeps its richer declarations), `shared/DatabaseEngineOptionChecks.cs` makes each model's option checks name the engine (`{Model} engine '{name}': {Option} …`), and `shared/DatabaseFileNames.cs` is the one name rule every model applies to a database it stores (a single file-name component, checked in each engine's create, open and drop cores and by each builder's `AddDatabase`). No model options type carries an engine name: the name is the builder's, or `Create(name, options)`'s. No separate generic application composition algorithm consumes arbitrary model options. The 2026-10-02 ruling that omitted typed worker/server factory overloads is superseded (D5): since step P4.0 the shared build state is typed over each model's engine, and since phase 4 each model's sealed builder offers typed `AddWorker` and `AddServer` ("Root bases", below).
+Each model ships a sealed engine builder (`SqlDatabaseEngineBuilder` and its siblings) with typed `AddWorker(Func<TEngine, DatabaseEngineWorker>)` and `AddServer(Func<TEngine, DatabaseServer>)`; the former root `IDatabaseEngineBuilder` they implemented is deleted (row 6 of the plan). Shared construction/rollback source is owned in this project's `shared/` (`DatabaseEngineBuilderState<TEngine>`) and compiled by each model through `CohesionSharedSource`. Since B3 of the engine extensibility design the state also holds the databases a non-SQL builder declares (`AddDatabase(name)`), hands them to the built engine and opens or creates each before the build returns, disposing the engine on a failure; `shared/DatabaseDeclarations.cs` words the duplicate-declaration and drop refusals for all five models (the SQL builder keeps its richer declarations), `shared/DatabaseEngineOptionChecks.cs` makes each model's option checks name the engine (`{Model} engine '{name}': {Option} …`), and `shared/DatabaseFileNames.cs` is the one name rule every model applies to a database it stores and the one mapping from a name to its directory and file sets (the rule is checked in each engine's create, open and drop cores and by each builder's `AddDatabase`; see "A database's name maps to its files", below). No model options type carries an engine name: the name is the builder's, or `Create(name, options)`'s. No separate generic application composition algorithm consumes arbitrary model options. The 2026-10-02 ruling that omitted typed worker/server factory overloads is superseded (D5): since step P4.0 the shared build state is typed over each model's engine, and since phase 4 each model's sealed builder offers typed `AddWorker` and `AddServer` ("Root bases", below).
 
 Workers remain scheduled and quiesced by their engine. Every worker derives from `DatabaseEngineWorker`, whose non-virtual `Run(CancellationToken)` is the pump the engine runs on the thread it owns. `DatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
 
@@ -216,6 +216,40 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   root suite pins the base's part with a test leaf (`TestEngine`) whose close a gate holds: an
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
   of a leaf that never forgets, and a second disposal that waits.
+- **A database's name maps to its files through one shared function** (#1392):
+  `shared/DatabaseFileNames`, compiled into each model assembly beside `DatabaseMemoryFiles`.
+  `DatabaseName` compares ordinally ignoring case, so the mapping has to give every spelling the
+  same files on a case-sensitive file system too. Each model used to build the directory from the
+  caller's spelling, and on Linux an open or declaration of `SALES` after a create of `sales` made
+  a second, empty database. The function holds four things:
+  - **The rule.** 1 to 128 ASCII letters, digits, `_`, `-` and `.`; no leading, trailing or
+    doubled dot; no Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`,
+    `LPT0`–`LPT9`) before the first dot. It is a fixed set, not `Path.GetInvalidFileNameChars`,
+    which holds only NUL and `/` on Linux, so a name valid on one OS is valid on every one.
+    `GetRefusal` returns the reason; `ThrowIfInvalid` throws an `ArgumentException` whose message
+    starts with `Rule`. Every engine's create, open and drop core and every builder's
+    `AddDatabase` call it.
+  - **The directory.** `GetStorageName` is the invariant lower case of the name, and
+    `GetDirectory(root, name)` is that under the engine's root. The rule admits ASCII only, so
+    lower-case equality is `DatabaseName` equality, with no culture or Unicode folding in play.
+    Nothing scans the root to find a database; `IsStorageName` is what a listing accepts as one.
+  - **The file sets.** `GetFiles(directory, set)` gives `{set}.dat`, `{set}.log` and `{set}.bak`
+    inside the directory: the model's data set and, for SQL and key-value, `CatalogFileSet`. A
+    file set is never named from a database name, so a catalog is never another database's
+    directory (before #1392 the catalog of `sales` was the directory `sales.catalog`).
+    `DatabaseMemoryFiles` keys its in-memory sets the same way, by storage name and set.
+  - **The reported name.** `GetOpenedName` returns the spelling the data set's storage header
+    kept from the create, whatever spelling opened the database, so the name a database reports
+    never depends on its caller. The header holds 128 bytes of name, which every valid name fits.
+  - **A leftover directory.** A directory without its data set's data file, which an interrupted
+    create or drop leaves, is no database: an open does not find it. A create claims the
+    directory, so every model refuses that one with `GetLeftoverRefusal`, which names the remedy,
+    and a drop deletes it. A lookup (`TryGetDatabase`) and a server handshake treat a name that
+    breaks the rule as not found (`GetRefusal`), since no such database can exist.
+
+  A case-variant directory made outside the engine (`Sales` for `sales`) is outside the contract:
+  Linux ignores it, while Windows and macOS resolve the lower-case path to it, so an open finds it
+  and a create refuses it. The area design (`docs/resources/Database/DESIGN.md`, §3.3) records the rejected alternatives.
 - **The server lifecycle Sql, KeyValuePair and Graph carried** lives in `DatabaseServer`: a server
   is created inert, starts once, and a failed start or any stop is terminal (a start after it
   throws `ObjectDisposedException`); stop is idempotent and runs for a server that never started,

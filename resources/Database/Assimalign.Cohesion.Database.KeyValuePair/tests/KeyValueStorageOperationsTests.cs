@@ -74,7 +74,7 @@ public sealed class KeyValueStorageOperationsTests
         }
 
         var dataAtTheFailure = strategy.Capture(name);
-        var catalogAtTheFailure = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogAtTheFailure = strategy.Capture(name, catalog: true);
 
         // The catalog file set went offline with the data set, before anything read either
         // state: the storage's own flag, not the instance's. Every worker then runs a pass, with a
@@ -88,7 +88,7 @@ public sealed class KeyValueStorageOperationsTests
         }
 
         var dataAfterTheWorkers = strategy.Capture(name);
-        var catalogAfterTheWorkers = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogAfterTheWorkers = strategy.Capture(name, catalog: true);
         var refusals = new List<DatabaseOfflineException>
         {
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync()),
@@ -130,7 +130,7 @@ public sealed class KeyValueStorageOperationsTests
         var closedState = open.State;
         await session.DisposeAsync();
         var dataBeforeTheReopen = strategy.Capture(name);
-        var catalogBeforeTheReopen = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogBeforeTheReopen = strategy.Capture(name, catalog: true);
 
         var reopened = await harness.Engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
@@ -191,7 +191,7 @@ public sealed class KeyValueStorageOperationsTests
 
         // Act: the data journal's fsync fails on the commit.
         int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1, storageName: name))
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1, databaseName: name))
         {
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
                 await database.PutAsync(session, Bytes("key"), Bytes("value")));
@@ -199,16 +199,16 @@ public sealed class KeyValueStorageOperationsTests
         }
 
         bool catalogOfflineAtOnce = database.CatalogStorage.IsOffline;
-        var catalogAtTheFailure = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
-        var controlCatalogBefore = strategy.Capture(control + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogAtTheFailure = strategy.Capture(name, catalog: true);
+        var controlCatalogBefore = strategy.Capture(control, catalog: true);
         database.CatalogStorage.CheckpointJournalSize = 1;
         foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
         {
             worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
-        var catalogAfterTheWorkers = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
-        var controlCatalogAfter = strategy.Capture(control + KeyValueDatabaseEngine.CatalogSuffix);
+        var catalogAfterTheWorkers = strategy.Capture(name, catalog: true);
+        var controlCatalogAfter = strategy.Capture(control, catalog: true);
 
         // Assert
         unspent.ShouldBe(0);
@@ -241,7 +241,7 @@ public sealed class KeyValueStorageOperationsTests
 
         // Act: the catalog journal's fsync fails as its checkpoint flushes the checkpoint record.
         int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1, storageName: name + KeyValueDatabaseEngine.CatalogSuffix))
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1, databaseName: name, catalog: true))
         {
             Should.Throw<StorageOfflineException>(() => database.CatalogStorage.Checkpoint());
             unspent = failures.Remaining;

@@ -25,8 +25,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// The catalog owns its own storage instance — separate from the database's data
 /// file set — so metadata records and user rows never share a scan space, while
 /// still getting the same page/WAL durability. The engine composes one catalog
-/// storage per database (by convention the database name suffixed with
-/// <c>.catalog</c>).
+/// storage per database: the <c>catalog</c> file set in the database's directory,
+/// beside its data set, labeled <c>{database}/catalog</c> in its storage header.
 /// </para>
 /// <para>
 /// DDL operations are self-committing: each runs in its own storage transaction and

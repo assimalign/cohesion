@@ -43,11 +43,12 @@ public sealed class SqlEngineWorkerTests : IDisposable
         }
     }
 
+    // A database's directory is the lower case of its name, holding both file sets (#1392).
     private string DataJournalPath(string database)
-        => Path.Combine(_rootPath, database, database + ".log");
+        => Path.Combine(_rootPath, database.ToLowerInvariant(), "sql.log");
 
     private string CatalogJournalPath(string database)
-        => Path.Combine(_rootPath, database + ".catalog", database + ".catalog.log");
+        => Path.Combine(_rootPath, database.ToLowerInvariant(), "catalog.log");
 
     private static long GetFileLength(string path)
     {

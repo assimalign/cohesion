@@ -364,7 +364,10 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
             await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
         }
 
-        Directory.Delete(Path.Combine(_rootPath, "kv" + KeyValueDatabaseEngine.CatalogSuffix), recursive: true);
+        foreach (string extension in new[] { ".dat", ".log", ".bak" })
+        {
+            File.Delete(Path.Combine(_rootPath, "kv", "catalog" + extension));
+        }
 
         // Act
         await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
@@ -428,8 +431,9 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
             await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
         }
 
-        string storageName = role == "catalog" ? "kv" + KeyValueDatabaseEngine.CatalogSuffix : "kv";
-        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 2);
+        bool catalog = role == "catalog";
+        string storageName = catalog ? "kv/catalog" : "kv";
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, "kv", catalog ? "catalog.dat" : "keyvalue.dat"), version: 2);
         var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
         // Act

@@ -126,18 +126,18 @@ public sealed class KeyValueStorageDurabilityPolicyTests : IDisposable
     {
         internal List<MemoryStream> Streams { get; } = [];
 
-        public override KeyValueStorage CreateStorage(string databaseName)
+        public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
         {
             var data = new MemoryStream();
             var journal = new MemoryStream();
             var backup = new MemoryStream();
             Streams.AddRange([data, journal, backup]);
-            return KeyValueStorage.Create(data, journal, backup, databaseName);
+            return KeyValueStorage.Create(data, journal, backup, GetLabel(databaseName, catalog));
         }
 
-        public override KeyValueStorage OpenStorage(string databaseName) => CreateStorage(databaseName);
+        public override KeyValueStorage OpenStorage(string databaseName, bool catalog) => CreateStorage(databaseName, catalog);
 
-        public override bool StorageExists(string databaseName) => true;
+        public override bool StorageExists(string databaseName, bool catalog) => true;
 
         public override void DropStorage(string databaseName) { }
     }

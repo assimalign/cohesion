@@ -58,6 +58,65 @@ public class CreateDatabaseMigrationTaskTests
         Path.GetRelativePath(directory.Path, sessions.MigrationPath).Replace('\\', '/').ShouldBe("Migrations/sessions/0001_initial.sql");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: a database renamed only in case keeps its migrations folder and numbering (#1392)")]
+    public void Execute_WithFolderOfAnotherCase_ShouldContinueItsNumbering()
+    {
+        // Arrange: the history of 'orders' in a folder spelled 'Orders', as a declaration of 'Orders'
+        // left it before it was renamed 'orders'.
+        using var directory = new TemporaryDirectory();
+        string history = directory.File("Migrations/Orders");
+        Directory.CreateDirectory(history);
+        SqlCompiledSchemaSerializer.Write(Path.Combine(history, "0001_initial.schema.json"), CreateSchema(includeDescription: false));
+        WriteSchema(directory.File("schemas"), CreateSchema(includeDescription: true));
+        var engine = new RecordingBuildEngine();
+        CreateDatabaseMigrationTask task = CreateTask(directory, engine, "add-description");
+
+        // Act
+        bool created = task.Execute();
+
+        // Assert: the next ordinal, in the existing folder, by its exact name, which is what a
+        // case-sensitive file system sees.
+        created.ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+        Path.GetRelativePath(directory.Path, task.MigrationPath).Replace('\\', '/').ShouldBe("Migrations/Orders/0002_add-description.sql");
+        Directory.EnumerateDirectories(directory.File("Migrations")).Select(Path.GetFileName).ShouldBe(["Orders"]);
+        File.ReadAllText(task.MigrationPath).ShouldContain("ALTER TABLE dbo.Orders ADD COLUMN Description TEXT NULL;");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: two folders that match one database ignoring case are refused (#1392)")]
+    public void Execute_WithTwoFoldersOfOneDatabase_ShouldFailWithoutFiles()
+    {
+        // Arrange: 'Orders' and 'orders', which only a case-sensitive file system holds apart; one
+        // that folds case makes the second the first.
+        using var directory = new TemporaryDirectory();
+        Directory.CreateDirectory(directory.File("Migrations/Orders"));
+        Directory.CreateDirectory(directory.File("Migrations/orders"));
+        WriteSchema(directory.File("schemas"), CreateSchema(includeDescription: false));
+        string[] folders = Directory.EnumerateDirectories(directory.File("Migrations")).Select(path => Path.GetFileName(path)).Order(StringComparer.Ordinal).ToArray();
+        var engine = new RecordingBuildEngine();
+        CreateDatabaseMigrationTask task = CreateTask(directory, engine, "initial");
+
+        // Act
+        bool created = task.Execute();
+
+        // Assert: where the file system holds both, refused without a file written; where it holds
+        // one, that folder takes the migration.
+        if (folders.Length == 2)
+        {
+            created.ShouldBeFalse();
+            engine.Errors.ShouldContain(error =>
+                error.Code == "COHDBSDK208" &&
+                error.Message != null &&
+                error.Message.Contains("more than one migrations folder (Orders, orders)", StringComparison.Ordinal));
+            Directory.EnumerateFiles(directory.File("Migrations"), "*", SearchOption.AllDirectories).ShouldBeEmpty();
+        }
+        else
+        {
+            folders.ShouldBe(["Orders"]);
+            created.ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+            Path.GetRelativePath(directory.Path, task.MigrationPath).Replace('\\', '/').ShouldBe("Migrations/Orders/0001_initial.sql");
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: the database must be named and declared")]
     public void Execute_WithoutDeclaredDatabaseName_ShouldFailNamingTheDeclaredDatabases()
     {

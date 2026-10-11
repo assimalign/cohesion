@@ -140,6 +140,7 @@ public sealed class KeyValueDatabaseEventSourceTests
     [InlineData("StartupExpected", nameof(ProtocolErrorCode.ProtocolViolation))]
     [InlineData("UnsupportedVersion", nameof(ProtocolErrorCode.UnsupportedVersion))]
     [InlineData("DatabaseNotFound", nameof(ProtocolErrorCode.DatabaseNotFound))]
+    [InlineData("InvalidDatabaseName", nameof(ProtocolErrorCode.DatabaseNotFound))]
     [InlineData("AuthenticateResponseExpected", nameof(ProtocolErrorCode.ProtocolViolation))]
     [InlineData("AuthenticationFailed", nameof(ProtocolErrorCode.AuthenticationFailed))]
     [InlineData("DatabaseOffline", nameof(ProtocolErrorCode.Unavailable))]
@@ -158,7 +159,8 @@ public sealed class KeyValueDatabaseEventSourceTests
         }
 
         await using var client = await harness.DialAsync();
-        string database = refusal == "DatabaseNotFound" ? "no-such-db" : KeyValueServerHarness.DatabaseName;
+        // A name the area's name rule refuses (#1392) names no database, so it is not found either.
+        string database = refusal switch { "DatabaseNotFound" => "no-such-db", "InvalidDatabaseName" => "CON", _ => KeyValueServerHarness.DatabaseName };
         var version = refusal == "UnsupportedVersion" ? new ProtocolVersion(99, 0) : ProtocolVersion.Current;
 
         // Act

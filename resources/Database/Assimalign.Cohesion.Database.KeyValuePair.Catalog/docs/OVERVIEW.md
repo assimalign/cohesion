@@ -34,4 +34,4 @@ named key spaces, per-entry expiration (TTL) metadata.
 ## Usage
 
 The engine (`Assimalign.Cohesion.Database.KeyValuePair`) opens one catalog per
-database over the `<name>.catalog` file set; consumers never compose it directly.
+database over its `catalog` file set; consumers never compose it directly.

@@ -35,7 +35,7 @@ planner's job.
 ## Usage
 
 ```csharp
-var catalogStorage = SqlStorage.Create(dataStream, journalStream, backupStream, "mydb.catalog");
+var catalogStorage = SqlStorage.Create(dataStream, journalStream, backupStream, "mydb/catalog");
 var catalog = SqlCatalog.Open(catalogStorage);
 
 var users = await catalog.CreateTableAsync("dbo", "users", new[]

@@ -164,64 +164,68 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     }
 
     /// <summary>
-    /// Gets the current durable byte image of one storage: what an opened storage
+    /// Gets the current durable byte image of one file set: what an opened storage
     /// has made durable so far, or the image a never-opened one was given.
     /// </summary>
-    /// <param name="storageName">The storage name (a database name, or one suffixed with <c>.catalog</c>).</param>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
     /// <returns>Copies of the storage's data, journal and backup images.</returns>
-    public (byte[] Data, byte[] Journal, byte[] Backup) GetDurableImage(string storageName)
+    public (byte[] Data, byte[] Journal, byte[] Backup) GetDurableImage(string databaseName, bool catalog = false)
     {
+        string key = Key(databaseName, catalog);
         lock (_sync)
         {
-            if (_live.TryGetValue(storageName, out var streams))
+            if (_live.TryGetValue(key, out var streams))
             {
                 return (streams.Data.CaptureDurable(), streams.Journal.CaptureDurable(), streams.Backup.CaptureDurable());
             }
 
-            if (_images.TryGetValue(storageName, out var image))
+            if (_images.TryGetValue(key, out var image))
             {
                 return ((byte[])image.Data.Clone(), (byte[])image.Journal.Clone(), (byte[])image.Backup.Clone());
             }
 
-            throw new KeyNotFoundException($"Crash-capture storage for '{storageName}' does not exist.");
+            throw new KeyNotFoundException($"Crash-capture storage for '{key}' does not exist.");
         }
     }
 
     /// <inheritdoc />
-    public override SqlStorage CreateStorage(string databaseName)
+    public override SqlStorage CreateStorage(string databaseName, bool catalog)
     {
+        string key = Key(databaseName, catalog);
         lock (_sync)
         {
-            if (_live.ContainsKey(databaseName))
+            if (_live.ContainsKey(key))
             {
-                throw new DatabaseException($"Crash-capture storage for '{databaseName}' already exists.");
+                throw new DatabaseException($"Crash-capture storage for '{key}' already exists.");
             }
 
             // Data write-through: the worst case for steal (every page write is
             // immediately "on disk"); the journal honors flush-gated durability.
             var streams = (Data: new GatedStream(writeThrough: true, OnDurableChange), Journal: new GatedStream(writeThrough: false, OnDurableChange),
                 Backup: new GatedStream(writeThrough: true, OnDurableChange));
-            _live[databaseName] = streams;
+            _live[key] = streams;
             return SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
-                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), databaseName);
+                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), GetLabel(databaseName, catalog));
         }
     }
 
     /// <inheritdoc />
-    public override SqlStorage OpenStorage(string databaseName)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog)
     {
+        string key = Key(databaseName, catalog);
         lock (_sync)
         {
-            if (!_images.TryGetValue(databaseName, out var image))
+            if (!_images.TryGetValue(key, out var image))
             {
-                throw new DatabaseException($"Crash-capture storage for '{databaseName}' does not exist.");
+                throw new DatabaseException($"Crash-capture storage for '{key}' does not exist.");
             }
 
             var streams = (Data: new GatedStream(image.Data, writeThrough: true, OnDurableChange),
                 Journal: new GatedStream(image.Journal, writeThrough: false, OnDurableChange),
                 Backup: new GatedStream(image.Backup, writeThrough: true, OnDurableChange));
-            _live[databaseName] = streams;
+            _live[key] = streams;
 
             // Deferred checkpoint per the strategy contract: the engine analyzes
             // the recovered journal before truncation.
@@ -236,19 +240,28 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     {
         lock (_sync)
         {
-            _live.Remove(databaseName);
-            _images.Remove(databaseName);
+            foreach (bool catalog in new[] { false, true })
+            {
+                _live.Remove(Key(databaseName, catalog));
+                _images.Remove(Key(databaseName, catalog));
+            }
         }
     }
 
     /// <inheritdoc />
-    public override bool StorageExists(string databaseName)
+    public override bool StorageExists(string databaseName, bool catalog)
     {
+        string key = Key(databaseName, catalog);
         lock (_sync)
         {
-            return _live.ContainsKey(databaseName) || _images.ContainsKey(databaseName);
+            return _live.ContainsKey(key) || _images.ContainsKey(key);
         }
     }
+
+    // A file set's key: the database's lower-case storage name and the set, as the file-based
+    // strategy finds it in the database's directory (#1392).
+    private static string Key(string databaseName, bool catalog)
+        => DatabaseFileNames.GetStorageName(databaseName) + "/" + GetFileSet(catalog);
 
     /// <summary>
     /// An in-memory stream with crash semantics: the live buffer accepts every

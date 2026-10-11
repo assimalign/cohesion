@@ -25,14 +25,21 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
     }
 
     /// <inheritdoc />
-    public override KeyValueStorage CreateStorage(string databaseName)
+    public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
     {
-        if (!_files.TryCreate(databaseName, out var data, out var journal, out var backup))
+        // The data set comes first and claims the database, as a directory on disk does: any file
+        // set of the name, in any spelling, means the database exists.
+        if (!catalog && (_files.Exists(databaseName, DataFileSet) || _files.Exists(databaseName, DatabaseFileNames.CatalogFileSet)))
         {
             throw new DatabaseException($"In-memory storage for database '{databaseName}' already exists.");
         }
 
-        return KeyValueStorage.Create(data, journal, backup, databaseName, _durability);
+        if (!_files.TryCreate(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
+        {
+            throw new DatabaseException($"In-memory storage '{GetLabel(databaseName, catalog)}' already exists.");
+        }
+
+        return KeyValueStorage.Create(data, journal, backup, GetLabel(databaseName, catalog), _durability);
     }
 
     /// <inheritdoc />
@@ -40,11 +47,11 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
     /// The open-time checkpoint is deferred, as the file-based strategy defers it: the engine runs
     /// transaction-recovery analysis over the recovered journal first.
     /// </remarks>
-    public override KeyValueStorage OpenStorage(string databaseName)
+    public override KeyValueStorage OpenStorage(string databaseName, bool catalog)
     {
-        if (!_files.TryOpen(databaseName, out var data, out var journal, out var backup))
+        if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException($"In-memory storage for database '{databaseName}' does not exist.");
+            throw new DatabaseException($"In-memory storage '{GetLabel(databaseName, catalog)}' does not exist.");
         }
 
         try
@@ -64,7 +71,7 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
     public override void DropStorage(string databaseName) => _files.Drop(databaseName);
 
     /// <inheritdoc />
-    public override bool StorageExists(string databaseName) => _files.Exists(databaseName);
+    public override bool StorageExists(string databaseName, bool catalog) => _files.Exists(databaseName, GetFileSet(catalog));
 
     /// <summary>
     /// Releases every file set's bytes, once the engine that owns the strategy closed its databases

@@ -147,7 +147,10 @@ database may omit. Without it in a project that declares more, the target fails 
 `COHDBSDK207`, and with a name the manifest does not list with `COHDBSDK203`; both list the
 declared databases. Each database numbers its own migrations in `$(CohesionDatabaseMigrationsRoot)/<database>/`
 (default `Migrations/<database>/`), so two databases never share an ordinal sequence or a file
-name. A required, sanitized `CohesionDatabaseMigrationName` is combined with the next four-digit
+name. The folder is found by its name ignoring case, as database names compare, so a declaration
+renamed only in case (`Sales` to `sales`) keeps its history on a case-sensitive file system too
+(#1392); a new folder takes the declared spelling, and two folders that match one database fail
+the target with `COHDBSDK208`. A required, sanitized `CohesionDatabaseMigrationName` is combined with the next four-digit
 ordinal. SQL compares the new document with the database's newest `NNNN_name.schema.json`
 baseline through the shared `SqlSchemaMigrationPlanner`, renders operations in planner order, and
 atomically emits matching `NNNN_name.sql` and `NNNN_name.schema.json` files. There are no

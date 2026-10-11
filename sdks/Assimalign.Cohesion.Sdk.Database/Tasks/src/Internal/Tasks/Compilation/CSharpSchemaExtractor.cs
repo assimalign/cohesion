@@ -35,8 +35,10 @@ internal sealed class CSharpSchemaExtractor
     private const string databaseBuilderType = "Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder";
     private const string engineBuilderType = "Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineBuilder";
 
-    // Characters no artifact file name may carry on any build host. The engine stores a database
-    // under a directory of its name, so a name that fails here cannot name a database on disk either.
+    // Characters no artifact file name may carry on any build host. The engines' database-name rule
+    // is stricter (ASCII letters, digits, '_', '-' and '.', and no Windows device name; #1392), so a
+    // name that fails here names no database either, but one that passes can still be refused when
+    // the engine's builder declares it at startup. The SDK does not share that rule's source yet.
     private static readonly char[] _invalidFileNameCharacters = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
 
     private static readonly SymbolDisplayFormat _typeDisplayFormat = new(

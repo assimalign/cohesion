@@ -333,12 +333,17 @@ public sealed class BlobEngineDeclarationTests : IDisposable
         await server.DisposeAsync();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Declarations: a name that is not a single file-name component is refused at the declaration")]
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Declarations: a name that breaks the database-name rule is refused at the declaration")]
     [InlineData("..")]
     [InlineData("../escaped")]
     [InlineData("nested/escaped")]
     [InlineData("nested\\escaped")]
-    public async Task AddDatabase_NotASingleFileNameComponent_ShouldBeRefusedAtTheCall(string name)
+    [InlineData("a:b")]
+    [InlineData("CON")]
+    [InlineData("nul.db")]
+    [InlineData("sales.")]
+    [InlineData("sal\u00E9s")]
+    public async Task AddDatabase_NameBreakingTheRule_ShouldBeRefusedAtTheCall(string name)
     {
         // Arrange
         var builder = CreateBuilder("names");
@@ -350,7 +355,7 @@ public sealed class BlobEngineDeclarationTests : IDisposable
         // Assert: refused like a duplicate, before anything exists, rather than by the engine's
         // open after the engine, its workers and its servers were created.
         refusal.ParamName.ShouldBe("name");
-        refusal.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        refusal.Message.ShouldStartWith("A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots,", Case.Sensitive);
         engine.DeclaredDatabases.ShouldBeEmpty();
     }
 

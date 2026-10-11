@@ -129,8 +129,10 @@ public sealed class SqlDatabaseEngineBuilder
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="name"/> is empty or white space, or not a single file-name component (the
-    /// database's files live in a directory named for it): refused here, before anything is created.
+    /// <paramref name="name"/> is empty or white space, or breaks the database-name rule (1 to 128
+    /// ASCII letters, digits, underscores, hyphens and dots, no leading, trailing or doubled dot, no
+    /// Windows device name; the database's files live in a directory named for it): refused here,
+    /// before anything is created.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A build was attempted, or the engine already declares a database of that name (ignoring case,
@@ -143,7 +145,7 @@ public sealed class SqlDatabaseEngineBuilder
     public SqlDatabaseEngineBuilder AddDatabase(string name, Action<SqlDatabaseBuilder>? configure = null)
     {
         _state.EnsureMutable();
-        DatabaseFileNames.ThrowIfNotSingleComponent(name);
+        DatabaseFileNames.ThrowIfInvalid(name);
         var databaseName = new DatabaseName(name);
         foreach (SqlDatabaseBuilder declared in _databases)
         {
@@ -178,7 +180,7 @@ public sealed class SqlDatabaseEngineBuilder
     /// <param name="schema">The schema declaration.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
-    /// <exception cref="ArgumentException">The schema's name is not a single file-name component.</exception>
+    /// <exception cref="ArgumentException">The schema's name breaks the database-name rule.</exception>
     /// <exception cref="InvalidOperationException">
     /// A build was attempted, or the engine already declares a database of the schema's name.
     /// </exception>

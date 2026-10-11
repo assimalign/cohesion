@@ -809,11 +809,14 @@ column, constraint or index, an undeclared one, or a column's type or nullabilit
 `SqlDatabaseBuilder` holds one database's default collation, typed schema and
 `SqlProvisioningMode` (`Apply`, the default, or `Verify`, decision 55). `BuildAsync` is the primary
 path; `Build()` bridges it on the thread pool, so it never captures the caller's synchronization
-context. A database name must be a single file-name component, because the database's files live
-in a directory named for it under `RootPath`: `AddDatabase` refuses `..`, `a/b` and the like at the
-call, and the engine's create, open and drop cores refuse them after the root base's checks
-(`DatabaseFileNames`, shared with every model since the B3 review; before it, a SQL
-`DropDatabaseAsync("../x")` deleted the directory beside the root). The phases, each seeing only
+context. A database name must follow the area's one name rule (#1392: 1 to 128 ASCII letters,
+digits, `_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name), because
+the database's files live in a directory named for it under `RootPath`: `AddDatabase` refuses
+`..`, `a/b`, `a:b` and the like at the call, on every OS alike, and the engine's create, open and
+drop cores refuse them after the root base's checks (`DatabaseFileNames`, shared with every model
+since the B3 review; before it, a SQL `DropDatabaseAsync("../x")` deleted the directory beside the
+root). A declaration of `SALES` opens a database created as `sales`: names ignore case, and the
+directory is the lower case of the name ("Names and files", below). The phases, each seeing only
 what earlier ones produced:
 
 ```mermaid
@@ -1300,7 +1303,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `StorageFormatException` (`COHDBS001`) when it opens, before recovery reads its
   journal. A database has two file sets, so `OpenDatabaseAsync` carries the refusal
   in `SqlDataStorageFormatException` naming the database and the file set: "Database
-  'x' cannot be opened: its catalog file set 'x.catalog' was refused. COHDBS001: …"
+  'x' cannot be opened: its catalog file set 'x/catalog' was refused. COHDBS001: …"
   (or its data file set 'x'). The server forwards it to the client like the gate's
   own refusals, and the files stay byte-identical.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
@@ -1722,9 +1725,61 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   writers, and physical read/write interleaving is unchanged from the
   page-grain engine (a known storage-layer constraint, not widened by this
   design).
-- **Two file sets per database:** `<name>` (data) and `<name>.catalog` — both via
+- **Two file sets per database:** the data set and the catalog set — both via
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
+
+### Names and files (#1392)
+
+Every strategy maps a database's name through the area's one shared function,
+`DatabaseFileNames` (root design, "A database's name maps to its files through one
+shared function"). On disk a database is one directory under `RootPath`, named for
+the invariant lower case of its name:
+
+```
+<RootPath>/
+└── sales/            database created as "Sales", "sales" or "SALES"
+    ├── sql.dat       data file set
+    ├── sql.log
+    ├── sql.bak
+    ├── catalog.dat   catalog file set
+    ├── catalog.log
+    └── catalog.bak
+```
+
+- **Every spelling is one database.** Create, open, drop, the builder's declarations
+  and the strategy's existence checks all map the caller's spelling to the same
+  directory, so on Linux an open of `SALES` finds `sales` instead of creating a
+  second, empty database, and a create of `SALES` after `sales` is refused as
+  existing whether `sales` is open or not. Before #1392 `FileSystemSqlStorageStrategy`
+  built `<RootPath>/<name>/<name>.dat` from the spelling it was given.
+- **The catalog is a file set, not a name.** A strategy member takes the database
+  name and a `catalog` flag; the strategy picks the set (`sql` or `catalog`). The
+  catalog used to be the storage named `<name>.catalog`, in the same namespace as
+  database names, so a database named `sales.catalog` was the catalog of `sales`. A
+  drop deletes the database's directory, both sets at once. A database whose data set
+  exists without its catalog set (an interrupted create) is refused with
+  `SqlDataStorageFormatException`, as before. A directory without the data set, which
+  an interrupted create or drop leaves, is no database: an open does not find it, a
+  create refuses it with a message that names the remedy (a stale catalog set must
+  never meet a new data set), and a drop deletes it.
+- **The reported name.** A created database reports the name its create used; an
+  opened one reports the spelling its data set's storage header kept from the create
+  (`DatabaseFileNames.GetOpenedName`), whatever spelling opened it. The catalog set's
+  header is labeled `<name>/catalog`, which no database name can be, and refusals name
+  it that way.
+- **In memory** the engine's `DatabaseMemoryFiles` keys each set by the database's
+  storage name and the set, so the same rules hold without a file system.
+- **The name rule** (1 to 128 ASCII letters, digits, `_`, `-` and `.`; no leading,
+  trailing or doubled dot; no Windows device name before the first dot) is the same
+  on every OS, and the refusal message starts with the rule.
+
+`SqlDatabaseNameTests` pins each case in memory and on disk, asserting the exact
+directory and file names it leaves (ordinal comparison, so the tests prove the
+mapping on Windows, whose file system folds case, as on Linux).
+`DatabaseFileNamesTests` pins the rule and the mapping as pure functions: every
+UTF-16 code unit is tried, and the verdicts are literals, never read from the
+running platform.
 
 ## Secondary indexes
 

@@ -70,7 +70,7 @@ public sealed class SqlStorageOperationsTests
         }
 
         var dataAtTheFailure = strategy.Capture(name);
-        var catalogAtTheFailure = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
+        var catalogAtTheFailure = strategy.Capture(name, catalog: true);
 
         // The catalog file set went offline with the data set, before anything read either
         // state: the storage's own flag, not the instance's. Every worker then runs a pass, with a
@@ -84,7 +84,7 @@ public sealed class SqlStorageOperationsTests
         }
 
         var dataAfterTheWorkers = strategy.Capture(name);
-        var catalogAfterTheWorkers = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
+        var catalogAfterTheWorkers = strategy.Capture(name, catalog: true);
         var refusals = new List<DatabaseOfflineException>
         {
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync()),
@@ -109,7 +109,7 @@ public sealed class SqlStorageOperationsTests
         await session.DisposeAsync();
         bool offlineAfterTheClose = database.IsOffline;
         var dataBeforeTheReopen = strategy.Capture(name);
-        var catalogBeforeTheReopen = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
+        var catalogBeforeTheReopen = strategy.Capture(name, catalog: true);
 
         var reopened = await harness.Engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
@@ -178,7 +178,7 @@ public sealed class SqlStorageOperationsTests
 
         // Act: the data journal's fsync fails on the commit.
         int unspent;
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: name))
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, databaseName: name))
         {
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
                 await session.ExecuteAsync("INSERT INTO t1 (id, val) VALUES (1, 1)"));
@@ -186,16 +186,16 @@ public sealed class SqlStorageOperationsTests
         }
 
         bool catalogOfflineAtOnce = database.CatalogStorage.IsOffline;
-        var catalogAtTheFailure = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
-        var controlCatalogBefore = strategy.Capture(control + SqlDatabaseEngine.CatalogSuffix);
+        var catalogAtTheFailure = strategy.Capture(name, catalog: true);
+        var controlCatalogBefore = strategy.Capture(control, catalog: true);
         database.CatalogStorage.CheckpointJournalSize = 1;
         foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
         {
             worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
-        var catalogAfterTheWorkers = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
-        var controlCatalogAfter = strategy.Capture(control + SqlDatabaseEngine.CatalogSuffix);
+        var catalogAfterTheWorkers = strategy.Capture(name, catalog: true);
+        var controlCatalogAfter = strategy.Capture(control, catalog: true);
 
         // Assert
         unspent.ShouldBe(0);
@@ -230,7 +230,7 @@ public sealed class SqlStorageOperationsTests
         // Act: the catalog journal's fsync fails while CREATE TABLE commits its catalog bracket.
         DatabaseTransactionCommitUnconfirmedException ddl;
         int unspent;
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: name + SqlDatabaseEngine.CatalogSuffix))
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, databaseName: name, catalog: true))
         {
             ddl = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
                 await session.ExecuteAsync("CREATE TABLE u (id INT NOT NULL)"));
@@ -359,7 +359,7 @@ public sealed class SqlStorageOperationsTests
         bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
 
         // Act: another statement's commit fsync fails, which takes the database offline.
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: name))
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, databaseName: name))
         {
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await other.ExecuteAsync("INSERT INTO u (id) VALUES (1)"));
         }
@@ -404,7 +404,7 @@ public sealed class SqlStorageOperationsTests
         await using (var setup = await failed.CreateSessionAsync())
         {
             await setup.ExecuteAsync("CREATE TABLE f (id INT NOT NULL)");
-            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: "failed");
+            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, databaseName: "failed");
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await setup.ExecuteAsync("INSERT INTO f (id) VALUES (1)"));
         }
 
@@ -474,7 +474,7 @@ public sealed class SqlStorageOperationsTests
         await using (var setup = await failed.CreateSessionAsync())
         {
             await setup.ExecuteAsync("CREATE TABLE f (id INT NOT NULL)");
-            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: "failed");
+            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, databaseName: "failed");
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await setup.ExecuteAsync("INSERT INTO f (id) VALUES (1)"));
         }
 

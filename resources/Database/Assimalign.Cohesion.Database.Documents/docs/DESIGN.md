@@ -521,7 +521,25 @@ checkpointer's failure ends and the engine runs again (before the checkpointer's
 `Faulted` for the test's 30 seconds).
 
 File-backed databases have `document.dat`, `document.log`, and `document.bak` under
-one validated database-name directory. Open performs kernel WAL replay with its
+one directory, `<RootPath>/<storage name>`, where the storage name is the invariant lower case of
+the database's name (#1392). Database names compare ignoring case, so every spelling reaches that
+one directory on every OS: on Linux an open of `SALES` finds `sales`, a create of `SALES` after
+`sales` is refused as existing, and a drop of `SALES` drops `sales`. Before #1392 the engine
+scanned the root for a directory whose name matched ignoring case (a scan per open, and ambiguous
+when `sales` and `Sales` both existed on a case-sensitive file system); now the directory is a pure
+function of the name (`DatabaseFileNames`, shared with every model; the area design, §3.3, has the
+reasoning). A name follows the area's one rule, with the same verdict on every OS: 1 to 128 ASCII
+letters, digits, `_`, `-` and `.`; no leading, trailing or doubled dot; no Windows device name
+before the first dot. Enumeration takes each directory that is a lower-case valid name holding
+`document.dat`, so it skips a case-variant directory made outside the engine (outside the
+contract: on Windows and macOS the file system resolves an open's lower-case path to it). An open
+needs `document.dat` too, so a directory without it, left by an interrupted create or drop, is not
+found; a create refuses it with a message that names the leftover, and a drop removes it.
+`TryGetDatabase` is a lookup, so a name that breaks the rule is not found rather than refused. A
+database reports the spelling its storage header kept from its create, whatever spelling opened or
+listed it. In memory the engine's `DatabaseMemoryFiles` keys the file set by the same storage name.
+`DocumentDatabaseNameTests` pins each case in memory and on disk, asserting the exact directory
+names it leaves with ordinal comparison. Open performs kernel WAL replay with its
 checkpoint deferred, scrubs uncommitted record writers and index changes, and then
 completes the recovery checkpoint. Before the scrub it checks every index tree's
 B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
