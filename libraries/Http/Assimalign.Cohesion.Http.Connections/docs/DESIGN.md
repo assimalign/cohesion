@@ -3700,6 +3700,29 @@ codes in the table above were never sent. `GOAWAY` and `MAX_PUSH_ID` were
 skipped unread until #1083's review, so their payload and ordering rules
 went unchecked.
 
+**Breaking changes (#1083).** These are behavior breaks against
+10.0.0-preview.1, accepted on decision 15's terms like the others in this
+document. A client that did any of the following was tolerated, and now has
+its connection closed with the code above or in "QPACK encoder/decoder
+streams":
+
+- ends or resets its control stream, or either QPACK stream, while the
+  connection is open;
+- sends on its control stream a `CANCEL_PUSH`, a push `PRIORITY_UPDATE`,
+  a request `PRIORITY_UPDATE` that names no client-initiated bidirectional
+  stream, a `DATA`, `HEADERS`, or `PUSH_PROMISE` frame, a second
+  `SETTINGS`, a reserved HTTP/2 frame type, or a frame the stream ends
+  inside;
+- sends a `GOAWAY` or `MAX_PUSH_ID` that is not exactly one integer, a
+  `GOAWAY` that raises its identifier, or a `MAX_PUSH_ID` that lowers its
+  maximum;
+- sends a Section Acknowledgment or an Insert Count Increment on its QPACK
+  decoder stream.
+
+A client that names many unopened streams in `PRIORITY_UPDATE` frames also
+has updates past the first 128 dropped, where every one was kept before (see
+"RFC 9218 extensible priorities").
+
 ### QPACK encoder/decoder streams
 
 Each of the QPACK encoder (0x02) and decoder (0x03) streams may appear
