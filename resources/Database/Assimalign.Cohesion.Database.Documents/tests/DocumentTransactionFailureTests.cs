@@ -1237,5 +1237,11 @@ public sealed class DocumentTransactionFailureTests
     }
 
     // A request that carries no OQL statement: the session refuses it before any statement starts.
-    private sealed class ForeignRequest() : QueryRequest(null!);
+    private sealed class ForeignRequest : QueryRequest
+    {
+        public ForeignRequest()
+            : base(null!)
+        {
+        }
+    }
 }

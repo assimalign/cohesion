@@ -235,10 +235,25 @@ public sealed class GraphConnection : IAsyncDisposable
     /// The end of a path query whose start was written, carried into the start's execution context
     /// so its <c>QueryStop</c> closes the activity its <c>QueryStart</c> opened.
     /// </summary>
-    private sealed class PathQueryEnd(GraphConnection connection, string status, Exception? failure, long paths, long startTimestamp)
+    private sealed class PathQueryEnd
     {
+        private readonly GraphConnection _connection;
+        private readonly string _status;
+        private readonly Exception? _failure;
+        private readonly long _paths;
+        private readonly long _startTimestamp;
+
+        public PathQueryEnd(GraphConnection connection, string status, Exception? failure, long paths, long startTimestamp)
+        {
+            _connection = connection;
+            _status = status;
+            _failure = failure;
+            _paths = paths;
+            _startTimestamp = startTimestamp;
+        }
+
         public void Write()
-            => GraphClientEventSource.Log.QueryEnded(connection, QueryPathsOperation, startWritten: true, status, failure, paths, startTimestamp);
+            => GraphClientEventSource.Log.QueryEnded(_connection, QueryPathsOperation, startWritten: true, _status, _failure, _paths, _startTimestamp);
     }
 
     private static async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, CancellationToken cancellationToken)

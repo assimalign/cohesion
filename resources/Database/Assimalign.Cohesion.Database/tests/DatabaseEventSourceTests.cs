@@ -1177,13 +1177,18 @@ public sealed class DatabaseEventSourceTests
     /// <summary>
     /// A result a session refused with diagnostics: <see cref="QueryResultStatus.Error"/>.
     /// </summary>
-    private sealed class DiagnosedResult(params Diagnostic[] diagnostics) : QueryResult
+    private sealed class DiagnosedResult : QueryResult
     {
+        public DiagnosedResult(params Diagnostic[] diagnostics)
+        {
+            Diagnostics = diagnostics;
+        }
+
         public override QueryResultStatus Status => QueryResultStatus.Error;
 
         public override long AffectedCount => 0;
 
-        public override IReadOnlyList<Diagnostic>? Diagnostics { get; } = diagnostics;
+        public override IReadOnlyList<Diagnostic>? Diagnostics { get; }
     }
 
     /// <summary>

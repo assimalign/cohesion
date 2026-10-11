@@ -876,9 +876,16 @@ public sealed class SqlStorageOperationsTests
 
     // Lets a held statement end when a test leaves its scope, a failed assertion included.
     // Declared after the engine, it runs before the engine's disposal, which waits for that statement.
-    private sealed class Release(Action release) : IDisposable
+    private sealed class Release : IDisposable
     {
-        public void Dispose() => release();
+        private readonly Action _release;
+
+        public Release(Action release)
+        {
+            _release = release;
+        }
+
+        public void Dispose() => _release();
     }
 
     // Polls a condition the engine's workers make true, for at most the test timeout.

@@ -396,8 +396,15 @@ public sealed class SqlEngineContractTests
 
     // Lets a held close end when a test leaves its scope, a failed assertion included. Declared
     // after the engine, it runs before the engine's disposal, which waits for that close.
-    private sealed class Release(Action release) : IDisposable
+    private sealed class Release : IDisposable
     {
-        public void Dispose() => release();
+        private readonly Action _release;
+
+        public Release(Action release)
+        {
+            _release = release;
+        }
+
+        public void Dispose() => _release();
     }
 }
