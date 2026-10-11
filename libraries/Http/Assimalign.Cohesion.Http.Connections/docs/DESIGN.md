@@ -4196,6 +4196,12 @@ connection. Before #1306 such a stream was never accepted: its client waited
 until the QUIC connection closed — up to a host's whole drain window — before it
 could retry.
 
+**Breaking change (#1306).** A behavior break against 10.0.0-preview.1,
+accepted on decision 15's terms: a request stream a client opens once the
+accept loop has stopped is reset with `H3_REQUEST_REJECTED` at once. In
+10.0.0-preview.1 such a stream stayed pending, unanswered, until the QUIC
+connection closed.
+
 ### Incremental reads off the PipeReader
 
 Every inbound stream — the unidirectional-stream handlers and, since #1066,
