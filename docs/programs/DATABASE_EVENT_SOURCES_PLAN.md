@@ -446,11 +446,16 @@ to 256 characters plus an ellipsis. Disabled commands return the original core d
 Server startup/shutdown remains root events 18-20; the server host service adds no events.
 
 **Event 10 landed (#1441, owner decision 2026-10-11):** the shared
-`Host<TContext>.OnStartFailedAsync(Exception, CancellationToken)` hook runs once after rollback,
-with the failure returned to the caller and `CancellationToken.None`. Its default does nothing.
+`Host<TContext>.OnStartFailedAsync(Exception, CancellationToken)` hook runs once after rollback
+for an accepted failed start (successful `OnStartingAsync`), excluding caller cancellation and
+lifecycle rejection. It receives the failure returned to the caller and an independent token.
+Its default does nothing. The startup timer and registration are disarmed/drained before rollback.
+Reporting runs on a worker with a fixed one-second budget, even for synchronous blocking overrides
+or infinite shutdown timeouts. Expiry propagates the original failure and requests cancellation;
+late hook/cancellation faults are observed without modifying the returned exception or a newer attempt.
 Database.Hosting overrides it to write event 10. Direct start and complete-run paths share the
 same hook; ordinary failures retain identity and stack, and existing startup-timeout translation
-is unchanged. A hook failure is attached under
+is unchanged. A hook failure or reporting timeout is attached under
 `Exception.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"]` when writable. The host
 also retains it in a private field for debugger inspection until the next accepted start, so a
 custom exception that rejects attachment neither drops the hook failure nor replaces the start
@@ -477,10 +482,12 @@ There is no new per-statement allocation, async wrapper or timer: the existing m
 one boolean and are read from a synchronous helper called by execution's finally.
 The real SQL statement check found a 24-byte Debug regression in the part-1 async state machine:
 the extra catch/finally locals were hoisted. Sharing the complexity catch local and extracting
-the reporting locals restored the measured pre-tracing baseline, 10,648 bytes per indexed SELECT
-in Debug and 9,088 in Release. The test pins the full public text-execution path against
-`SqlDatabaseSession.cs` from `e2830a17d`, with 100 warmups and the minimum of three 1,000-call
-rounds. The helper checks remain. The existing server counters stay.
+the reporting locals removed it. The second review replaces the historical byte-count assertion
+with paired measurements: the disabled public text-execution path versus a test-only request
+wrapper without tracing calls, both using the current parser and executor on the same session.
+Each arm takes 100 warmups and the minimum of three 1,000-call rounds; their difference must be
+zero. Two SELECT projections exercise different parser/materialization totals. Static test-only
+accessors avoid any shipped visibility change. The helper checks and existing server counters stay.
 
 Former provisioning references now resolve to `SqlDatabase.CreateSchemaSession` at line 514,
 `ApplySchemaAsync` at line 556 (delegating at 573), `VerifySchemaAsync` at 585,
