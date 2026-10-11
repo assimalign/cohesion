@@ -211,7 +211,7 @@ internal static class Http3HeaderCodec
         // RFC 9114 §4.1.2 — the request body is checked against a declared
         // Content-Length as its DATA frames arrive; a value that is not a valid
         // length makes the request malformed here, before it is dispatched.
-        contentLength = ParseContentLength(headers);
+        contentLength = HttpRequestContentLength.Parse(headers, "HTTP/3");
 
         // RFC 8441 §4 / RFC 9220 §3 — the head carries :protocol only once it passed the extended
         // CONNECT validation above, which rejects an empty value and any method but CONNECT, so a
@@ -461,72 +461,6 @@ internal static class Http3HeaderCodec
         }
 
         slot = value;
-    }
-
-    /// <summary>
-    /// Parses the request's <c>Content-Length</c>, if any (RFC 9110 §8.6): one or more identical
-    /// non-negative decimal values — as separate field lines or a comma-separated list whose elements
-    /// lose SP and HTAB and nothing else — or the request is malformed (RFC 9114 §4.1.2).
-    /// </summary>
-    private static long? ParseContentLength(HttpHeaderCollection headers)
-    {
-        if (!headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue raw))
-        {
-            return null;
-        }
-
-        long? agreed = null;
-
-        foreach (string? entry in raw)
-        {
-            if (entry is null)
-            {
-                continue;
-            }
-
-            // RFC 9110 §5.6.1 / §5.6.3 — trim OWS, SP and HTAB, from each element and nothing else, as HTTP/1.1
-            // does (#1341). StringSplitOptions.TrimEntries also strips U+0085 and U+00A0, which QPACK decodes
-            // from obs-text, so "5\xA0" was enforced as 5 while HTTP/1.1 answered it with 400 and a hop that
-            // compares the value exactly saw no valid length.
-            ReadOnlySpan<char> list = entry.AsSpan();
-            foreach (Range range in list.Split(','))
-            {
-                ReadOnlySpan<char> element = list[range].Trim(Http1FieldLine.OptionalWhitespace);
-                if (element.IsEmpty)
-                {
-                    continue;
-                }
-
-                string segment = element.ToString();
-                if (!IsAsciiDigits(segment)
-                    || !long.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed))
-                {
-                    throw new InvalidDataException($"HTTP/3 request Content-Length value '{segment}' is not a non-negative decimal integer (RFC 9110 §8.6).");
-                }
-
-                if (agreed is { } existing && existing != parsed)
-                {
-                    throw new InvalidDataException($"HTTP/3 request declares conflicting Content-Length values ({existing} and {parsed}) (RFC 9110 §8.6).");
-                }
-
-                agreed = parsed;
-            }
-        }
-
-        return agreed ?? throw new InvalidDataException("HTTP/3 request carries an empty Content-Length field (RFC 9110 §8.6).");
-    }
-
-    private static bool IsAsciiDigits(string value)
-    {
-        foreach (char c in value)
-        {
-            if (c is < '0' or > '9')
-            {
-                return false;
-            }
-        }
-
-        return value.Length > 0;
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

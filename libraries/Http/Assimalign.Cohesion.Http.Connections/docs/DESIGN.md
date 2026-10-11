@@ -2403,6 +2403,46 @@ the status RFC 9112 §3 gives a method longer than any the server implements.
 - *Public API.* `HttpFieldNormalization.ValidateRequestTarget` is a new public member of the core
   `Assimalign.Cohesion.Http` package.
 
+## HTTP/2 request content-length (RFC 9113 §8.1.1, #1378)
+
+### The gap this closes
+
+RFC 9113 §8.1.1 makes a request malformed when its `content-length` does not equal the sum of
+its DATA payloads, and a malformed request is a stream error of type `PROTOCOL_ERROR`. HTTP/2 used
+the declaration only to refuse a body over the cap before it was read (see "The request-body
+cap"), and delivered whatever DATA arrived: a body that ran past its declaration was read in full,
+and one that ended short read as complete. HTTP/1.1 frames its body by the declaration, and
+HTTP/3 already held the DATA to it (RFC 9114 §4.1.2, `Http3RequestBodyStream`). #1378 needs the
+check so a body that contradicts its declaration is the client's fault on all three versions.
+
+### What the stream enforces
+
+`Http2Stream` parses the declaration at dispatch with `HttpRequestContentLength.Parse`, the
+helper HTTP/3 now shares, and holds the DATA to it on receipt:
+
+- **A value that is not a valid length** (RFC 9110 §8.6) — not a non-negative decimal integer,
+  empty, or two different values — makes the head malformed: `CreateContextAsync` resets the
+  stream before the request is dispatched, as for any other malformed head.
+- **A non-zero length on a head that ends the stream** declares content the request cannot carry:
+  malformed, refused before dispatch.
+- **DATA past the declaration** is refused when the frame that crosses it arrives
+  (`ReceiveData`), and **a stream that ends short of it** when its END_STREAM arrives, on a DATA
+  frame or on the trailer section (`ReceiveTrailers`). The body pipe fails first, with an
+  `IOException`, so a reader never takes the request for a complete one, and the stream error
+  resets the stream alone. Like the other stream errors a peer's frames raise, it counts toward
+  the reset-flood budget.
+
+The content check runs before the cap. A declaration over the cap was refused at dispatch, so a
+body within its declaration is within the cap too, and a body that runs past both is reported as
+malformed, not as too large. A CONNECT's DATA is tunnel traffic (RFC 9113 §8.5), so its
+declaration binds nothing.
+
+### Behavior changes
+
+- *Observable by clients.* An HTTP/2 request whose content contradicts its `content-length`, whose
+  `content-length` is not a valid length, or whose head ends the stream while declaring content is
+  reset with `PROTOCOL_ERROR`. It used to be dispatched, and its body read as whatever arrived.
+
 ## HTTP/2 abuse limits
 
 ### Why the frame machinery isn't enough
@@ -3037,9 +3077,8 @@ volatile flags, and the cap is a running `long` counter maintained by the pump.
   knob at dispatch, so `IHttpMaxRequestBodySizeFeature` is read-only from the first
   middleware onward. Freezing at the first body read, as HTTP/1.1 does, is a later
   change.
-- **`content-length` versus DATA-total validation.** RFC 9113 §8.1.1 makes a
-  mismatch a malformed request. The declaration is used here only for the early
-  rejection; the cap bounds the rest.
+- **`content-length` versus DATA-total validation** was a non-goal of the cap. #1378
+  added it: see "HTTP/2 request content-length".
 
 ## Responses without content: HEAD, 204, and 304 (#1073)
 

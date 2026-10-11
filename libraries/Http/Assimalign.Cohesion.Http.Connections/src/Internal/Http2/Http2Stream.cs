@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
@@ -123,11 +122,16 @@ internal sealed class Http2Stream
 
     // RFC 9110 §15.5.14 — the effective request-body cap frozen at dispatch (null = unbounded; always
     // null for CONNECT, whose post-head octets are tunnel traffic, not a message body), the running
-    // total of de-padded DATA octets received, and whether the cap has been crossed. Pump-only state:
-    // the frame pump is the single writer and the single reader.
+    // total of de-padded DATA octets received, and whether the body has been rejected (over the cap, or
+    // malformed). Pump-only state: the frame pump is the single writer and the single reader.
     private long? _maxRequestBodySize;
     private long _requestBodyReceived;
     private bool _requestBodyRejected;
+    // RFC 9113 §8.1.1 — the content-length the request declared, checked against the running total of
+    // DATA octets: content that exceeds it, or a stream that ends short of it, makes the request
+    // malformed. Null when the request declared none, and for a CONNECT, whose DATA is tunnel traffic.
+    // Pump-only state, set at dispatch.
+    private long? _declaredContentLength;
 
     // RFC 9113 §8.1 — the request's trailer section: a second field block, opened by a HEADERS frame
     // that carries END_STREAM once the head is in, and closed by END_HEADERS. It accumulates in
@@ -585,8 +589,9 @@ internal sealed class Http2Stream
     /// <exception cref="Http2StreamException">
     /// The section is malformed (RFC 9113 §8.1.1) — a pseudo-header field, a connection-specific field,
     /// a field prohibited in trailers, an uppercase name, or any trailer section after a CONNECT head
-    /// (RFC 9113 §8.5): a stream error of type <c>PROTOCOL_ERROR</c>. The body pipe fails first, so the
-    /// reader never mistakes the request for a complete one.
+    /// (RFC 9113 §8.5) — or the content it ends falls short of the declared content-length (RFC 9113
+    /// §8.1.1): a stream error of type <c>PROTOCOL_ERROR</c>. The body pipe fails first, so the reader
+    /// never mistakes the request for a complete one.
     /// </exception>
     public void ReceiveTrailers(HPackDecoder decoder)
     {
@@ -622,8 +627,34 @@ internal sealed class Http2Stream
             throw new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, exception.Message);
         }
 
+        // RFC 9113 §8.1.1 — the trailer section ends the stream, so the content is complete: it must add
+        // up to the declared content-length. Content past it was refused as it arrived.
+        if (_declaredContentLength is { } declared && _requestBodyReceived != declared)
+        {
+            throw RejectMalformedContent(declared);
+        }
+
         Volatile.Write(ref _receivedTrailers, trailers);
         CompleteBody();
+    }
+
+    /// <summary>
+    /// Rejects a request whose content contradicts its declared content-length (RFC 9113 §8.1.1): the
+    /// body pipe fails, so a reader never mistakes the request for a complete one, and the returned stream
+    /// error of type <c>PROTOCOL_ERROR</c> has the frame pump reset this stream alone.
+    /// </summary>
+    /// <param name="declared">The content-length the request declared.</param>
+    /// <returns>The stream error for the caller to throw.</returns>
+    private Http2StreamException RejectMalformedContent(long declared)
+    {
+        _requestBodyRejected = true;
+
+        string message = _requestBodyReceived > declared
+            ? $"The HTTP/2 request on stream {StreamId} is malformed: its DATA frames exceed its content-length of {declared} octets (RFC 9113 §8.1.1)."
+            : $"The HTTP/2 request on stream {StreamId} is malformed: the stream ended after {_requestBodyReceived} of the {declared} octets its content-length declared (RFC 9113 §8.1.1).";
+
+        FailBody(new IOException(message));
+        return new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, message);
     }
 
     private void CompleteHeaderBlock()
@@ -677,7 +708,10 @@ internal sealed class Http2Stream
     /// </returns>
     /// <exception cref="Http2StreamException">
     /// Thrown when DATA is received on a stream that has already had its remote
-    /// half closed (STREAM_CLOSED — RFC 9113 §5.1).
+    /// half closed (STREAM_CLOSED — RFC 9113 §5.1), or (PROTOCOL_ERROR) when the content
+    /// contradicts the request's declared content-length: it runs past it, or the stream ends short
+    /// of it (RFC 9113 §8.1.1). For the latter the body pipe fails first, so the reader never
+    /// mistakes the request for a complete one.
     /// </exception>
     /// <exception cref="Http2ConnectionException">
     /// Thrown when DATA is received on a stream in <see cref="Http2StreamState.Idle"/>
@@ -726,17 +760,24 @@ internal sealed class Http2Stream
             return false;
         }
 
-        if (_maxRequestBodySize is { } limit)
-        {
-            _requestBodyReceived += data.Length;
+        _requestBodyReceived += data.Length;
 
-            if (_requestBodyReceived > limit)
-            {
-                _requestBodyRejected = true;
-                FailBody(new IOException(
-                    $"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large)."));
-                return false;
-            }
+        // RFC 9113 §8.1.1 — the content must add up to the declared content-length: more than it
+        // declared, or an END_STREAM short of it, makes the request malformed. Checked before the cap,
+        // since a declaration over the cap was refused at dispatch, so a body within its declaration is
+        // within the cap too.
+        if (_declaredContentLength is { } declared
+            && (_requestBodyReceived > declared || (endStream && _requestBodyReceived < declared)))
+        {
+            throw RejectMalformedContent(declared);
+        }
+
+        if (_maxRequestBodySize is { } limit && _requestBodyReceived > limit)
+        {
+            _requestBodyRejected = true;
+            FailBody(new IOException(
+                $"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large)."));
+            return false;
         }
 
         if (!data.IsEmpty || flowControlLength > 0)
@@ -1008,10 +1049,12 @@ internal sealed class Http2Stream
     /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> for a malformed request, reset per stream
     /// (RFC 9113 §8.1.1): a decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3), a
     /// pseudo-header field that is repeated, a required one that is missing, an empty <c>:path</c>
-    /// (RFC 9113 §8.3.1), a <c>:path</c> that does not decode to a legal path, or a head that
+    /// (RFC 9113 §8.3.1), a <c>:path</c> that does not decode to a legal path, a head that
     /// violates the extended CONNECT rules of RFC 8441 §4 (an empty <c>:protocol</c>, a
     /// <c>:protocol</c> on a method other than <c>CONNECT</c>, or an extended CONNECT missing
-    /// <c>:scheme</c>, <c>:path</c>, or <c>:authority</c>).
+    /// <c>:scheme</c>, <c>:path</c>, or <c>:authority</c>), a <c>content-length</c> that is not a valid
+    /// length (RFC 9110 §8.6), or a non-zero <c>content-length</c> on a head that ends the stream
+    /// (RFC 9113 §8.1.1).
     /// </exception>
     /// <exception cref="HPackDecodingException">
     /// The block is not valid HPACK, or its decoded list exceeds the advertised
@@ -1141,6 +1184,18 @@ internal sealed class Http2Stream
                 $"The HTTP/2 request on stream {StreamId} is malformed: {requestTargetViolation}");
         }
 
+        // RFC 9113 §8.1.1 / RFC 9110 §8.6 — a declared content-length is held against the DATA the stream
+        // carries, so a value that is not a valid length makes the request malformed, as it does on HTTP/3.
+        long? declaredContentLength;
+        try
+        {
+            declaredContentLength = HttpRequestContentLength.Parse(decodedHeaders.Headers, "HTTP/2");
+        }
+        catch (InvalidDataException exception)
+        {
+            throw CreateMalformedRequestError($"carries an invalid content-length: {exception.Message}");
+        }
+
         // RFC 3986 §2.4 — the :path is percent-decoded through the same HttpPath.FromUriComponent
         // decode HTTP/1.1 and HTTP/3 use. A :path whose decoded form is not a legal path — a decoded
         // space, control character, '?', '#', or NUL, or no leading '/' — makes the request malformed,
@@ -1167,6 +1222,17 @@ internal sealed class Http2Stream
 
         HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
         bool isConnect = method == HttpMethod.Connect;
+
+        // RFC 9113 §8.1.1 — the declaration binds the request's content, so a head that ends the stream
+        // may declare none but zero. A CONNECT's DATA is tunnel traffic, not content (§8.5), so its
+        // declaration binds nothing.
+        _declaredContentLength = isConnect ? null : declaredContentLength;
+
+        if (InputCompleted && _declaredContentLength is > 0)
+        {
+            throw CreateMalformedRequestError(
+                $"declares a content-length of {_declaredContentLength} octets but ends the stream with its head (RFC 9113 §8.1.1)");
+        }
 
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
@@ -1244,7 +1310,7 @@ internal sealed class Http2Stream
         // single body octet is read. A CONNECT tunnel carries no message body, so it is uncapped.
         _maxRequestBodySize = isConnect ? null : interception.MaxRequestBodySize;
         IsDeclaredBodyOverLimit = _maxRequestBodySize is { } limit
-            && TryGetDeclaredContentLength(decodedHeaders.Headers, out long declaredLength)
+            && _declaredContentLength is { } declaredLength
             && declaredLength > limit;
 
         // An accepted extended CONNECT tunnel reads the peer's DATA from the transport's own body stream.
@@ -1262,21 +1328,6 @@ internal sealed class Http2Stream
         };
 
         return context;
-    }
-
-    /// <summary>
-    /// Reads a single, well-formed <c>content-length</c> value (RFC 9110 §8.6: a non-negative decimal
-    /// integer). An absent, repeated, or unparsable field yields <see langword="false"/>: the
-    /// declaration is then simply not used for the early rejection, and the receipt-side running total
-    /// still enforces the cap.
-    /// </summary>
-    private static bool TryGetDeclaredContentLength(HttpHeaderCollection headers, out long contentLength)
-    {
-        contentLength = 0;
-
-        return headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue value)
-            && value.Count == 1
-            && long.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out contentLength);
     }
 
     /// <summary>
