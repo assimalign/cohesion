@@ -48,8 +48,10 @@ calls it. The package and `ObjectValidation` are members of the `App.Web` shared
 source-declared partial `JsonSerializerContext` classes, including `[JsonPropertyName]` renames. When
 using individual packages, include `Assimalign.Cohesion.SourceGeneration.Web` as an analyzer. Custom
 resolvers that rename properties beyond policies and attributes implement `IValidationJsonPropertyResolver`
-to identify the final contract's properties. Precompiled contexts without that metadata fall back to CLR
-names for renamed mutable members; see [DESIGN.md](DESIGN.md), "The failure payload".
+to identify the final contract's properties. They may return null for unchanged members; validation then
+tries the originating resolver and the existing constructor-name/naming-policy fallback. Precompiled
+contexts without that metadata fall back to CLR names for renamed mutable members; see
+[DESIGN.md](DESIGN.md), "The failure payload".
 
 ```csharp
 using Assimalign.Cohesion.ObjectValidation;

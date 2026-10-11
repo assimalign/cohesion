@@ -148,11 +148,16 @@ internal static class ValidationErrorMap
     {
         // A customized resolver can identify properties after arbitrary contract modifications. Generated
         // contexts supply the CLR/attribute-name identity that JsonPropertyInfo otherwise keeps internal.
-        IValidationJsonPropertyResolver? resolver = contract.Options.TypeInfoResolver as IValidationJsonPropertyResolver
-            ?? contract.OriginatingResolver as IValidationJsonPropertyResolver;
-        if (resolver is not null)
+        if (contract.Options.TypeInfoResolver is IValidationJsonPropertyResolver optionsResolver
+            && optionsResolver.GetProperty(contract, memberName) is { } optionsProperty)
         {
-            return resolver.GetProperty(contract, memberName);
+            return optionsProperty;
+        }
+
+        if (contract.OriginatingResolver is IValidationJsonPropertyResolver originatingResolver
+            && originatingResolver.GetProperty(contract, memberName) is { } originatingProperty)
+        {
+            return originatingProperty;
         }
 
         // A context built without the Web generator can still describe ordinary policy-named properties

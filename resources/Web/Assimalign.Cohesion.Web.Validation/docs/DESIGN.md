@@ -175,8 +175,11 @@ a property present in that contract. The generator ships with `Sdk.Web`; a packa
 into `Assimalign.Cohesion.SourceGeneration.Web` alongside its JSON generator.
 
 A custom resolver can implement the same optional interface to handle arbitrary contract modifications;
-the map checks the options resolver first and then the contract's originating resolver. A context that
-already implements it is not augmented. A precompiled context without that metadata still supports
+the map checks the options resolver first and then the contract's originating resolver, continuing when
+either returns null before trying constructor-associated names and the naming-policy fallback. This lets
+a custom resolver handle only the properties it changes without hiding generated mappings for other
+nested or collection members. A context that already implements it is not augmented. A precompiled
+context without that metadata still supports
 policy-named properties and constructor-associated member names; a renamed mutable member with no
 identity metadata falls back to its CLR name. Modifiers that rename or replace properties beyond the
 policy/attribute names need an application implementation that identifies those final properties. This

@@ -91,19 +91,24 @@ public sealed class ValidationJsonPathTests
         unchangedMap.Keys.ShouldBe(["Items[2].Quantity"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Error map: Should honor an application's modified contract")]
-    public void Create_CustomContractResolver_ShouldUseFinalPropertyName()
+    [Theory(DisplayName = "Cohesion Test [Web.Validation] - Error map: Should honor custom mappings and continue unresolved lookups")]
+    [InlineData(false, "order => order.DisplayName", "caption")]
+    [InlineData(false, "order => order.Address.City", "ship_to.city")]
+    [InlineData(false, "order => order.Items[2].Quantity", "items[2].quantity")]
+    [InlineData(true, "order => order.Items[2].Quantity", "items[2].quantity")]
+    public void Create_CustomContractResolver_ShouldUseFinalPropertyName(bool omitGeneratedResolver, string source, string expected)
     {
         // Arrange
         IHttpContentSerializationFeature serialization = new ContentSerializationBuilder()
-            .AddJson(new RenamedContractResolver()).Build();
-        IValidationError[] errors = [new ValidationError { Source = "order => order.DisplayName", Message = "invalid" }];
+            .AddJson(new RenamedContractResolver(omitGeneratedResolver)).Build();
+        IValidationError[] errors = [new ValidationError { Source = source, Message = "invalid" }];
 
         // Act
         Dictionary<string, object?> map = ValidationErrorMap.Create(errors, typeof(ValidationOrder), serialization);
 
         // Assert
-        map.Keys.ShouldBe(["caption"]);
+        map.Keys.ShouldBe([expected]);
+        map[expected].ShouldBe(new[] { "invalid" });
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.Validation] - Typed: Should return JSON names and distinct collection indexes")]
@@ -157,12 +162,24 @@ public sealed class ValidationJsonPathTests
 
     private sealed class RenamedContractResolver : IJsonTypeInfoResolver, IValidationJsonPropertyResolver
     {
+        private readonly bool _omitGeneratedResolver;
+
+        public RenamedContractResolver(bool omitGeneratedResolver)
+        {
+            _omitGeneratedResolver = omitGeneratedResolver;
+        }
+
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
             JsonTypeInfo? contract = ((IJsonTypeInfoResolver)ValidationOrderJsonContext.Default).GetTypeInfo(type, options);
             if (contract?.Type == typeof(ValidationOrder))
             {
                 contract.Properties.Single(property => property.Name == "display_name").Name = "caption";
+            }
+            if (contract is not null && _omitGeneratedResolver)
+            {
+                // Both resolver lookups return null for ordinary properties, exercising policy fallback.
+                contract.OriginatingResolver = this;
             }
             return contract;
         }
