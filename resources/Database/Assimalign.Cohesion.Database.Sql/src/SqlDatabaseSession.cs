@@ -190,7 +190,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// other walk over the statement does.
     /// </remarks>
     protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
-        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions), cancellationToken);
+        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
 
     private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
     {
@@ -215,6 +215,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         }
         catch (InsufficientExecutionStackException exception)
         {
+            SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
             // Every recursive walk over a statement (the system-relation scan, planning,
             // evaluation, CHECK validation) checks the stack before it descends (#1151). The
             // nesting limit bounds how deep a statement nests, not how much stack the walks need
@@ -226,6 +227,27 @@ public sealed class SqlDatabaseSession : DatabaseSession
             // context has rolled back, an explicit transaction stays active, and the session
             // stays usable.
             throw SqlEvaluationException.StatementTooComplex(exception);
+        }
+        catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.StatementTooComplexCode)
+        {
+            SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
+            throw;
+        }
+        finally
+        {
+            // Metrics are already owned by execution. Report the completed plan's actual work,
+            // once per request (including failure), without another async wrapper or a timer.
+            if (_lastStatementMetrics is { } metrics && !ReferenceEquals(metrics, previousMetrics))
+            {
+                if (metrics.IsPlanned)
+                {
+                    SqlDatabaseEventSource.Log.StatementPlanned(_database.Name, metrics);
+                }
+                if (metrics.SelfCommits > 0 && request is SqlQueryRequest sql)
+                {
+                    SqlDatabaseEventSource.Log.DdlSelfCommitted(_database.Name, sql.Statement.SqlExpression.CommandType);
+                }
+            }
         }
     }
 
@@ -270,6 +292,10 @@ public sealed class SqlDatabaseSession : DatabaseSession
             {
                 if (diagnostic.Severity == DiagnosticSeverity.Error)
                 {
+                    if (diagnostic.Code is "SQL0006" or "SQL0007")
+                    {
+                        SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, parsed.Statement.ExpressionNestingDepth);
+                    }
                     return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
                         [.. parsed.Statement.Diagnostics]);
                 }
@@ -282,6 +308,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
             // and is held to the depth of its own tree, which is what the walks below recurse over.
             if (parsed.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
             {
+                SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, parsed.Statement.ExpressionNestingDepth);
                 return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
                     [NestingLimitDiagnostic(parsed.Statement.ExpressionNestingDepth)]);
             }

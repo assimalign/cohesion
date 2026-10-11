@@ -3761,7 +3761,8 @@ calls and a listener that creates a default-collation database on the same or an
 
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;
-database event-sources plan, batch B5). It reports the wire server and its sessions. A
+database event-sources plan, batches B5 and D part 1). It reports the wire server and its sessions,
+statement access paths, complexity refusals, DDL self-commits, extension registration and index-registration persistence. A
 statement's outcome, the engine, its databases and its workers are the root source's
 (`Assimalign.Cohesion.Database`); kernel transactions, locks and storage are the Transactions and
 Storage sources'. The Key-value, Graph and Blob servers write events 1-9 with the same ids, names
@@ -3782,9 +3783,34 @@ bounded peer-sent names) are in the area's
 | 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
+| 10 | `StatementPlanned` | Verbose | `Statements` | `database`, `accessPath` (cut to 256 characters), `recordsExamined` |
+| 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
+| 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
+| 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
+| 17 | `IndexRegistrationsSaved` | Verbose | — | `database`, `count` |
 
-Ids 10-17 are reserved for the statement-planning, DDL and provisioning events that land with
-the model's redesign (plan, section 5).
+Batch D part 1 (#1349) adds statement detail and typed extension registration. Ids **13-15**
+remain reserved for `ProvisioningStart`, `ProvisioningStop` and `ProvisioningFailed` after
+provisioning hardening (decision 49a). `Sessions = 0x1`; `Statements = 0x2`.
+
+`StatementPlanned` is written once when execution leaves a successfully planned statement,
+including execution failure: only then are the existing `SqlStatementMetrics` access path and
+record count final. A parse refusal, transaction-control command or unsupported plan writes none.
+`DdlSelfCommitted` is written once if the statement committed at least one visible catalog change,
+even if a later step failed; merely attempting DDL, or reserving an unreachable identity, is not
+self-commit. These hooks reuse execution's metrics, add no timer or async wrapper, and convert
+payloads only inside the source's keyword guard. The disabled-hook allocation test runs 10,000
+iterations and requires zero bytes in both build configurations.
+
+`StatementTooComplex` reports the text parser's nesting/stack diagnostic, the typed request's
+nesting refusal, or the execution stack backstop, once, with no SQL text or exception message.
+Depth is the parser's deepest level reached (it stops before entering a forbidden level), or -1
+for an execution stack failure. `ExtensionRegistered` follows a successful registry insertion,
+including built-in scalar and aggregate overloads, types and casts and schema-declared domains.
+A rejected duplicate or a schema domain already present writes nothing. The shared standard
+catalogs register once when first initialized; a builder's collections register their own entries.
+`IndexRegistrationsSaved` follows persistence of a changed set; an unchanged set writes nothing.
+No new counters.
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,

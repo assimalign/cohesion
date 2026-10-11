@@ -318,6 +318,7 @@ public sealed class SqlDatabase : DatabaseInstance
         // Synchronous over the ValueTask by design: catalog writes complete
         // synchronously (worker passes and disposal are synchronous paths).
         _catalog.SaveIndexRegistrationsAsync(current).AsTask().GetAwaiter().GetResult();
+        SqlDatabaseEventSource.Log.IndexRegistrationsSaved(Name, current.Count);
 
         static bool RegistrationsEqual(
             IReadOnlyList<BTreeIndexRegistration> left,

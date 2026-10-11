@@ -13,6 +13,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal sealed class SqlStatementMetrics
 {
+    /// <summary>Whether the planner produced a plan, including one whose execution later failed.</summary>
+    internal bool IsPlanned { get; set; }
+
     /// <summary>
     /// Gets or sets the number of stored records the statement examined: units
     /// decoded by a scan, or entries fetched by an index seek.

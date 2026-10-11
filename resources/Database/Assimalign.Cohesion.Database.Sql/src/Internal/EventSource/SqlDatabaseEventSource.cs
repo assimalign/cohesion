@@ -4,6 +4,7 @@ using System.Diagnostics.Tracing;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -21,8 +22,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// (database event-sources plan, D2), so one provider list and one log query cover all four.
 /// </para>
 /// <para>
-/// Ids 10-17 are reserved for the statement-planning and provisioning events that land with the
-/// SQL model's redesign (plan section 5); a statement's own outcome is the root source's
+/// Ids 13-15 remain reserved for provisioning (plan section 5); statement execution detail and
+/// extension registration use ids 10-12 and 16-17. A statement's own outcome is the root source's
 /// (<c>Assimalign.Cohesion.Database</c>), so the server does not repeat it. Every write sits
 /// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
 /// allocates is computed inside that check. The counters' backing fields are maintained whether or
@@ -58,6 +59,9 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         /// <summary>The per-session lifecycle detail: accepted and closed sessions.</summary>
         public const EventKeywords Sessions = (EventKeywords)0x1;
+
+        /// <summary>Per-statement access paths and catalog self-commits.</summary>
+        public const EventKeywords Statements = (EventKeywords)0x2;
     }
 
     /// <summary>
@@ -272,6 +276,69 @@ internal sealed class SqlDatabaseEventSource : EventSource
         }
     }
 
+    [NonEvent]
+    public void StatementPlanned(DatabaseName database, SqlStatementMetrics metrics)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
+        {
+            StatementPlanned(database.ToString(), Bound(metrics.AccessPath, MaxNameLength), metrics.RecordsExamined);
+        }
+    }
+
+    [NonEvent]
+    public void StatementTooComplex(DatabaseName database, int depth)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            StatementTooComplex(database.ToString(), depth);
+        }
+    }
+
+    [NonEvent]
+    public void DdlSelfCommitted(DatabaseName database, SqlQueryCommandType commandType)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
+        {
+            DdlSelfCommitted(database.ToString(), commandType.ToString());
+        }
+    }
+
+    [NonEvent]
+    public void ExtensionRegistered(SqlFunction function)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExtensionRegistered(function.Kind.ToString(), Bound(function.Name, MaxNameLength));
+        }
+    }
+
+    [NonEvent]
+    public void ExtensionRegistered(SqlType type)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExtensionRegistered("Type", Bound(type.Name, MaxNameLength));
+        }
+    }
+
+    [NonEvent]
+    public void ExtensionRegistered(SqlCast cast)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExtensionRegistered("Cast", Bound(cast.Source.Name, MaxNameLength) + " -> " + Bound(cast.Target.Name, MaxNameLength));
+        }
+    }
+
+    [NonEvent]
+    public void IndexRegistrationsSaved(DatabaseName database, int count)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            IndexRegistrationsSaved(database.ToString(), count);
+        }
+    }
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);
@@ -307,6 +374,28 @@ internal sealed class SqlDatabaseEventSource : EventSource
     [Event(9, Level = EventLevel.Warning, Message = "The server of engine {0} aborted {1} session(s) its {2} ms drain did not close.")]
     private void SessionsAborted(string engineName, int sessions, double drainTimeoutMilliseconds)
         => WriteEvent(9, engineName, sessions, drainTimeoutMilliseconds);
+
+    [Event(10, Level = EventLevel.Verbose, Keywords = Keywords.Statements, Message = "Database '{0}' executed access path '{1}', examining {2} record(s).")]
+    private void StatementPlanned(string database, string accessPath, long recordsExamined)
+        => WriteEvent(10, database, accessPath, recordsExamined);
+
+    [Event(11, Level = EventLevel.Warning, Message = "Database '{0}' refused a statement too complex to execute (depth {1}; -1 means unknown).")]
+    private void StatementTooComplex(string database, int depth)
+        => WriteEvent(11, database, depth);
+
+    [Event(12, Level = EventLevel.Verbose, Keywords = Keywords.Statements, Message = "Database '{0}' self-committed catalog changes for {1}.")]
+    private void DdlSelfCommitted(string database, string commandType)
+        => WriteEvent(12, database, commandType);
+
+    // Ids 13-15 are reserved for provisioning in batch D's second run.
+
+    [Event(16, Level = EventLevel.Verbose, Message = "Registered SQL extension {0} '{1}'.")]
+    private void ExtensionRegistered(string kind, string name)
+        => WriteEvent(16, kind, name);
+
+    [Event(17, Level = EventLevel.Verbose, Message = "Database '{0}' saved {1} index registration(s).")]
+    private void IndexRegistrationsSaved(string database, int count)
+        => WriteEvent(17, database, count);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

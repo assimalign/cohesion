@@ -89,6 +89,11 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
     /// parse it: <c>COHSQLE004</c>, statement too complex (ISO SQLSTATE 54001).
     /// </exception>
     public static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters, SqlQueryParserOptions? parserOptions)
+        => FromSql(sql, parameters, parserOptions, database: null);
+
+    // A session supplies its database so parser refusals, before it enters execution, can be
+    // reported without parsing a second time or reading user text out of an exception message.
+    internal static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters, SqlQueryParserOptions? parserOptions, DatabaseName? database)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
@@ -97,6 +102,10 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
         var error = statement.Diagnostics.FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
+            if (database is { } name && error.Code is "SQL0006" or ParserOutOfStackCode)
+            {
+                SqlDatabaseEventSource.Log.StatementTooComplex(name, statement.ExpressionNestingDepth);
+            }
             if (error.Code == ParserOutOfStackCode)
             {
                 // The text is within the dialect; the thread is too small for it. That is a

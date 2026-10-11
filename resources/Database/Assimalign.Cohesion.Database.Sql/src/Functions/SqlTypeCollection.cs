@@ -51,6 +51,10 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
     internal SqlTypeCollection(Action? ensureMutable)
     {
         _ensureMutable = ensureMutable;
+        foreach (var type in _types)
+        {
+            SqlDatabaseEventSource.Log.ExtensionRegistered(type);
+        }
         SqlStandardCasts.Register(this);
     }
 
@@ -85,6 +89,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         }
 
         _types.Add(type);
+        SqlDatabaseEventSource.Log.ExtensionRegistered(type);
         return this;
     }
 
@@ -122,6 +127,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         }
 
         _casts.Add(cast);
+        SqlDatabaseEventSource.Log.ExtensionRegistered(cast);
         return this;
     }
 
@@ -158,6 +164,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         if (Find(domain.Name) is not { } registered)
         {
             _types.Add(domain);
+            SqlDatabaseEventSource.Log.ExtensionRegistered(domain);
             return null;
         }
 
