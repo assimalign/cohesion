@@ -14,6 +14,7 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Logging;
+using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Routing;
@@ -906,6 +907,69 @@ public class WebServerTelemetryTests
         span.GetTagItem("error.type").ShouldBe("request_canceled");
         span.GetTagItem("http.response.status_code").ShouldBeNull();
         duration.Tags.ContainsKey("http.response.status_code").ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: The error boundary's streamed-response abort is cancelled and skips completion callbacks")]
+    [InlineData(WebApplicationTestProtocol.Http1)]
+    [InlineData(WebApplicationTestProtocol.Http2)]
+    public async Task ServerSpan_ErrorBoundaryAbortsStartedResponse_ShouldReportCancellationAndSkipCompletion(WebApplicationTestProtocol protocol)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new();
+        TaskCompletionSource releaseFault = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        string path = $"/telemetry/boundary-abort/{Guid.NewGuid():N}";
+        int completionCallbacks = 0;
+
+        await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
+        factory.Builder.Server.UseServer(options => options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor()));
+        factory.Builder.Services.AddRouting();
+        factory.Application.UseErrorHandling();
+        factory.Application.UseRouting().Map(CohesionHttpMethod.Get, path, new RouterRouteHandler(async context =>
+        {
+            context.Features.Get<IWebResponseCompletionFeature>().ShouldNotBeNull().Register(() =>
+            {
+                Interlocked.Increment(ref completionCallbacks);
+                return ValueTask.CompletedTask;
+            });
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            IHttpResponseStreamingFeature streaming = context.Response.Streaming;
+            await streaming.WriteAsync(Encoding.UTF8.GetBytes("partial"), cancellationToken);
+            await streaming.FlushAsync(cancellationToken);
+            await releaseFault.Task.WaitAsync(cancellationToken);
+            throw new InvalidOperationException("Deliberate fault after the client read a partial response.");
+        }));
+        using HttpClient client = factory.CreateClient();
+
+        try
+        {
+            // Act: read the streamed bytes before allowing the handler to fault, on either protocol.
+            using HttpResponseMessage response = await client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            Stream body = await response.Content.ReadAsStreamAsync(cancellationToken);
+            byte[] partial = new byte[7];
+            await body.ReadExactlyAsync(partial, cancellationToken);
+            releaseFault.TrySetResult();
+            Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+            RecordedMeasurement duration = await recorder.WaitForMeasurementAsync(
+                m => m.Instrument == "http.server.request.duration" && Equals(m.Tags.GetValueOrDefault("http.route"), path),
+                cancellationToken);
+
+            // Assert
+            Encoding.UTF8.GetString(partial).ShouldBe("partial");
+            response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+            Volatile.Read(ref completionCallbacks).ShouldBe(0);
+            span.Status.ShouldBe(ActivityStatusCode.Error);
+            span.GetTagItem("error.type").ShouldBe("request_canceled");
+            span.GetTagItem("http.response.status_code").ShouldBe(200);
+            duration.Tags.GetValueOrDefault("error.type").ShouldBe("request_canceled");
+            duration.Tags.GetValueOrDefault("http.response.status_code").ShouldBe(200);
+            await Should.ThrowAsync<Exception>(() => body.ReadAsync(new byte[1], cancellationToken).AsTask());
+        }
+        finally
+        {
+            releaseFault.TrySetResult();
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A fault after the response started should report unhandled_exception with the sent status")]

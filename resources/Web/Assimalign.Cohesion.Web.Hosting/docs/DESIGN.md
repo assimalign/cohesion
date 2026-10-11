@@ -287,7 +287,7 @@ once, in one of three ways, chosen by how its pipeline ended:
 
 | Pipeline outcome | Finalization | On the wire |
 | --- | --- | --- |
-| Returned | `SendAsync` | the application's response |
+| Returned without cancellation | `SendAsync` | the application's response |
 | Returned, but the transport refused a field of its response (#1183) | as for a throw before the response started | `500 Internal Server Error` |
 | Threw, response not started | the staged status, headers, trailers, and body are replaced by a bodyless `500`, then `SendAsync` | `500 Internal Server Error` |
 | Threw after the response started, or the exchange was cancelled | `IHttpContext.CancelAsync`, then `SendAsync` | a reset: HTTP/2 `RST_STREAM(CANCEL)`, HTTP/3 stream abort, HTTP/1.1 no further bytes and a connection that ends after the exchange |
@@ -296,6 +296,14 @@ once, in one of three ways, chosen by how its pipeline ended:
   only when the server's shutdown token or the exchange's own `RequestCancelled`
   fired (server stop, peer reset, closed connection, `IHttpContext.Cancel`). An
   operation cancelled for any other reason — an application timeout — is a fault.
+  The same generic cancellation signals are checked after a normal pipeline return (#1411).
+  In particular, ErrorHandling may abort a started response and return normally: that is a
+  cancelled exchange, so no completion callback runs, and telemetry records
+  `error.type=request_canceled` with the status already sent. The original exception remains
+  available through ErrorHandling's diagnostics; the server classifies the transport outcome.
+  This changes preview.1 behavior, which could run completion callbacks after the abort, and
+  corrects the later telemetry implementation's success report. No feature contract is added
+  to the Web root; `IHttpContext.RequestCancelled` carries the cancellation.
 - **Why "started" decides.** Once the final response head is on the wire (a
   streamed write or flush through the raw body sink — `Http.Streaming`, server-sent
   events), a replacement status can no longer reach the peer, and `SendAsync` would

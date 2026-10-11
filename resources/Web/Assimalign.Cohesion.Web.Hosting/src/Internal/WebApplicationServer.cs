@@ -618,7 +618,11 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 
             await _pipeline.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
 
-            return ExchangeOutcome.Completed;
+            // Middleware can abort a started response and return normally (the exception
+            // boundary does). The generic exchange signal still makes that a cancellation.
+            return cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested
+                ? ExchangeOutcome.Cancelled
+                : ExchangeOutcome.Completed;
         }
         catch (OperationCanceledException) when (
             cancellationToken.IsCancellationRequested || exchange.RequestCancelled.IsCancellationRequested)

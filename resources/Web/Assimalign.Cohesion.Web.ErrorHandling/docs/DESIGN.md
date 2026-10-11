@@ -106,6 +106,11 @@ the three-layer model above. It wraps everything downstream in a `try/catch` and
   the one exchange (`IHttpContext.CancelAsync`; the connection survives). This is the same wire-commit
   signal the request-timeout middleware reads. While the response is unstarted, the boundary discards
   the partial response (clears headers, truncates/replaces the body) and writes the error cleanly.
+  The abort trips the generic `IHttpContext.RequestCancelled` signal. Web.Hosting checks it even
+  when the boundary returns normally (#1411), classifies the exchange as cancelled, skips
+  response-completion callbacks and records `error.type=request_canceled`. The original fault
+  still reaches the boundary's diagnostic hook. Compared with 10.0.0-preview.1, callbacks no
+  longer run after this aborted response; no new feature or Web-root contract is required.
 - **Dispatches through the `OnError` chain.** It consults `IErrorHandlingFeature.Handlers` in
   registration order, first-`true`-wins — the same contract `HandleAsync` implements. It consumes the
   chain rather than calling `HandleAsync` blindly only so the **developer-detail toggle** can enrich
