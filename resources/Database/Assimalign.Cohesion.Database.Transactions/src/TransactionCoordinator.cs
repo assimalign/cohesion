@@ -115,7 +115,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         // drives its deferred-undo retry. It releases a transaction's locks through the
         // lock manager's unfiltered release; engine code shares the same lock manager in
         // its engine mode, whose release-all leaves a tracked transaction to the manager
-        // (see LockManager). Both learn the storage's name here, for their diagnostics only.
+        // and which refuses a request that would wait inside a statement apply (see
+        // LockManager). Both learn the storage's name here, for their diagnostics only.
         string database = storage.Name;
         _manager = new TransactionManager(
             _log,
@@ -124,7 +125,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             ReserveSequence,
             time,
             database);
-        locks.EnterEngineMode(_manager.IsTracked, database);
+        locks.EnterEngineMode(_manager.IsTracked, () => _insideApply.Value, database);
         _lockManager = locks;
     }
 
@@ -473,7 +474,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// before the gate — so the index's internal acquisition is a same-owner
     /// re-grant that completes synchronously. A genuine wait inside the gate
     /// would be invisible to the lock manager's deadlock detection (the recorded
-    /// page-conflict-fallback lesson).
+    /// page-conflict-fallback lesson), so <see cref="LockManager"/> refuses it:
+    /// a request that would wait inside the apply fails with
+    /// <see cref="InvalidOperationException"/>, which rolls the statement's
+    /// bracket back (#1390).
     /// </summary>
     /// <typeparam name="T">The apply result type.</typeparam>
     /// <param name="context">The transaction the statement belongs to.</param>

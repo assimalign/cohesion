@@ -643,11 +643,26 @@ internal sealed partial class SqlPlanExecutor
     /// nothing, and the deleted child's unique entry stayed live, so its key could never be
     /// inserted again.
     /// </para>
+    /// <para>
+    /// The walk found the version before it held the row's lock, and a version whose writer was
+    /// in flight can be gone by the time the check reads it: the writer rolled back and its undo
+    /// deleted the version, or the writer's statement failed and its bracket restored the page
+    /// without it. The snapshot never saw such a version either, so the statement fails with the
+    /// same conflict. Until the #1390 stress probe found it, the check read the slot with
+    /// <c>ReadRow</c>, which throws for a deleted or reverted slot, and the statement failed with
+    /// the storage's exception instead: <c>SlottedPageException</c> for a deleted slot,
+    /// <c>ArgumentOutOfRangeException</c> for a slot past the restored page's last, or
+    /// <c>StorageIOException</c> ("Page N is not allocated") when the undo emptied the page and
+    /// freed it. <c>TryReadRecord</c> reports all three as a record that is gone. The race is rare
+    /// under the probe's workload (one <c>SlottedPageException</c> in its early runs, none in six
+    /// minutes of later ones), so <c>SqlLockWaitTests</c> builds it step by step.
+    /// </para>
     /// </remarks>
     /// <param name="table">The child row's table.</param>
     /// <param name="location">The child row's location, exclusively locked by the statement.</param>
     /// <param name="statement">The executing statement.</param>
-    /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer, or the version is gone.</exception>
+    /// <exception cref="StorageCorruptionException">The slot holds a record too short for its version stamps (#1362).</exception>
     private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement)
     {
         if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
@@ -655,7 +670,22 @@ internal sealed partial class SqlPlanExecutor
             return;
         }
 
-        var (writer, _) = ReadVersionStamps(table, location.PageId, location.SlotIndex);
+        if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
+        {
+            throw new TransactionAbortedException(
+                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE CASCADE reached a row version that was rolled back after the walk found it, " +
+                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+        }
+
+        if (record.Length < SqlRowCodec.StampHeaderSize)
+        {
+            throw new StorageCorruptionException(
+                location.PageId,
+                $"The row record in slot {location.SlotIndex} of page {(long)location.PageId} of table '{table.Schema}.{table.Name}' holds " +
+                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+        }
+
+        var (writer, _) = SqlRowCodec.ReadStamps(record.Span);
         if (!statement.Snapshot.IsVisible(writer))
         {
             throw new TransactionAbortedException(

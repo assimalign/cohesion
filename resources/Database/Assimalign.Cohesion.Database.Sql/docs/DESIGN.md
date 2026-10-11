@@ -1833,7 +1833,9 @@ description + exported registrations), the engine binds them.
   the entry-grain classes can conflict. Inside the apply gate the B+Tree
   re-acquires the key lock as a same-owner re-grant that completes synchronously
   — **no lock wait can ever occur while the gate is held** (a wait there would be
-  invisible to deadlock detection). Non-unique indexes take no key locks. Key
+  invisible to deadlock detection; since #1390 the coordinator's lock manager refuses a
+  request that would wait there, so a statement that missed a pre-acquisition fails
+  instead of stalling every writer of the database). Non-unique indexes take no key locks. Key
   locks and row locks share the `LockResource.Entry` space; a hash/location
   collision only over-locks, and the class ordering keeps acquisition globally
   consistent. **The one deliberate exception is the cascade walk**, which locks
@@ -2677,6 +2679,35 @@ the coordinator has no commit-time validation hook, adding one would be a new
 concurrency mechanism in `Database.Transactions`, and lock-based enforcement
 reuses the machinery that already arbitrates every other wait in the engine.
 
+**Until #1390 some of these cycles never surfaced.** The detector recorded a request's edges
+when it queued, and a waiter's holders change while it waits. In one cycle the stress probe
+caught, a cascade queued for a child row behind an `UPDATE` that re-parents the child; the
+release of the row's holder granted the row to the update, queued first; and the update then
+waited for the shared lock on the parent row the cascade holds. The cascade's only edge named
+the holder that had left, so both statements waited until something canceled them. The #1370
+review's stress runs saw two to five such waits pass 10 s per run, and the probe below saw 40 in
+each of two 60-second runs on `19b1a495`: the members of ten two-transaction cycles, and the
+statements queued behind them. Nine were cascade-against-child-writer cycles like this one (the
+child writer's edge was the stale one seven times, the cascade's twice); the tenth was two child
+writers in explicit transactions. The detector now reads its edges from the lock table as it
+stands (`Database.Transactions` DESIGN.md, "The wait-for graph is read from the table"); the
+lock order is unchanged. `SqlLockWaitTests` builds the cycle step
+by step (an `UPDATE` of the child row stands in for the cascade's lock on it), and runs the
+review's workload as a stress probe that fails on any wait of 10 s.
+
+**A child writer's shared lock on a parent row queues behind a cascade's (#1390 review).** The
+lock manager used to grant a shared request beside the shared holders of a parent row while a
+cascade's exclusive request on it waited, so on one hot parent row a stream of child writers
+kept the cascade waiting past 10 s. Its grants now respect the queue (`Database.Transactions`
+DESIGN.md, "Grants respect the queue"): the waits are bounded, but the hot row's cascade still
+makes no progress. The child writers queued behind it hold child rows, the cycle above forms
+as soon as the cascade is granted the parent row, and the cascade is its victim; on one hot
+parent row the probe's workers commit between about a third and nine tenths of what they
+committed before. The measurements and
+the owner decision they feed (the victim rule, or a cascade lock order without the cycle, such
+as an update-mode parent lock taken before the child rows) are in that section. The lock order
+is unchanged.
+
 DDL constraint backfills are the exception that stays table-grain: `ADD
 CONSTRAINT` / `ADD COLUMN` validate *every* existing row against latest state,
 so they hold the `Exclusive` table lock on their own table plus the `Exclusive`
@@ -2775,10 +2806,19 @@ parent version that a committed transaction has since replaced: child writers lo
 replacement, not the version the statement locked, so the walk can reach a child whose writer
 is still in flight. The statement fails either way, here or at the stale parent's
 latest-version check in phase two, which runs before any row below that parent is deleted
-because the deletion set is built pre-order. A version the transaction wrote itself is visible
-to its own snapshot, so a transaction that inserts children and then deletes their parent still
-cascades. The rows a statement targets directly were found through its snapshot and need no
-check.
+because the deletion set is built pre-order. That writer can also roll back while the walk waits
+for the child's lock, and its undo deletes the version (or its failed statement's bracket
+restores the page without it). The check reads the slot with `TryReadRecord`, and a version that
+is gone fails the statement with the same conflict, naming no writer ("... reached a row version
+that was rolled back after the walk found it ..."). Until #1390 it read the slot with `ReadRow`,
+and the statement failed with the storage's exception: `SlottedPageException` for a deleted slot,
+`ArgumentOutOfRangeException` for a slot past a restored page's last, or `StorageIOException`
+("Page 7 is not allocated" in the step-by-step test on `19b1a495`) when the undo emptied the page
+and freed it. The #1390 stress probe met it rarely (one `SlottedPageException` in its early runs,
+none in six minutes of later ones), so `SqlLockWaitTests` builds the race step by step. A version the
+transaction wrote itself is visible to its own snapshot, so a transaction that inserts children
+and then deletes their parent still cascades. The rows a statement targets directly were found
+through its snapshot and need no check.
 
 **Why a conflict, not a re-read.** PostgreSQL decides the same way. Its cascade asks
 `ri_PerformCheck` to detect new rows, which in a REPEATABLE READ or SERIALIZABLE transaction

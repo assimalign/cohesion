@@ -485,7 +485,7 @@ durable record of its events. The decisions every source shares:
   `RecoveryStart`/`Stop` and `CheckpointStart`/`Stop` (`Success` or `Error`: neither can be
   cancelled); Graph's and Documents' `IndexRecoveryStart`/`Stop`; and the four client pairs
   (`CommandStart`/`Stop`, `QueryStart`/`Stop`, `TransferStart`/`Stop`). The one exception is the
-  Transactions `LockWaitStop`, whose `outcome` (`Granted`, `Cancelled`, `Ended`, `Abandoned`) is a
+  Transactions `LockWaitStop`, whose `outcome` (`Granted`, `Cancelled`, `Ended`, `Deadlock`, `Abandoned`) is a
   domain outcome finer than a status. Lifetimes that cross flows (`Opened`/`Closed`) are not pairs
   and carry their own close reason.
 - **A peer that hangs up is not a fault** (plan D9). The four model servers classify a failure that
