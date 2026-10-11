@@ -154,6 +154,39 @@ public sealed class ResourceControlPlaneTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Health: an exception a contributor places in its data is absent from the unauthenticated probes")]
+    public async Task HealthProbes_WhenContributorDataHoldsException_ShouldNotPublishIt()
+    {
+        // Arrange
+        const string hostName = "db-primary.corp.internal";
+        await using var factory = new WebApplicationTestFactory();
+        IResourceControlPlane plane = ResourceControlPlane.Create();
+        plane.AddHealthContributor(new Contributor(
+            "database",
+            HealthContribution.Unhealthy(
+                "database unreachable",
+                new Dictionary<string, object> { ["error"] = new InvalidOperationException(hostName) })));
+        ((IWebApplicationPipelineBuilder)factory.Application).UseResourceControlPlane(plane, new ResourceContext(), () => true);
+        using HttpClient client = factory.CreateClient();
+
+        foreach (string path in new[] { "/healthz", "/readyz", "/livez" })
+        {
+            // Act
+            using HttpResponseMessage response = await client.GetAsync(path, CancellationToken.None);
+            string body = await response.Content.ReadAsStringAsync();
+
+            // Assert
+            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, path);
+            body.ShouldNotContain(hostName, Case.Insensitive, path);
+            body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive, path);
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement contribution = document.RootElement.GetProperty("contributions").GetProperty("database");
+            contribution.GetProperty("description").GetString().ShouldBe("database unreachable", path);
+            contribution.GetProperty("data").GetProperty("error").GetString()
+                .ShouldBe("The contributor reported an exception.", path);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Bootstrap: verifies signature, identity, audience, lifetime, and rotation")]
     public async Task Authorization_WithManagedContext_ShouldVerifyJwtClaims()
     {

@@ -21,6 +21,17 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
     /// </remarks>
     internal const string ContributorThrewDescription = "The contributor threw an exception.";
 
+    /// <summary>
+    /// The value recorded in place of an <see cref="Exception"/> a contributor placed in
+    /// <see cref="HealthContribution.Data"/>.
+    /// </summary>
+    /// <remarks>
+    /// Area writers serialize data values they do not recognize through
+    /// <see cref="object.ToString"/>, and an exception's is its type, message, inner exceptions and
+    /// stack trace, which the unauthenticated probes would publish like a thrown exception's message.
+    /// </remarks>
+    internal const string ContributorExceptionDataValue = "The contributor reported an exception.";
+
     private readonly object _sync = new();
     private readonly IReadOnlyList<string> _acceptedCommandKinds;
     private readonly Dictionary<string, IHealthContributor> _contributors = new(StringComparer.Ordinal);
@@ -259,7 +270,8 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
             HealthContribution contribution;
             try
             {
-                contribution = await contributor.CheckAsync(cancellationToken).ConfigureAwait(false);
+                contribution = WithholdExceptionData(
+                    await contributor.CheckAsync(cancellationToken).ConfigureAwait(false));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -281,5 +293,27 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
         return new ResourceHealthReport(
             status,
             new ReadOnlyDictionary<string, HealthContribution>(results));
+    }
+
+    /// <summary>
+    /// Returns the contribution with every <see cref="Exception"/> in its data replaced by
+    /// <see cref="ContributorExceptionDataValue"/>, or the contribution itself when its data holds
+    /// none. Keys, other values and enumeration order are kept.
+    /// </summary>
+    private static HealthContribution WithholdExceptionData(HealthContribution contribution)
+    {
+        if (contribution.Data is not { Count: > 0 } data ||
+            !data.Values.Any(static value => value is Exception))
+        {
+            return contribution;
+        }
+
+        var withheld = new Dictionary<string, object>(data.Count, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, object> item in data)
+        {
+            withheld[item.Key] = item.Value is Exception ? ContributorExceptionDataValue : item.Value;
+        }
+
+        return contribution with { Data = new ReadOnlyDictionary<string, object>(withheld) };
     }
 }

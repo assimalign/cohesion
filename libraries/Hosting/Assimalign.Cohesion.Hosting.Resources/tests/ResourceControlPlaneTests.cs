@@ -140,6 +140,64 @@ public class ResourceControlPlaneTests
             HealthContribution.Unhealthy(DefaultResourceControlPlane.ContributorThrewDescription));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "An exception a contributor places in its data is replaced with fixed text, keeping the other values and their order")]
+    public async Task CheckHealthAsync_WhenContributorDataHoldsException_ReplacesItWithFixedText()
+    {
+        // Arrange
+        const string hostName = "db-primary.corp.internal";
+        Exception failure;
+        try
+        {
+            throw new InvalidOperationException(
+                $"Failed to connect to {hostName}:5432.",
+                new TimeoutException($"No answer from {hostName}."));
+        }
+        catch (InvalidOperationException exception)
+        {
+            failure = exception;
+        }
+
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        controlPlane.AddHealthContributor(new TestContributor(
+            "database",
+            HealthContribution.Unhealthy(
+                "database unreachable",
+                new Dictionary<string, object>
+                {
+                    ["attempts"] = 3,
+                    ["error"] = failure,
+                    ["endpoint"] = "primary",
+                })));
+
+        // Act
+        ResourceHealthReport report = await controlPlane.CheckHealthAsync(CancellationToken.None);
+
+        // Assert
+        HealthContribution contribution = report.Contributions["database"];
+        contribution.Status.ShouldBe(HealthStatus.Unhealthy);
+        contribution.Description.ShouldBe("database unreachable");
+        IReadOnlyDictionary<string, object> data = contribution.Data.ShouldNotBeNull();
+        data.Keys.ShouldBe(new[] { "attempts", "error", "endpoint" });
+        data["attempts"].ShouldBe(3);
+        data["error"].ShouldBe(DefaultResourceControlPlane.ContributorExceptionDataValue);
+        data["endpoint"].ShouldBe("primary");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A contribution whose data holds no exception is reported as returned")]
+    public async Task CheckHealthAsync_WhenContributorDataHoldsNoException_ReportsDataAsReturned()
+    {
+        // Arrange
+        var data = new Dictionary<string, object> { ["queued"] = 12, ["note"] = "draining" };
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        controlPlane.AddHealthContributor(new TestContributor("queue", HealthContribution.Degraded("slow", data)));
+
+        // Act
+        ResourceHealthReport report = await controlPlane.CheckHealthAsync(CancellationToken.None);
+
+        // Assert
+        report.Contributions["queue"].Data.ShouldBeSameAs(data);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Caller cancellation propagates and stops aggregation")]
     public async Task CheckHealthAsync_WhenCallerCancels_PropagatesCancellation()
     {

@@ -86,6 +86,15 @@ plane recorded the message as the description, so every area that exposes the pr
 exception; a contributor that wants its failure diagnosed records it itself before throwing, or
 returns a contribution whose description it has chosen.
 
+The same holds for an exception a contributor returns rather than throws. An `Exception` value in
+`HealthContribution.Data` is replaced in the report by the fixed text
+`The contributor reported an exception.`; keys, the other values and their order are kept. Area
+writers serialize a data value they do not recognize through `ToString()`, and an exception's is
+its type, message, inner exceptions and stack trace, so through 10.0.0-preview.1 the probes
+published all of it. The control plane is the one place every shipped area's report passes, so the
+check lives here rather than in each writer, as it does for a thrown exception. Descriptions and
+string data are the contributor's own text and are reported as returned.
+
 The control plane is transport-neutral. Area Hosting packages decide how to expose health and
 commands over HTTP or another protocol.
 

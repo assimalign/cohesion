@@ -5,6 +5,8 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using ConfigurationResourceCommand = Assimalign.Cohesion.ConfigurationStore.Client.ResourceCommand;
@@ -14,6 +16,7 @@ using Xunit;
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Client;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
@@ -320,6 +323,61 @@ public sealed class ConfigurationStoreProtocolTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Health: an exception a contributor places in its data is absent from the unauthenticated probes")]
+    public async Task HealthProbes_WhenContributorDataHoldsException_ShouldNotPublishIt()
+    {
+        // Arrange
+        const string hostName = "db-primary.corp.internal";
+        string dataPath = CreateTemporaryDirectory();
+        try
+        {
+            using var identity = new TestBootstrapIdentity();
+            Uri endpoint = ConfigurationStoreTestHost.GetEndpoint();
+            ResourceContext context = ConfigurationStoreTestHost.CreateContext(
+                endpoint,
+                dataPath,
+                identity.Issue("configuration"),
+                identity.PublicKey);
+            using IDisposable scope = ResourceRuntime.CreateScope(context);
+            await using ConfigurationStoreApplication application = ConfigurationStoreTestHost.CreateBuilder().Build();
+            ResourceRuntime.TryGetControlPlane((IHost)application, out IResourceControlPlane? plane).ShouldBeTrue();
+            plane.ShouldNotBeNull().AddHealthContributor(new DataContributor(
+                "database",
+                HealthContribution.Unhealthy(
+                    "database unreachable",
+                    new Dictionary<string, object> { ["error"] = new InvalidOperationException(hostName) })));
+            await ((IHost)application).StartAsync();
+
+            try
+            {
+                using var client = new HttpClient();
+                foreach (string path in new[] { "/healthz", "/readyz", "/livez" })
+                {
+                    // Act
+                    using HttpResponseMessage response = await client.GetAsync(new Uri(endpoint, path));
+                    string body = await response.Content.ReadAsStringAsync();
+
+                    // Assert
+                    response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, path);
+                    body.ShouldNotContain(hostName, Case.Insensitive, path);
+                    body.ShouldNotContain(nameof(InvalidOperationException), Case.Sensitive, path);
+                    using JsonDocument document = JsonDocument.Parse(body);
+                    document.RootElement.GetProperty("contributions").GetProperty("database")
+                        .GetProperty("data").GetProperty("error").GetString()
+                        .ShouldBe("The contributor reported an exception.", path);
+                }
+            }
+            finally
+            {
+                await ((IHost)application).StopAsync();
+            }
+        }
+        finally
+        {
+            Directory.Delete(dataPath, recursive: true);
+        }
+    }
+
     private static string CreateTemporaryDirectory()
     {
         string path = Path.Combine(
@@ -328,5 +386,21 @@ public sealed class ConfigurationStoreProtocolTests
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private sealed class DataContributor : IHealthContributor
+    {
+        private readonly HealthContribution _contribution;
+
+        internal DataContributor(string name, HealthContribution contribution)
+        {
+            Name = name;
+            _contribution = contribution;
+        }
+
+        public string Name { get; }
+
+        public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(_contribution);
     }
 }
