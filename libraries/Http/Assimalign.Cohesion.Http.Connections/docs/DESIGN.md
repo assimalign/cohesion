@@ -1282,7 +1282,7 @@ elsewhere already or needs a design of its own:
 | Per-request latency, status, route, errors and trace context | The Web server's `ActivitySource` and `Meter`, `Assimalign.Cohesion.Web.Hosting` (#1064). The host sees the whole exchange and how its pipeline ended; the transport sees neither. |
 | Connection lifetimes and counts | Each connection driver's event source (`Assimalign.Cohesion.Connections.Tcp`, `.Quic`, `.NamedPipes`). An HTTP/1.1 or HTTP/2 connection is one driver connection and an HTTP/3 connection is one QUIC connection, so an HTTP-level `Opened`/`Closed` pair and a second `current-connections` counter would count the same connections twice under two names. |
 | TLS handshakes | The runtime's `System.Net.Security` source. A handshake that failed or timed out, and the connection closed for it: `Assimalign.Cohesion.Connections` (`UpgradeFailed`) for TCP endpoints, `Assimalign.Cohesion.Connections.Quic` (`HandshakeFailed`) for HTTP/3. |
-| Requests this package answers itself before dispatch (400, 408, 413, 414, 421, 431), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
+| Requests this package answers itself before dispatch (400, 408, 413, 414, 421, 431, 501), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
 
 The last row is the remaining gap, and filling a placeholder would not close it. It needs an
 error vocabulary per protocol, a choice between events and metric instruments (Kestrel reports the
@@ -2251,10 +2251,11 @@ is shared by every stream and the pump, so it stays held to the listener's rate.
 - **The connection's own writes with no rate.** A listener whose `MinResponseDataRate` is `null` holds the
   HTTP/2 output to nothing, so the pump's control frames and the transport's own answers are unbounded
   there, whatever rate a request sets for itself.
-- **Status-only answers on HTTP/1.1 and HTTP/3.** The transport's own small answers (`408`, `413`, `431`,
-  `400`) are not bounded. Each is a few hundred octets, written when nothing else is being written to its
-  connection (HTTP/1.1) or request stream (HTTP/3). On HTTP/2 they share the connection's output and are
-  bounded with it.
+- **Status-only answers on HTTP/1.1 and HTTP/3.** The transport's own small answers (`400`, `408`, `413`,
+  `414`, `421`, `431`, `501`) are not bounded. The `421` and `501` are HTTP/1.1-only pre-dispatch answers,
+  written the same way as the `400`. Each is a few hundred octets, written when nothing else is being
+  written to its connection (HTTP/1.1) or request stream (HTTP/3). On HTTP/2 they share the connection's
+  output and are bounded with it.
 
 ### Breaking changes
 
