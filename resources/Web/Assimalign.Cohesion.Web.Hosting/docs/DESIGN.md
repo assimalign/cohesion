@@ -590,10 +590,37 @@ flowchart TD
     Stop --> Dispose["Exchange disposed"]
 ```
 
-**The parent is the caller.** The server parses `traceparent` and `tracestate` with
-`ActivityContext.TryParse` (W3C Trace Context). A missing, repeated or malformed `traceparent`, or an
+**The parent is the caller.** The server parses `traceparent` and `tracestate` per W3C Trace Context
+(`WebServerTelemetry.TryParseTraceParent`). A missing, repeated or malformed `traceparent`, or an
 all-zero id, gives no parent, and the request starts a new trace. Repeated `tracestate` fields are
-joined into one list. Before it starts the span, the server clears an ambient `Activity.Current`. The
+joined into one list.
+
+**A later version continues the trace (#1299).** W3C Trace Context §3.2, "Versioning of
+traceparent", has a parser read a header of a version it does not know by its version-00 fields
+and ignore what follows. `ActivityContext.TryParse` accepts exactly the 55 characters of a
+version-00 header, so a later version with extra fields used to start a new trace, while HTTP
+logging, whose own parser accepts it, recorded the caller's. The server now checks what the BCL
+parser does not, then hands it the version-00 fields:
+
+- the three separators are dashes (`TryParse` checks only the characters between them);
+- a value longer than 55 characters belongs to a version other than `00`, and its flags are
+  followed by a dash, so `00-…-01-extra` and `cc-…-01.extra` are rejected;
+- of a later version's flags, only the sampled bit is kept; the specification defines the other bits
+  for version `00` only.
+
+`TryParse` still checks the rest: a lower-case hex version other than `ff`, lower-case hex ids that
+are not all zeros, and lower-case hex flags. A later version's header costs one 55-character
+substring; a version-00 header costs nothing more than before.
+
+Decision 32 lets this module reference `Web.Diagnostics`, whose HTTP logging already parses later
+versions. It does not, because:
+
+- its parser is internal, so reusing it needs a public API or shared source for one consumer;
+- it yields hex strings, not an `ActivityContext` with its `tracestate`, and it accepts a version-00
+  value with trailing fields, which W3C forbids;
+- the reference would ship `Web.Diagnostics` in every area framework that carries this module.
+
+The local check is one short method on top of the BCL parser. Before it starts the span, the server clears an ambient `Activity.Current`. The
 accept loop inherits whatever activity was current when `StartAsync` ran, and that activity is never
 a request's parent; without the clear, every request of a host started inside an activity would
 nest under it.
@@ -1087,7 +1114,11 @@ request's `http.route` (through real `Web.Routing`); every outcome in the
 `error.type` table; `_OTHER`, including a lower-case `get` written raw and reported with its original
 case; one span per HTTP/2 stream; an ambient activity at server start that
 must not parent requests; the duration and the active-request count; the request id with and
-without a span; and no activity at all without a listener. `url.query` (#1298) is pinned end to end
+without a span; and no activity at all without a listener. A version-00 `traceparent` and a later
+version's, with and without extra fields, continue the caller's trace (#1299). Version `ff`, a
+version-00 value with extra fields, a later version whose flags are followed by something other than
+a dash, upper-case hex, a short value and a separator other than a dash each start a new trace, and
+a later version keeps only its sampled flag. `url.query` (#1298) is pinned end to end
 with every value redacted and with values declared safe, and its builder against empty and
 valueless parameters, encoded names and case-insensitive declarations; a request double that counts
 reads of its query (`TestObjects/ServerTestDoubles`, `FakeHttpRequest`) shows the query is read only

@@ -245,10 +245,59 @@ public class WebServerTelemetryTests
         firstReads[1].ShouldNotBe(firstReads[0]);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A version-00 or later-version traceparent should continue the caller's trace")]
+    [InlineData("00", "")]
+    [InlineData("cc", "")]
+    [InlineData("cc", "-what-the-future-will-be-like")]
+    [InlineData("01", "-a1-b2")]
+    public async Task ServerSpan_SupportedTraceParentVersion_ShouldContinueTheCallersTrace(string version, string laterFields)
+    {
+        // Arrange — W3C Trace Context §3.2, "Versioning of traceparent": a header of a version the server
+        // does not know is read by its version-00 fields, and the fields after them are ignored (#1299).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+
+        ActivityTraceId traceId = ActivityTraceId.CreateRandom();
+        ActivitySpanId callerSpanId = ActivitySpanId.CreateRandom();
+        ActivityTraceId requestIdInPipeline = default;
+        string path = $"/telemetry/version/{Guid.NewGuid():N}";
+
+        await using WebApplicationTestFactory factory = new();
+
+        factory.Application.Use((context, next) =>
+        {
+            requestIdInPipeline = context.Features.Get<IWebRequestIdFeature>()!.RequestId;
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+            return Task.CompletedTask;
+        });
+
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage request = new(NetHttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation("traceparent", $"{version}-{traceId.ToHexString()}-{callerSpanId.ToHexString()}-01{laterFields}");
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NoContent);
+        span.TraceId.ShouldBe(traceId);
+        span.ParentSpanId.ShouldBe(callerSpanId);
+        span.HasRemoteParent.ShouldBeTrue();
+        requestIdInPipeline.ShouldBe(traceId);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An invalid traceparent should start a new trace")]
     [InlineData("00-00000000000000000000000000000000-00f067aa0ba902b7-01")]
     [InlineData("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01")]
     [InlineData("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")]
+    [InlineData("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-what-the-future-will-be-like")]
+    [InlineData("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-what-the-future-will-be-like")]
+    [InlineData("cc-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01.what-the-future-will-be-like")]
+    [InlineData("CC-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-what-the-future-will-be-like")]
+    [InlineData("cc-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0")]
+    [InlineData("00_4bf92f3577b34da6a3ce929d0e0e4736_00f067aa0ba902b7_01")]
     [InlineData("not-a-trace-context")]
     public async Task ServerSpan_InvalidTraceParent_ShouldStartANewTrace(string traceParent)
     {
@@ -952,6 +1001,25 @@ public class WebServerTelemetryTests
 
         // Assert
         attribute.ShouldBe("PAGE=2&sort=name&q=a%20b%26c&token=REDACTED");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A later-version traceparent should keep only its sampled flag")]
+    [InlineData("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03", 3)]
+    [InlineData("cc-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03", 1)]
+    [InlineData("cc-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-02-what-the-future-will-be-like", 0)]
+    public void TryParseTraceParent_TraceFlags_ShouldKeepOnlyTheSampledBitOfALaterVersion(string traceParent, int expectedFlags)
+    {
+        // Act — W3C Trace Context defines the flag bits for version 00; of a later version's flags only
+        // the sampled bit is read (§3.2, "Versioning of traceparent").
+        bool parsed = WebServerTelemetry.TryParseTraceParent(traceParent, "cohesion=1", out ActivityContext context);
+
+        // Assert
+        parsed.ShouldBeTrue();
+        context.TraceId.ToHexString().ShouldBe("4bf92f3577b34da6a3ce929d0e0e4736");
+        context.SpanId.ToHexString().ShouldBe("00f067aa0ba902b7");
+        context.TraceFlags.ShouldBe((ActivityTraceFlags)expectedFlags);
+        context.TraceState.ShouldBe("cohesion=1");
+        context.IsRemote.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - AllowQueryValuesInTelemetry: A missing or empty name should be rejected")]

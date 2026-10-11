@@ -108,6 +108,10 @@ internal static class WebServerTelemetry
     private static readonly FrozenSet<string>? _knownMethods = ParseKnownMethods(
         Environment.GetEnvironmentVariable(KnownMethodsVariable));
 
+    // A traceparent's version-00 fields: version "-" trace-id "-" parent-id "-" trace-flags, which is
+    // 2 + 1 + 32 + 1 + 16 + 1 + 2 characters.
+    private const int traceParentLength = 55;
+
     // Status codes recur, so their boxed and text forms are cached rather than allocated per exchange.
     private static readonly object?[] _boxedStatusCodes = new object?[600];
     private static readonly string?[] _statusCodeTexts = new string?[600];
@@ -236,6 +240,72 @@ internal static class WebServerTelemetry
         }
 
         return builder.ToStringAndClear();
+    }
+
+    /// <summary>
+    /// Parses a W3C <c>traceparent</c> value into the caller's remote context, reading a later
+    /// version's header by its version-00 fields (W3C Trace Context §3.2, "Versioning of traceparent").
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A version-00 value is exactly <c>version "-" trace-id "-" parent-id "-" trace-flags</c>, 55
+    /// characters. A later version may append fields, each after a dash, and a parser that does not know
+    /// the version reads the version-00 fields and ignores the rest: the flags must be followed by the
+    /// end of the value or a dash. Version <c>ff</c> is invalid, as are upper-case hex, an all-zero
+    /// trace or parent id, and a separator other than a dash.
+    /// </para>
+    /// <para>
+    /// <see cref="ActivityContext.TryParse(string, string, bool, out ActivityContext)"/> accepts only
+    /// 55 characters, so it rejected every later-version header with extra fields and the request
+    /// started a new trace (#1299); it also does not check the separators. This method checks the
+    /// separators and the length, and the BCL parser checks the rest. Of a later version's flags only
+    /// the sampled bit is kept: the specification defines the other bits for version 00 only.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The <c>traceparent</c> field value.</param>
+    /// <param name="traceState">The combined <c>tracestate</c> list, or <see langword="null"/>.</param>
+    /// <param name="context">The caller's context when the value is valid.</param>
+    /// <returns><see langword="true"/> when the value is a valid <c>traceparent</c>.</returns>
+    public static bool TryParseTraceParent(string? value, string? traceState, out ActivityContext context)
+    {
+        context = default;
+
+        if (value is null || value.Length < traceParentLength || value[2] != '-' || value[35] != '-' || value[52] != '-')
+        {
+            return false;
+        }
+
+        bool laterVersion = value[0] != '0' || value[1] != '0';
+
+        if (value.Length > traceParentLength)
+        {
+            // Version 00 has no further fields; a later version separates each one with a dash.
+            if (!laterVersion || value[traceParentLength] != '-')
+            {
+                return false;
+            }
+
+            value = value[..traceParentLength];
+        }
+
+        // Checks a lower-case hex version other than ff, lower-case hex ids that are not all zeros, and
+        // lower-case hex flags.
+        if (!ActivityContext.TryParse(value, traceState, isRemote: true, out context))
+        {
+            return false;
+        }
+
+        if (laterVersion)
+        {
+            context = new ActivityContext(
+                context.TraceId,
+                context.SpanId,
+                context.TraceFlags & ActivityTraceFlags.Recorded,
+                context.TraceState,
+                isRemote: true);
+        }
+
+        return true;
     }
 
     /// <summary>

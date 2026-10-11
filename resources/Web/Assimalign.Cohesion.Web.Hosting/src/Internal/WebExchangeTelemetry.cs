@@ -396,7 +396,8 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
     }
 
     // W3C Trace Context: a request carries exactly one traceparent field, and its tracestate fields
-    // combine into one list. A missing, repeated or malformed traceparent leaves no parent.
+    // combine into one list. A missing, repeated or malformed traceparent leaves no parent; a later
+    // version's is read by its version-00 fields (#1299).
     private static bool TryGetRemoteParent(IHttpHeaderCollection headers, bool includeTraceState, out ActivityContext parent)
     {
         if (headers.TryGetValue(HttpHeaderKey.TraceParent, out HttpHeaderValue traceParent) && traceParent.Count == 1)
@@ -407,7 +408,7 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
                     ? state.Value
                     : null;
 
-            return ActivityContext.TryParse(traceParent[0], traceState, isRemote: true, out parent);
+            return WebServerTelemetry.TryParseTraceParent(traceParent[0], traceState, out parent);
         }
 
         parent = default;
