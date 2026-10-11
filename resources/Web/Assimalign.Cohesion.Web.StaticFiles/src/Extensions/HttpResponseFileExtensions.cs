@@ -52,10 +52,16 @@ public static class HttpResponseFileExtensions
         /// <remarks>
         /// <para>
         /// The <c>ETag</c> is a strong entity-tag derived from the file's <c>Size</c> and
-        /// <c>UpdatedOn</c>, and <c>Last-Modified</c> is <c>UpdatedOn</c>, or the response time when
-        /// <c>UpdatedOn</c> is in the future (RFC 9110 &#167; 8.8.2.1): the validators
-        /// <c>UseStaticFiles</c> emits for the same file. The file is opened only when the outcome has
-        /// content, so a <c>304</c>, <c>412</c>, or <c>416</c> never reads it, and a file that no
+        /// <c>UpdatedOn</c>. Emitting and evaluating <c>Last-Modified</c> requires one valid response
+        /// <c>Date</c> value when this helper runs. The file's <c>UpdatedOn</c> is compared at whole-second
+        /// precision and clamped to that <c>Date</c> when later (RFC 9110 &#167; 8.8.2.1). These are the
+        /// validators <c>UseStaticFiles</c> emits for the same file. If <c>Date</c> is missing, invalid, or repeated
+        /// (including when automatic Date generation is disabled and the application supplies none),
+        /// no derived <c>Last-Modified</c> is emitted, <c>If-Modified-Since</c> and
+        /// <c>If-Unmodified-Since</c> are ignored, and a date-form <c>If-Range</c> gets the full
+        /// representation. Entity-tag conditions are still evaluated.
+        /// The file is opened only when the outcome has content, so a <c>304</c>, <c>412</c>, or
+        /// <c>416</c> never reads it, and a file that no
         /// longer exists by the time it is read is answered with <c>404 Not Found</c>. It is opened
         /// for shared reading, so any number of responses can send it at once, and it may be deleted
         /// or renamed while a response is sending it.
@@ -104,8 +110,13 @@ public static class HttpResponseFileExtensions
         /// <c>404</c>.
         /// </para>
         /// <para>
-        /// A resolved file is sent exactly as the <see cref="IFileSystemFile"/> overload sends it. The
-        /// mount is the security boundary: to serve the files of one directory, mount that directory
+        /// A resolved file is sent exactly as the <see cref="IFileSystemFile"/> overload sends it,
+        /// including its valid, single response <c>Date</c> prerequisite for <c>Last-Modified</c> and
+        /// date-based conditions, and clamping a later modification time to that <c>Date</c>.
+        /// Without that date, no derived <c>Last-Modified</c> is emitted, <c>If-Modified-Since</c> and
+        /// <c>If-Unmodified-Since</c> are ignored, and a date-form <c>If-Range</c> gets the full
+        /// representation.
+        /// The mount is the security boundary: to serve the files of one directory, mount that directory
         /// (a read-only <see cref="PhysicalFileSystem"/> rooted there, for example) rather than a parent
         /// whose other contents must stay private.
         /// </para>
@@ -163,9 +174,16 @@ public static class HttpResponseFileExtensions
         /// <c>If-Match</c> and <c>If-None-Match</c> can match, and a request carrying <c>If-Range</c>
         /// gets the full representation. A weak <paramref name="entityTag"/> can satisfy
         /// <c>If-None-Match</c>, but never <c>If-Match</c> or <c>If-Range</c>, which compare strongly.
-        /// A date in <c>If-Range</c> applies the range only when it equals
-        /// <paramref name="lastModified"/> and <paramref name="lastModified"/> is at least one second
-        /// in the past (RFC 9110 &#167; 13.1.5; the one-second test is a heuristic modeled on
+        /// Emitting and evaluating <paramref name="lastModified"/> requires one valid response
+        /// <c>Date</c> value when this helper runs. The modification time is compared at whole-second
+        /// precision and clamped to that <c>Date</c> when later (RFC 9110 &#167; 8.8.2.1).
+        /// If <c>Date</c> is missing, invalid, or repeated (including when automatic Date generation
+        /// is disabled and the application supplies none), no derived <c>Last-Modified</c> is emitted,
+        /// <c>If-Modified-Since</c> and <c>If-Unmodified-Since</c> are ignored, and a date-form
+        /// <c>If-Range</c> gets the full representation. Entity-tag conditions are still evaluated.
+        /// A date in <c>If-Range</c> applies the range only when it equals the clamped modification
+        /// time and that time is at least one second before the response's <c>Date</c>
+        /// (RFC 9110 &#167; 13.1.5; the one-second test is a heuristic modeled on
         /// &#167; 8.8.2.2, and a strong <paramref name="entityTag"/> is the reliable validator).
         /// </para>
         /// <para>
@@ -175,7 +193,7 @@ public static class HttpResponseFileExtensions
         /// <param name="stream">The readable stream whose remaining bytes are sent.</param>
         /// <param name="contentType">The <c>Content-Type</c> to send, or <see langword="null"/> for <c>application/octet-stream</c>.</param>
         /// <param name="entityTag">The representation's entity-tag, or <see langword="null"/> when it has none.</param>
-        /// <param name="lastModified">The representation's last-modification time, or <see langword="null"/> when unknown. It is sent and compared at whole-second (HTTP-date) precision, and a time later than the response is replaced by the response time (RFC 9110 &#167; 8.8.2.1).</param>
+        /// <param name="lastModified">The representation's last-modification time, or <see langword="null"/> when unknown. Requires one valid response <c>Date</c> value; otherwise emission from this value and date-based conditions are suppressed. It is sent and compared at whole-second (HTTP-date) precision, and a later time is clamped to that <c>Date</c> (RFC 9110 &#167; 8.8.2.1).</param>
         /// <param name="cancellationToken">A token that cancels the content copy. When it cannot be cancelled, the exchange's <see cref="IHttpContext.RequestCancelled"/> token is observed instead.</param>
         /// <returns>A task that completes when the response has been written.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="response"/> or <paramref name="stream"/> is <see langword="null"/>.</exception>
