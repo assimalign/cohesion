@@ -1,4 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
+
+using Assimalign.Cohesion.Http.Internal;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -58,6 +62,54 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
         }
 
         return collection;
+    }
+
+    /// <summary>
+    /// Creates the raw query text of a parsed query collection, the inverse of <see cref="Parse"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every name and value is percent-encoded as UTF-8 except for the unreserved characters (RFC 3986 §2.3),
+    /// so an <c>&amp;</c>, <c>=</c> or <c>+</c> inside one cannot split or change its entry. Entries are joined
+    /// with <c>&amp;</c> in the collection's enumeration order. An entry with an empty value is written as its
+    /// name alone, without <c>=</c>; <see cref="Parse"/> reads both forms as the same empty value.
+    /// </para>
+    /// <para>
+    /// The result is the query a redirect carries, not the bytes the request carried: a transport keeps only
+    /// the parsed collection, so the original order and percent-encoding are not available to reproduce.
+    /// </para>
+    /// </remarks>
+    /// <param name="query">The parsed query.</param>
+    /// <returns>The query text without a leading <c>?</c>; empty when the collection has no entries.</returns>
+    public static HttpQuery Create(IHttpQueryCollection query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.Count == 0)
+        {
+            return new HttpQuery(string.Empty);
+        }
+
+        StringBuilder builder = new(32);
+
+        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> entry in query)
+        {
+            if (builder.Length != 0)
+            {
+                builder.Append('&');
+            }
+
+            UrlEncoder.AppendComponent(builder, entry.Key.Value);
+
+            string value = entry.Value.Value;
+            if (!string.IsNullOrEmpty(value))
+            {
+                builder.Append('=');
+                UrlEncoder.AppendComponent(builder, value);
+            }
+        }
+
+        return new HttpQuery(builder.ToString());
     }
 
     public bool Equals(HttpQuery other) => string.Equals(Value, other.Value, StringComparison.Ordinal);

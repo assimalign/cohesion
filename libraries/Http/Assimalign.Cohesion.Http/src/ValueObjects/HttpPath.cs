@@ -101,6 +101,27 @@ public readonly struct HttpPath : IEquatable<HttpPath>
         return new HttpPath(buffer[..(index + decodedLength)].ToString());
     }
 
+    /// <summary>
+    /// Returns the path as a percent-encoded URI component, the inverse of <see cref="FromUriComponent(string)"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each segment is encoded on its own (RFC 3986 §3.3): the <c>/</c> between segments and every
+    /// <c>pchar</c> (unreserved, sub-delims, <c>:</c> and <c>@</c>) are written as they are, and every
+    /// other character is percent-encoded as UTF-8 (§2.1). A lone surrogate is written as U+FFFD.
+    /// </para>
+    /// <para>
+    /// A <c>%</c> is written as <c>%25</c>, except where it begins <c>%2F</c> or <c>%2f</c>.
+    /// <see cref="FromUriComponent(string)"/> never decodes an encoded slash, so it never becomes a segment
+    /// separator, and one in <see cref="Value"/> is that encoded slash. It is written as it is: encoding it again
+    /// would produce <c>%252F</c>, which decodes to the same path but is a different URI. So
+    /// <c>FromUriComponent(path.ToUriComponent())</c> equals the path, and a redirect built from it names the
+    /// resource the request named.
+    /// </para>
+    /// </remarks>
+    /// <returns>The percent-encoded path; <see cref="Value"/> itself when nothing needs encoding.</returns>
+    public string ToUriComponent() => UrlEncoder.EncodePath(Value ?? string.Empty);
+
     public override string ToString() => Value;
     public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Value);
     public override bool Equals(object? obj) => obj is HttpPath path && Equals(path);

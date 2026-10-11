@@ -438,6 +438,46 @@ stays visible only in the raw `HttpQuery.Value`. Before #1323 the parse threw
 could fail its own connection or stream, and have the server log the failure as
 a defect, with one `=`.
 
+## Writing a path and a query back out (`ToUriComponent`, `HttpQuery.Create`)
+
+Every transport hands middleware a **decoded** request: `HttpPath.FromUriComponent`
+decodes the path, and `HttpQuery.Parse` decodes the query into a collection. A
+component that writes the request back into a URL, such as a redirect's
+`Location`, needs the inverse of each, and before #1324 the Web redirects wrote
+the decoded path as it was: `/caf%C3%A9` became `/café`, which the HTTP/1.1
+writer sends as `/caf?`, and `/100%25` became `/100%`, which is not a URI
+reference (RFC 9110 §10.2.2). The inverses live here, beside the decoder whose
+rules they have to mirror:
+
+- **`HttpPath.ToUriComponent()`** encodes each segment (RFC 3986 §3.3): `/` and
+  every `pchar` (unreserved, sub-delims, `:` and `@`) are written as they are,
+  and everything else is percent-encoded as UTF-8, a lone surrogate as U+FFFD. A
+  `%` is written as `%25`, **except** where it begins `%2F` or `%2f`.
+  `UrlDecoder` never decodes an encoded slash, so it can never become a segment
+  separator (the routing `{**}` invariant depends on that), and a `%2F` in a
+  decoded path is therefore the encoded slash the request carried. Encoding its
+  `%` again would write `%252F`: it decodes to the same `HttpPath`, but it is a
+  different URI, which a cache or another server in front reads as another
+  resource. With the exception, `FromUriComponent(path.ToUriComponent())` equals
+  `path` for every path a transport produces, and a request-target in canonical
+  form (upper-case hex, nothing escaped that need not be) comes back unchanged.
+  The decoded form is ambiguous in one place: `/a%252F` and `/a%2F` both decode to
+  `/a%2F`, and both are written back as `/a%2F`, which decodes to the same path.
+- **`HttpQuery.Create(IHttpQueryCollection)`** joins the entries with `&` in
+  enumeration order, percent-encodes each name and value except for the
+  unreserved characters, so an `&`, `=` or `+` inside one cannot split or change
+  it, and writes an empty value as the bare name. `Parse` reads it back as the
+  same collection. It is not the query the request carried: only the parsed
+  collection survives the transport, so order and percent-encoding are rebuilt.
+
+A space, `?` or `#` never needs encoding in a path that came from a request:
+`HttpPath` rejects them, and the transports fail a request-target whose path
+decodes to one (`HttpRequestTargetDecodeParityTests`, `Http2MalformedPathTests`,
+`Http3MalformedPathTests` in Http.Connections). Both helpers are value-object
+members, not feature contracts, so decision 20's rule for the core is unchanged.
+`Web.HttpsPolicy` and `Web.StaticFiles` build their redirects with them;
+`Web.Rewrite` still uses its own encoder (`RewriteUrl`).
+
 ## Media types and content negotiation
 
 The core owns the RFC 9110 §8.3 / §12 content-negotiation primitives so that every
