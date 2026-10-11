@@ -29,6 +29,9 @@ Implements a fluent validation engine built from validators, profiles, rules, an
 
 ## Key Types
 
+When `ThrowExceptionOnFailure` is enabled, catch `ValidationFailureException` and inspect its `Errors`
+read-only list for the failures, in the order supplied when the exception was constructed.
+
 - IValidationCondition
 - IValidationContext
 - IValidationError

@@ -84,6 +84,14 @@ members in reverse declaration order.
 
 ## A Rule That Throws
 
+`ValidationFailureException.Errors` retains the failures supplied to either internal constructor (a
+context or an enumerable). It snapshots the sequence into a read-only list in enumeration order,
+preserving the error objects, so later additions to a context or changes to the input collection do not
+change which failures the exception exposes. `ThrowExceptionOnFailure` callers can inspect that list.
+This adds a public property without changing an interface. Compared with 10.0.0-preview.1, which
+discarded both constructors' errors, retaining and exposing them is an observable behavior change
+recorded on HTTP/Web decision 15's preview breaking-change terms (#1208).
+
 A rule reports a failure by adding errors to its context; an exception is a fault, not a failure. A nested
 profile's rules (`ChildRules`, `UseProfile`) and a custom rule's delegate (`Custom`) run arbitrary code, and
 an exception from either propagates out of `Validate` and `ValidateAsync`: validation fails closed.
