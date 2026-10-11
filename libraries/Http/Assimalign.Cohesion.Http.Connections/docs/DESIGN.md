@@ -3639,9 +3639,12 @@ with the error as the reason, and the receive enumeration ends):
 - **At most one control stream per peer.** A second control stream is
   `H3_STREAM_CREATION_ERROR`.
 - **The first frame on the control stream MUST be SETTINGS.** A missing
-  or non-SETTINGS first frame is `H3_MISSING_SETTINGS`; a truncated or
-  malformed one — or one declaring more than a 16 KiB payload, which the
-  server refuses to buffer — is `H3_FRAME_ERROR`.
+  or non-SETTINGS first frame is `H3_MISSING_SETTINGS`, and so is a stream
+  that ends (`FIN`) before its first frame's type and length; a truncated
+  or malformed one — the stream ending inside the SETTINGS payload
+  included, or one declaring more than a 16 KiB payload, which the server
+  refuses to buffer — is `H3_FRAME_ERROR`. A reset before SETTINGS is
+  complete is `H3_CLOSED_CRITICAL_STREAM`.
 
 The SETTINGS payload is parsed into `Http3PeerSettings`, a small
 identifier→value store keyed by the `Http3SettingId` registry. Unknown
@@ -3654,29 +3657,33 @@ later control frame for the connection's lifetime. Draining on a background
 task is load-bearing: the control stream is long-lived, so draining it inline
 would tie up its processing for the connection's life.
 
-The drain enforces the rest of the control stream's rules as connection
+The drain enforces the control stream's rules after SETTINGS as connection
 errors (#1083). Because the stream is critical, it never stops quietly while
 the connection is open — a frame it left unread could be the one that closes
 the connection — so it ends only when the connection closes, or with one of:
 
-| The peer's control stream | Code | Rule |
+| The peer's control stream, after its SETTINGS frame | Code | Rule |
 | --- | --- | --- |
-| Ends (`FIN`), or is reset, at any point | `H3_CLOSED_CRITICAL_STREAM` | RFC 9114 §6.2.1 |
+| Ends (`FIN`) between frames, or is reset | `H3_CLOSED_CRITICAL_STREAM` | RFC 9114 §6.2.1 |
 | Ends inside a frame | `H3_FRAME_ERROR` | §7.1 |
 | Carries `DATA`, `HEADERS`, `PUSH_PROMISE`, a second `SETTINGS`, or a reserved HTTP/2 type | `H3_FRAME_UNEXPECTED` | §7.2.1, §7.2.2, §7.2.4, §7.2.5, §7.2.8 |
 | Carries a push `PRIORITY_UPDATE` (`0xF0701`) or a `CANCEL_PUSH` | `H3_ID_ERROR` | RFC 9218 §7.2, RFC 9114 §7.2.3: the server promises no pushes, so every push ID is one it never sent |
 | Carries a request `PRIORITY_UPDATE` that names no client-initiated bidirectional stream | `H3_ID_ERROR` | RFC 9218 §7.2 |
 | Carries a request `PRIORITY_UPDATE` cut short inside its element ID | `H3_FRAME_ERROR` | §7.1 |
+| Carries a `GOAWAY` or `MAX_PUSH_ID` whose payload is not exactly one variable-length integer | `H3_FRAME_ERROR` | §7.1, §7.2.6, §7.2.7 |
+| Carries a `GOAWAY` with a larger identifier than an earlier one | `H3_ID_ERROR` | §5.2 |
+| Carries a `MAX_PUSH_ID` with a smaller maximum than an earlier one | `H3_ID_ERROR` | §7.2.7 |
 
 A request `PRIORITY_UPDATE` otherwise sets the referenced stream's effective
 priority, or is buffered for a stream not yet opened, within a bound (see "RFC
 9218 extensible priorities"); one whose Priority Field Value does not parse,
 whose payload is over the 16 KiB the drain buffers, or that names a stream that
-has ended, is skipped and has no effect. Other post-SETTINGS frames are read and discarded — a peer
-`GOAWAY` (§7.2.6) is not acted on (the server does not implement the *client*
-role of graceful shutdown — reacting to a peer's `GOAWAY` — only the server
-role of *emitting* one, see "Graceful GOAWAY on the control stream"),
-`MAX_PUSH_ID` (§7.2.7) is inert because the server never pushes, and frames of
+has ended, is skipped and has no effect. A valid peer `GOAWAY` (§7.2.6) is
+otherwise not acted on (the server does not implement the *client* role of
+graceful shutdown — reacting to a peer's `GOAWAY` — only the server role of
+*emitting* one, see "Graceful GOAWAY on the control stream"), and a valid
+`MAX_PUSH_ID` (§7.2.7) is inert because the server never pushes; the drain
+keeps only their last identifiers, for the ordering rules above. Frames of
 unknown or reserved type are skipped (§9).
 
 A read that fails underneath the drain is a peer reset only while the
@@ -3689,7 +3696,9 @@ closed critical stream. A reset that arrives before SETTINGS is complete is
 
 Before #1083 the drain stopped quietly on the stream's end, on a malformed or
 oversized frame, and on a push `PRIORITY_UPDATE`, which it only recorded; the
-codes in the table above were never sent.
+codes in the table above were never sent. `GOAWAY` and `MAX_PUSH_ID` were
+skipped unread until #1083's review, so their payload and ordering rules
+went unchecked.
 
 ### QPACK encoder/decoder streams
 
@@ -3698,11 +3707,21 @@ at most once (RFC 9204 §4.2); a duplicate is a connection error. Both are
 critical streams: the peer ending or resetting either one is
 `H3_CLOSED_CRITICAL_STREAM` (§4.2, #1083). With the QPACK dynamic table
 disabled (`QPACK_MAX_TABLE_CAPACITY = 0`, the default posture) the encoder
-stream carries no instruction the server must act on, and the peer's decoder
-stream never does, because the server's encoder references only the static
-table. Each such stream is watched for the connection's lifetime
-(`WatchQPackStreamAsync`): what arrives is discarded, so it cannot accumulate
-unread, and its closure ends the connection.
+stream carries no instruction the server must act on; it is watched for the
+connection's lifetime (`WatchQPackStreamAsync`): what arrives is discarded, so
+it cannot accumulate unread, and its closure ends the connection.
+
+The peer's decoder stream is read for the connection's lifetime too
+(`WatchQPackDecoderStreamAsync`), and its instructions are checked. The
+server's encoder references only the static table and inserts nothing, so
+every field section it sends has a Required Insert Count of zero, and the one
+instruction a decoder may send it is a **Stream Cancellation** (§4.4.2), which
+is read and needs nothing. A **Section Acknowledgment** refers to a stream with
+no unacknowledged section that has a non-zero Required Insert Count (§4.4.1),
+and an **Insert Count Increment** would raise the Known Received Count beyond
+the zero entries sent (§4.4.3): each closes the connection with
+`QPACK_DECODER_STREAM_ERROR`, as does a stream ID whose prefixed integer
+overflows. A partial instruction waits for its octets, at most ten of them.
 
 When the dynamic table is **enabled** (opt-in, see "Dynamic table" below),
 the peer's encoder stream is drained on a background task
@@ -4215,9 +4234,9 @@ queue is a `System.Threading.Channels` channel.
 ### Non-goals
 
 - **Acting on a peer's `GOAWAY` and `MAX_PUSH_ID`.** Both are *drained*
-  (read and discarded by the background control-stream drain, which enforces
-  the control stream's rules, so they cannot accumulate unread) but not *acted
-  on*: the server never pushes, so `MAX_PUSH_ID` is inert, and reacting to
+  (read by the background control-stream drain, which checks each one's
+  payload and its order against the last, then discards it, so they cannot
+  accumulate unread) but not *acted on*: the server never pushes, so `MAX_PUSH_ID` is inert, and reacting to
   a peer's `GOAWAY` (the client role of graceful shutdown) is future work.
   Note this is distinct from *emitting* the server's own `GOAWAY`, which
   now ships — see "Graceful GOAWAY on the control stream".

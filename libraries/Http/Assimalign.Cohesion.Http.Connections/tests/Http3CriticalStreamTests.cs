@@ -24,6 +24,8 @@ public class Http3CriticalStreamTests
     private const long frameUnexpected = 0x105;
     private const long frameError = 0x106;
     private const long idError = 0x108;
+    // RFC 9204 §6.
+    private const long qpackDecoderStreamError = 0x202;
 
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
@@ -139,6 +141,103 @@ public class Http3CriticalStreamTests
 
         // Assert
         ((long)connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode).ShouldBe(expectedCode);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Critical Streams: A GOAWAY or MAX_PUSH_ID that breaks its rules should close the connection with its RFC 9114 code")]
+    [InlineData(0x07L, new byte[] { 0x04 }, new byte[] { 0x08 }, idError)]  // GOAWAY raises its identifier (§5.2)
+    [InlineData(0x0DL, new byte[] { 0x08 }, new byte[] { 0x04 }, idError)]  // MAX_PUSH_ID lowers the maximum (§7.2.7)
+    [InlineData(0x07L, new byte[] { 0x04, 0x00 }, null, frameError)]        // GOAWAY with an octet after its identifier (§7.1)
+    [InlineData(0x0DL, new byte[] { }, null, frameError)]                   // MAX_PUSH_ID without its identifier
+    [InlineData(0x07L, new byte[] { 0x40 }, null, frameError)]              // GOAWAY whose two-octet identifier is cut short
+    public async Task ReceiveAsync_OnGoAwayOrMaxPushIdBreakingItsRules_ShouldAbortConnection(long frameType, byte[] first, byte[]? second, long expectedCode)
+    {
+        // Arrange — the control stream stays open, so only the frames can end the connection.
+        (long, byte[])[] frames = second is null ? [(frameType, first)] : [(frameType, first), (frameType, second)];
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(new (long, long)[] { (0x01, 0) }, frames);
+
+        // Act
+        TestMultiplexedConnection connection = await DriveControlStreamAsync(payload, completeInput: false);
+
+        // Assert
+        ((long)connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode).ShouldBe(expectedCode);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Critical Streams: A GOAWAY that lowers its identifier and a MAX_PUSH_ID that raises its maximum should leave the connection open")]
+    public async Task ReceiveAsync_OnGoAwayAndMaxPushIdInOrder_ShouldKeepServing()
+    {
+        // Arrange — both orders RFC 9114 permits, then a PRIORITY_UPDATE that shows the drain read past them.
+        TestConnection control = new(
+            HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
+                new (long, long)[] { (0x01, 0) },
+                ((long)Http3FrameType.GoAway, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(8)),
+                ((long)Http3FrameType.GoAway, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(4)),
+                ((long)Http3FrameType.MaxPushId, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(4)),
+                ((long)Http3FrameType.MaxPushId, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(16_384)),
+                ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(4, "u=6"))),
+            ConnectionDirection.ReadOnly,
+            completeInput: false);
+        TestMultiplexedConnection connection = new(control);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        // Act
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        await WaitForPriorityAsync(connectionContext.ShouldBeOfType<Http3ConnectionContext>(), streamId: 4);
+
+        // Assert
+        connection.AbortReason.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Critical Streams: A QPACK decoder instruction the server's encoder cannot have caused should close the connection with QPACK_DECODER_STREAM_ERROR")]
+    [InlineData(new byte[] { 0x80 })]                                                       // Section Acknowledgment, stream 0 (RFC 9204 §4.4.1)
+    [InlineData(new byte[] { 0x44, 0x81 })]                                                 // a Stream Cancellation, then a Section Acknowledgment
+    [InlineData(new byte[] { 0x01 })]                                                       // Insert Count Increment of 1 (§4.4.3)
+    [InlineData(new byte[] { 0x00 })]                                                       // Insert Count Increment of 0
+    [InlineData(new byte[] { 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF })] // a Stream Cancellation whose stream ID overflows
+    public async Task ReceiveAsync_OnUnexpectedQPackDecoderInstruction_ShouldAbortWithDecoderStreamError(byte[] instructions)
+    {
+        // Arrange — the server's field sections never reference the dynamic table, so only a Stream Cancellation
+        // may arrive on the peer's decoder stream, which stays open.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3UnidirectionalStream(0x03, instructions);
+
+        // Act
+        TestMultiplexedConnection connection = await DriveControlStreamAsync(payload, completeInput: false);
+
+        // Assert
+        ((long)connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode).ShouldBe(qpackDecoderStreamError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Critical Streams: Stream Cancellations on the QPACK decoder stream should be read without closing the connection")]
+    public async Task ReceiveAsync_OnQPackStreamCancellations_ShouldKeepServing()
+    {
+        // Arrange — two Stream Cancellations, one with a multi-octet stream ID; a request is then served, and the
+        // decoder stream ends, which shows the instructions were read without an error of their own.
+        TestConnection decoder = new(
+            HttpProtocolPayloadFactory.CreateHttp3UnidirectionalStream(0x03, [0x40, 0x7F, 0x01]),
+            ConnectionDirection.ReadOnly,
+            completeInput: false);
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/served", "https", "a"));
+        TestMultiplexedConnection connection = new(decoder, request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/served");
+
+        // Act
+        decoder.CompleteInput();
+        await connection.ConnectionClosed.WhenCancelledAsync();
+
+        // Assert
+        connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.ClosedCriticalStream);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Critical Streams: An oversized PRIORITY_UPDATE should be skipped and the control stream still read")]

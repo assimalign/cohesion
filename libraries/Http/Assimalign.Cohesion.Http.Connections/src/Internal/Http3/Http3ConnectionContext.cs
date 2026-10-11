@@ -614,9 +614,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <para>
     /// Exchanges already handed out keep running — the server may dispatch each on its own task — so
     /// nothing they still need is torn down here: request-body reads, trailer decodes, the decoder-stream
-    /// gate, and the background control-stream and QPACK encoder drains all live until the connection
+    /// gate, and the background control-stream and QPACK stream drains all live until the connection
     /// itself closes (<see cref="IMultiplexedConnection.ConnectionClosed"/>). The drains end on their
-    /// own then, and swallow their own failures, so nothing awaits them.
+    /// own then. None of them throws: a violation one finds closes the connection with its error (#1083),
+    /// and a read that fails because the connection is ending reports nothing, so nothing awaits them.
     /// </para>
     /// <para>
     /// The outbound control stream is deliberately not completed here — teardown stays
@@ -1140,9 +1141,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         "The peer opened a second QPACK decoder stream (RFC 9204 §4.2).");
                 }
 
-                // The server's encoder never references the dynamic table, so the peer's decoder stream
-                // carries nothing the server acts on; it is watched for its closure (RFC 9204 §4.2).
-                _ = WatchQPackStreamAsync(reader, "QPACK decoder");
+                // The server's encoder never references the dynamic table, so the peer's decoder stream may
+                // carry only Stream Cancellations, which need nothing; it is read for the connection's
+                // lifetime, so its other instructions and its closure are seen (RFC 9204 §4.2, §4.4).
+                _ = WatchQPackDecoderStreamAsync(reader);
                 return null;
 
             case Http3StreamType.Push:
@@ -1287,12 +1289,19 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <item><description>A request <c>PRIORITY_UPDATE</c> whose Prioritized Element ID is not a
     /// client-initiated bidirectional stream: <c>H3_ID_ERROR</c> (RFC 9218 §7.2); one whose element ID
     /// is truncated: <c>H3_FRAME_ERROR</c>.</description></item>
+    /// <item><description>A <c>GOAWAY</c> or <c>MAX_PUSH_ID</c> whose payload is not exactly one
+    /// variable-length integer: <c>H3_FRAME_ERROR</c> (RFC 9114 §7.1).</description></item>
+    /// <item><description>A <c>GOAWAY</c> whose identifier is larger than an earlier one's, or a
+    /// <c>MAX_PUSH_ID</c> whose maximum is smaller than an earlier one's: <c>H3_ID_ERROR</c> (RFC 9114 §5.2,
+    /// §7.2.7).</description></item>
     /// </list>
     /// <para>
     /// A request <c>PRIORITY_UPDATE</c> records the referenced stream's effective priority, within the
     /// priority state's bound (<see cref="RecordRequestStreamPriority"/>); one whose Priority Field Value
-    /// cannot be parsed, or whose payload exceeds the 16 KiB this drain buffers, has no effect. <c>GOAWAY</c> (§7.2.6), <c>MAX_PUSH_ID</c> (§7.2.7), and frames of unknown or
-    /// reserved type (§9) are read and discarded.
+    /// cannot be parsed, or whose payload exceeds the 16 KiB this drain buffers, has no effect. A valid
+    /// <c>GOAWAY</c> (§7.2.6) or <c>MAX_PUSH_ID</c> (§7.2.7) is otherwise not acted on: the server plays no
+    /// client role in a graceful close and never pushes. Frames of unknown or reserved type (§9) are read and
+    /// discarded.
     /// </para>
     /// </remarks>
     private async Task DrainPeerControlStreamAsync(PipeReader reader)
@@ -1337,6 +1346,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     private async Task<Http3ConnectionException> ReadPeerControlFramesAsync(PipeReader reader, CancellationToken cancellationToken)
     {
+        // The last identifier each of the peer's GOAWAY and MAX_PUSH_ID frames carried, which the next one is
+        // checked against (RFC 9114 §5.2, §7.2.7); null until the first.
+        long? lastGoAwayId = null;
+        long? lastMaxPushId = null;
+
         while (true)
         {
             long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
@@ -1375,6 +1389,42 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         Http3ErrorCode.IdError,
                         "The peer cancelled a push the server never promised (RFC 9114 §7.2.3).");
 
+                case (long)Http3FrameType.GoAway:
+                case (long)Http3FrameType.MaxPushId:
+                    if (await ReadSingleIdentifierAsync(reader, frameLength.Value, cancellationToken).ConfigureAwait(false) is not { } identifier)
+                    {
+                        return new Http3ConnectionException(
+                            Http3ErrorCode.FrameError,
+                            $"The peer's frame of type 0x{frameType.Value:x} does not hold exactly one variable-length integer (RFC 9114 §7.1).");
+                    }
+
+                    if (frameType.Value == (long)Http3FrameType.GoAway)
+                    {
+                        // RFC 9114 §5.2 — a later GOAWAY may not carry a larger identifier than an earlier one.
+                        if (identifier > lastGoAwayId)
+                        {
+                            return new Http3ConnectionException(
+                                Http3ErrorCode.IdError,
+                                $"The peer's GOAWAY raised its identifier from {lastGoAwayId} to {identifier} (RFC 9114 §5.2).");
+                        }
+
+                        lastGoAwayId = identifier;
+                    }
+                    else
+                    {
+                        // RFC 9114 §7.2.7 — a client may not reduce the maximum push ID it advertised.
+                        if (identifier < lastMaxPushId)
+                        {
+                            return new Http3ConnectionException(
+                                Http3ErrorCode.IdError,
+                                $"The peer's MAX_PUSH_ID lowered the maximum push ID from {lastMaxPushId} to {identifier} (RFC 9114 §7.2.7).");
+                        }
+
+                        lastMaxPushId = identifier;
+                    }
+
+                    continue;
+
                 case (long)Http3FrameType.Data:
                 case (long)Http3FrameType.Headers:
                 case (long)Http3FrameType.Settings:
@@ -1388,11 +1438,36 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         $"The peer sent a frame of type 0x{frameType.Value:x} on its control stream, where it is not permitted (RFC 9114 §7.2).");
 
                 default:
-                    // GOAWAY, MAX_PUSH_ID, and frames of unknown or reserved type (RFC 9114 §9).
+                    // Frames of unknown or reserved type (RFC 9114 §9).
                     await SkipAsync(reader, frameLength.Value, cancellationToken).ConfigureAwait(false);
                     continue;
             }
         }
+    }
+
+    /// <summary>
+    /// Reads the payload of a <c>GOAWAY</c> or <c>MAX_PUSH_ID</c> frame, whose only field is one variable-length
+    /// integer (RFC 9114 §7.2.6, §7.2.7). Returns <see langword="null"/> when the payload holds anything else —
+    /// nothing, a truncated integer, or octets after it — which RFC 9114 §7.1 makes <c>H3_FRAME_ERROR</c>.
+    /// </summary>
+    private static async Task<long?> ReadSingleIdentifierAsync(PipeReader reader, long length, CancellationToken cancellationToken)
+    {
+        // A variable-length integer takes at most eight octets, so a longer payload cannot be one; it is not read.
+        if (length is 0 or > QuicVariableLengthInteger.MaxLength)
+        {
+            return null;
+        }
+
+        byte[] payload = await ReadExactAsync(reader, (int)length, cancellationToken).ConfigureAwait(false);
+
+        // The two high bits of the first octet give the integer's length (RFC 9000 §16).
+        if (payload.Length != 1 << (payload[0] >> 6))
+        {
+            return null;
+        }
+
+        int index = 0;
+        return QuicVariableLengthInteger.Decode(payload, ref index);
     }
 
     /// <summary>
@@ -1438,9 +1513,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Reads a peer QPACK stream the server takes no instruction from — the encoder stream while the
-    /// dynamic table is disabled, and the decoder stream, since the server's encoder never references
-    /// the dynamic table — for the connection's lifetime, discarding what arrives, so its closure is
-    /// seen: the peer ending or resetting either stream is a connection error of type
+    /// dynamic table is disabled — for the connection's lifetime, discarding what arrives, so its closure is
+    /// seen: the peer ending or resetting the stream is a connection error of type
     /// <c>H3_CLOSED_CRITICAL_STREAM</c> (RFC 9204 §4.2). Never throws.
     /// </summary>
     /// <param name="reader">The stream's input, positioned after its stream type.</param>
@@ -1485,6 +1559,128 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         {
             AbortConnection(violation);
         }
+    }
+
+    /// <summary>
+    /// Reads the peer's QPACK decoder stream for the connection's lifetime (RFC 9204 §4.4), and closes the
+    /// connection on an instruction the server's encoder cannot have caused, or on the stream's closure.
+    /// Never throws.
+    /// </summary>
+    /// <remarks>
+    /// The server's encoder references only the static table and inserts nothing, so every field section it
+    /// sends has a Required Insert Count of zero. A Stream Cancellation (§4.4.2) is therefore the one
+    /// instruction a decoder may send it, and it needs nothing. A Section Acknowledgment (§4.4.1) refers to
+    /// a stream with no unacknowledged section that has a non-zero Required Insert Count, and an Insert
+    /// Count Increment (§4.4.3) would raise the Known Received Count beyond the zero entries the encoder
+    /// sent; RFC 9204 makes each a connection error of type <c>QPACK_DECODER_STREAM_ERROR</c>, as is an
+    /// integer that overflows. The peer ending or resetting the stream is <c>H3_CLOSED_CRITICAL_STREAM</c>
+    /// (§4.2).
+    /// </remarks>
+    /// <param name="reader">The stream's input, positioned after its stream type.</param>
+    private async Task WatchQPackDecoderStreamAsync(PipeReader reader)
+    {
+        CancellationToken cancellationToken = _connection.ConnectionClosed;
+        Http3ConnectionException? violation;
+
+        try
+        {
+            while (true)
+            {
+                ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                ReadOnlySequence<byte> buffer = result.Buffer;
+
+                violation = SkipStreamCancellations(ref buffer);
+
+                // Complete instructions are consumed; a trailing partial one waits for its next octets.
+                reader.AdvanceTo(buffer.Start, result.Buffer.End);
+
+                if (violation is not null)
+                {
+                    break;
+                }
+
+                if (result.IsCompleted)
+                {
+                    violation = new Http3ConnectionException(
+                        Http3ErrorCode.ClosedCriticalStream,
+                        "The peer closed its QPACK decoder stream (RFC 9204 §4.2).");
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The connection closed — nothing more to read.
+            return;
+        }
+        catch (Exception exception) when (IsStreamReadFailure(exception))
+        {
+            violation = IsCriticalStreamResetByPeer(exception)
+                ? new Http3ConnectionException(
+                    Http3ErrorCode.ClosedCriticalStream,
+                    "The peer reset its QPACK decoder stream (RFC 9204 §4.2).",
+                    exception)
+                : null;
+        }
+
+        if (violation is not null)
+        {
+            AbortConnection(violation);
+        }
+    }
+
+    /// <summary>
+    /// Consumes the complete Stream Cancellation instructions (RFC 9204 §4.4.2) at the start of
+    /// <paramref name="buffer"/>, leaving it at the first octet not consumed. Returns the connection error when
+    /// an instruction is any other (see <see cref="WatchQPackDecoderStreamAsync"/>) or its integer overflows;
+    /// otherwise <see langword="null"/>, also when the buffer ends inside a Stream Cancellation.
+    /// </summary>
+    private static Http3ConnectionException? SkipStreamCancellations(ref ReadOnlySequence<byte> buffer)
+    {
+        // A 6-bit prefixed integer takes at most ten octets, so ten buffered octets decide each instruction.
+        Span<byte> instruction = stackalloc byte[10];
+
+        while (!buffer.IsEmpty)
+        {
+            byte first = buffer.FirstSpan[0];
+
+            if ((first & 0x80) != 0)
+            {
+                return new Http3ConnectionException(
+                    Http3ErrorCode.QPackDecoderStreamError,
+                    "The peer acknowledged a field section, but the server's field sections reference no dynamic table entry (RFC 9204 §4.4.1).");
+            }
+
+            if ((first & 0x40) == 0)
+            {
+                return new Http3ConnectionException(
+                    Http3ErrorCode.QPackDecoderStreamError,
+                    "The peer sent an Insert Count Increment, but the server's encoder inserts nothing (RFC 9204 §4.4.3).");
+            }
+
+            int available = (int)Math.Min(buffer.Length, instruction.Length);
+            buffer.Slice(0, available).CopyTo(instruction);
+            int consumed = 0;
+
+            try
+            {
+                if (!QPackPrefixedInteger.TryDecode(instruction[..available], ref consumed, prefixBits: 6, out _))
+                {
+                    return null;
+                }
+            }
+            catch (InvalidDataException exception)
+            {
+                return new Http3ConnectionException(
+                    Http3ErrorCode.QPackDecoderStreamError,
+                    "The peer's Stream Cancellation carries a stream ID that overflows (RFC 9204 §4.1.1).",
+                    exception);
+            }
+
+            buffer = buffer.Slice(consumed);
+        }
+
+        return null;
     }
 
     /// <summary>
