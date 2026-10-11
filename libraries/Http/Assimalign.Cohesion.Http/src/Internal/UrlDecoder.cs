@@ -249,6 +249,33 @@ internal sealed class UrlDecoder
         return false;
     }
 
+    /// <summary>
+    /// Determines whether <see cref="DecodeInPlace(Span{char})"/>, reaching the <c>%</c> that starts
+    /// <paramref name="text"/>, decodes the escape there instead of leaving it as written. It leaves an
+    /// encoded slash, an escape without two hex digits, and a sequence that is not valid UTF-8 (invalid,
+    /// overlong, truncated, or a surrogate). It never leaves <c>%00</c>: it refuses it.
+    /// </summary>
+    /// <param name="text">The text from the <c>%</c> on.</param>
+    /// <returns><see langword="true"/> when the decoder does not leave the escape as written.</returns>
+    public static bool DecodesEscapeAt(ReadOnlySpan<char> text)
+    {
+        // The decoder throws for a decoded NUL rather than leaving it, so the probe answers for it.
+        if (text.Length >= 3 && text[1] == '0' && text[2] == '0')
+        {
+            return true;
+        }
+
+        // One scalar value is at most four escapes. DecodeCore writes what it decodes over the text it has
+        // read, so it runs on a copy.
+        Span<char> window = stackalloc char[12];
+        int length = Math.Min(text.Length, window.Length);
+        text[..length].CopyTo(window);
+
+        int sourceIndex = 0;
+        int destinationIndex = 0;
+        return DecodeCore(ref sourceIndex, ref destinationIndex, window[..length]);
+    }
+
     public static int DecodeRequestLine(ReadOnlySpan<char> source, Span<char> destination)
     {
         source.CopyTo(destination);

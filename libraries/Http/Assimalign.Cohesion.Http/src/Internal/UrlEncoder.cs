@@ -28,8 +28,9 @@ internal static class UrlEncoder
     /// <summary>
     /// Encodes a percent-decoded path so that <see cref="HttpPath.FromUriComponent(string)"/> reads it back
     /// unchanged. Every character outside <c>pchar</c> and <c>/</c> is percent-encoded as UTF-8, and a
-    /// <c>%</c> becomes <c>%25</c> unless it begins an encoded slash, which the decoder never decodes and
-    /// the path therefore already carries in encoded form.
+    /// <c>%</c> becomes <c>%25</c> unless it begins an escape the decoder leaves as written (an encoded
+    /// slash, or a sequence that is not valid UTF-8), which the path therefore already carries in encoded
+    /// form.
     /// </summary>
     public static string EncodePath(string path)
     {
@@ -49,10 +50,19 @@ internal static class UrlEncoder
 
             if (text[0] == '%')
             {
-                // UrlDecoder leaves "%2F" (either case) as written, so one in a decoded path is the encoded
-                // slash the request carried, never a '%' followed by "2F". Encoding its '%' would write
-                // "%252F": the same decoded path, but a different URI.
-                if (IsEncodedSlash(text))
+                // UrlDecoder leaves some escapes as written: "%2F" (either case), and a sequence that is not
+                // valid UTF-8 ("%E9" alone, "%C3" at the end, "%C0%AE"). One in a decoded path is most
+                // likely the escape the request carried, and written back as it is the decoder leaves it
+                // again. Encoding its '%' would write "%252F" or "%25E9": the same decoded path, but a
+                // different URI. Any other '%' must have arrived as "%25", since the decoder would have
+                // decoded it otherwise, so it is escaped. The decision is made on the decoded text that
+                // follows, and agrees with the decoder on the encoded text: an escape a lead byte needs as
+                // its continuation can only be one this loop keeps, because a character it encodes never
+                // starts with a continuation byte.
+                if (text.Length >= 3
+                    && char.IsAsciiHexDigit(text[1])
+                    && char.IsAsciiHexDigit(text[2])
+                    && !UrlDecoder.DecodesEscapeAt(text))
                 {
                     builder.Append(text[..3]);
                     text = text[3..];
@@ -95,9 +105,6 @@ internal static class UrlEncoder
             text = AppendRune(builder, text[index..]);
         }
     }
-
-    private static bool IsEncodedSlash(ReadOnlySpan<char> text)
-        => text.Length >= 3 && text[1] == '2' && (text[2] == 'F' || text[2] == 'f');
 
     // Percent-encodes the scalar value at the start of the text as UTF-8 and returns the rest. A lone
     // surrogate is not text; it is encoded as U+FFFD, as UTF-8 encoders do.

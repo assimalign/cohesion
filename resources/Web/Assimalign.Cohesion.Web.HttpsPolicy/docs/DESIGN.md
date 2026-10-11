@@ -127,11 +127,13 @@ trust walk accepted the hop and shape-checked the value):
   `/caf?` (a different path plus a query), and `/100%25` became `/100%`, which is
   not a URI reference (RFC 9110 §10.2.2). `ToUriComponent` keeps `pchar` and `/`
   as they are, encodes everything else as UTF-8, and writes a `%` as `%25` except
-  where it begins `%2F`: the decoder never decodes an encoded slash, so one in the
-  path is the slash the request carried, and encoding it again would name the
-  different URI `%252F`. `HttpPath.FromUriComponent` reads the result back as the
-  request's path. A space, `?` or `#` never reaches this point: `HttpPath` rejects
-  them, and the transports fail a request-target that decodes to one.
+  where it begins an escape the decoder leaves as written: an encoded slash
+  (`%2F`), or a sequence that is not valid UTF-8 (the Latin-1 `%E9`). One in the
+  path is the escape the request carried, and encoding it again would name the
+  different URI `%252F` or `%25E9`. `HttpPath.FromUriComponent` reads the result
+  back as the request's path. A space, `?` or `#` never reaches this point:
+  `HttpPath` rejects them, and the transports fail a request-target that decodes
+  to one (`HttpPathTests` in core Http pins both).
 - **Query** — rebuilt from the parsed `IHttpQueryCollection` by
   `HttpQuery.Create`, which percent-encodes each key and value except for the
   unreserved characters and writes an empty value as the bare key.

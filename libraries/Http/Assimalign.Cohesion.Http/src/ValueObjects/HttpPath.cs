@@ -111,10 +111,12 @@ public readonly struct HttpPath : IEquatable<HttpPath>
     /// other character is percent-encoded as UTF-8 (§2.1). A lone surrogate is written as U+FFFD.
     /// </para>
     /// <para>
-    /// A <c>%</c> is written as <c>%25</c>, except where it begins <c>%2F</c> or <c>%2f</c>.
-    /// <see cref="FromUriComponent(string)"/> never decodes an encoded slash, so it never becomes a segment
-    /// separator, and one in <see cref="Value"/> is that encoded slash. It is written as it is: encoding it again
-    /// would produce <c>%252F</c>, which decodes to the same path but is a different URI. So
+    /// A <c>%</c> is written as <c>%25</c>, except where it begins an escape that
+    /// <see cref="FromUriComponent(string)"/> leaves as written: <c>%2F</c> or <c>%2f</c>, which it never
+    /// decodes so that it never becomes a segment separator, and a sequence that is not valid UTF-8, such as
+    /// the Latin-1 <c>%E9</c> or a truncated <c>%C3</c>. One in <see cref="Value"/> is the escape the request
+    /// carried, and it is written as it is: encoding it again would produce <c>%252F</c> or <c>%25E9</c>, which
+    /// decode to the same path but are different URIs. Any other <c>%</c> arrived as <c>%25</c>. So
     /// <c>FromUriComponent(path.ToUriComponent())</c> equals the path, and a redirect built from it names the
     /// resource the request named.
     /// </para>

@@ -107,11 +107,13 @@ public class HttpsRedirectionTests
     [InlineData("/100%", "https://example.com/100%25")]
     [InlineData("/a\\b", "https://example.com/a%5Cb")]
     [InlineData("/a%2Fb", "https://example.com/a%2Fb")]
+    [InlineData("/caf%E9", "https://example.com/caf%E9")]
     public async Task Redirection_PathNeedingEncoding_ShouldPercentEncodeEachSegment(string decodedPath, string expected)
     {
         // Arrange — the transports hand the middleware the percent-decoded path, so "/caf%C3%A9" on the
-        // wire arrives as "/café" and "/100%25" as "/100%". An encoded slash stays encoded ("/a%2Fb"), and
-        // must not be encoded again into "%252F".
+        // wire arrives as "/café" and "/100%25" as "/100%". An encoded slash stays encoded ("/a%2Fb"), as
+        // does a Latin-1 escape that is not UTF-8 ("/caf%E9"), and neither may be encoded again into
+        // "%252F" or "%25E9".
         IWebApplicationMiddleware middleware = BuildRedirection();
         TestHttpContext context = new(HttpScheme.Http, "example.com", decodedPath);
 

@@ -452,17 +452,30 @@ rules they have to mirror:
 - **`HttpPath.ToUriComponent()`** encodes each segment (RFC 3986 §3.3): `/` and
   every `pchar` (unreserved, sub-delims, `:` and `@`) are written as they are,
   and everything else is percent-encoded as UTF-8, a lone surrogate as U+FFFD. A
-  `%` is written as `%25`, **except** where it begins `%2F` or `%2f`.
-  `UrlDecoder` never decodes an encoded slash, so it can never become a segment
-  separator (the routing `{**}` invariant depends on that), and a `%2F` in a
-  decoded path is therefore the encoded slash the request carried. Encoding its
-  `%` again would write `%252F`: it decodes to the same `HttpPath`, but it is a
-  different URI, which a cache or another server in front reads as another
-  resource. With the exception, `FromUriComponent(path.ToUriComponent())` equals
-  `path` for every path a transport produces, and a request-target in canonical
-  form (upper-case hex, nothing escaped that need not be) comes back unchanged.
-  The decoded form is ambiguous in one place: `/a%252F` and `/a%2F` both decode to
-  `/a%2F`, and both are written back as `/a%2F`, which decodes to the same path.
+  `%` is written as `%25`, **except** where it begins an escape `UrlDecoder`
+  leaves as written, which a decoded path can only carry because the request did:
+  - `%2F` or `%2f`. `UrlDecoder` never decodes an encoded slash, so it can never
+    become a segment separator (the routing `{**}` invariant depends on that).
+  - A sequence that is not valid UTF-8: an invalid or lone byte (the Latin-1
+    `/caf%E9`, a stray continuation `%A9`), a truncated sequence (`/%C3` at the
+    end), an overlong one (`%C0%AE`) or an encoded surrogate (`%ED%A0%80`).
+
+  Encoding the `%` of either kind again would write `%252F` or `%25E9`: it
+  decodes to the same `HttpPath`, but it is a different URI, which a cache or
+  another server in front reads as another resource. `UrlDecoder.DecodesEscapeAt`
+  runs the decoder's own rule at the `%`, so the two cannot drift; any other `%`
+  must have arrived as `%25`, because the decoder would have decoded it, and is
+  escaped. The rule is applied to the decoded text and holds for the encoded
+  text: an escape that a lead byte needs as its continuation is one the encoder
+  keeps, since a character it encodes never starts with a continuation byte. So
+  `FromUriComponent(path.ToUriComponent())` equals `path` for every path. A
+  request-target in canonical form (upper-case hex, nothing escaped that need not
+  be) comes back unchanged, except where it spells as `%25` a `%` that begins an
+  escape the decoder leaves: `/a%2F` and `/a%252F` both decode to `/a%2F`,
+  `/caf%E9` and `/caf%25E9` both decode to `/caf%E9`, and the decoded form cannot
+  tell them apart. Each is written back in the form a client sends, `/a%2F` and
+  `/caf%E9`, which decodes to the same path. (#1324's review, 2026-10-10: the
+  first version kept only `%2F`, so `/caf%E9` came back as `/caf%25E9`.)
 - **`HttpQuery.Create(IHttpQueryCollection)`** joins the entries with `&` in
   enumeration order, percent-encodes each name and value except for the
   unreserved characters, so an `&`, `=` or `+` inside one cannot split or change

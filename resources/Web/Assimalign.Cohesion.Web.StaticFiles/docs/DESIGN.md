@@ -93,8 +93,8 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   the query with `HttpQuery.Create`, the two calls `UseHttpsRedirection` makes. Written decoded,
   a request for `/caf%C3%A9` was redirected to `/café/`, which the HTTP/1.1 writer sends as
   `/caf?/`, and `/100%25` to `/100%/`, which is not a URI reference. `ToUriComponent` writes an
-  encoded slash the request carried (`%2F`, which the decoder keeps) as it is, rather than as
-  `%252F`. The query is now rebuilt the way HttpsPolicy rebuilds it: an empty value is the bare
+  escape the decoder keeps as the request carried it, rather than as `%252F` or `%25E9`: an
+  encoded slash (`%2F`), or a sequence that is not valid UTF-8 (`%E9`). The query is now rebuilt the way HttpsPolicy rebuilds it: an empty value is the bare
   key (`?flag`, where this middleware used to write `?flag=`), and every character but the
   unreserved ones is encoded. A path that begins with two separators (`//docs`, which the file
   lookup resolves to the directory `docs`) has its leading slashes collapsed to one: written as
