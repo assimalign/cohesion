@@ -321,9 +321,10 @@ Middleware registered after `UseRewrite` that logs the path logs the rewritten o
 `IWebRewriteFeature` for the original. The package itself emits no log entries or spans: it has no logger seam
 of its own, and the rewrite is visible in the route the request reports.
 
-`UseHttpLogging` captures the request body by setting `Body` on the transport's `HttpRequest`; registered after
-a view (this one, or request decompression), it sees the view instead and does not capture the body. That is a
-limit of the logging middleware's downcast, not of the view.
+`UseHttpLogging` captures the request body through its own `IHttpContext`/`IHttpRequest` view, wrapping the
+body exposed by the request it receives. Capture works after `UseRewrite` and request decompression;
+registered after decompression, it observes decoded bytes. Capture remains opt-in, content-type gated and
+bounded, and observes only bytes consumed downstream.
 
 ## Error model
 
