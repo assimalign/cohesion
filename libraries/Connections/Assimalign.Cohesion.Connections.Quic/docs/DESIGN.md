@@ -299,6 +299,42 @@ NativeAOT compatible. Platform support follows `System.Net.Quic`
 (`windows` / `linux` / `macos`, gated by `QuicListener.IsSupported` at
 runtime).
 
+## Breaking changes
+
+These are behavior breaks against 10.0.0-preview.1, which shipped this
+driver with stream pipes created with `leaveOpen: false`. They are
+accepted on the terms of decision 15 of the HTTP/Web program plan: a
+break is accepted during the previews and recorded here.
+
+1. **Completing `Output` no longer releases the stream or stops
+   reading (#1330).** It used to dispose the `QuicStream`, which also
+   stopped the receiving direction with `DefaultStreamErrorCode`. Now it
+   ends only the sending direction: a consumer that completes only
+   `Output` leaves the receiving direction open, so the peer may keep
+   sending up to the stream window, and the `QuicStream` stays alive
+   until `Input` is completed too or the stream is disposed.
+2. **Completing `Output` with an error sends `RESET_STREAM`, not a
+   FIN.** `Output.Complete(exception)` used to end the direction
+   gracefully, so an abnormal end looked complete. It now resets with
+   `DefaultStreamErrorCode`, and so does a completion whose final flush
+   fails.
+3. **Completing `Input` no longer ends the sending direction.** It used to
+   dispose the `QuicStream`, which ended both directions; it now stops
+   only the receiving direction (`STOP_SENDING` with
+   `DefaultStreamErrorCode`, unless it has already ended).
+4. **Disposal waits for the delivery of streams already completed.** A
+   stream whose halves were both completed is released in the
+   background, and its `DisposeAsync`, and therefore the connection's
+   `DisposeAsync`, waits for the peer to acknowledge its data and FIN.
+   Before, that wait blocked the thread that completed the pipe instead,
+   and a later disposal of the stream, or of its connection, found the
+   `QuicStream` already disposed and returned at once. The connection's
+   wait is bounded by `CloseDeliveryTimeout` (five seconds by default);
+   a single stream's is not.
+
+Completing a half also no longer blocks the completing thread until the
+peer acknowledges the FIN; that is not expected to break a consumer.
+
 ## Non-goals
 
 - **No protocol semantics.** Stream-type prefixes, SETTINGS, GOAWAY,

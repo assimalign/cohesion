@@ -97,6 +97,13 @@ public sealed class QuicConnectionListenerOptions
     /// it when the stream is later aborted or disposed.
     /// </para>
     /// <para>
+    /// Changed from 10.0.0-preview.1 (#1330; see the Breaking changes in the driver's DESIGN): completing
+    /// <see cref="System.IO.Pipelines.IDuplexPipe.Output"/> used to dispose the whole stream, which stopped a
+    /// receiving direction still open with this code, and completing it with an error sent the FIN. It now
+    /// ends only the sending direction, and completing it with an error sends <c>RESET_STREAM</c> with this
+    /// code.
+    /// </para>
+    /// <para>
     /// Defaults to <c>0x10c</c> — HTTP/3 <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §8.1) — matching
     /// the default HTTP/3 application protocol. Override this when the listener serves a
     /// different ALPN protocol.
