@@ -1219,6 +1219,27 @@ fault injection through Sql's own storage-strategy test doubles (a crash after s
 the next Build); the skip does not walk the catalog (an internal hook counter); the §10
 provisioning case.
 
+*Landed in B2* (#1355). Catalog format **8** persists a DDL generation in the counter transaction
+and records `{hash, generation}` with the applied document. Equal identity and generation skip
+reconciliation without a catalog walk or identity recomputation; retained immutable declarations
+reuse their compiled schema. The open-time definition binding pass also caches its validation at
+that generation. A moved generation reconstructs all provisionable catalog metadata, including
+literal DEFAULTs, unique indexes, composite primary keys, CHECKs, foreign keys and bounded domain
+columns. `table.Default(selector, literal)` and SDK extraction represent the existing literal
+DEFAULT capability. Crash-storage tests recover every committed prefix of all eight executable
+add/drop operation kinds and assert the exact remaining plan and final marker. Provisioning name
+collisions refuse before compensation can claim another session's object. Format-7 counters reach
+the existing actionable format refusal; there is no compatibility reader or upgrade.
+Release NativeAOT `win-arm64`, best-of-five medians in alternating runs of the base
+`2bf42d94b3a200662fb7e22c54f55607d9af4b94` and B2: Q8's isolated provisioning entry point (Q8P)
+**0.1063 → 0.0027 ms**, below **1 ms**; complete Q8 Build **10.2314 → 9.7064 ms**. Q8P uses
+`ApplySchemaAsync` immediately after Build with the same precompiled schema identity, rather than
+an internal Build timer. The [benchmark README](../../resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/README.md)
+retains both campaigns, every alternating median, and exact commands; both NativeAOT harnesses
+publish without IL2xxx/IL3xxx warnings. **49a remains unaccepted and unimplemented**: a future
+classification/scheduling decision would attach between plan rendering and statement execution,
+with the applied marker still withheld until all required steps finish.
+
 **B3: the other four models' seams.** `Options`, `AddDatabase(name)` through the shared builder
 state, `AddServer(Action<XServerOptions>)` for KeyValue, Graph and Blob; `EngineName` leaves all five
 options types (`Create(name, options)`, 286 SQL call sites and the other models', mechanical);

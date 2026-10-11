@@ -28,7 +28,15 @@ internal static class Q8Schema
             builder.Functions.Add(SqlScalarFunction.Create("has_text", static (string text) => text.Length > 0, SqlFunctionVolatility.Immutable));
         }
 #endif
-        builder.AddDatabase("q8", database => database.Schema(schema =>
+        builder.AddDatabase(CreateSchema(checks));
+        return builder;
+    }
+
+    /// <summary>Creates the declaration shared by complete Build and isolated provisioning measurements.</summary>
+    /// <param name="checks">Whether every table declares a CHECK over a registered function.</param>
+    /// <returns>The schema declaration; the isolated measurement compiles it once outside its timed regions.</returns>
+    internal static SqlSchema CreateSchema(bool checks)
+        => SqlSchema.Create("q8", schema =>
         {
             schema.Table<R00>("t00", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Column(row => row.Value); table.Column(row => row.ParentId); table.Index(row => row.Name); Check(table, checks, "t00"); });
             schema.Table<R01>("t01", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Column(row => row.Value); table.Column(row => row.ParentId); table.Index(row => row.Name); table.References<R00>(row => row.ParentId); Check(table, checks, "t01"); });
@@ -80,9 +88,7 @@ internal static class Q8Schema
             schema.Table<R47>("t47", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Column(row => row.Value); table.Column(row => row.ParentId); table.Index(row => row.Name); table.References<R46>(row => row.ParentId); Check(table, checks, "t47"); });
             schema.Table<R48>("t48", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Column(row => row.Value); table.Column(row => row.ParentId); table.Index(row => row.Name); table.References<R47>(row => row.ParentId); Check(table, checks, "t48"); });
             schema.Table<R49>("t49", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Column(row => row.Value); table.Column(row => row.ParentId); table.Index(row => row.Name); table.References<R48>(row => row.ParentId); Check(table, checks, "t49"); });
-        }));
-        return builder;
-    }
+        });
 
     // Q8C's CHECK on every table; the selectors stay inline in each declaration, which the schema
     // builder reads as direct members of the row type.

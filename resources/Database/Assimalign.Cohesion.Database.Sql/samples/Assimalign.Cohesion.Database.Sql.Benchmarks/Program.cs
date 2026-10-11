@@ -33,7 +33,9 @@ namespace Assimalign.Cohesion.Database.Sql.Benchmarks;
 /// projects <c>ABS(-5)</c>, a call folded at plan time, beside its control Q6C, which projects the
 /// constant; Q7R is Q7 with an immutable registered function in the CHECK; Q8 is an engine build over
 /// an already-applied 50-table schema in a file-backed root, timed per build, and Q8C the same schema
-/// with a CHECK over a registered function on every table.
+/// with a CHECK over a registered function on every table. Q8P and Q8CP separately time
+/// <c>ApplySchemaAsync</c> with one precompiled schema immediately after each corresponding build;
+/// those measurements exclude declaration compilation, engine creation, opening and binding.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -151,7 +153,9 @@ internal static class Program
     /// Q8 and Q8C: an engine build over a file-backed root whose 50-table schema is already applied,
     /// so each build compiles the schema, creates the engine, opens and recovers the database, skips
     /// the applied schema and returns. The first build applies the schema and is not measured; the
-    /// engine's disposal is outside the timed region.
+    /// engine's disposal is outside the timed region. Q8P and Q8CP then measure only the shared
+    /// provisioning entry point through ApplySchemaAsync on that already-open database, using the
+    /// same precompiled schema for every iteration.
     /// </summary>
     private static async Task<IReadOnlyList<Sample>> MeasureBuildsAsync(int iterations, bool checks)
     {
@@ -162,17 +166,34 @@ internal static class Program
             {
             }
 
-            return await MeasureAsync(iterations, async () =>
+            var schema = Q8Schema.CreateSchema(checks).Compile();
+            _ = schema.Hash; // Declaration identity is outside the provisioning phase.
+            var provisioning = new List<Sample>();
+            var builds = await MeasureAsync(iterations, async () =>
             {
                 SqlDatabaseEngine? engine = null;
                 var (elapsed, cpu, threadBytes, processBytes, hopped) = await TimeAsync(async () =>
                 {
                     engine = await Q8Schema.CreateBuilder(root, checks).BuildAsync();
                 });
+                string buildCollections = LastCollections;
 
-                await engine!.DisposeAsync();
+                var database = await engine!.OpenDatabaseAsync("q8");
+                var (applyElapsed, applyCpu, applyThreadBytes, applyProcessBytes, applyHopped) = await TimeAsync(async () =>
+                {
+                    await database.ApplySchemaAsync(schema, CancellationToken.None);
+                });
+                provisioning.Add(new Sample(applyElapsed, applyCpu, applyThreadBytes, applyProcessBytes, 1, applyHopped, Q8Schema.Tables)
+                {
+                    Collections = LastCollections,
+                });
+                await engine.DisposeAsync();
+                LastCollections = buildCollections;
                 return new Sample(elapsed, cpu, threadBytes, processBytes, 1, hopped, Q8Schema.Tables);
             });
+            // Exclude MeasureAsync's warm-up, just as the complete build measurement does.
+            Report(checks ? "Q8CP" : "Q8P", "apply", provisioning.Skip(1).ToArray());
+            return builds;
         }
         finally
         {
