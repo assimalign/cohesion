@@ -183,41 +183,22 @@ internal static class Http1MessageWriter
 
     /// <summary>
     /// Hands <paramref name="data"/> to the transport, or flushes when it is empty, crediting its octets to
-    /// <paramref name="gate"/> first and bounding the wait by what is left of the allowance.
+    /// <paramref name="gate"/> first and bounding the wait by what is left of the allowance
+    /// (<see cref="MinDataRateWait"/>). Shared by the buffered path and the streaming sink
+    /// (<see cref="Http1ResponseBodyStream"/>).
     /// </summary>
+    /// <param name="stream">The connection stream to write to.</param>
+    /// <param name="data">The octets to hand over, or empty to flush.</param>
+    /// <param name="gate">The gate holding the response to its minimum data rate.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
     /// <returns><see langword="false"/> when the allowance ran out before the transport accepted the octets.</returns>
-    private static async ValueTask<bool> TryWriteWithinRateAsync(Stream stream, ReadOnlyMemory<byte> data, MinDataRateGate gate, CancellationToken cancellationToken)
+    internal static ValueTask<bool> TryWriteWithinRateAsync(Stream stream, ReadOnlyMemory<byte> data, MinDataRateGate gate, CancellationToken cancellationToken)
     {
         gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
 
-        if (!MinDataRateWait.TryBegin(gate, cancellationToken, out MinDataRateWait wait))
-        {
-            return false;
-        }
-
-        try
-        {
-            if (data.IsEmpty)
-            {
-                await stream.FlushAsync(wait.Token).ConfigureAwait(false);
-            }
-            else
-            {
-                await stream.WriteAsync(data, wait.Token).ConfigureAwait(false);
-            }
-
-            wait.Complete();
-            return true;
-        }
-        catch (OperationCanceledException) when (wait.TimedOut)
-        {
-            wait.Complete();
-            return false;
-        }
-        finally
-        {
-            wait.Dispose();
-        }
+        return data.IsEmpty
+            ? MinDataRateWait.TryRunAsync(gate, stream, static (output, token) => new ValueTask(output.FlushAsync(token)), cancellationToken)
+            : MinDataRateWait.TryRunAsync(gate, (Output: stream, Data: data), static (state, token) => state.Output.WriteAsync(state.Data, token), cancellationToken);
     }
 
     /// <summary>

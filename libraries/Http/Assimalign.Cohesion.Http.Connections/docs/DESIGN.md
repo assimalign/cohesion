@@ -2102,12 +2102,13 @@ an application fault.
 | Version | What is bounded | Signal |
 |---|---|---|
 | HTTP/1.1 | Every write and flush of the head, the body and the chunked terminator, on the buffered path (`Http1MessageWriter.WriteResponseAsync`) and the streaming sink (`Http1ResponseBodyStream`) | The connection is aborted, the only reset HTTP/1.1 has, and the receive loop ends after the exchange |
-| HTTP/2 | The wait for send-window credit (`AcquireSendWindowAsync`), and every write and flush of the response's HEADERS and DATA frames | Stream window empty: `RST_STREAM(CANCEL)`, and the connection keeps serving. Connection window empty and uncredited for a grace period: `GOAWAY(ENHANCE_YOUR_CALM)` and the pump stops. Output not draining: the connection is aborted and the pump stops |
+| HTTP/2 | The response's wait for send-window credit (`AcquireSendWindowAsync`), held to the response's rate; and every write and flush to the connection's output, whoever makes it, held to the connection output's allowance (below) | Stream window empty: `RST_STREAM(CANCEL)`, and the connection keeps serving. Connection window empty and uncredited for a grace period: `GOAWAY(ENHANCE_YOUR_CALM)` and the pump stops. Output not draining: the connection is aborted and the pump stops |
 | HTTP/3 | Every write and flush of the response's frames to the request stream, which QUIC credit paces | The request stream is reset with `H3_REQUEST_CANCELLED`, and the connection keeps serving |
 
-The HTTP/2 signal follows what holds the writer when its allowance runs out. RFC 9113 §8.1's `CANCEL`
-says the response is no longer needed, and the stream keeps its slot until the exchange ends, like
-every stream the server resets. When the connection-level window is what is empty and the peer has not
+The HTTP/2 signal follows what holds the writer when its allowance runs out. RFC 9113 §5.4.2 lets an
+endpoint end one stream with `RST_STREAM`, and §7 defines `CANCEL` for a stream that is no longer needed;
+the stream keeps its slot until the exchange ends, like every stream the server resets. When the
+connection-level window is what is empty and the peer has not
 credited it (a `WINDOW_UPDATE` on stream 0) for a whole grace period, every stream of the connection is
 stalled, so the connection ends with `GOAWAY(ENHANCE_YOUR_CALM)`: RFC 9113 §10.5 lets an endpoint treat
 activity that ties up its resources as that connection error, and it is the code this connection's other
@@ -2121,6 +2122,36 @@ itself stops draining, nothing more can be written, a `GOAWAY` included, so the 
 HTTP/3 has no shared window to tell apart: a peer that withholds `MAX_DATA` stalls every response, and
 each is reset as its own allowance runs out, with the code RFC 9114 §4.1.1 gives a request whose
 processing began.
+
+### The HTTP/2 connection's output
+
+Every frame an HTTP/2 connection sends goes to one transport output under one write gate: the pump's
+`SETTINGS` and `PING` acknowledgements, `WINDOW_UPDATE`, `RST_STREAM` and `GOAWAY`, the transport's own
+`408` and `413` answers, interim and final responses, and tunnel octets. A peer that stops reading the TCP
+connection stalls whichever writer holds the gate, and every writer queued behind it. Bounding only the
+response frames left a hole: a peer that stopped reading and sent `PING`s, far under the flood limit, parked
+the pump on an acknowledgement's flush with no deadline, and the next response writer then waited for the
+gate forever, its exchange still in flight, so keep-alive never armed and the connection kept its slot.
+
+So the output, not one response, is what the HTTP/2 rate is measured over (`Http2ConnectionContext.Output`).
+The connection holds one `MinDataRateGate` at the listener's `MinResponseDataRate` (`_outputDataRate`):
+every frame any writer hands to the output is credited to it, and every wait any writer spends on the
+transport is charged to it, as Kestrel's HTTP/2 output times every frame against the connection. A write
+that waits past what is left of the allowance means the output stopped draining: the connection is aborted
+and the pump stops (`FailOutputStall`), and every writer that then takes the gate fails at once without
+touching the transport. The gate holder waits on nothing but the transport, so bounding every write bounds
+every writer queued behind it; nothing needs a deadline on the gate itself.
+
+Measuring the output as a whole is also what keeps a slow but steady reader safe. A small response, a `304`
+or a `HEAD`, whose flush waits while the transport drains another stream's large body, is charged against
+the octets that body handed over, not against its own hundred. Held to its own allowance alone, as before,
+it bought about 5 seconds at the default rate and aborted the whole connection on a reader merely slower
+than its buffered backlog.
+
+A final response's write still credits its octets to the response's own gate too, which bounds the
+response's wait for flow-control credit; that wait is the stream's own, and its per-request rate (below)
+applies there. When the listener holds the connection to no rate there is no output gate, and a response
+that set a rate for itself is held to its own over its own writes, as on the other versions.
 
 ### Crediting octets as they are handed over
 
@@ -2149,27 +2180,43 @@ until then; `Http.RequestLimits` surfaces it as `IHttpMinResponseDataRateFeature
 object as the other limits. The parse context reaches the exchange through
 `HttpRequestInterceptionResult.Context` and `TransportHttpContext.RequestInterception`, one reference
 per exchange that ran request hooks. Disabling the rate is for a response whose reader legitimately
-pauses for long stretches; it removes the slow-read defence for that response only.
+pauses for long stretches; it removes the slow-read defence for that response only. On HTTP/2 that means
+the response's wait for flow-control credit, which is how a reader there pauses: the connection's output
+is shared by every stream and the pump, so it stays held to the listener's rate.
 
 ### Not covered
 
 - **Tunnels.** An accepted HTTP/1.1 upgrade or `CONNECT`, and an extended `CONNECT` on HTTP/2 and
   HTTP/3, carry tunnel octets, not a response body, and are not held to the rate (as Kestrel exempts
-  upgraded connections). Their reads and writes are the tunnel's owner's to bound.
-- **Interim responses.** A `1xx` written through the exchange control is not bounded; it is small, and
-  the final response that follows is.
-- **HTTP/2 control frames.** The pump's own writes (`SETTINGS`, `PING` acknowledgements,
-  `WINDOW_UPDATE`, `RST_STREAM`, `GOAWAY`) are not held to a response's rate. A peer that floods `PING`
-  without reading the connection can stall the pump on a write while no response is in flight; the
-  flood limits bound the rate of such frames, not the time a write may block.
-- **Status-only answers.** The transport's own small answers (`408`, `413`, `431`, `400`) are not
-  bounded either; they fit in any transport buffer.
+  upgraded connections). Their reads and their wait for credit are the tunnel's owner's to bound. An
+  HTTP/2 tunnel's writes to the connection's shared output are held to the output's allowance like every
+  other frame there, and fail with an `IOException` once the output has stalled.
+- **Interim responses.** A `1xx` written through the exchange control is not held to the response's rate;
+  it is small, and the final response that follows is. On HTTP/2 it is a write to the connection's output
+  and is held to the output's allowance.
+- **The connection's own writes with no rate.** A listener whose `MinResponseDataRate` is `null` holds the
+  HTTP/2 output to nothing, so the pump's control frames and the transport's own answers are unbounded
+  there, whatever rate a request sets for itself.
+- **Status-only answers on HTTP/1.1 and HTTP/3.** The transport's own small answers (`408`, `413`, `431`,
+  `400`) are not bounded. Each is a few hundred octets, written when nothing else is being written to its
+  connection (HTTP/1.1) or request stream (HTTP/3). On HTTP/2 they share the connection's output and are
+  bounded with it.
 
-### AOT posture
+### AOT posture and cost
 
-No reflection or code generation. `MinDataRateWait` is a struct over two linked
-`CancellationTokenSource` instances, allocated only when a rate applies, and the HTTP/2 helpers pass
-their arguments through static lambdas and a value tuple, so the ungated path allocates nothing new.
+No reflection or code generation. A deadline is armed only when an operation actually waits
+(`MinDataRateWait.TryRunAsync`). The operation starts with the token of the gate's one reusable
+`CancellationTokenSource` (`MinDataRateGate.RentDeadline`), unarmed, and the caller's token reaches it
+through a registration on that token for the operation's run, which reuses the token's own node. A write
+that completes synchronously, which a pipe write below its pause threshold always does, therefore costs no
+timer, no linked source and no allocation. Only an operation still pending arms the source
+(`CancelAfter`), charges the measured wait, and resets the source for the next operation (`TryReset`). The
+source is created once per transfer, its timer at the first wait, and replaced only after it fired. On the
+default rate a small response therefore pays one gate per exchange (and, on HTTP/2, the connection's one
+output gate) and nothing per write; Kestrel reaches the same end with a heartbeat. HTTP/3 encodes each
+frame header into the request stream's own buffer (`PipeWriter.GetSpan`), so a frame costs no header array
+and goes out with its payload's write. The helpers pass their arguments through static lambdas and value
+tuples, and a write that completes synchronously completes its async helpers synchronously too.
 
 ## HTTP/2 request heads (RFC 9113 §8.3)
 

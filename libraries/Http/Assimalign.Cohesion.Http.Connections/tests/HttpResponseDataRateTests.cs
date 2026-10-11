@@ -176,7 +176,7 @@ public class HttpResponseDataRateTests
         OperationCanceledException failure = await Should.ThrowAsync<OperationCanceledException>(
             () => peer.ConnectionContext.SendAsync(exchange).AsTask().WaitAsync(_timeout));
 
-        // Assert — RFC 9113 §8.1: the response is no longer needed.
+        // Assert — a stream error (RFC 9113 §5.4.2) with CANCEL, which §7 defines for a stream that is no longer needed.
         await peer.Output.ReadUntilAsync(frames => frames.Any(frame => frame.IsRstStream && frame.StreamId == 1), "the reset of stream 1");
         peer.Output.ForStream(1).Single(frame => frame.IsRstStream).GetRstStreamErrorCode().ShouldBe(Http2ErrorCode.Cancel);
         exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
@@ -289,6 +289,40 @@ public class HttpResponseDataRateTests
         // Assert — no frame can get out any more, so the connection is aborted and the pump stops.
         transport.IsAborted.ShouldBeTrue();
         exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        await peer.WaitForReceiveEndAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Response Rate: A PING acknowledgement the peer never reads should end the connection, not park a streamed response behind the write gate")]
+    public async Task Http2_OnPingAckNeverDrainedBetweenStreamedFrames_ShouldAbortConnectionAndCancelHandler()
+    {
+        // Arrange — a streamed response is between DATA frames, every window open, when the peer stops
+        // reading the connection and sends one PING, far under the flood limit. The pump takes the write
+        // gate at control urgency for the acknowledgement, and the transport never accepts it.
+        StallingConnection? transport = null;
+        await using Http2TestPeer peer = await Http2TestPeer.ConnectAsync(
+            CreateOptions(streaming: true),
+            http2 => http2.Limits.MinResponseDataRate = _rate,
+            initialWindowSize: 1 << 20,
+            decorate: inner => transport = new StallingConnection(inner));
+        await peer.SendHeadersAsync(1, endStream: true, Http2TestPeer.Get("/stream"));
+        IHttpContext exchange = await peer.ReceiveContextAsync();
+        await exchange.Response.Streaming.WriteAsync(new byte[1024]).AsTask().WaitAsync(_timeout);
+        await peer.SyncAsync();
+        transport!.Writer.Stall();
+        await peer.SendAsync(Http2TestSettings.RawFrame(0x6, 0, 0, new byte[8]));
+        await WaitForAsync(() => transport.Writer.IsFlushWaiting, "the pump's acknowledgement to wait on the transport");
+
+        // Act — the handler's next frame queues for the write gate the pump holds.
+        Stopwatch elapsed = Stopwatch.StartNew();
+        OperationCanceledException failure = await Should.ThrowAsync<OperationCanceledException>(
+            () => exchange.Response.Streaming.WriteAsync(new byte[1024]).AsTask().WaitAsync(_timeout));
+
+        // Assert — the acknowledgement is held to the connection output's allowance, so the stall ends the
+        // connection within it, and the handler queued behind the pump observes the cancellation.
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+        transport.IsAborted.ShouldBeTrue();
+        exchange.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        failure.CancellationToken.ShouldBe(exchange.RequestCancelled);
         await peer.WaitForReceiveEndAsync();
     }
 
@@ -467,6 +501,17 @@ public class HttpResponseDataRateTests
         if (streaming)
         {
             options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        }
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition, string description)
+    {
+        Stopwatch elapsed = Stopwatch.StartNew();
+
+        while (!condition())
+        {
+            elapsed.Elapsed.ShouldBeLessThan(_timeout, $"Timed out waiting for {description}.");
+            await Task.Delay(10);
         }
     }
 

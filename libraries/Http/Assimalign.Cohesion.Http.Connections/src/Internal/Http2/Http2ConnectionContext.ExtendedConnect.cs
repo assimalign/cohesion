@@ -54,7 +54,7 @@ internal sealed partial class Http2ConnectionContext
 
             // The block is written in one piece, so a cancellation lands before or after it (#1326).
             await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: false, cancellationToken).ConfigureAwait(false);
-            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await FlushOutputAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -129,8 +129,8 @@ internal sealed partial class Http2ConnectionContext
 
                 Http2Frame frame = new();
                 frame.PrepareData(context.StreamId);
-                await Http2FrameWriter.WriteAsync(Stream, frame, data.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
-                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync(frame, data.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
+                await FlushOutputAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -164,8 +164,8 @@ internal sealed partial class Http2ConnectionContext
             Http2Frame frame = new();
             frame.PrepareData(context.StreamId);
             frame.DataFlags |= Http2DataFrameFlags.EndStream;
-            await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, CancellationToken.None).ConfigureAwait(false);
-            await Stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            await WriteFrameAsync(frame, ReadOnlyMemory<byte>.Empty, CancellationToken.None).ConfigureAwait(false);
+            await FlushOutputAsync(CancellationToken.None).ConfigureAwait(false);
 
             stream.CompleteResponse();
         }

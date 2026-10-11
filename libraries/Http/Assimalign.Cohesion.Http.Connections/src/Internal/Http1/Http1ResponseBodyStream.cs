@@ -165,26 +165,9 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 
         // The octets count toward the allowance as they are handed over (MinDataRateWait), so a reader
         // draining a large write at a healthy pace is not held to the bare grace period.
-        _gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
-
-        if (!MinDataRateWait.TryBegin(_gate, cancellationToken, out MinDataRateWait wait))
+        if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, data, _gate, cancellationToken).ConfigureAwait(false))
         {
             throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
-        }
-
-        try
-        {
-            await _stream.WriteAsync(data, wait.Token).ConfigureAwait(false);
-            wait.Complete();
-        }
-        catch (OperationCanceledException) when (wait.TimedOut)
-        {
-            wait.Complete();
-            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
-        }
-        finally
-        {
-            wait.Dispose();
         }
     }
 
@@ -196,24 +179,9 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
             return;
         }
 
-        if (!MinDataRateWait.TryBegin(_gate, cancellationToken, out MinDataRateWait wait))
+        if (!await Http1MessageWriter.TryWriteWithinRateAsync(_stream, ReadOnlyMemory<byte>.Empty, _gate, cancellationToken).ConfigureAwait(false))
         {
             throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
-        }
-
-        try
-        {
-            await _stream.FlushAsync(wait.Token).ConfigureAwait(false);
-            wait.Complete();
-        }
-        catch (OperationCanceledException) when (wait.TimedOut)
-        {
-            wait.Complete();
-            throw Http1ConnectionContext.FailSlowResponse(_connection, _context);
-        }
-        finally
-        {
-            wait.Dispose();
         }
     }
 }

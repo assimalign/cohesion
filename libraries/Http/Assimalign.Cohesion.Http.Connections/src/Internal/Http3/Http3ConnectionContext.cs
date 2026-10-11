@@ -2368,13 +2368,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Writes one frame of a response — its type and length, then its payload — to the request stream,
-    /// held to the response's minimum data rate (#1384). The frame header is encoded and written
-    /// asynchronously with the caller's token, never octet by octet: a synchronous write to the stream
-    /// adapter flushes, and a flush the peer withholds credit for would block the thread beyond any
-    /// token. With a rate, the payload is handed over in pieces of at most
-    /// <see cref="MinDataRateWait.MaxWriteSize"/> octets, each credited as it goes and accepted within
-    /// what is left of the allowance; when the allowance runs out the stream is reset
-    /// (<see cref="FailSlowResponse"/>) and the write throws.
+    /// held to the response's minimum data rate (#1384). The frame header is encoded straight into the
+    /// request stream's own buffer (<see cref="PipeWriter.GetSpan"/>), never octet by octet through the
+    /// stream adapter, whose synchronous writes flush, so a flush the peer withholds credit for would
+    /// block the thread beyond any token; it goes out with the payload's first write, or with the flush
+    /// that follows a frame with no payload. With a rate, the payload is handed over in pieces of at most
+    /// <see cref="MinDataRateWait.MaxWriteSize"/> octets, each credited as it goes (the header with the
+    /// first) and accepted within what is left of the allowance; when the allowance runs out the stream
+    /// is reset (<see cref="FailSlowResponse"/>) and the write throws.
     /// </summary>
     /// <param name="context">The exchange whose response is written.</param>
     /// <param name="stream">The request stream, as a stream.</param>
@@ -2388,14 +2389,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         MinDataRateGate? gate = context.GetResponseDataRateGate(_limits.MinResponseDataRate, _timeProvider);
 
         // RFC 9114 §7.1 — frame = type (varint) + length (varint) + payload.
-        byte[] header = new byte[2 * QuicVariableLengthInteger.MaxLength];
+        PipeWriter output = context.StreamConnection.Output;
+        Span<byte> header = output.GetSpan(2 * QuicVariableLengthInteger.MaxLength);
         int headerLength = QuicVariableLengthInteger.Write(header, (long)frameType);
-        headerLength += QuicVariableLengthInteger.Write(header.AsSpan(headerLength), payload.Length);
+        headerLength += QuicVariableLengthInteger.Write(header[headerLength..], payload.Length);
+        output.Advance(headerLength);
 
         if (gate is null)
         {
-            await stream.WriteAsync(header.AsMemory(0, headerLength), cancellationToken).ConfigureAwait(false);
-
             if (!payload.IsEmpty)
             {
                 await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
@@ -2404,12 +2405,18 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
-        await WriteResponseOctetsWithinRateAsync(context, gate, stream, header.AsMemory(0, headerLength), cancellationToken).ConfigureAwait(false);
-
+        int credit = headerLength;
         for (int offset = 0; offset < payload.Length; offset += MinDataRateWait.MaxWriteSize)
         {
             ReadOnlyMemory<byte> piece = payload.Slice(offset, Math.Min(MinDataRateWait.MaxWriteSize, payload.Length - offset));
-            await WriteResponseOctetsWithinRateAsync(context, gate, stream, piece, cancellationToken).ConfigureAwait(false);
+            await WriteResponseOctetsWithinRateAsync(context, gate, stream, piece, credit + piece.Length, cancellationToken).ConfigureAwait(false);
+            credit = 0;
+        }
+
+        if (credit > 0)
+        {
+            // A frame with no payload: its header rides the flush that follows, and counts toward it.
+            gate.Record(ticksWaited: 0, bytesTransferred: credit);
         }
     }
 
@@ -2427,43 +2434,25 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         return gate is null
             ? new ValueTask(stream.FlushAsync(cancellationToken))
-            : WriteResponseOctetsWithinRateAsync(context, gate, stream, ReadOnlyMemory<byte>.Empty, cancellationToken);
+            : WriteResponseOctetsWithinRateAsync(context, gate, stream, ReadOnlyMemory<byte>.Empty, 0, cancellationToken);
     }
 
     /// <summary>
     /// Hands <paramref name="data"/> to the request stream, or flushes it when <paramref name="data"/> is
-    /// empty, crediting the octets first and bounding the wait by what is left of the allowance.
+    /// empty, crediting <paramref name="credit"/> octets first and bounding the wait by what is left of
+    /// the allowance (<see cref="MinDataRateWait"/>).
     /// </summary>
-    private async ValueTask WriteResponseOctetsWithinRateAsync(Http3Context context, MinDataRateGate gate, Stream stream, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    private async ValueTask WriteResponseOctetsWithinRateAsync(Http3Context context, MinDataRateGate gate, Stream stream, ReadOnlyMemory<byte> data, int credit, CancellationToken cancellationToken)
     {
-        gate.Record(ticksWaited: 0, bytesTransferred: data.Length);
+        gate.Record(ticksWaited: 0, bytesTransferred: credit);
 
-        if (!MinDataRateWait.TryBegin(gate, cancellationToken, out MinDataRateWait wait))
+        bool accepted = data.IsEmpty
+            ? await MinDataRateWait.TryRunAsync(gate, stream, static (output, token) => new ValueTask(output.FlushAsync(token)), cancellationToken).ConfigureAwait(false)
+            : await MinDataRateWait.TryRunAsync(gate, (Output: stream, Data: data), static (state, token) => state.Output.WriteAsync(state.Data, token), cancellationToken).ConfigureAwait(false);
+
+        if (!accepted)
         {
             throw FailSlowResponse(context);
-        }
-
-        try
-        {
-            if (data.IsEmpty)
-            {
-                await stream.FlushAsync(wait.Token).ConfigureAwait(false);
-            }
-            else
-            {
-                await stream.WriteAsync(data, wait.Token).ConfigureAwait(false);
-            }
-
-            wait.Complete();
-        }
-        catch (OperationCanceledException) when (wait.TimedOut)
-        {
-            wait.Complete();
-            throw FailSlowResponse(context);
-        }
-        finally
-        {
-            wait.Dispose();
         }
     }
 

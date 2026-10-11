@@ -220,11 +220,12 @@ public abstract class HttpConnectionListenerLimits
     /// <list type="bullet">
     /// <item><description><b>HTTP/1.1</b> — every write and flush of the head, the body and the chunked
     /// terminator. HTTP/1.1 has no reset finer than the connection, so the connection is closed.</description></item>
-    /// <item><description><b>HTTP/2</b> — the wait for send-window credit and every write of the
-    /// response's frames to the connection. A stream whose own window the peer leaves empty is reset
-    /// with <c>RST_STREAM(CANCEL)</c>, and the connection keeps serving its other streams; when the
-    /// connection-level window is empty and the peer has not credited it for a grace period, the whole
-    /// connection is stalled, so it ends with
+    /// <item><description><b>HTTP/2</b> — the response's wait for send-window credit, and every write to
+    /// the connection's output, whoever makes it: the response frames of every stream, and the
+    /// connection's own control frames and answers, measured together against this rate over the whole
+    /// output. A stream whose own window the peer leaves empty is reset with <c>RST_STREAM(CANCEL)</c>,
+    /// and the connection keeps serving its other streams; when the connection-level window is empty and
+    /// the peer has not credited it for a grace period, the whole connection is stalled, so it ends with
     /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>; and when the connection's output stops draining it is
     /// aborted.</description></item>
     /// <item><description><b>HTTP/3</b> — every write and flush of the response's frames to the request
@@ -237,9 +238,11 @@ public abstract class HttpConnectionListenerLimits
     /// (<see cref="Assimalign.Cohesion.Http.HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>),
     /// where a request-parse interceptor, middleware or an endpoint may lower, raise or disable it until
     /// the response's first write freezes it (the <c>Assimalign.Cohesion.Http.RequestLimits</c> package
-    /// surfaces it as a typed <c>IHttpMinResponseDataRateFeature</c>). A tunnel (an accepted HTTP/1.1
-    /// upgrade or <c>CONNECT</c>, or an extended <c>CONNECT</c>) is not a response body and is never held
-    /// to it, and neither are interim (<c>1xx</c>) responses.
+    /// surfaces it as a typed <c>IHttpMinResponseDataRateFeature</c>). On HTTP/2 the request's rate bounds
+    /// its response's wait for flow-control credit; the connection's output is shared, so it stays held to
+    /// this listener-wide rate. A tunnel (an accepted HTTP/1.1 upgrade or <c>CONNECT</c>, or an extended
+    /// <c>CONNECT</c>) is not a response body and is never held to it, and neither are interim
+    /// (<c>1xx</c>) responses, except that on HTTP/2 their writes to the shared output are.
     /// </para>
     /// </remarks>
     public HttpMinDataRate? MinResponseDataRate
