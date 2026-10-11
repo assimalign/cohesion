@@ -98,7 +98,8 @@ the default server publishes it from an interceptor. To keep the transport's fas
 installs the feature only on a request that can have a body, as the transport reports it
 (`HttpExchangeInterceptorRequestContext.CanHaveBody`): on HTTP/1.1 one that declares a body, on HTTP/2
 one whose head did not end the stream, on HTTP/3 one whose request stream had not ended with its head
-(#1378). It reads `null` until a fault is latched. On HTTP/2 and HTTP/3 a body that contradicts its
+(#1378), which over the QUIC driver is nearly every request, since the transport sees the stream's end
+only on a read. It reads `null` until a fault is latched. On HTTP/2 and HTTP/3 a body that contradicts its
 content-length, or a malformed trailer section, resets the stream rather than drawing a status, and the
 feature reports `400` for it. The value is read through on each access, because the fault is latched while the pipeline
 runs.

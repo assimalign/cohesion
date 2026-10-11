@@ -1135,7 +1135,11 @@ invites the body:
   is a request stream whose FIN was not already buffered behind its HEADERS frame
   (`Http3RequestStreamReader.IsEndBuffered`, the probe `CanHaveBody` uses); a stream
   whose end the transport has not seen yet is solicited, which costs nothing if the
-  content turns out to be empty.
+  content turns out to be empty. Over the QUIC driver the probe sees a FIN only on a
+  read, so every request there that carries the expectation is solicited, one whose
+  FIN came with its head included. RFC 9110 §10.1.1 forbids a client to send the
+  expectation without content and lets a server send the `100` anyway, so such a
+  client gets an interim response it does not need, and nothing else changes.
 - **HTTP/2.** `Http2RequestBodyStream` sends it after resolving the rate at its first
   read, through `Http2ConnectionContext.WriteInterimResponseAsync` on the exchange
   `Http2Stream.CreateContextAsync` attaches (`AttachExchange`): a HEADERS block
@@ -1776,8 +1780,11 @@ catches `InvalidDataException` or `IOException` keeps working.
   itself to the response phase of a request that can have a body
   (`HttpExchangeInterceptorRequestContext.CanHaveBody`, which this transport sets
   from the framing it decides before the head hooks run) and publishes the report
-  as `IWebClientFaultFeature` (`Web.Server`). Every other exchange keeps this
-  transport's fast path. Web.Hosting's DESIGN carries the consumers.
+  as `IWebClientFaultFeature` (`Web.Server`). Every other HTTP/1.1 exchange keeps
+  this transport's fast path, and so does an HTTP/2 one whose head ended its stream.
+  HTTP/3 over the QUIC driver does not: its probe sees a FIN only on a read, so
+  nearly every request reports a body and takes the response phase (see "The body
+  signal for a host's gate"). Web.Hosting's DESIGN carries the consumers.
 
 ### Keep-alive realignment (draining)
 
@@ -2603,7 +2610,14 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
 - **HTTP/3** sets it unless the request stream's FIN is already buffered behind its HEADERS frame
   (`Http3RequestStreamReader.IsEndBuffered`, a `TryRead` that consumes nothing), and only when a
   request hook is registered. Over the QUIC driver the end is seen only by a read that returns no
-  octets, so there a request without a body usually reports `true`; see the core DESIGN.
+  octets, so there a request without a body usually reports `true`; see the core DESIGN. The driver's
+  input is `PipeReader.Create` over the `QuicStream`, which learns of a FIN only when a `ReadAsync` of
+  the stream returns no octets, and `TryRead` never reads the stream. The in-memory driver
+  completes its pipe with the FIN, so the in-memory tests see it; `HttpRequestCanHaveBodyTests` pins the
+  QUIC behavior over a stream-backed input (`StreamInputMultiplexedConnection`): the probe misses the end
+  until a read, and a `GET` whose FIN came with its head reports a body. Closing the gap is the driver's
+  work: it holds the FIN already, and can report it through a connection facet the probe consults
+  (tracked as a follow-up, not in #1378).
 
 ### Behavior changes
 
@@ -2617,6 +2631,12 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   An HTTP/3 body read that finds a connection error now reports a `400` client fault, and `SendAsync`
   writes nothing for that exchange and adopts the `400`; it used to try to send the staged response on the
   aborted connection.
+- *Performance (HTTP/3 over the QUIC driver).* The default Web server's client-fault gate joins the
+  response phase of every request that reports a body, and over the QUIC driver nearly every request does,
+  a `GET` whose FIN came with its head included (see "The body signal for a host's gate"). Each such
+  exchange now pays for a response sink, an exchange control, a response context and the feature; before
+  #1378 no HTTP/3 exchange did. HTTP/1.1, HTTP/2 and the in-memory HTTP/3 driver keep the fast path for a
+  request without a body.
 - *Internal.* `Http2RequestBodyStream` takes its `Http2Stream` instead of a stream id, an abort token and
   a trailer-publishing delegate, which also saves the delegate it allocated per request.
 

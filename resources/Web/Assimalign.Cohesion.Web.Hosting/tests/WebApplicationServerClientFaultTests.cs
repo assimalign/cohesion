@@ -409,7 +409,9 @@ public class WebApplicationServerClientFaultTests
         await factory.StartAsync(cancellationToken);
         await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
 
-        // Act — the GET's FIN goes out with its HEADERS frame.
+        // Act — the GET's FIN goes out with its HEADERS frame. The in-memory driver reports it with the head;
+        // the QUIC driver does not until a read, so there the same GET takes the response phase
+        // (Http.Connections' HttpRequestCanHaveBodyTests pins that over a stream-backed input).
         Connection stream = await client.SendRequestAsync("GET", "/plain", [], [], endStream: true, cancellationToken);
         (IReadOnlyList<int> statuses, _) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
         await observed.Recorded.Task.WaitAsync(cancellationToken);

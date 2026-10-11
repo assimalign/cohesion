@@ -2,10 +2,13 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Pipelines;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Http.Connections.Internal;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 using Shouldly;
@@ -19,7 +22,9 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// tells the request-parse hooks whether content may follow the head, from the framing only it sees. On
 /// HTTP/1.1 that is a <c>Transfer-Encoding</c> or a non-zero <c>Content-Length</c>; on HTTP/2 a HEADERS
 /// frame without <c>END_STREAM</c>, whatever <c>content-length</c> it declares; on HTTP/3 a request stream
-/// whose end had not arrived with its HEADERS frame. A CONNECT never has one.
+/// whose end had not arrived with its HEADERS frame. A CONNECT never has one. Over a stream-backed input,
+/// which the QUIC driver's is, an HTTP/3 FIN that arrived with the head is not seen until a read, so such a
+/// request still reports a body; the tests pin that production behavior.
 /// </summary>
 public class HttpRequestCanHaveBodyTests
 {
@@ -141,6 +146,56 @@ public class HttpRequestCanHaveBodyTests
         recorder.CanHaveBody.ShouldBe(true);
 
         await request.Output.CompleteAsync();
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A stream-backed HTTP/3 request stream should not see a FIN that came with its HEADERS frame until a read returns nothing")]
+    public async Task IsEndBuffered_OnStreamBackedInputAfterTheHead_ShouldNotSeeTheEnd()
+    {
+        // Arrange — the QUIC driver reads a request stream through PipeReader.Create over the QuicStream, which
+        // learns of the FIN only from a read that returns no octets. A stream that holds the head and then ends
+        // is the same: its end is in hand, but nothing has read it yet.
+        using MemoryStream requestStream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a"));
+        PipeReader input = PipeReader.Create(requestStream);
+        Http3RequestStreamReader reader = new(input);
+        byte[]? head = await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
+
+        // Act
+        bool endBuffered = reader.IsEndBuffered();
+        Http3FrameHeader? next = await reader.ReadFrameHeaderAsync(CancellationToken.None);
+
+        // Assert — the probe the transport answers CanHaveBody and the automatic 100 Continue with misses the
+        // end (production behavior over the QUIC driver, pinned until the driver reports a FIN it already
+        // holds); the next read finds it.
+        head.ShouldNotBeNull();
+        endBuffered.ShouldBeFalse();
+        next.ShouldBeNull();
+        reader.IsCompleted.ShouldBeTrue();
+
+        await input.CompleteAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: An HTTP/3 request read through a stream-backed input should report a body even when its FIN came with its HEADERS frame")]
+    public async Task CanHaveBody_OnHttp3RequestEndedWithItsHeadOverStreamBackedInput_ShouldBeTrue()
+    {
+        // Arrange — the server reads its request streams the way it reads the QUIC driver's: through a
+        // PipeReader over a stream.
+        CanHaveBodyRecorder recorder = new();
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            configureListener: options => options.Interceptors.Add(recorder),
+            decorate: static server => new StreamInputMultiplexedConnection(server));
+        Connection request = await peer.OpenRequestStreamAsync();
+
+        // Act — as in CanHaveBody_OnHttp3RequestEndedWithItsHead_ShouldBeFalse, the FIN arrives with the head.
+        request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a"));
+        await request.Output.CompleteAsync();
+        IHttpContext context = await peer.NextContextAsync();
+
+        // Assert — production behavior over the QUIC driver, pinned: the transport cannot see the FIN without
+        // a read, so even a GET reports that it can have a body, and a host gate on it takes the response
+        // phase. A driver that reports a FIN it already holds turns this to false.
+        recorder.CanHaveBody.ShouldBe(true);
+
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
     }
 

@@ -313,7 +313,8 @@ public sealed class WebApplicationServerBuilder
     /// over-limit body as the client's fault rather than the application's (#1340, #1378). A request that no
     /// application accepts is served exactly as before, and an ordinary exchange keeps the transport's
     /// fast path under all four; a request that can have a body takes the response phase, for its
-    /// exchange control. User configurations may still inspect or clear
+    /// exchange control. Over the QUIC driver nearly every HTTP/3 request reports a body, since the transport
+    /// sees a request stream end only on a read. User configurations may still inspect or clear
     /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out; clearing them removes
     /// WebSockets on every protocol, because the HTTP/2 and HTTP/3 transports still advertise extended
     /// CONNECT but no feature then surfaces it, and a malformed body is then classified as an
