@@ -112,6 +112,52 @@ public sealed class DatabaseHostingEventSourceTests
         recorder.Events.ShouldNotContain(entry => entry.EventId == 9);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationStartFailed: Caller cancellation should emit no failure or consume the lifecycle")]
+    public async Task Application_AlreadyCancelledStart_ShouldNotReportOrConsumeLifecycle()
+    {
+        // Arrange
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
+        var order = new List<string>();
+        builder.AddService(new RecordingService(order));
+        await using var application = builder.Build();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var recorder = new HostingEventRecorder(EventLevel.Informational);
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(() => ((IHost)application).StartAsync(cancellation.Token));
+
+        // Assert
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 8 || entry.EventId == 9 || entry.EventId == 10);
+        order.ShouldBeEmpty();
+        await ((IHost)application).StartAsync(CancellationToken.None);
+        await ((IHost)application).StopAsync(CancellationToken.None);
+        order.ShouldBe(["service:start", "service:stop"]);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 10);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationStartFailed: A rejected restart should emit no failure")]
+    public async Task Application_RejectedSecondLifecycle_ShouldNotReportFailure()
+    {
+        // Arrange
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
+        var order = new List<string>();
+        builder.AddService(new RecordingService(order));
+        await using var application = builder.Build();
+        await ((IHost)application).StartAsync(CancellationToken.None);
+        await ((IHost)application).StopAsync(CancellationToken.None);
+        using var recorder = new HostingEventRecorder(EventLevel.Informational);
+
+        // Act
+        var failure = await Should.ThrowAsync<InvalidOperationException>(
+            () => ((IHost)application).StartAsync(CancellationToken.None));
+
+        // Assert
+        failure.Message.ShouldBe("A database application supports only one start lifecycle.");
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 8 || entry.EventId == 9 || entry.EventId == 10);
+        order.ShouldBe(["service:start", "service:stop"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationDisposeFailed: Should report aggregate disposal failure only once")]
     public async Task DisposeAsync_FailedOwnedEngine_ShouldReportOnce()
     {

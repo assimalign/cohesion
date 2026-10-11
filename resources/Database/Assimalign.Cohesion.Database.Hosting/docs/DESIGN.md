@@ -139,10 +139,14 @@ The module raises its own events through one internal event source, named for th
 Batch D part 1 reserves **16-17** for `HealthDegraded` and `HealthRestored` after decision 49a.
 Build reports only after the resource integration hook succeeds. The existing host lifecycle hooks
 report actual start/stop transitions; repeated start/stop no-ops write nothing. The shared host's
-`OnStartFailedAsync` hook (#1441, owner decision 2026-10-11) writes event 10 once per failed start,
+`OnStartFailedAsync` hook (#1441, owner decision 2026-10-11) writes event 10 once per accepted failed start,
 after rollback and the host's transition to `Failed`, on direct start and complete-run paths. The
 hook receives the failure the caller receives, including a normalized startup timeout; it preserves
-that failure. A failure of the hook itself is attached by the shared host to the original exception's
+that failure. Caller cancellation and rejection by `OnStartingAsync` (including a second lifecycle)
+write no event 10. An already-cancelled start writes neither event 8 nor 10 and consumes no lifecycle;
+a later uncancelled start is still allowed. Reporting runs on a worker with the shared host's fixed
+one-second budget and independent cancellation token. A late hook fault is observed without changing
+the propagated failure or a later start's record. A hook failure or reporting timeout is attached by the shared host to the original exception's
 `Data` when writable (see the [Hosting DESIGN](../../../../libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md)), so diagnostics cannot replace the startup failure. Start and stop
 measure their own operation only while an Informational listener is attached; a listener attaching
 mid-operation sees zero duration. These are lifetime names, not EventSource Start/Stop activity pairs.
