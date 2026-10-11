@@ -41,6 +41,17 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// stream, so <see cref="Input"/> is a thin delegating reader that fails a read once the receiving direction
 /// was aborted; a read in flight at the abort fails in <see cref="QuicStream"/> itself.
 /// </para>
+/// <para>
+/// Each half ends on its own (#1330). The pipes leave the <see cref="QuicStream"/> open when they complete,
+/// and the halves the holder sees end only their own direction: completing <see cref="Output"/> flushes and
+/// sends the FIN (<see cref="QuicStream.CompleteWrites"/>), or <c>RESET_STREAM</c> with the default code
+/// when it is completed with an error, and leaves the stream readable until the peer ends its side;
+/// completing <see cref="Input"/> stops the receiving direction with the default code (<c>STOP_SENDING</c>),
+/// unless it has already ended, and leaves the sending direction alone. Once every usable half has been
+/// completed the stream is finished, so it is disposed in the background, and
+/// <see cref="DisposeAsync"/> waits for that disposal. Neither completion signals
+/// <see cref="ConnectionClosed"/>: a half the holder ends is a half-close, not an abort.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
@@ -55,12 +66,18 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     private readonly Action<QuicStreamConnection> _onDisposed;
     private readonly CancellationTokenSource _connectionClosedSource = new();
     private readonly Lock _stateLock = new();
+    // Completed once the QuicStream is disposed, whoever started it (see ReleaseStream).
+    private readonly TaskCompletionSource _streamReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private volatile ConnectionState _state;
     // Set by AbortRead: every later read of Input fails, buffered octets included.
     private volatile bool _readAborted;
     private bool _isDisposed;
     private int _closeReported;
+    // The usable halves the holder has not completed yet; the last one to complete releases the stream.
+    private int _openHalves;
+    // Interlocked one-shot: the QuicStream's disposal has started.
+    private int _releaseStarted;
 
     /// <summary>
     /// Creates a new connection over the supplied QUIC stream. The connection takes ownership
@@ -108,8 +125,9 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
             ? new AbortableInput(this, PipeReader.Create(stream, streamOptions.ReaderOptions))
             : PipeReader.Create(Stream.Null);
         Output = stream.CanWrite
-            ? PipeWriter.Create(stream, streamOptions.WriterOptions)
+            ? new HalfClosingOutput(this, PipeWriter.Create(stream, streamOptions.WriterOptions))
             : UnwritablePipeWriter.Instance;
+        _openHalves = (stream.CanRead ? 1 : 0) + (stream.CanWrite ? 1 : 0);
         _state = ConnectionState.Open;
 
         if (stream.CanRead)
@@ -231,7 +249,10 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
             // closed — routine for streams released after their owning connection closed.
         }
 
-        await _stream.DisposeAsync().ConfigureAwait(false);
+        // Completing the last open half has started the release; a half whose completion threw has not,
+        // so the release is started here too. Either way this waits for it, as the owning connection's
+        // disposal needs: a bidirectional stream's FIN and data are delivered before the connection closes.
+        await ReleaseStream().ConfigureAwait(false);
 
         CancelConnectionClosedToken();
 
@@ -266,6 +287,92 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         catch (QuicException)
         {
             // The stream or its connection has already ended.
+        }
+    }
+
+    // The holder completed Output: end the sending direction alone — the FIN after the flushed data, or
+    // RESET_STREAM with the default code when Output was completed with an error. QuicStream ends each
+    // direction once, so a direction already aborted with a code keeps it.
+    private void EndWrites(Exception? exception)
+    {
+        try
+        {
+            if (exception is null)
+            {
+                _stream.CompleteWrites();
+            }
+            else
+            {
+                AbortDirection(QuicAbortDirection.Write, _defaultStreamErrorCode);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException included: the stream was released underneath (an abort or the
+            // connection's teardown), so there is no direction left to end.
+        }
+        catch (QuicException)
+        {
+            // The stream or its connection has already ended.
+        }
+        finally
+        {
+            OnHalfCompleted();
+        }
+    }
+
+    // The holder completed Input: stop the receiving direction with the default code (STOP_SENDING) unless it
+    // has already ended — read to its end, or aborted with a code — and leave the sending direction alone.
+    private void EndReads()
+    {
+        try
+        {
+            AbortDirection(QuicAbortDirection.Read, _defaultStreamErrorCode);
+        }
+        finally
+        {
+            OnHalfCompleted();
+        }
+    }
+
+    private void OnHalfCompleted()
+    {
+        if (Interlocked.Decrement(ref _openHalves) == 0)
+        {
+            // Every usable half is done, so the stream is finished: release it without waiting.
+            _ = ReleaseStream();
+        }
+    }
+
+    // Disposes the QuicStream once, whoever asks first: the completion of the last open half, or DisposeAsync.
+    // QuicStream.DisposeAsync ends a direction still open (reads with the default code, writes gracefully)
+    // and waits for the stream's shutdown to complete, which a graceful FIN reaches once the peer has the data.
+    private Task ReleaseStream()
+    {
+        if (Interlocked.Exchange(ref _releaseStarted, 1) == 0)
+        {
+            _ = ReleaseStreamCoreAsync();
+        }
+
+        return _streamReleased.Task;
+    }
+
+    private async Task ReleaseStreamCoreAsync()
+    {
+        try
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (QuicException)
+        {
+            // The connection is gone underneath the stream; there is nothing left to shut down.
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            _streamReleased.TrySetResult();
         }
     }
 
@@ -321,12 +428,14 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
     /// every read once <see cref="AbortRead(long)"/> abandoned the receiving direction. The pipe it delegates
     /// to returns octets it has buffered but the holder has not examined without reading the stream, so the
     /// check is made before each read; a read already waiting on the stream fails in <see cref="QuicStream"/>.
-    /// Everything else passes straight through, so a read before the abort costs one flag check.
+    /// Completing it ends the receiving direction alone (<see cref="EndReads"/>), once. Everything else passes
+    /// straight through, so a read before the abort costs one flag check.
     /// </summary>
     private sealed class AbortableInput : PipeReader
     {
         private readonly QuicStreamConnection _connection;
         private readonly PipeReader _inner;
+        private int _completed;
 
         public AbortableInput(QuicStreamConnection connection, PipeReader inner)
         {
@@ -340,9 +449,39 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
 
         public override void CancelPendingRead() => _inner.CancelPendingRead();
 
-        public override void Complete(Exception? exception = null) => _inner.Complete(exception);
+        public override void Complete(Exception? exception = null)
+        {
+            if (Interlocked.Exchange(ref _completed, 1) == 1)
+            {
+                return;
+            }
 
-        public override ValueTask CompleteAsync(Exception? exception = null) => _inner.CompleteAsync(exception);
+            try
+            {
+                _inner.Complete(exception);
+            }
+            finally
+            {
+                _connection.EndReads();
+            }
+        }
+
+        public override async ValueTask CompleteAsync(Exception? exception = null)
+        {
+            if (Interlocked.Exchange(ref _completed, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                await _inner.CompleteAsync(exception).ConfigureAwait(false);
+            }
+            finally
+            {
+                _connection.EndReads();
+            }
+        }
 
         public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
         {
@@ -366,6 +505,75 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
             return _connection._readAborted
                 ? ValueTask.FromException<ReadResult>(ReadAborted())
                 : _inner.ReadAtLeastAsync(minimumSize, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// The writable stream's <see cref="Output"/>: a <see cref="PipeWriter"/> over the QUIC stream whose
+    /// completion ends the sending direction alone (#1330) — it flushes what the pipe holds, then sends the
+    /// FIN, or <c>RESET_STREAM</c> with the default code when completed with an error, and leaves the stream
+    /// readable (<see cref="EndWrites"/>), once. Everything else passes straight through.
+    /// </summary>
+    private sealed class HalfClosingOutput : PipeWriter
+    {
+        private readonly QuicStreamConnection _connection;
+        private readonly PipeWriter _inner;
+        private int _completed;
+
+        public HalfClosingOutput(QuicStreamConnection connection, PipeWriter inner)
+        {
+            _connection = connection;
+            _inner = inner;
+        }
+
+        public override bool CanGetUnflushedBytes => _inner.CanGetUnflushedBytes;
+
+        public override long UnflushedBytes => _inner.UnflushedBytes;
+
+        public override void Advance(int bytes) => _inner.Advance(bytes);
+
+        public override Memory<byte> GetMemory(int sizeHint = 0) => _inner.GetMemory(sizeHint);
+
+        public override Span<byte> GetSpan(int sizeHint = 0) => _inner.GetSpan(sizeHint);
+
+        public override void CancelPendingFlush() => _inner.CancelPendingFlush();
+
+        public override ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default) => _inner.FlushAsync(cancellationToken);
+
+        public override ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default) => _inner.WriteAsync(source, cancellationToken);
+
+        public override void Complete(Exception? exception = null)
+        {
+            if (Interlocked.Exchange(ref _completed, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                _inner.Complete(exception);
+            }
+            finally
+            {
+                _connection.EndWrites(exception);
+            }
+        }
+
+        public override async ValueTask CompleteAsync(Exception? exception = null)
+        {
+            if (Interlocked.Exchange(ref _completed, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                await _inner.CompleteAsync(exception).ConfigureAwait(false);
+            }
+            finally
+            {
+                _connection.EndWrites(exception);
+            }
         }
     }
 }

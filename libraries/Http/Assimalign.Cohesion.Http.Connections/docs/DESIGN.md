@@ -3925,14 +3925,17 @@ up to five seconds before ending each response, and a larger upload still failed
 at the client. The drain is gone: `STOP_SENDING(H3_NO_ERROR)` is what the client
 expects, at any upload size, with no wait.
 
-**Order on the QUIC driver.** Completing a QUIC stream's `Output` or `Input`
-disposes the whole QUIC stream (its pipes are created with `leaveOpen: false`,
-see #1330), and the disposal stops a read direction still open with the default
-code. So the refusal goes out after the response body is flushed (on the
+**Order.** RFC 9114 §4.1 permits stopping the request before the response
+completes: abort reading, finish the response, then end the sending direction
+cleanly. So the refusal goes out after the response body is flushed (on the
 streamed path, before its trailers and final flush) and before the FIN, and the
-input pipe is released after the FIN (`StopReading`). RFC 9114 §4.1 permits
-stopping the request before the response completes: abort reading, finish the
-response, then end the sending direction cleanly.
+input pipe is released after the FIN (`StopReading`). Since #1330 the QUIC
+driver ends each direction on its own — completing `Output` sends the FIN and
+leaves the stream readable, completing `Input` stops only the receiving
+direction, and the stream is disposed once both are done — so the order is the
+RFC's rather than a constraint of the driver. Before #1330, completing either
+pipe disposed the whole QUIC stream, which stopped an unread request with the
+default code.
 
 A **HEAD** response carries its HEADERS frame and no DATA frame or trailer
 section, on the buffered and the streaming path alike (RFC 9110 §9.3.2). The buffered path synthesizes a
@@ -4756,14 +4759,15 @@ sequenceDiagram
   and returns without waiting, because the BCL WebSocket disposes its stream
   synchronously under its own lock; the close first wakes any read or write
   still waiting. `DisposeAsync` and `SendAsync` wait for the close. The
-  client may keep sending until it ends its own side.
+  client may keep sending until it ends its own side (see "Half-close",
+  below).
 - **Ending the exchange.** When the handler returns, `SendAsync` ends a tunnel
   the application left open, then removes the stream once both sides have
   ended or stops a client still sending — `RST_STREAM(NO_ERROR)` on HTTP/2
   (RFC 9113 §8.1), `STOP_SENDING(H3_NO_ERROR)` on HTTP/3 (RFC 9114 §4.1) — as
   after any response that completes before its request. On HTTP/3 the stop
-  goes out before the FIN, because on the QUIC driver the FIN releases the
-  stream (see "Known limitation", below). A cancelled
+  goes out before a FIN the application left unsent, in RFC 9114 §4.1's
+  order. A cancelled
   exchange, or a tunnel whose head never reached the wire, is reset instead:
   `RST_STREAM(CANCEL)`, RFC 8441 §5's abortive close, or
   `H3_REQUEST_CANCELLED`. No second head is ever written.
@@ -4776,20 +4780,26 @@ sequenceDiagram
   graceful close waits for it only within the drain window before teardown
   aborts it.
 
-### Known limitation: half-close on the QUIC driver
+### Half-close
 
-The QUIC connection driver backs a stream's output with a pipe writer that
-does not leave the `QuicStream` open, so completing it — the FIN — disposes
-the stream, which also stops its read side with the driver's default error
-code. On real QUIC, ending the server's side therefore ends the tunnel in
-both directions: a server that closes first cannot read what the client
-still sends. A WebSocket closes after its close handshake, when nothing more
-is expected, so it is unaffected. A write-only half-close needs the QUIC driver
-to complete only the write direction when the output completes (#1330). It
-builds on the per-direction, code-carrying abort that #1080 added to the
-connection contracts, which already puts `H3_NO_ERROR` on the wire (see
-"Request streams: dispatch at HEADERS, lazy body"). The in-memory driver
-half-closes exactly.
+Closing the tunnel ends only the server's sending direction, on every driver.
+On HTTP/3 the close completes the request stream's output pipe, and since #1330
+the QUIC driver maps that to the FIN alone (`QuicStream.CompleteWrites`): the
+stream stays readable, so the client can keep sending — more than QUIC's
+stream window, since the request stream is still read — until it ends its own
+side, or until the exchange ends and the transport stops it with
+`STOP_SENDING(H3_NO_ERROR)`. The tunnel `Stream` itself refuses reads once it
+is closed, so after closing, the handler reads what the client still sends
+through the exchange's request body, which carries the CONNECT's `DATA`;
+`Http3ExtendedConnectRoundTripTests` does exactly that over real QUIC. The
+in-memory driver has always half-closed this way.
+
+Before #1330 the QUIC driver's pipes did not leave the `QuicStream` open, so
+completing the output disposed the stream and stopped its read side with the
+driver's default code (`H3_REQUEST_CANCELLED`): ending the server's side ended
+the tunnel in both directions, and a server that closed first could not read
+what the client still sent. A WebSocket, which closes after its close
+handshake, was unaffected.
 
 ### AOT posture
 

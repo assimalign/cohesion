@@ -88,10 +88,11 @@ public sealed class QuicConnectionListenerOptions
     /// <para>
     /// The code goes on the wire only where the driver ends a direction on its own:
     /// <see cref="IConnection.Abort(Exception)"/> and <see cref="IAsyncDisposable.DisposeAsync"/> on a
-    /// stream, and completing a stream's <see cref="System.IO.Pipelines.IDuplexPipe.Input"/> or
-    /// <see cref="System.IO.Pipelines.IDuplexPipe.Output"/>, which releases the QUIC stream and stops a
-    /// receiving direction still open. A direction aborted through <see cref="IMultiplexedStreamAbort"/>
-    /// carries the caller's code instead, and keeps it when the stream is later aborted or disposed.
+    /// stream; completing a stream's <see cref="System.IO.Pipelines.IDuplexPipe.Input"/>, which stops a
+    /// receiving direction still open; and completing its <see cref="System.IO.Pipelines.IDuplexPipe.Output"/>
+    /// with an error, which resets the sending direction (a clean completion sends the FIN). A direction
+    /// aborted through <see cref="IMultiplexedStreamAbort"/> carries the caller's code instead, and keeps
+    /// it when the stream is later aborted or disposed.
     /// </para>
     /// <para>
     /// Defaults to <c>0x10c</c> — HTTP/3 <c>H3_REQUEST_CANCELLED</c> (RFC 9114 §8.1) — matching

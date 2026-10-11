@@ -2405,8 +2405,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         await FlushResponseAsync(http3Context, stream, cancellationToken).ConfigureAwait(false);
 
         // RFC 9114 §4.1 — the complete response is flushed, so the rest of an unread request is refused
-        // with STOP_SENDING(H3_NO_ERROR). It goes out before the FIN: on the QUIC driver, ending the
-        // response releases the stream, which would stop an unread request with the default code instead.
+        // with STOP_SENDING(H3_NO_ERROR) — abort reading, finish the response, then end the sending
+        // direction. The FIN ends the write side alone (#1330), so the order is the RFC's, not the driver's.
         requestBody.RefuseRemainder();
 
         // RFC 9114 §4.1 — an HTTP/3 response body is delimited by the request stream's end, so the
@@ -2599,8 +2599,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// Ends the request stream's write side once the final response is fully written, emitting the
     /// graceful QUIC FIN that delimits an HTTP/3 response body (RFC 9114 §4.1). Completing the
     /// connection's outbound <see cref="PipeWriter"/> is the <see cref="IConnection"/> contract's
-    /// documented half-close signal. Best-effort: the response bytes are already flushed to the
-    /// transport, so a teardown race that disposes the stream underneath the completion is benign.
+    /// documented half-close signal: the read side stays open until the request stream stops reading
+    /// (#1330). Best-effort: the response bytes are already flushed to the transport, so a teardown race
+    /// that disposes the stream underneath the completion is benign.
     /// </summary>
     /// <param name="streamConnection">The request stream whose write side is ended.</param>
     private static void CompleteResponseStreamWrites(IConnection streamConnection)

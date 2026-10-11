@@ -54,12 +54,18 @@ await listener.BindAsync(cancellationToken);
 IMultiplexedConnection connection = await listener.AcceptAsync(cancellationToken);
 IConnection stream = await connection.AcceptStreamAsync(cancellationToken);
 
-// Refuse the rest of the peer's data with a code of the protocol's choosing (STOP_SENDING),
-// then end this side gracefully.
+// End this side gracefully (FIN). The stream stays readable: the peer may keep sending
+// until it ends its own side.
+await stream.Output.CompleteAsync();
+ReadResult rest = await stream.Input.ReadAsync(cancellationToken);
+
+// Or refuse the rest of the peer's data with a code of the protocol's choosing (STOP_SENDING).
+// Completing Input without one stops it with DefaultStreamErrorCode. Once both halves are
+// complete the QUIC stream is released.
 if (stream is IMultiplexedStreamAbort abort)
 {
     abort.AbortRead(0x100); // H3_NO_ERROR
 }
 
-await stream.Output.CompleteAsync();
+await stream.Input.CompleteAsync();
 ```

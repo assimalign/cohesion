@@ -284,13 +284,13 @@ Why this shape:
 - **Two named members, not a direction enum.** Each direction has its own frame and fails something
   different on the peer, its reads or its writes. `ConnectionDirection` says which halves a stream has, not
   which to abort.
-- **The half-close of #1330 builds on it.** The QUIC driver's stream pipes are created with
-  `leaveOpen: false`, so completing either `Input` or `Output` disposes the QUIC stream: ending one direction
-  ends both, and the disposal stops an unread direction with the default code. #1330 maps `Output`
-  completion to the FIN alone and `Input` completion to a read-direction abort with the default code. A
-  consumer that needs another code calls `AbortRead` first, and the first signal wins. Until then a consumer
-  that ends its sending direction while the peer is still sending calls `AbortRead` before completing
-  `Output`, as the HTTP/3 transport does after a complete response.
+- **The half-close of #1330 builds on it.** The QUIC driver maps `Output` completion to the FIN alone
+  (`RESET_STREAM` with the default code when `Output` is completed with an error) and `Input` completion to a
+  read-direction abort with the default code, and disposes the QUIC stream once both are done — the
+  `IConnection` half-close the contract always described. A consumer that needs another code for an unread
+  direction calls `AbortRead` first, and the first signal wins, as the HTTP/3 transport does after a complete
+  response. Before #1330 the driver's stream pipes were created with `leaveOpen: false`, so completing either
+  one disposed the QUIC stream: ending one direction ended both.
 
 ### Precedents
 

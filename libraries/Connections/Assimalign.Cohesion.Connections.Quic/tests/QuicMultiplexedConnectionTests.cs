@@ -575,6 +575,144 @@ public class QuicMultiplexedConnectionTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: Completing Output should send the FIN and keep reading the peer's data")]
+    public async Task CompleteOutput_WhilePeerStillSends_ShouldSendFinAndKeepReading()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — more than the stream's flow-control window follows the server's FIN, so the server must
+        // keep reading for the client to finish (#1330).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        byte[] response = [9, 8, 7];
+        byte[] upload = new byte[512 * 1024];
+        Random.Shared.NextBytes(upload);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act — the server ends its side first.
+            await serverStream.Output.WriteAsync(response, cancellation.Token);
+            await serverStream.Output.CompleteAsync();
+
+            byte[] received = await ReadBytesAsync(clientStream.Input, response.Length, cancellation.Token);
+            ReadResult end = await clientStream.Input.ReadAsync(cancellation.Token);
+            clientStream.Input.AdvanceTo(end.Buffer.End);
+
+            Task sending = SendAndFinishAsync(clientStream, upload, cancellation.Token);
+            byte[] uploaded = await ReadBytesAsync(serverStream.Input, upload.Length, cancellation.Token);
+            ReadResult uploadEnd = await serverStream.Input.ReadAsync(cancellation.Token);
+            await sending;
+
+            // Assert — the client saw the response and the FIN; the server read the whole upload and its FIN,
+            // and neither end saw the stream abandoned.
+            received.ShouldBe(response);
+            end.IsCompleted.ShouldBeTrue();
+            end.Buffer.IsEmpty.ShouldBeTrue();
+            uploaded.ShouldBe(upload);
+            uploadEnd.IsCompleted.ShouldBeTrue();
+            uploadEnd.Buffer.IsEmpty.ShouldBeTrue();
+            serverStream.State.ShouldBe(ConnectionState.Open);
+            serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+            clientStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: Completing Input should stop the peer with the default code and keep writing")]
+    public async Task CompleteInput_WhilePeerStillReads_ShouldStopReadingAndKeepWriting()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+        byte[] response = [6, 5, 4];
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act — the server stops reading, then still answers.
+            await serverStream.Input.CompleteAsync();
+            QuicException stopped = await WaitForClientWriteFailureAsync(clientStream, cancellation.Token);
+
+            await serverStream.Output.WriteAsync(response, cancellation.Token);
+            await serverStream.Output.CompleteAsync();
+
+            byte[] received = await ReadBytesAsync(clientStream.Input, response.Length, cancellation.Token);
+            ReadResult end = await clientStream.Input.ReadAsync(cancellation.Token);
+
+            // Assert — STOP_SENDING carried the default code, and the response arrived whole with its FIN.
+            stopped.QuicError.ShouldBe(QuicError.StreamAborted);
+            stopped.ApplicationErrorCode.ShouldBe(sentinelStreamErrorCode);
+            received.ShouldBe(response);
+            end.IsCompleted.ShouldBeTrue();
+            end.Buffer.IsEmpty.ShouldBeTrue();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: Completing Output with an error should reset the sending direction")]
+    public async Task CompleteOutput_WithError_ShouldResetTheSendingDirection()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token, WithSentinelCodes);
+        (Connection clientStream, Connection serverStream) = await OpenAcceptedStreamAsync(pair, cancellation.Token);
+
+        await using (clientStream)
+        await using (serverStream)
+        {
+            // Act — an abnormal end of the sending direction must not look like a complete one.
+            await serverStream.Output.CompleteAsync(new InvalidOperationException("the response failed"));
+
+            // Assert — RESET_STREAM with the default code, never a FIN; the server can still read.
+            QuicException reset = await Should.ThrowAsync<QuicException>(
+                async () => await clientStream.Input.ReadAsync(cancellation.Token));
+            reset.QuicError.ShouldBe(QuicError.StreamAborted);
+            reset.ApplicationErrorCode.ShouldBe(sentinelStreamErrorCode);
+
+            await clientStream.Output.WriteAsync(new byte[] { 3 }, cancellation.Token);
+            (await ReadBytesAsync(serverStream.Input, 1, cancellation.Token)).ShouldBe(new byte[] { 3 });
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream half-close: The stream pipes should leave the QUIC stream open when they complete")]
+    public void CreateStreamOptions_ShouldLeaveTheStreamOpen()
+    {
+        // Arrange — no QUIC needed: the driver ends each direction itself, so neither pipe adapter may
+        // dispose the stream underneath the other direction (#1330).
+        QuicConnectionListenerOptions listenerOptions = new();
+        QuicConnectionFactoryOptions factoryOptions = new();
+
+        // Act
+        using StreamPipeOptionsContext server = listenerOptions.CreateStreamOptions();
+        using StreamPipeOptionsContext client = factoryOptions.CreateStreamOptions();
+
+        // Assert
+        server.ReaderOptions.LeaveOpen.ShouldBeTrue();
+        server.WriterOptions.LeaveOpen.ShouldBeTrue();
+        client.ReaderOptions.LeaveOpen.ShouldBeTrue();
+        client.WriterOptions.LeaveOpen.ShouldBeTrue();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Connections.Quic] - Stream abort: A code outside the QUIC range should be rejected")]
     [InlineData(-1L)]
     [InlineData(1L << 62)]
@@ -684,6 +822,22 @@ public class QuicMultiplexedConnectionTests
         await ReadBytesAsync(serverStream.Input, 1, cancellationToken);
 
         return (clientStream, serverStream);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="payload"/> in 16 KiB pieces, each flushed, then ends the stream's sending
+    /// direction with its FIN.
+    /// </summary>
+    private static async Task SendAndFinishAsync(Connection stream, byte[] payload, CancellationToken cancellationToken)
+    {
+        const int piece = 16 * 1024;
+
+        for (int offset = 0; offset < payload.Length; offset += piece)
+        {
+            await stream.Output.WriteAsync(payload.AsMemory(offset, Math.Min(piece, payload.Length - offset)), cancellationToken);
+        }
+
+        await stream.Output.CompleteAsync();
     }
 
     /// <summary>

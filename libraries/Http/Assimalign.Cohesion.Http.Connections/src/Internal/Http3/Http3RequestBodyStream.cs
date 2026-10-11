@@ -61,10 +61,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </para>
 /// <para>
 /// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
-/// particular it never completes the input pipe — on the QUIC driver that would dispose the whole QUIC
-/// stream, response direction included. The send path refuses the rest of an unread request before the
-/// response's FIN unless its FIN has already arrived (<see cref="RefuseRemainder"/>), and releases the input
-/// once the complete response is on the wire (<see cref="StopReading"/>).
+/// particular it never completes the input pipe: completing it stops the request stream's receiving
+/// direction, which is the send path's decision once the response is done, not the application's. The
+/// send path refuses the rest of an unread request before the response's FIN unless its FIN has already
+/// arrived (<see cref="RefuseRemainder"/>), and releases the input once the complete response is on the
+/// wire (<see cref="StopReading"/>). The FIN ends only the response direction (#1330), so the request
+/// stream stays readable until then — after an extended CONNECT tunnel's server side has ended, too.
 /// </para>
 /// <para>
 /// <b>CONNECT.</b> For a CONNECT request the DATA frames carry tunnel octets rather than a message body
@@ -300,10 +302,11 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// flushed (on the streamed path, before its trailers and final flush), or its tunnel is done: the peer
     /// is asked to stop sending with <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1, which permits stopping
     /// the request before the response completes), and no application read follows. Called before the
-    /// response's FIN, because on the QUIC driver ending the response releases the stream, which would stop
-    /// an unread request with the driver's default code instead — a code .NET's <c>HttpClient</c> reports as
-    /// a failed request even after a complete response. A body read to its end, a request whose FIN has
-    /// already arrived, or a reset stream needs no signal. Idempotent.
+    /// response's FIN, in RFC 9114 §4.1's order: abort reading, finish the response, then end the sending
+    /// direction. Without it, releasing the input would stop an unread request with the driver's default
+    /// code instead — a code .NET's <c>HttpClient</c> reports as a failed request even after a complete
+    /// response. A body read to its end, a request whose FIN has already arrived, or a reset stream needs no
+    /// signal. Idempotent.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -414,8 +417,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     protected override void Dispose(bool disposing)
     {
         // The request stream belongs to the exchange, not to this body: disposal only bars further reads
-        // and must never complete the input pipe (on the QUIC driver that disposes the whole QUIC stream,
-        // response direction included). The send path stops reading once the response is complete.
+        // and must never complete the input pipe, which would stop the request stream's receiving direction
+        // with the driver's default code. The send path stops reading once the response is complete.
         _disposed = true;
         base.Dispose(disposing);
     }
@@ -903,8 +906,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
         catch (IOException)
         {
-            // Completing the QUIC driver's reader disposes the QUIC stream, which raises a QuicException
-            // (an IOException) when the stream or its connection is already gone.
+            // A driver's reader can fail its completion when the stream or its connection is already gone
+            // (the QUIC driver's QuicException is an IOException).
         }
     }
 

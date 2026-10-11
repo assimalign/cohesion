@@ -48,10 +48,30 @@ it, then immediately fall back to the `IMultiplexedConnection` /
   `StreamPipeOptionsContext` (one adaptive memory pool per connection,
   not per stream), owned by the connection and disposed last, after all
   streams and the QUIC connection have released their buffers.
-- The stream pipes are created with `leaveOpen: false`, so completing a
-  stream's `Output` is the graceful write-side close: the pipe flushes
-  remaining bytes and disposes the `QuicStream`, which sends FIN and
-  waits for the peer to acknowledge delivery.
+- **Each half ends on its own (#1330).** The stream pipes are created with
+  `leaveOpen: true`, and the halves a holder sees end only their own
+  direction:
+  - completing `Output` flushes what the pipe holds and sends the FIN
+    (`QuicStream.CompleteWrites`), and the stream stays readable until the
+    peer ends its side. Completing it with an error sends `RESET_STREAM`
+    with `DefaultStreamErrorCode` instead, so an abnormal end never looks
+    like a complete one;
+  - completing `Input` stops the receiving direction with
+    `DefaultStreamErrorCode` (`STOP_SENDING`), unless it has already
+    ended — read to its end, or stopped with a code — and leaves the
+    sending direction alone.
+
+  Once every usable half has been completed the stream is finished, so the
+  `QuicStream` is disposed in the background — it waits for the stream's
+  shutdown, which a graceful FIN reaches once the peer has the data — and
+  the stream's `DisposeAsync` waits for that same disposal. That keeps the
+  connection-first teardown below intact: a bidirectional stream disposed by
+  its connection still delivers its FIN before the `CONNECTION_CLOSE`.
+  Neither completion signals the stream's `ConnectionClosed` or changes its
+  `State`: a half the holder ends is a half-close, not an abort. Before
+  #1330 the pipes were created with `leaveOpen: false`, so completing either
+  one disposed the `QuicStream` synchronously, which ended both directions
+  and blocked the completing thread until the peer acknowledged the FIN.
 
 ## Handshake facts
 
@@ -159,9 +179,9 @@ is routine for streams released after their owning connection closed.
   serving a different ALPN protocol overrides the codes alongside
   `ApplicationProtocols`. The defaults apply only where the caller gives
   no code (see "Application error codes"): the stream default on a
-  stream's `Abort(Exception?)`, its disposal, and the completion of its
-  `Input` or `Output`; the close default on the connection's
-  `Abort(Exception?)` and disposal. The options' XML docs say the same.
+  stream's `Abort(Exception?)`, its disposal, the completion of its
+  `Input`, and the completion of its `Output` with an error; the close
+  default on the connection's `Abort(Exception?)` and disposal. The options' XML docs say the same.
 
 ## Application error codes
 
@@ -198,14 +218,13 @@ The driver implements the contracts library's two code-carrying facets
   driver swallows `ObjectDisposedException` and `QuicException` there. A
   code outside 0 to 2^62 - 1 throws `ArgumentOutOfRangeException` before
   the stream is touched.
-- **Abort the read direction before completing `Output` on an unread
-  stream.** Completing either pipe disposes the `QuicStream`
-  (`leaveOpen: false`), and the disposal stops a read direction that is
-  still open with `DefaultStreamErrorCode`. A protocol that ends its
-  sending direction while the peer is still sending therefore calls
-  `AbortRead` with its own code first. #1330 separates the two
-  directions, so that completing `Output` sends the FIN and leaves
-  reading open.
+- **Completing a half uses the default code; abort first for another.**
+  Completing `Input` on a stream the peer is still sending stops it with
+  `DefaultStreamErrorCode`, and completing `Output` with an error resets
+  with it. A protocol that wants its own code calls `AbortRead` or
+  `AbortWrite` first, and the completion then leaves that direction alone.
+  Completing `Output` cleanly needs nothing first: it sends the FIN and
+  leaves reading open (#1330), so the peer may keep sending.
 
 ## Diagnostics
 

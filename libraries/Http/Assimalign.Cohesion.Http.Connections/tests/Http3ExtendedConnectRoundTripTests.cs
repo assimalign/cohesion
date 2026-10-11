@@ -96,6 +96,71 @@ public class Http3ExtendedConnectRoundTripTests
         echoed.AsSpan().SequenceEqual(upload).ShouldBeTrue("the echo should match the upload octet for octet");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 ExtendedConnect: After the server ends its side over real QUIC, the request stream should still deliver the client's data")]
+    public async Task Tunnel_OnServerEndingItsSideFirstOverRealQuic_ShouldStillReadTheClientsData()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the handler sends a farewell, ends its side of the tunnel (the FIN), then reads what the
+        // client still sends through the exchange's request body, which carries the CONNECT's DATA. Before
+        // #1330 the QUIC driver disposed the stream with the FIN, so the client was stopped with the default
+        // code and the read failed.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        byte[] farewell = "server done"u8.ToArray();
+        byte[] upload = Http2TestPeer.CreateBody(1024 * 1024);
+        TaskCompletionSource<byte[]> serverRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(async exchange =>
+        {
+            try
+            {
+                Stream tunnel = await exchange.ExtendedConnect!.AcceptAsync(cancellationToken);
+                await tunnel.WriteAsync(farewell, cancellationToken);
+                await tunnel.DisposeAsync();
+
+                using MemoryStream received = new();
+                await exchange.Request.Body.CopyToAsync(received, cancellationToken);
+                serverRead.TrySetResult(received.ToArray());
+            }
+            catch (Exception exception)
+            {
+                serverRead.TrySetException(exception);
+            }
+        },
+        configure: null,
+        configureListener: static options => options.Interceptors.Add(HttpExtendedConnect.CreateInterceptor()),
+        cancellationToken);
+
+        await using QuicConnection connection = await QuicConnection.ConnectAsync(CreateClientOptions(server.BaseUri.Port), cancellationToken);
+        await using QuicStream stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Bidirectional, cancellationToken);
+        Http3FrameCollector output = new(PipeReader.Create(stream, new StreamPipeReaderOptions(leaveOpen: true)));
+
+        await stream.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/proxy"),
+            (":authority", "localhost")), cancellationToken);
+        await output.ReadUntilAsync(collector => collector.IsCompleted, "the server's FIN after its farewell");
+
+        // Act — the client keeps sending after the server's FIN: more than QUIC's stream window, so the
+        // server must keep reading for the transfer to finish.
+        await SendAsync(stream, upload, cancellationToken);
+        byte[] read = await serverRead.Task.WaitAsync(cancellationToken);
+        await stream.WritesClosed.WaitAsync(cancellationToken);
+
+        // Assert — the server's side ended cleanly after its farewell, and it read the client's whole transfer.
+        output.Failure.ShouldBeNull();
+        HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(output.Frames[0].Payload)[":status"].ShouldBe("200");
+        output.DataPayload().ShouldBe(farewell);
+        read.Length.ShouldBe(upload.Length);
+        read.AsSpan().SequenceEqual(upload).ShouldBeTrue("the server should read the client's data octet for octet");
+    }
+
     private static async Task SendAsync(QuicStream stream, byte[] payload, CancellationToken cancellationToken)
     {
         const int chunk = 64 * 1024;

@@ -22,8 +22,9 @@ internal sealed partial class Http3ConnectionContext
     /// <item><description><b>Otherwise</b> — a peer still sending is told to stop with
     /// <c>STOP_SENDING(H3_NO_ERROR)</c> (RFC 9114 §4.1), as after any response that completes before its
     /// request, then the server's side is ended with a FIN if the application left it open, and reading
-    /// stops. The stop goes first because on the QUIC driver the FIN releases the stream, which would stop
-    /// the peer with the default code instead.</description></item>
+    /// stops — RFC 9114 §4.1's order. A tunnel the application closed earlier ended only its sending
+    /// direction (#1330), so the client could keep sending until now, and a request body read to its end
+    /// needs no stop.</description></item>
     /// </list>
     /// The after-response interceptor hooks do not run: the tunnel took the exchange over.
     /// </remarks>
