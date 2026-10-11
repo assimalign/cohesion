@@ -1612,8 +1612,11 @@ the callback list, so a handler that catches the failure cannot retry an incompl
 transport aborts/reset the exchange before writing its final response, rather than sending a 500.
 This differs from completion callbacks, which isolate failures after a response is already sent.
 
-A head refused by `InvalidResponseField` is still unstarted. Successful starting callbacks do not
-run again. Their header edits (added/changed values and removals) are captured as a delta, and the
+A head refused by `InvalidResponseField` is still unstarted. Http.Streaming now reads the same
+transport commitment state for `HasStarted` (#1388), so a refused `StartAsync` or `CompleteAsync`
+can be retried, or the handler can stage a buffered replacement. This does not reopen starting
+registration: successful starting callbacks do not run again. Their header edits (added/changed
+values and removals) are captured as a delta, and the
 server reapplies that delta immediately before an unstarted buffered send, after clearing a refused
 response for its own bodyless 500. This also covers a boundary or handler that clears the refused
 streamed head and stages a buffered replacement. Status and body are the replacement's; application

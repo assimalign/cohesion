@@ -23,7 +23,8 @@ namespace Assimalign.Cohesion.Http;
 /// <b>Header-commit timing (the load-bearing rule).</b> The response status line and header block
 /// are committed to the wire exactly once, at the moment the response <em>starts</em> — the first of
 /// <see cref="StartAsync"/>, <see cref="WriteAsync"/>, <see cref="FlushAsync"/>, or
-/// <see cref="CompleteAsync"/> to run. After the response has started (<see cref="HasStarted"/> is
+/// <see cref="CompleteAsync"/> that commits the head. A head refused before commitment does not start
+/// the response. After the response has started (<see cref="HasStarted"/> is
 /// <see langword="true"/>) the status code and headers are <em>locked</em>: they have already been
 /// transmitted, so further mutation has no effect on the wire. Set every header before the first
 /// call.
@@ -33,7 +34,7 @@ namespace Assimalign.Cohesion.Http;
 /// coding when no <c>Content-Length</c> was set; HTTP/2 and HTTP/3 emit incremental <c>DATA</c>
 /// frames. Writes respect transport flow control and therefore <em>await</em> available send credit
 /// rather than buffering unbounded. The wire terminator is emitted when the transport finalizes the
-/// exchange; <see cref="CompleteAsync"/> flushes and forbids further writes.
+/// exchange; <see cref="CompleteAsync"/> forbids further writes only after its flush succeeds.
 /// </para>
 /// <para>
 /// <b>Threading.</b> Like <see cref="System.IO.Stream"/>, an implementation is <em>not</em> safe for
@@ -45,23 +46,30 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// <summary>
     /// Gets a value indicating whether the response has started — that is, whether the status line
     /// and headers have been committed to the wire. Once <see langword="true"/>, the status code and
-    /// headers are locked.
+    /// headers are locked, including when the committing call later fails while writing or flushing.
     /// </summary>
+    /// <remarks>
+    /// The default implementation observes the transport's <see cref="IHttpExchangeControl.HasResponseStarted"/>
+    /// when the interceptor context provides exchange control. Without that optional control, it uses a
+    /// fallback latch advanced only by successful sink calls. A head refused with
+    /// <see cref="HttpErrorCode.InvalidResponseField"/> leaves this property false and permits a retry or
+    /// buffered replacement. Such recovery does not rerun response-starting callbacks.
+    /// </remarks>
     bool HasStarted { get; }
 
     /// <summary>
     /// Starts the response by committing the status line and header block to the transport, locking
-    /// the status code and headers. Idempotent.
+    /// the status code and headers. Idempotent after commitment; a refused head may be corrected and retried.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the header write.</param>
     /// <returns>A task that completes when the head has been flushed to the transport.</returns>
     /// <exception cref="HttpException">
-    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call attempted to start the
     /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
     /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
     /// before any of it is written, so nothing was written and the exchange's response has not started
-    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
-    /// still be answered with another response.
+    /// (<see cref="HasStarted"/> and <see cref="IHttpExchangeControl.HasResponseStarted"/> stay
+    /// <see langword="false"/>): correct the invalid fields and retry, or answer with a buffered replacement.
     /// </exception>
     ValueTask StartAsync(CancellationToken cancellationToken = default);
 
@@ -74,12 +82,12 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// <returns>A task that completes when the bytes have been handed to the transport.</returns>
     /// <exception cref="InvalidOperationException">The response has already been completed.</exception>
     /// <exception cref="HttpException">
-    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call attempted to start the
     /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
     /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
     /// before any of it is written, so nothing was written and the exchange's response has not started
-    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
-    /// still be answered with another response.
+    /// (<see cref="HasStarted"/> and <see cref="IHttpExchangeControl.HasResponseStarted"/> stay
+    /// <see langword="false"/>): correct the invalid fields and retry, or answer with a buffered replacement.
     /// </exception>
     ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default);
 
@@ -91,17 +99,18 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// <returns>A task that completes when the buffered bytes have been flushed.</returns>
     /// <exception cref="InvalidOperationException">The response has already been completed.</exception>
     /// <exception cref="HttpException">
-    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call attempted to start the
     /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
     /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
     /// before any of it is written, so nothing was written and the exchange's response has not started
-    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
-    /// still be answered with another response.
+    /// (<see cref="HasStarted"/> and <see cref="IHttpExchangeControl.HasResponseStarted"/> stay
+    /// <see langword="false"/>): correct the invalid fields and retry, or answer with a buffered replacement.
     /// </exception>
     ValueTask FlushAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Completes the response body: flushes and forbids further writes. Idempotent. Starts the
+    /// Completes the response body: flushes and, only after that flush succeeds, forbids further writes.
+    /// Idempotent after successful completion; a refused completion may be corrected and retried. Starts the
     /// response first if it never started — so calling only <see cref="CompleteAsync"/> still commits
     /// the head and locks the headers (an empty streamed response). The transport emits the wire
     /// end-of-body marker (terminating zero-length chunk / <c>END_STREAM</c>) when it finalizes the
@@ -110,12 +119,12 @@ public interface IHttpResponseStreamingFeature : IHttpFeature
     /// <param name="cancellationToken">A token to cancel the completion.</param>
     /// <returns>A task that completes when the body has been flushed.</returns>
     /// <exception cref="HttpException">
-    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call started the
+    /// <see cref="HttpException.Code"/> is <see cref="HttpErrorCode.InvalidResponseField"/>: this call attempted to start the
     /// response, and the transport refused one of its fields: a name that is not a token, or a value with a
     /// control character other than HTAB, CR, LF, and NUL among them (RFC 9110 §5.1, §5.5). The head is checked
     /// before any of it is written, so nothing was written and the exchange's response has not started
-    /// (<see cref="IHttpExchangeControl.HasResponseStarted"/> stays <see langword="false"/>): the exchange can
-    /// still be answered with another response.
+    /// (<see cref="HasStarted"/> and <see cref="IHttpExchangeControl.HasResponseStarted"/> stay
+    /// <see langword="false"/>): correct the invalid fields and retry, or answer with a buffered replacement.
     /// </exception>
     ValueTask CompleteAsync(CancellationToken cancellationToken = default);
 }

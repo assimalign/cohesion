@@ -14,6 +14,7 @@ using Xunit;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Testing;
 using Assimalign.Cohesion.Web.WebSockets.Tests.TestObjects;
@@ -578,6 +579,178 @@ public class ResponseStartingFeatureTests
         response.Status.ShouldBeNull();
         response.HeadCount.ShouldBe(0);
         response.Body.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Streaming: A refused head stays unstarted and preserves starting headers on a buffered replacement")]
+    [InlineData(1, "start")]
+    [InlineData(1, "write")]
+    [InlineData(1, "flush")]
+    [InlineData(1, "complete")]
+    [InlineData(2, "start")]
+    [InlineData(2, "write")]
+    [InlineData(2, "flush")]
+    [InlineData(2, "complete")]
+    [InlineData(3, "start")]
+    [InlineData(3, "write")]
+    [InlineData(3, "flush")]
+    [InlineData(3, "complete")]
+    public async Task StreamingOperation_RefusedHead_ShouldStayUnstartedForBufferedReplacement(int protocol, string operation)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_timeout);
+        HttpErrorCode? refusalCode = null;
+        bool? featureStartedInCallback = null;
+        bool? exchangeStartedInCallback = null;
+        bool? featureStartedAfterRefusal = null;
+        bool? exchangeStartedAfterRefusal = null;
+        int calls = 0;
+
+        // Act
+        ResponseSnapshot response = await SendAsync(protocol, async context =>
+        {
+            IHttpResponseStreamingFeature streaming = context.Response.Streaming;
+            StageRefusedResponse(context, () => calls++);
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                // Record rather than assert inside the hook: a failed assertion would itself
+                // abort the exchange before the transport's InvalidResponseField refusal.
+                featureStartedInCallback = streaming.HasStarted;
+                exchangeStartedInCallback = context.HasResponseStarted;
+                return Task.CompletedTask;
+            }, null);
+
+            try
+            {
+                await InvokeStreamingOperationAsync(streaming, operation, cancellation.Token);
+            }
+            catch (HttpException refused)
+            {
+                refusalCode = refused.Code;
+            }
+
+            featureStartedAfterRefusal = streaming.HasStarted;
+            exchangeStartedAfterRefusal = context.HasResponseStarted;
+            context.Response.Headers.Clear();
+            context.Response.StatusCode = HttpStatusCode.BadGateway;
+            context.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("replacement"));
+        }, cancellation.Token);
+
+        // Assert
+        refusalCode.ShouldBe(HttpErrorCode.InvalidResponseField);
+        featureStartedInCallback.ShouldBe(false);
+        exchangeStartedInCallback.ShouldBe(false);
+        featureStartedAfterRefusal.ShouldBe(false);
+        exchangeStartedAfterRefusal.ShouldBe(false);
+        response.Failure.ShouldBeNull();
+        response.Status.ShouldBe(502);
+        response.HeadCount.ShouldBe(1);
+        response.Body.ShouldBe("replacement");
+        response.Headers["x-starting-security"].ShouldBe("nosniff");
+        response.Headers["vary"].ShouldBe("Accept-Encoding, Origin");
+        response.Headers.ContainsKey("x-invalid").ShouldBeFalse();
+        calls.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Streaming: A refused operation can retry and completion forbids writes only after succeeding")]
+    [InlineData(1, "start")]
+    [InlineData(1, "write")]
+    [InlineData(1, "flush")]
+    [InlineData(1, "complete")]
+    [InlineData(2, "start")]
+    [InlineData(2, "write")]
+    [InlineData(2, "flush")]
+    [InlineData(2, "complete")]
+    [InlineData(3, "start")]
+    [InlineData(3, "write")]
+    [InlineData(3, "flush")]
+    [InlineData(3, "complete")]
+    public async Task StreamingOperation_RefusedHead_ShouldAllowTheSameOperationToRetry(int protocol, string operation)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_timeout);
+        HttpErrorCode? refusalCode = null;
+        bool? featureStartedInCallback = null;
+        bool? featureStartedAfterRefusal = null;
+        bool? exchangeStartedAfterRefusal = null;
+        bool? featureStartedAfterRetry = null;
+        bool? exchangeStartedAfterRetry = null;
+        Exception? writeAfterCompletion = null;
+        int calls = 0;
+
+        // Act
+        ResponseSnapshot response = await SendAsync(protocol, async context =>
+        {
+            IHttpResponseStreamingFeature streaming = context.Response.Streaming;
+            StageRefusedResponse(context, () => calls++);
+            context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
+            {
+                featureStartedInCallback = streaming.HasStarted;
+                return Task.CompletedTask;
+            }, null);
+
+            try
+            {
+                await InvokeStreamingOperationAsync(streaming, operation, cancellation.Token);
+            }
+            catch (HttpException refused)
+            {
+                refusalCode = refused.Code;
+            }
+
+            featureStartedAfterRefusal = streaming.HasStarted;
+            exchangeStartedAfterRefusal = context.HasResponseStarted;
+            context.Response.Headers.Remove(_invalid);
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            await InvokeStreamingOperationAsync(streaming, operation, cancellation.Token);
+            featureStartedAfterRetry = streaming.HasStarted;
+            exchangeStartedAfterRetry = context.HasResponseStarted;
+
+            // Complete is idempotent after its successful call, including when it was itself
+            // the retried operation. The write guard must now apply to every path.
+            await streaming.CompleteAsync(cancellation.Token);
+            await streaming.CompleteAsync(cancellation.Token);
+
+            try
+            {
+                await streaming.WriteAsync(Encoding.ASCII.GetBytes("after completion"), cancellation.Token);
+            }
+            catch (InvalidOperationException exception)
+            {
+                writeAfterCompletion = exception;
+            }
+        }, cancellation.Token);
+
+        // Assert
+        refusalCode.ShouldBe(HttpErrorCode.InvalidResponseField);
+        featureStartedInCallback.ShouldBe(false);
+        featureStartedAfterRefusal.ShouldBe(false);
+        exchangeStartedAfterRefusal.ShouldBe(false);
+        featureStartedAfterRetry.ShouldBe(true);
+        exchangeStartedAfterRetry.ShouldBe(true);
+        writeAfterCompletion.ShouldBeOfType<InvalidOperationException>();
+        response.Failure.ShouldBeNull();
+        response.Status.ShouldBe(200);
+        response.HeadCount.ShouldBe(1);
+        response.Body.ShouldBe(operation == "write" ? "streamed" : string.Empty);
+        response.Headers["x-starting-security"].ShouldBe("nosniff");
+        response.Headers["vary"].ShouldBe("Accept-Encoding, Origin");
+        response.Headers.ContainsKey("x-invalid").ShouldBeFalse();
+        calls.ShouldBe(1);
+    }
+
+    private static ValueTask InvokeStreamingOperationAsync(
+        IHttpResponseStreamingFeature streaming,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        return operation switch
+        {
+            "start" => streaming.StartAsync(cancellationToken),
+            "write" => streaming.WriteAsync(Encoding.ASCII.GetBytes("streamed"), cancellationToken),
+            "flush" => streaming.FlushAsync(cancellationToken),
+            "complete" => streaming.CompleteAsync(cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+        };
     }
 
     private static void StageRefusedResponse(IHttpContext context, Action recordCallback)

@@ -13,6 +13,6 @@ internal sealed class HttpResponseStreamingInterceptor : HttpExchangeInterceptor
 
     public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
-        context.Features.Set(new HttpResponseStreamingFeature(context.ResponseBody));
+        context.Features.Set(new HttpResponseStreamingFeature(context.ResponseBody, context.Control));
     }
 }
