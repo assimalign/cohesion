@@ -264,12 +264,14 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
 /// A minimal <see cref="IHttpContext"/> exchange double. Only the members the server touches are
 /// implemented: the protocol version (which selects sequential or concurrent dispatch), the
 /// cancellation surface, and disposal. <see cref="Response"/> exists only when a test supplies one —
-/// the server reshapes a response solely to answer a faulted exchange with a 500 — and the rest
-/// throw to prove the server never reads request state during dispatch.
+/// the server reshapes a response solely to answer a faulted exchange with a 500 — and so does
+/// <see cref="Request"/>, which only instrumented telemetry reads; the rest throw to prove the server
+/// never reads request state during dispatch.
 /// </summary>
 internal sealed class FakeHttpContext : IHttpContext
 {
     private readonly IHttpResponse? _response;
+    private readonly IHttpRequest? _request;
 
     private int _disposeCount;
     private int _cancelCount;
@@ -277,10 +279,12 @@ internal sealed class FakeHttpContext : IHttpContext
     public FakeHttpContext(
         HttpVersion version = HttpVersion.Http11,
         IHttpResponse? response = null,
-        CancellationToken requestCancelled = default)
+        CancellationToken requestCancelled = default,
+        IHttpRequest? request = null)
     {
         Version = version;
         _response = response;
+        _request = request;
         RequestCancelled = requestCancelled;
     }
 
@@ -298,7 +302,7 @@ internal sealed class FakeHttpContext : IHttpContext
 
     public HttpVersion Version { get; }
 
-    public IHttpRequest Request => throw new NotSupportedException();
+    public IHttpRequest Request => _request ?? throw new NotSupportedException();
 
     public IHttpResponse Response => _response ?? throw new NotSupportedException();
 
@@ -342,6 +346,51 @@ internal sealed class FakeHttpResponse : IHttpResponse
     public IHttpContext HttpContext => throw new NotSupportedException();
 
     public Stream Body { get; set; } = new MemoryStream();
+}
+
+/// <summary>
+/// A request double for the telemetry tests: a <c>GET</c> to a supplied path and query that counts how
+/// often its query is read, so a test can show that a request no listener observes is never inspected.
+/// </summary>
+internal sealed class FakeHttpRequest : IHttpRequest
+{
+    private readonly IHttpQueryCollection _query;
+
+    private int _queryReads;
+
+    public FakeHttpRequest(string path, string query)
+    {
+        Path = new HttpPath(path);
+        _query = new HttpQuery(query).Parse();
+    }
+
+    /// <summary>
+    /// Gets how many times <see cref="Query"/> was read.
+    /// </summary>
+    public int QueryReads => Volatile.Read(ref _queryReads);
+
+    public HttpHost Host { get; } = new("localhost");
+
+    public HttpPath Path { get; }
+
+    public HttpMethod Method => HttpMethod.Get;
+
+    public HttpScheme Scheme => HttpScheme.Http;
+
+    public IHttpQueryCollection Query
+    {
+        get
+        {
+            Interlocked.Increment(ref _queryReads);
+            return _query;
+        }
+    }
+
+    public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
+
+    public IHttpContext HttpContext => throw new NotSupportedException();
+
+    public Stream Body => Stream.Null;
 }
 
 /// <summary>

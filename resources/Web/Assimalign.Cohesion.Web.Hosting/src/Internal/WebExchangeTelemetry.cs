@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
@@ -40,6 +41,7 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
     private const string httpResponseStatusCode = "http.response.status_code";
     private const string httpRoute = "http.route";
     private const string urlPath = "url.path";
+    private const string urlQuery = "url.query";
     private const string urlScheme = "url.scheme";
     private const string serverAddress = "server.address";
     private const string serverPort = "server.port";
@@ -95,8 +97,12 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
     /// Starts the exchange's telemetry and installs it as the exchange's <see cref="IWebRequestIdFeature"/>.
     /// </summary>
     /// <param name="exchange">The exchange about to run its pipeline.</param>
+    /// <param name="shownQueryValues">
+    /// The query parameters whose values the span's <c>url.query</c> shows, or <see langword="null"/> to
+    /// redact every value. Read only when the span is created.
+    /// </param>
     /// <returns>The exchange's telemetry, which the server stops once the exchange is finalized.</returns>
-    public static WebExchangeTelemetry Start(IHttpContext exchange)
+    public static WebExchangeTelemetry Start(IHttpContext exchange, FrozenSet<string>? shownQueryValues)
     {
         WebExchangeTelemetry telemetry = new(exchange);
 
@@ -110,7 +116,7 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
 
             if (traced || timed || counted)
             {
-                telemetry.Instrument(traced, timed, counted);
+                telemetry.Instrument(traced, timed, counted, shownQueryValues);
             }
         }
         // Deviates from the repo "catch specific exceptions" rule per design decision: listener callbacks
@@ -209,7 +215,7 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
     /// </summary>
     private bool IsClientFault() => _exchange.Features.Get<IWebClientFaultFeature>()?.StatusCode is not null;
 
-    private void Instrument(bool traced, bool timed, bool counted)
+    private void Instrument(bool traced, bool timed, bool counted, FrozenSet<string>? shownQueryValues)
     {
         IHttpRequest request = _exchange.Request;
         string method = WebServerTelemetry.GetMethodAttribute(request.Method, out bool known);
@@ -233,11 +239,11 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
         if (traced)
         {
             _spanName = known ? method : WebServerTelemetry.OtherMethodSpanName;
-            _activity = StartActivity(request, known);
+            _activity = StartActivity(request, known, shownQueryValues);
         }
     }
 
-    private Activity? StartActivity(IHttpRequest request, bool knownMethod)
+    private Activity? StartActivity(IHttpRequest request, bool knownMethod, FrozenSet<string>? shownQueryValues)
     {
         TryGetRemoteParent(request.Headers, includeTraceState: true, out ActivityContext parent);
 
@@ -258,6 +264,14 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature
         }
 
         tags.Add(urlPath, request.Path.Value ?? "/");
+
+        // Conditionally required when the request carried a query, and a creation-time attribute. Values
+        // are redacted unless the application declared their parameter safe (#1298). With it the list
+        // holds eight tags at most, which TagList keeps inline.
+        if (WebServerTelemetry.GetQueryAttribute(request.Query, shownQueryValues) is { } query)
+        {
+            tags.Add(urlQuery, query);
+        }
 
         if (_scheme is not null)
         {

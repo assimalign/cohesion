@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Net;
 using System.Threading;
@@ -53,6 +54,11 @@ public sealed class WebApplicationServerBuilder
     // server's factory runs the listener configurations, just before the factory reads it, and an
     // explicit LimitConcurrentConnections call takes precedence over it.
     private int? _configuredMaxConcurrentConnections;
+
+    // The query parameters whose values the default server's request spans show in url.query, compared
+    // as HttpQueryKey compares names. Null (the default) redacts every value; frozen when the server is
+    // created.
+    private HashSet<string>? _telemetryQueryValues;
 
     internal void OwnEndpointCertificate(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate) => _builder.OwnEndpointCertificate(certificate);
 
@@ -111,6 +117,7 @@ public sealed class WebApplicationServerBuilder
                 MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections,
                 // The application's logging (builder.Logging), created once with the server.
                 Logger = serviceProvider.GetRequiredService<ILoggerFactory>().Create(WebApplicationServerLog.Category),
+                TelemetryQueryValues = _telemetryQueryValues?.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             });
         });
     }
@@ -140,6 +147,39 @@ public sealed class WebApplicationServerBuilder
         }
 
         _maxConcurrentConnections = maxConcurrentConnections;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Declares query parameters whose values the default server's request spans may show.
+    /// </summary>
+    /// <remarks>
+    /// The default server tags the span of every request that carries a query with <c>url.query</c>, as
+    /// the OpenTelemetry HTTP server conventions require. Each parameter's value is replaced with
+    /// <c>REDACTED</c> by default, because a query string can carry tokens, signatures and personal data
+    /// that the server cannot recognize; the names stay, so the span still shows the query's shape. A
+    /// parameter named here keeps its value. Names compare case-insensitively, as the request's query
+    /// collection compares them, and repeated calls add to the names already declared. Name only
+    /// parameters whose values are safe to send to a telemetry backend. Nothing is read or written when
+    /// no activity listener subscribes to the server's source.
+    /// </remarks>
+    /// <param name="parameterNames">The names of the query parameters whose values are safe to show.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="parameterNames"/> or one of the names is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when one of the names is empty.</exception>
+    public WebApplicationServerBuilder AllowQueryValuesInTelemetry(params string[] parameterNames)
+    {
+        ArgumentNullException.ThrowIfNull(parameterNames);
+
+        // Every name is checked before any is kept, so a rejected call declares nothing.
+        foreach (string parameterName in parameterNames)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(parameterName, nameof(parameterNames));
+        }
+
+        _telemetryQueryValues ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _telemetryQueryValues.UnionWith(parameterNames);
 
         return this;
     }

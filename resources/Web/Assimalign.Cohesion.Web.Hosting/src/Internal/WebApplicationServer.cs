@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -66,6 +67,9 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     // budget cut short.
     private readonly WebApplicationServerLog _log;
 
+    // The query parameters whose values a request span's url.query shows; null redacts every value.
+    private readonly FrozenSet<string>? _telemetryQueryValues;
+
     // The exchanges being served on every connection, reported when a stop's budget runs out.
     private int _exchangesInFlight;
 
@@ -94,6 +98,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         _listener = options.Listener
             ?? throw new ArgumentException("A listener must be configured on the server options.", nameof(options));
         _log = new WebApplicationServerLog(options.Logger);
+        _telemetryQueryValues = options.TelemetryQueryValues;
         _drainFeature = new WebServerDrainFeature(_drain.Draining);
 
         if (options.MaxConcurrentConnections is int limit)
@@ -545,7 +550,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         bool multiplexed,
         CancellationToken cancellationToken)
     {
-        WebExchangeTelemetry telemetry = WebExchangeTelemetry.Start(exchange);
+        WebExchangeTelemetry telemetry = WebExchangeTelemetry.Start(exchange, _telemetryQueryValues);
         Interlocked.Increment(ref _exchangesInFlight);
 
         try

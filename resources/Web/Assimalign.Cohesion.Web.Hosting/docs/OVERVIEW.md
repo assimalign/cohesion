@@ -61,6 +61,13 @@ The default server traces and measures every request (#1064). Subscribe by name:
 - **Request id:** `context.Features.Get<IWebRequestIdFeature>()?.RequestId` is the request's trace id,
   with or without a listener.
 
+A request's span carries its query as `url.query` with every value redacted
+(`access_token=REDACTED&page=REDACTED`). Declare the parameters whose values are safe to show:
+
+```csharp
+builder.Server.AllowQueryValuesInTelemetry("page", "sort");
+```
+
 With no listener the server creates no activity and records nothing. Exporting these signals is not
 this module's job; see [Design](DESIGN.md), "Server telemetry", for the attributes, the outcomes and
 what is deliberately not emitted.

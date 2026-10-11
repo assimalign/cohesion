@@ -105,6 +105,7 @@ public class WebServerTelemetryTests
 
         span.GetTagItem("http.request.method").ShouldBe("GET");
         span.GetTagItem("url.path").ShouldBe("/telemetry/parented");
+        span.GetTagItem("url.query").ShouldBeNull();
         span.GetTagItem("url.scheme").ShouldBe("http");
         span.GetTagItem("server.address").ShouldBe("localhost");
         span.GetTagItem("server.port").ShouldBe(5080);
@@ -818,6 +819,156 @@ public class WebServerTelemetryTests
         {
             response.Dispose();
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A request with a query should tag url.query with every value redacted and the names kept")]
+    public async Task ServerSpan_RequestWithQuery_ShouldTagUrlQueryWithEveryValueRedacted()
+    {
+        // Arrange — a token, an ordinary parameter, and a parameter without a value (#1298).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+
+        string path = $"/telemetry/query/{Guid.NewGuid():N}";
+
+        await using WebApplicationTestFactory factory = new();
+
+        factory.Application.Use((context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+            return Task.CompletedTask;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync($"{path}?access_token=s3cr3t&page=2&debug", cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NoContent);
+        span.GetTagItem("url.query").ShouldBe("access_token=REDACTED&page=REDACTED&debug");
+        span.TagObjects.Select(tag => tag.Value as string).ShouldNotContain(text => text != null && text.Contains("s3cr3t"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: Query parameters the application declares safe should keep their values in url.query")]
+    public async Task ServerSpan_QueryParametersDeclaredSafe_ShouldShowTheirValues()
+    {
+        // Arrange — names compare case-insensitively, as the query collection compares them, and the
+        // calls add up.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+
+        string path = $"/telemetry/query-shown/{Guid.NewGuid():N}";
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.AllowQueryValuesInTelemetry("page").AllowQueryValuesInTelemetry("SORT", "q");
+
+        factory.Application.Use((context, next) =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+            return Task.CompletedTask;
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync($"{path}?page=2&sort=name&q=a%20b&access_token=s3cr3t", cancellationToken);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NoContent);
+        span.GetTagItem("url.query").ShouldBe("page=2&sort=name&q=a%20b&access_token=REDACTED");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: The request's query should be read only when a span listener subscribes")]
+    public void Start_WithoutSpanListener_ShouldNotReadTheQuery()
+    {
+        // Arrange — the same exchange with nobody listening, with only the meter listened to, and with the
+        // source listened to.
+        FakeHttpRequest unobserved = new($"/telemetry/zero-cost/{Guid.NewGuid():N}", "access_token=s3cr3t");
+        FakeHttpRequest measured = new($"/telemetry/zero-cost/{Guid.NewGuid():N}", "access_token=s3cr3t");
+        FakeHttpRequest traced = new($"/telemetry/zero-cost/{Guid.NewGuid():N}", "access_token=s3cr3t");
+        Activity span;
+
+        // Act
+        Serve(unobserved);
+
+        using (new TelemetryRecorder(traces: false))
+        {
+            Serve(measured);
+        }
+
+        using (TelemetryRecorder recorder = new(metrics: false))
+        {
+            Serve(traced);
+            span = recorder.Stopped.Single(a => Equals(a.GetTagItem("url.path"), traced.Path.Value));
+        }
+
+        // Assert
+        unobserved.QueryReads.ShouldBe(0);
+        measured.QueryReads.ShouldBe(0);
+        traced.QueryReads.ShouldBe(1);
+        span.GetTagItem("url.query").ShouldBe("access_token=REDACTED");
+
+        static void Serve(FakeHttpRequest request)
+        {
+            FakeHttpContext exchange = new(response: new FakeHttpResponse(), request: request);
+            WebExchangeTelemetry telemetry = WebExchangeTelemetry.Start(exchange, shownQueryValues: null);
+            telemetry.SetOutcome(responded: true, canceled: false);
+            telemetry.Stop();
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: url.query should redact every value and keep every name")]
+    [InlineData("", null)]
+    [InlineData("access_token=s3cr3t", "access_token=REDACTED")]
+    [InlineData("a=1&b=2", "a=REDACTED&b=REDACTED")]
+    [InlineData("flag&empty=&token=s3cr3t", "flag&empty&token=REDACTED")]
+    [InlineData("a%20b=1&%C3%A9=2", "a%20b=REDACTED&%C3%A9=REDACTED")]
+    [InlineData("=orphan&a=1", "a=REDACTED")]
+    public void GetQueryAttribute_NoParameterDeclaredSafe_ShouldRedactEveryValue(string query, string? expected)
+    {
+        // Arrange
+        IHttpQueryCollection parsed = new HttpQuery(query).Parse();
+
+        // Act
+        string? attribute = WebServerTelemetry.GetQueryAttribute(parsed, shownValues: null);
+
+        // Assert
+        attribute.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: url.query should show the values of the parameters declared safe, re-encoded")]
+    public void GetQueryAttribute_ParametersDeclaredSafe_ShouldShowTheirValuesReEncoded()
+    {
+        // Arrange
+        FrozenSet<string> shown = new[] { "page", "Sort", "q" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        IHttpQueryCollection parsed = new HttpQuery("PAGE=2&sort=name&q=a%20b%26c&token=s3cr3t").Parse();
+
+        // Act
+        string? attribute = WebServerTelemetry.GetQueryAttribute(parsed, shown);
+
+        // Assert
+        attribute.ShouldBe("PAGE=2&sort=name&q=a%20b%26c&token=REDACTED");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - AllowQueryValuesInTelemetry: A missing or empty name should be rejected")]
+    public void AllowQueryValuesInTelemetry_MissingOrEmptyName_ShouldThrow()
+    {
+        // Arrange
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+
+        // Act
+        Exception missingList = Should.Throw<ArgumentNullException>(() => builder.Server.AllowQueryValuesInTelemetry(null!));
+        Exception missingName = Should.Throw<ArgumentNullException>(() => builder.Server.AllowQueryValuesInTelemetry("page", null!));
+        Exception emptyName = Should.Throw<ArgumentException>(() => builder.Server.AllowQueryValuesInTelemetry(string.Empty));
+
+        // Assert
+        missingList.ShouldBeOfType<ArgumentNullException>();
+        missingName.ShouldBeOfType<ArgumentNullException>();
+        emptyName.ShouldBeOfType<ArgumentException>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: The known-method list should default to the semantic convention's and be replaceable")]

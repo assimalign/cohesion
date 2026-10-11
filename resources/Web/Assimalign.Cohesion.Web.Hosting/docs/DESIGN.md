@@ -606,6 +606,7 @@ nest under it.
 | `http.request.method_original` | when `_OTHER` | no | no | the method token |
 | `url.scheme` | yes | yes | yes | `http` or `https`, as the transport saw the request |
 | `url.path` | yes | no | no | the request path |
+| `url.query` | when the request has a query | no | no | the query's parameters, each value replaced by `REDACTED` unless the application declared the parameter safe (#1298) |
 | `server.address`, `server.port` | yes | no | no | the `Host` or `:authority` host, and its port when the value carries one |
 | `network.protocol.version` | yes | yes | no | `1.1`, `2` or `3` |
 | `http.route` | when routed | when routed | no | `IWebEndpointFeature.RouteTemplate` |
@@ -625,6 +626,51 @@ read once per process, as the source and meter are process-wide. Methods are cas
 is an unknown method, reported as `_OTHER` with `http.request.method_original` = `get`. A method is
 known only when it matches a list entry exactly, so its original never differs from
 `http.request.method`, and `http.request.method_original` is set only for `_OTHER`.
+
+**`url.query` shows the names and hides the values (#1298).** The convention makes `url.query`
+conditionally required when a query was received, and asks for sensitive content to be scrubbed
+rather than the attribute dropped. A query string carries tokens, signatures, one-time codes and
+personal data that the server cannot recognize generically, so every value is replaced with
+`REDACTED`, the convention's marker, and the parameter names stay: `?access_token=s3cr3t&page=2&debug`
+is reported as `access_token=REDACTED&page=REDACTED&debug`. The span still shows the query's shape,
+which is what an operator reads it for, and no value leaves the process unless the application said
+it may.
+
+- **Declaring values safe.** `builder.Server.AllowQueryValuesInTelemetry("page", "sort")` keeps those
+  parameters' values. Names compare case-insensitively, as `HttpQueryKey` compares them, so the
+  declaration covers every spelling the application itself reads as the same parameter. Calls add
+  to one another, and a missing or empty name is rejected before anything is declared. The set is
+  frozen when the default server is created and handed to it through
+  `WebApplicationServerOptions.TelemetryQueryValues`; no exchange carries it.
+- **A parameter without a value** is written as its name alone. There is nothing to hide, and
+  `REDACTED` would claim a value was sent.
+- **Names are treated as the application's schema.** An application that puts a secret in a
+  parameter's name, such as a bare `?<token>`, gets it reported. Redacting names too would leave
+  only a count of parameters, which is not the attribute the convention defines.
+- **Rebuilt from the parsed query.** `IHttpRequest` carries only the parsed `IHttpQueryCollection`;
+  no transport keeps the raw query string. So the value is normalized: names and shown values are
+  percent-encoded again with `Uri.EscapeDataString`, a parameter with an empty name is left out (the
+  parser skips it), and a repeated name appears once, holding the value the collection kept. The
+  parameters appear in the collection's order, which for the transports' collections is the order
+  they were received. When the collection gains a view of every value of a repeated name (#1335,
+  Stage 13), this is the reader to switch to it.
+- **The received query.** The server reads it before the pipeline runs, so it reports what the client
+  sent, not a `Web.Rewrite` rewrite of it, as it does for `url.path`.
+- **Cost.** It is built only while an `ActivityListener` subscribes to the source, once per span, as
+  one string; it is a creation-time attribute, so samplers can read it. Without a span listener the
+  server never reads the query, and the metrics never carry `url.query`, as the convention defines
+  them.
+
+Rejected:
+
+- **The convention's short list as the default.** It names `AWSAccessKeyId`, `Signature`, `sig` and
+  `X-Goog-Signature`, and misses every application's own tokens (`access_token`, `code`, `state`,
+  `api_key`). Redacting every value fails closed.
+- **The raw query string from the transport.** It would need a new core request member and a change
+  to all three transports' request parsing for one attribute; core Http holds base contracts only
+  (owner decision 20), and the parsed form is enough to show the query's shape.
+- **A process-wide environment variable,** as `OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS` is. Which
+  parameters are safe is the application's knowledge, so the application declares them in code.
 
 **Outcomes and `error.type`.** The server reports how it finalized the exchange; the exception
 itself stays with the error boundary, which does not keep it, and with the hosting logs (#147).
@@ -684,9 +730,7 @@ response. This is the isolation boundary the server keeps around application cod
 
 **Deliberately not emitted.**
 
-- `url.query`, although the convention makes it conditionally required. Query strings carry tokens
-  and signatures that the server cannot recognize generically. An application can tag
-  `Activity.Current` itself.
+- Query values the application has not declared safe (see `url.query` above).
 - Proxy-resolved host and scheme. The convention prefers `Forwarded`/`X-Forwarded-*` values for
   `server.address` and `url.scheme`; the server reports what the transport saw. Those headers are
   believable only after `Web.ForwardedHeaders`' trust evaluation, and reading its result
@@ -701,8 +745,8 @@ response. This is the isolation boundary the server keeps around application cod
   transport does not report them yet either (Http.Connections DESIGN, "Diagnostics").
 - W3C `baggage`.
 
-**AOT.** `ActivitySource`, `Meter`, `TagList`, `ActivityContext.TryParse` and `FrozenSet`: no
-reflection and no runtime code. The Web AOT guard's smoke run subscribes with an `ActivityListener`
+**AOT.** `ActivitySource`, `Meter`, `TagList`, `ActivityContext.TryParse`, `FrozenSet`,
+`Uri.EscapeDataString` and `DefaultInterpolatedStringHandler`: no reflection and no runtime code. The Web AOT guard's smoke run subscribes with an `ActivityListener`
 and a `MeterListener` and checks a routed request's span and duration. In-process listeners need no
 `EventSourceSupport` in a NativeAOT application; tools that read meters out of process through
 EventPipe (`dotnet-counters`) do, as they do for event sources.
@@ -1043,8 +1087,12 @@ request's `http.route` (through real `Web.Routing`); every outcome in the
 `error.type` table; `_OTHER`, including a lower-case `get` written raw and reported with its original
 case; one span per HTTP/2 stream; an ambient activity at server start that
 must not parent requests; the duration and the active-request count; the request id with and
-without a span; and no activity at all without a listener. Listeners are process-wide, so the class
-runs in the non-parallel `TelemetryCollection`.
+without a span; and no activity at all without a listener. `url.query` (#1298) is pinned end to end
+with every value redacted and with values declared safe, and its builder against empty and
+valueless parameters, encoded names and case-insensitive declarations; a request double that counts
+reads of its query (`TestObjects/ServerTestDoubles`, `FakeHttpRequest`) shows the query is read only
+when a span listener subscribes. Listeners are process-wide, so the class runs in the non-parallel
+`TelemetryCollection`.
 
 The lame-duck drain (#146) is pinned by `WebApplicationServerDrainTests`. Against the
 doubles: the stop begins every connection's graceful close and the exchange in flight

@@ -1,5 +1,7 @@
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
+using System.Collections.Frozen;
+
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Logging;
 
@@ -31,4 +33,11 @@ internal sealed class WebApplicationServerOptions
     /// nothing.
     /// </summary>
     public ILogger? Logger { get; set; }
+
+    /// <summary>
+    /// Gets or sets the query parameters whose values the server's request spans show in
+    /// <c>url.query</c>, compared by the set's comparer (the builder's ignores case, as the query
+    /// collection does). <see langword="null"/> (the default) redacts every value.
+    /// </summary>
+    public FrozenSet<string>? TelemetryQueryValues { get; set; }
 }

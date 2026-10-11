@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Frozen;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Http;
 
@@ -62,6 +64,12 @@ internal static class WebServerTelemetry
     /// <c>error.type</c> for a response that could not be put on the wire.
     /// </summary>
     public const string ResponseSendFailed = "response_send_failed";
+
+    /// <summary>
+    /// The text that replaces a query parameter's value in <c>url.query</c>: the redaction marker the
+    /// semantic convention uses.
+    /// </summary>
+    public const string RedactedQueryValue = "REDACTED";
 
     /// <summary>
     /// The source of the server's request spans.
@@ -167,6 +175,68 @@ internal static class WebServerTelemetry
         HttpScheme.Https => "https",
         _ => null,
     };
+
+    /// <summary>
+    /// Gets the <c>url.query</c> value: the request's query parameters with every value replaced by
+    /// <see cref="RedactedQueryValue"/>, except those of the parameters the application declared safe to
+    /// show. Returns <see langword="null"/> when the request carried no query parameter.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A query string carries tokens, signatures and personal data that the server cannot recognize, so
+    /// a value is shown only when the application named its parameter. The names stay, so the span still
+    /// shows the query's shape. A parameter without a value is written as its name alone: there is
+    /// nothing to hide, and writing <see cref="RedactedQueryValue"/> would claim a value was sent.
+    /// </para>
+    /// <para>
+    /// The value is rebuilt from the parsed query, the only form the request carries, so it is
+    /// normalized: names and shown values are percent-encoded again, a parameter with an empty name is
+    /// left out, and a repeated name appears once, as the collection holds it.
+    /// </para>
+    /// </remarks>
+    /// <param name="query">The request's parsed query.</param>
+    /// <param name="shownValues">
+    /// The parameters whose values are shown, compared by the set's comparer, or <see langword="null"/>
+    /// to redact every value.
+    /// </param>
+    /// <returns>The attribute value, or <see langword="null"/>.</returns>
+    public static string? GetQueryAttribute(IHttpQueryCollection query, FrozenSet<string>? shownValues)
+    {
+        if (query.Count == 0)
+        {
+            return null;
+        }
+
+        DefaultInterpolatedStringHandler builder = new(0, 0, CultureInfo.InvariantCulture, stackalloc char[256]);
+        bool first = true;
+
+        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> parameter in query)
+        {
+            if (!first)
+            {
+                builder.AppendLiteral("&");
+            }
+
+            first = false;
+
+            string name = parameter.Key.Value;
+            string value = parameter.Value.Value;
+
+            builder.AppendFormatted(Uri.EscapeDataString(name));
+
+            if (string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+
+            builder.AppendLiteral("=");
+            builder.AppendFormatted(shownValues is not null && shownValues.Contains(name)
+                ? Uri.EscapeDataString(value)
+                : RedactedQueryValue);
+        }
+
+        return builder.ToStringAndClear();
+    }
 
     /// <summary>
     /// Gets the <c>network.protocol.version</c> value, or <see langword="null"/> when the version is
