@@ -244,7 +244,8 @@ internal static class WebServerTelemetry
 
     /// <summary>
     /// Parses a W3C <c>traceparent</c> value into the caller's remote context, reading a later
-    /// version's header by its version-00 fields (W3C Trace Context §3.2, "Versioning of traceparent").
+    /// version's header by its version-00 fields (W3C Trace Context §3.2.4, "Versioning of
+    /// traceparent").
     /// </summary>
     /// <remarks>
     /// <para>

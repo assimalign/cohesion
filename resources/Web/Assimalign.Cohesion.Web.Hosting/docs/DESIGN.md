@@ -593,9 +593,12 @@ flowchart TD
 **The parent is the caller.** The server parses `traceparent` and `tracestate` per W3C Trace Context
 (`WebServerTelemetry.TryParseTraceParent`). A missing, repeated or malformed `traceparent`, or an
 all-zero id, gives no parent, and the request starts a new trace. Repeated `tracestate` fields are
-joined into one list.
+joined into one list. Before it starts the span, the server clears an ambient `Activity.Current`. The
+accept loop inherits whatever activity was current when `StartAsync` ran, and that activity is never
+a request's parent; without the clear, every request of a host started inside an activity would
+nest under it.
 
-**A later version continues the trace (#1299).** W3C Trace Context §3.2, "Versioning of
+**A later version continues the trace (#1299).** W3C Trace Context §3.2.4, "Versioning of
 traceparent", has a parser read a header of a version it does not know by its version-00 fields
 and ignore what follows. `ActivityContext.TryParse` accepts exactly the 55 characters of a
 version-00 header, so a later version with extra fields used to start a new trace, while HTTP
@@ -620,10 +623,7 @@ versions. It does not, because:
   value with trailing fields, which W3C forbids;
 - the reference would ship `Web.Diagnostics` in every area framework that carries this module.
 
-The local check is one short method on top of the BCL parser. Before it starts the span, the server clears an ambient `Activity.Current`. The
-accept loop inherits whatever activity was current when `StartAsync` ran, and that activity is never
-a request's parent; without the clear, every request of a host started inside an activity would
-nest under it.
+The local check is one short method on top of the BCL parser.
 
 **Attributes** follow the stable OpenTelemetry HTTP server conventions:
 

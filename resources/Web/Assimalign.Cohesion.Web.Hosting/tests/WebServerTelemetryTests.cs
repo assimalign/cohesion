@@ -252,7 +252,7 @@ public class WebServerTelemetryTests
     [InlineData("01", "-a1-b2")]
     public async Task ServerSpan_SupportedTraceParentVersion_ShouldContinueTheCallersTrace(string version, string laterFields)
     {
-        // Arrange — W3C Trace Context §3.2, "Versioning of traceparent": a header of a version the server
+        // Arrange — W3C Trace Context §3.2.4, "Versioning of traceparent": a header of a version the server
         // does not know is read by its version-00 fields, and the fields after them are ignored (#1299).
         using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
@@ -1010,7 +1010,7 @@ public class WebServerTelemetryTests
     public void TryParseTraceParent_TraceFlags_ShouldKeepOnlyTheSampledBitOfALaterVersion(string traceParent, int expectedFlags)
     {
         // Act — W3C Trace Context defines the flag bits for version 00; of a later version's flags only
-        // the sampled bit is read (§3.2, "Versioning of traceparent").
+        // the sampled bit is read (§3.2.4, "Versioning of traceparent").
         bool parsed = WebServerTelemetry.TryParseTraceParent(traceParent, "cohesion=1", out ActivityContext context);
 
         // Assert
