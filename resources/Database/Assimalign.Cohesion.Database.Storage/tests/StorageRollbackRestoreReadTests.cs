@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,6 +14,19 @@ using Assimalign.Cohesion.Database.Storage.Units;
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
+/// Runs the rollback-restore races alone: a writer and up to three readers would starve, or be
+/// starved by, other tests running beside them on a small CI runner.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class StorageRollbackRaceCollection
+{
+    /// <summary>
+    /// The collection name.
+    /// </summary>
+    public const string Name = "Storage rollback-restore races";
+}
+
+/// <summary>
 /// A rollback restores each page it changed in place, and a record read holds a pin, not a latch,
 /// so committed records that share a page with a failed bracket's inserts are read while that page
 /// is rewritten. Until the #1371 review the restore cleared the page and then wrote the pre-image's
@@ -22,13 +36,18 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// copy with the page's restore sequence, which <see cref="Storage.TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>,
 /// the model storages' direct record read and the unit iterator confirm their read against.
 /// </summary>
+[Collection(StorageRollbackRaceCollection.Name)]
 public sealed class StorageRollbackRestoreReadTests
 {
     private const ulong Owner = 7;
     private const int CommittedRecords = 30;
     private const int RecordLength = 128;
     private const int FailedInserts = 20;
-    private static readonly TimeSpan RaceDuration = TimeSpan.FromSeconds(2);
+    /// <summary>The shortest time a race runs.</summary>
+    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+
+    /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
+    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// A writer inserts records onto the page that holds 30 committed ones and rolls the bracket
@@ -40,7 +59,7 @@ public sealed class StorageRollbackRestoreReadTests
         // Arrange
         using var storage = TornStorage.Create(poolCapacity: 16);
         var committed = CommitRecords(storage);
-        using var stop = new CancellationTokenSource(RaceDuration);
+        using var stop = new CancellationTokenSource();
         var race = new Race(stop);
         var writer = Task.Run(() => race.RollBackInserts(storage, committed[0].PageId));
 
@@ -74,12 +93,13 @@ public sealed class StorageRollbackRestoreReadTests
             }));
         }
 
+        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
         await Task.WhenAll([writer, .. readers]);
 
         // Assert: the race ran on both sides and no read missed a committed record.
         race.Failure.ShouldBeNull();
-        race.Rollbacks.ShouldBeGreaterThan(0);
-        race.Reads.ShouldBeGreaterThan(0);
+        race.Rollbacks.ShouldBeGreaterThanOrEqualTo(20);
+        race.Reads.ShouldBeGreaterThanOrEqualTo(50);
     }
 
     /// <summary>
@@ -92,7 +112,7 @@ public sealed class StorageRollbackRestoreReadTests
         // Arrange
         using var storage = TornStorage.Create(poolCapacity: 16);
         var committed = CommitRecords(storage);
-        using var stop = new CancellationTokenSource(RaceDuration);
+        using var stop = new CancellationTokenSource();
         var race = new Race(stop);
         var writer = Task.Run(() => race.RollBackInserts(storage, committed[0].PageId));
 
@@ -130,12 +150,13 @@ public sealed class StorageRollbackRestoreReadTests
             }));
         }
 
+        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 20);
         await Task.WhenAll([writer, .. readers]);
 
         // Assert
         race.Failure.ShouldBeNull();
-        race.Rollbacks.ShouldBeGreaterThan(0);
-        race.Reads.ShouldBeGreaterThan(0);
+        race.Rollbacks.ShouldBeGreaterThanOrEqualTo(20);
+        race.Reads.ShouldBeGreaterThanOrEqualTo(20);
     }
 
     /// <summary>
@@ -279,11 +300,17 @@ public sealed class StorageRollbackRestoreReadTests
         return index;
     }
 
-    private sealed class Race(CancellationTokenSource stop)
+    private sealed class Race
     {
+        private readonly CancellationTokenSource _stop;
         private Exception? _failure;
         private long _rollbacks;
         private long _reads;
+
+        public Race(CancellationTokenSource stop)
+        {
+            _stop = stop;
+        }
 
         public Exception? Failure => Volatile.Read(ref _failure);
 
@@ -291,7 +318,24 @@ public sealed class StorageRollbackRestoreReadTests
 
         public long Reads => Interlocked.Read(ref _reads);
 
-        public bool Running => !stop.IsCancellationRequested && Failure is null;
+        public bool Running => !_stop.IsCancellationRequested && Failure is null;
+
+        /// <summary>
+        /// Lets the race run at least <paramref name="minimum"/>, then until
+        /// <paramref name="exercised"/> holds or <paramref name="ceiling"/> more has passed, and stops
+        /// it. Windows CI once ran a fixed two seconds without completing a rollback, so the race's
+        /// own counts decide when it has run long enough.
+        /// </summary>
+        public async Task RunUntilExercisedAsync(TimeSpan minimum, TimeSpan ceiling, Func<bool> exercised)
+        {
+            var elapsed = Stopwatch.StartNew();
+            while (Failure is null && (elapsed.Elapsed < minimum || (!exercised() && elapsed.Elapsed < minimum + ceiling)))
+            {
+                await Task.Delay(50);
+            }
+
+            _stop.Cancel();
+        }
 
         public void CountRead() => Interlocked.Increment(ref _reads);
 
