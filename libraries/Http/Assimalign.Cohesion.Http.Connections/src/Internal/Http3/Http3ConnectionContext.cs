@@ -2950,8 +2950,8 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <summary>
     /// Writes an interim (<c>1xx</c>) response on <paramref name="streamConnection"/>, a request stream
     /// whose final response has not started — the path <see cref="WriteInterimResponseAsync(Http3Context, HttpStatusCode, IHttpHeaderCollection?, CancellationToken)"/>
-    /// takes, open to the request body, which solicits a withheld body with <c>100 Continue</c> at its first
-    /// read even when a request hook reads it before the exchange exists (#1385).
+    /// takes, and the automatic <c>100 Continue</c>'s (<see cref="WriteContinueAsync"/>) when no rate holds
+    /// it.
     /// </summary>
     /// <param name="streamConnection">The request stream.</param>
     /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
@@ -2963,19 +2963,79 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)
     {
+        PipeWriter output = streamConnection.Output;
+        WriteInterimResponseFrame(output, statusCode, headers);
+        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the automatic <c>100 Continue</c> with which a request body's first read solicits a withheld
+    /// body (RFC 9110 §10.1.1, #1385) on <paramref name="streamConnection"/>. Once the exchange exists, the
+    /// flush is held to the minimum data rate its response is held to (#1384): the request's own
+    /// (<see cref="HttpExchangeInterceptorRequestContext.MinResponseDataRate"/>), else the listener's. The rate
+    /// is read without freezing it (<see cref="TransportHttpContext.PeekResponseDataRate"/>), so the request
+    /// may still change it until the response's first write, and the <c>100</c> gets a gate of its own, so a
+    /// stall that the final head's wait for it (<see cref="ClaimFinalResponseHeadAsync"/>) shares is charged
+    /// to the response's allowance only once. A peer that withholds the credit the <c>100</c> needs past the
+    /// allowance has the request stream reset with <c>H3_REQUEST_CANCELLED</c> (<see cref="FailSlowResponse"/>),
+    /// and the read that solicited it throws the exchange's cancellation. The request-body rate does not
+    /// reclaim such a peer: on a driver that stops a stream with a code it stops the receiving direction
+    /// (<c>STOP_SENDING</c>), which never releases the flush. Before the exchange exists (a request hook
+    /// reading the body), there is no response to hold to a rate, and the read's token alone bounds the
+    /// write.
+    /// </summary>
+    /// <param name="context">The exchange the request stream belongs to, or <see langword="null"/> before dispatch.</param>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="cancellationToken">The read's token.</param>
+    /// <returns>A task that completes once the request stream accepted the <c>100</c>.</returns>
+    /// <exception cref="OperationCanceledException">The peer did not take the <c>100</c> at the rate; the exchange was aborted.</exception>
+    internal async ValueTask WriteContinueAsync(Http3Context? context, IConnection streamConnection, CancellationToken cancellationToken)
+    {
+        if (context?.PeekResponseDataRate(_limits.MinResponseDataRate) is not { } rate)
+        {
+            await WriteInterimResponseAsync(streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        MinDataRateGate gate = new(rate, _timeProvider);
+        PipeWriter output = streamConnection.Output;
+        gate.Record(ticksWaited: 0, bytesTransferred: WriteInterimResponseFrame(output, HttpStatusCode.Continue, headers: null));
+
+        bool flushed = await MinDataRateWait.TryRunAsync(
+            gate,
+            output,
+            static (output, token) => FlushInterimResponseAsync(output, token),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!flushed)
+        {
+            throw FailSlowResponse(context);
+        }
+    }
+
+    /// <summary>
+    /// Hands an interim response's HEADERS frame to the request stream's writer, unflushed.
+    /// </summary>
+    /// <returns>The octets handed over.</returns>
+    private static int WriteInterimResponseFrame(PipeWriter output, HttpStatusCode statusCode, IHttpHeaderCollection? headers)
+    {
         byte[] headerBlock = Http3HeaderCodec.EncodeInterimResponseHeaders(statusCode, headers);
 
         // RFC 9114 §7.1 — the whole frame is handed to the request stream's writer before the one flush, so
         // a flush the token cancels never leaves part of a frame behind for the final response to follow,
         // and no write blocks the thread waiting for the peer's credit, as a write through the stream adapter
         // would.
-        PipeWriter output = streamConnection.Output;
         Span<byte> header = output.GetSpan(2 * QuicVariableLengthInteger.MaxLength);
         int headerLength = QuicVariableLengthInteger.Write(header, (long)Http3FrameType.Headers);
         headerLength += QuicVariableLengthInteger.Write(header[headerLength..], headerBlock.Length);
         output.Advance(headerLength);
         output.Write(headerBlock);
 
+        return headerLength + headerBlock.Length;
+    }
+
+    private static async ValueTask FlushInterimResponseAsync(PipeWriter output, CancellationToken cancellationToken)
+    {
         await output.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -2985,7 +3045,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// automatic <c>100 Continue</c> (#1385) the first body read is still writing is waited for, so the two
     /// never share the writer. The wait is held to the response's minimum data rate (#1384), as the head's own
     /// write would be: a peer that withholds the credit the <c>100</c> needs would stall the head too, and a
-    /// spent allowance resets the request stream (<see cref="FailSlowResponse"/>).
+    /// spent allowance resets the request stream (<see cref="FailSlowResponse"/>). The <c>100</c>'s own write
+    /// is held to the rate as well (<see cref="WriteContinueAsync"/>), and its allowance started first, so it
+    /// is usually the <c>100</c> that resets the stream, which ends this wait; the head then fails the same
+    /// way, since no stream is left for it to go out on.
     /// </summary>
     /// <param name="context">The exchange whose final head is about to be written.</param>
     /// <param name="cancellationToken">The caller's token.</param>
@@ -3006,18 +3069,20 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         if (gate is null)
         {
             await continueWritten.WaitAsync(cancellationToken).ConfigureAwait(false);
-            return;
         }
-
-        bool written = await MinDataRateWait.TryRunAsync(
+        else if (!await MinDataRateWait.TryRunAsync(
             gate,
             continueWritten,
             static (written, token) => new ValueTask(written.WaitAsync(token)),
-            cancellationToken).ConfigureAwait(false);
-
-        if (!written)
+            cancellationToken).ConfigureAwait(false))
         {
             throw FailSlowResponse(context);
+        }
+
+        if (context.RequestBody.IsReset)
+        {
+            // The 100's write ran out of its allowance and reset the request stream (WriteContinueAsync).
+            throw context.AbortSlowResponse();
         }
     }
 

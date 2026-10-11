@@ -189,6 +189,19 @@ internal abstract class TransportHttpContext : HttpContext
     }
 
     /// <summary>
+    /// Gets the minimum data rate the response is held to as the request stands, without freezing it: the
+    /// rate <see cref="GetResponseDataRateGate"/> would resolve now. An interim response the transport writes
+    /// on its own before the final one (HTTP/3's automatic <c>100 Continue</c>, #1385) is held to it, while
+    /// the request may still change the rate its final response is written under.
+    /// </summary>
+    /// <param name="listenerRate">The listener's <see cref="HttpConnectionListenerLimits.MinResponseDataRate"/>.</param>
+    /// <returns>The rate, or <see langword="null"/> when the response is held to none.</returns>
+    internal HttpMinDataRate? PeekResponseDataRate(HttpMinDataRate? listenerRate)
+    {
+        return RequestInterception is { } interception ? interception.MinResponseDataRate : listenerRate;
+    }
+
+    /// <summary>
     /// Ends the exchange for a peer that did not accept its response at the minimum data rate (#1384):
     /// trips <see cref="RequestCancelled"/>, so the handler observes the cancellation, without recording
     /// an application cancel (<see cref="CancelRequested"/>), and returns the exception the stalled write

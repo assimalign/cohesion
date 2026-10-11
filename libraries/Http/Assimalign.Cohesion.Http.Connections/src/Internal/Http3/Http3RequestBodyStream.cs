@@ -58,6 +58,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// stream, unless the final response has started, so a handler that answers without reading the body never
 /// invites it. The <c>100</c> and the final head take the request stream's writer in turn
 /// (<see cref="Http3Context.TryBeginContinue"/>), and the write runs inside the read's error handling.
+/// Once the exchange exists, the write is held to the response's minimum data rate (#1384): a peer that
+/// grants it no stream credit has the request stream reset with <c>H3_REQUEST_CANCELLED</c>, and the read
+/// throws the exchange's cancellation.
 /// </para>
 /// <para>
 /// <b>Errors.</b> A malformed request detected in the body (a Content-Length the DATA frames contradict,
@@ -534,7 +537,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // are resolved, so a Content-Length over the cap is refused (413) rather than invited, and a
             // handler that answers without reading the body never invites it onto the wire. It is written
             // under the read's token and inside its error handling, so a write the client's STOP_SENDING
-            // fails reports what a read would.
+            // fails reports what a read would. The rate deadline above stays out of that token on a driver
+            // that stops the stream with a code, so the write is held to the response's minimum data rate
+            // instead (#1384): a peer that grants it no credit has the stream reset.
             if (_solicitContinue)
             {
                 _solicitContinue = false;
@@ -818,7 +823,8 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// Sends <c>100 Continue</c> (RFC 9110 §10.1.1) as a HEADERS frame on the request stream, ahead of the
     /// final response (RFC 9114 §4.1), through the connection's interim-response path — unless an interim
     /// response can no longer precede the final one: the final response has started, the exchange was
-    /// cancelled, or the stream was reset or is no longer read.
+    /// cancelled, or the stream was reset or is no longer read. Once the exchange exists, the write is held
+    /// to the response's minimum data rate (#1384, <see cref="Http3ConnectionContext.WriteContinueAsync"/>).
     /// </summary>
     /// <remarks>
     /// A full-duplex handler can start its streamed response on one task while another makes this read, so
@@ -841,7 +847,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         try
         {
-            await _connection.WriteInterimResponseAsync(_streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+            await _connection.WriteContinueAsync(owner, _streamConnection, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

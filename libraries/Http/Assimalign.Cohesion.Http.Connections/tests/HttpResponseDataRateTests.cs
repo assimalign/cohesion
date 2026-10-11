@@ -534,6 +534,123 @@ public class HttpResponseDataRateTests
         Encoding.ASCII.GetString(frames[1].Payload).ShouldBe("payload");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Response Rate: A 100 Continue the peer grants no stream credit for should reset the stream and cancel the first body read")]
+    public async Task Http3_On100ContinueNeverGranted_ShouldResetAndCancelFirstRead()
+    {
+        // Arrange — an Expect: 100-continue upload whose client grants no MAX_STREAM_DATA credit, so the 100 the
+        // handler's first body read writes never goes out. On this driver the request-body rate stops only the
+        // receiving direction, which never releases the 100's flush.
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 => http3.Limits.MinResponseDataRate = _rate,
+            static options => AddRequestLimits(options),
+            inner => server = new StallingMultiplexedConnection(inner));
+        (Connection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
+        server!.RequestStreams.Single().Writer.Stall();
+
+        // Act
+        Stopwatch elapsed = Stopwatch.StartNew();
+        OperationCanceledException failure = await Should.ThrowAsync<OperationCanceledException>(
+            () => context.Request.Body.ReadAsync(new byte[16]).AsTask().WaitAsync(_timeout));
+        elapsed.Stop();
+
+        // Assert — reclaimed within the response's allowance, well before the request-body rate's 5-second
+        // grace period, as a stalled response write is: H3_REQUEST_CANCELLED, and the handler's read observes
+        // the exchange's cancellation.
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+        failure.CancellationToken.ShouldBe(context.RequestCancelled);
+        context.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
+        server.RequestStreams.Single().WriteAbortCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
+        ConnectionResetException reset = await Should.ThrowAsync<ConnectionResetException>(() => Http3InMemoryPeer.ReadToEndAsync(request));
+        reset.ApplicationErrorCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Response Rate: A streamed head waiting for a 100 Continue the peer grants no credit for should fail with the exchange's cancellation")]
+    public async Task Http3_OnStreamedHeadWaitingFor100NeverGranted_ShouldCancelReadAndHead()
+    {
+        // Arrange — a full-duplex handler: one task's first body read writes the 100, which the peer grants no
+        // credit for, and another task starts the streamed response, whose head waits for the 100. A longer
+        // grace period leaves the head time to start waiting before the 100's allowance runs out.
+        HttpMinDataRate rate = new(bytesPerSecond: 1_000_000, gracePeriod: TimeSpan.FromSeconds(1));
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 => http3.Limits.MinResponseDataRate = rate,
+            static options => AddRequestLimits(options, streaming: true),
+            inner => server = new StallingMultiplexedConnection(inner));
+        (Connection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
+        StallingPipeWriter writer = server!.RequestStreams.Single().Writer;
+        writer.Stall();
+
+        // Act
+        Task<int> read = Task.Run(() => context.Request.Body.ReadAsync(new byte[16]).AsTask());
+        await WaitForAsync(() => writer.IsFlushWaiting, "the 100 Continue's flush to wait for credit");
+        await Task.Delay(100);
+        Task head = Task.Run(() => context.Response.Streaming.WriteAsync(new byte[16]).AsTask());
+        await WaitForAsync(() => context.HasResponseStarted, "the streamed head to start");
+        bool headWaitedForThe100 = !read.IsCompleted;
+        OperationCanceledException readFailure = await Should.ThrowAsync<OperationCanceledException>(() => read.WaitAsync(_timeout));
+        OperationCanceledException headFailure = await Should.ThrowAsync<OperationCanceledException>(() => head.WaitAsync(_timeout));
+
+        // Assert — the 100's allowance ran out first and reset the stream; the head, released by it, had no
+        // stream left to go out on and failed the same way instead of writing to the reset stream.
+        headWaitedForThe100.ShouldBeTrue();
+        readFailure.CancellationToken.ShouldBe(context.RequestCancelled);
+        headFailure.CancellationToken.ShouldBe(context.RequestCancelled);
+        server.RequestStreams.Single().WriteAbortCode.ShouldBe((long)Http3ErrorCode.RequestCancelled);
+        writer.ConcurrentUseObserved.ShouldBeFalse();
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Response Rate: A 100 Continue whose request disabled the rate should wait for credit and leave the rate unfrozen")]
+    public async Task Http3_On100ContinueWithRateDisabledForRequest_ShouldWaitForCredit()
+    {
+        // Arrange — the request disables its response's rate before the handler's first body read.
+        StallingMultiplexedConnection? server = null;
+        await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
+            http3 => http3.Limits.MinResponseDataRate = _rate,
+            static options => AddRequestLimits(options),
+            inner => server = new StallingMultiplexedConnection(inner));
+        (Connection request, IHttpContext context) = await OpenHttp3UploadAsync(peer);
+        StallingPipeWriter writer = server!.RequestStreams.Single().Writer;
+        writer.Stall();
+        context.MinResponseDataRate!.MinDataRate = null;
+
+        // Act — the peer grants nothing for three grace periods, then everything, and sends the content.
+        Task<string> read = ReadToEndAsync(context.Request.Body);
+        await Task.Delay(_rate.GracePeriod * 3);
+        bool completedWhileStalled = read.IsCompleted;
+        writer.Grant(1L << 40);
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello")));
+        await request.Output.CompleteAsync();
+        string body = await read.WaitAsync(_timeout);
+
+        // Assert — the 100 read the request's rate without freezing it: the response's first write still can.
+        completedWhileStalled.ShouldBeFalse();
+        body.ShouldBe("hello");
+        server.RequestStreams.Single().WriteAbortCode.ShouldBeNull();
+        context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
+        context.MinResponseDataRate!.IsReadOnly.ShouldBeFalse();
+        context.Response.StatusCode = HttpStatusCode.Ok;
+        await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
+    private static async Task<(Connection Request, IHttpContext Context)> OpenHttp3UploadAsync(Http3InMemoryPeer peer)
+    {
+        // RFC 9110 §10.1.1 — the client declares the expectation and withholds the content until solicited.
+        Connection request = await peer.OpenRequestStreamAsync();
+        await request.Output.WriteAsync(HttpProtocolPayloadFactory.CreateHttp3Request(
+            "POST", "/upload", "https", "a", headers: new Dictionary<string, string> { ["content-length"] = "5", ["expect"] = "100-continue" }));
+        IHttpContext context = await peer.NextContextAsync();
+        return (request, context);
+    }
+
+    private static async Task<string> ReadToEndAsync(Stream body)
+    {
+        using StreamReader reader = new(body, leaveOpen: true);
+        return await reader.ReadToEndAsync();
+    }
+
     private static async Task<(Connection Request, IHttpContext Context)> OpenHttp3RequestAsync(Http3InMemoryPeer peer)
     {
         Connection request = await peer.OpenRequestStreamAsync();

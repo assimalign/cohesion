@@ -242,7 +242,9 @@ public abstract class HttpConnectionListenerLimits
     /// its response's wait for flow-control credit; the connection's output is shared, so it stays held to
     /// this listener-wide rate. A tunnel (an accepted HTTP/1.1 upgrade or <c>CONNECT</c>, or an extended
     /// <c>CONNECT</c>) is not a response body and is never held to it, and neither are interim
-    /// (<c>1xx</c>) responses, except that on HTTP/2 their writes to the shared output are.
+    /// (<c>1xx</c>) responses, except that on HTTP/2 their writes to the shared output are, and on HTTP/3
+    /// the automatic <c>100 Continue</c> a request body's first read sends is, under the request's rate as
+    /// it stands then, without freezing it.
     /// </para>
     /// <para>
     /// On HTTP/2, HTTP/3 and the HTTP/1.1 buffered path the rate applies from this release on; earlier

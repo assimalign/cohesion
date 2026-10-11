@@ -1165,12 +1165,32 @@ invites the body:
   interlocked state and, only for a request that solicits, a completion source). The
   `100` takes it before it writes and is dropped once the final head has; the final head
   — the buffered send's commit and the streamed sink's `CommitHeadersAsync` — takes it
-  before its HEADERS frame and waits for a `100` still being written, within the
-  response's minimum data rate (#1384), so a peer that withholds the credit the `100`
-  needs is reclaimed as a stalled head would be (`FailSlowResponse`). The `100` goes out
+  before its HEADERS frame and waits for a `100` still being written. The `100` goes out
   whole and first, and the two never share the writer. An application's own interim
   responses through `Http.InterimResponses` stay its own to sequence, as on every
   version.
+- **HTTP/3 holds the `100` to the response's minimum data rate (#1384).** Once the
+  exchange exists, `Http3ConnectionContext.WriteContinueAsync` hands the frame over and
+  runs its flush through `MinDataRateWait.TryRunAsync`, crediting the frame's octets
+  first. The rate is the one the response is held to: the request's own knob
+  (`HttpExchangeInterceptorRequestContext.MinResponseDataRate`), else the listener's. It
+  is read through `TransportHttpContext.PeekResponseDataRate`, which does not freeze it,
+  so the request may still change its response's rate until the response's first write,
+  as on HTTP/1.1 and HTTP/2, whose `100` freezes nothing either. The `100` gets a
+  `MinDataRateGate` of its own, so a stall that the final head's wait for it also sits
+  through is charged to the response's gate once, by the head's wait. When the allowance
+  runs out, `FailSlowResponse` resets the request stream with `H3_REQUEST_CANCELLED`
+  and trips the exchange's `RequestCancelled`, and the read throws that cancellation.
+  The bound is needed because the request-body rate does not cover the `100`: on a
+  driver that implements `IMultiplexedStreamAbort` (QUIC and in-memory) its deadline
+  stops the receiving direction with `STOP_SENDING(H3_NO_ERROR)` and is left out of the
+  read's token, so a client that granted no stream credit for the `100` held the handler's
+  first read with nothing to reclaim it. A final head waiting for the `100` is held to the
+  rate too (`ClaimFinalResponseHeadAsync`, against the response's own gate). The `100`'s
+  allowance started first, so it is normally the `100` that resets the stream; the head's
+  wait then ends, finds the stream reset, and throws the same cancellation. Before
+  dispatch (a request hook reading the body) there is no exchange and no response rate,
+  and only the read's token bounds the `100`.
 - **Its failures are the read's.** The `100` is written inside the read's error handling
   and under the read's token (the caller's, the exchange's abort, the connection's
   closure), so a write the client's `STOP_SENDING` fails reaches the application as the
@@ -1190,8 +1210,10 @@ invites the body:
   expectation and no content receives one too (see "Which requests").
 - *Observable by applications.* On HTTP/3, the head of a streamed response started while
   the first read writes the `100` waits for it, within the response's minimum data rate;
-  and a first read whose `100` meets the client's `STOP_SENDING` throws the exchange's
-  cancellation.
+  a first read whose `100` meets the client's `STOP_SENDING` throws the exchange's
+  cancellation; and so does a first read whose `100` the client grants no stream credit
+  for past the response's allowance, after the request stream is reset with
+  `H3_REQUEST_CANCELLED`.
 
 ### AOT posture
 
@@ -2315,8 +2337,9 @@ wait.
 The rate is the listener's default, seeded into the request's parse context
 (`HttpExchangeInterceptorRequestContext.MinResponseDataRate`) like the request-body rate (#1383), and
 frozen at the response's first write (`TransportHttpContext.GetResponseDataRateGate`), which resolves the
-gate once per exchange. A request-parse hook, middleware or an endpoint may lower, raise or disable it
-until then; `Http.RequestLimits` surfaces it as `IHttpMinResponseDataRateFeature` on the same feature
+gate once per exchange. HTTP/3's automatic `100 Continue` is held to the knob's value at the first body
+read without freezing it (`TransportHttpContext.PeekResponseDataRate`). A request-parse hook, middleware
+or an endpoint may lower, raise or disable it until then; `Http.RequestLimits` surfaces it as `IHttpMinResponseDataRateFeature` on the same feature
 object as the other limits. The parse context reaches the exchange through
 `HttpRequestInterceptionResult.Context` and `TransportHttpContext.RequestInterception`, one reference
 per exchange that ran request hooks. Disabling the rate is for a response whose reader legitimately
@@ -2333,7 +2356,9 @@ is shared by every stream and the pump, so it stays held to the listener's rate.
   other frame there, and fail with an `IOException` once the output has stalled.
 - **Interim responses.** A `1xx` written through the exchange control is not held to the response's rate;
   it is small, and the final response that follows is. On HTTP/2 it is a write to the connection's output
-  and is held to the output's allowance.
+  and is held to the output's allowance. HTTP/3's automatic `100 Continue` is the exception: the
+  application cannot bound the read that sends it, so the transport holds it to the response's rate,
+  read without freezing the knob (see "Interim (1xx) responses and `Expect: 100-continue`").
 - **The connection's own writes with no rate.** A listener whose `MinResponseDataRate` is `null` holds the
   HTTP/2 output to nothing, so the pump's control frames and the transport's own answers are unbounded
   there, whatever rate a request sets for itself.
