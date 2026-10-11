@@ -279,12 +279,14 @@ package keeps the engine's in-memory key and says plainly that it is for develop
 - **`UseAntiforgery` without `AddAntiforgery` fails the start.** The middleware resolves the registration
   from the application context when the pipeline is built, so a missing registration is an
   `InvalidOperationException` at startup, not a 500 on the first protected post.
-- **A malformed cookie path fails the registration.** `AddAntiforgery` runs `AntiforgeryBuilder.Build`,
-  which creates the service over its options snapshot, before it registers, and `Http.Antiforgery`
-  checks `HttpAntiforgeryOptions.CookiePath` against the RFC 6265 `path-value` grammar when the service
-  is created (#1153). A path such as `/tenant;x` set through `antiforgery.Options.CookiePath` is an
-  `ArgumentException` from `AddAntiforgery`, and nothing is registered, instead of a 500 on every token
-  issue.
+- **A malformed cookie name or path fails the registration.** `AddAntiforgery` runs
+  `AntiforgeryBuilder.Build`, which creates the service over its options snapshot, before it registers.
+  `Http.Antiforgery` checks `HttpAntiforgeryOptions.CookieName` against RFC 6265 §4.1.1's non-empty
+  `token` grammar (#1416), and `CookiePath` against `path-value` (#1153). A name such as `a b` set
+  through `antiforgery.Options.CookieName`, or a path such as `/tenant;x`, causes `ArgumentException`
+  from `AddAntiforgery` and nothing is registered. The exception has `ParamName` `options`, names the
+  full option, and wraps the cookie constructor's or setter's exception; neither message echoes the
+  invalid value. Valid token punctuation is accepted.
 
 ## Ordering
 
@@ -308,8 +310,17 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
 | Rejection after the response head was committed | The exchange is aborted |
 | A protected endpoint dispatched without `UseAntiforgery` having processed it | `InvalidOperationException` at dispatch |
 | `UseAntiforgery` without `AddAntiforgery` | `InvalidOperationException` when the pipeline is built |
+| Invalid `HttpAntiforgeryOptions.CookieName` or `CookiePath` | `ArgumentException` from `AddAntiforgery`; no feature is registered |
 | Key repository unreadable while the ring looks for a key id a token names | `400` `application/problem+json`, as for a forged token |
 | Key repository unreadable while a token is issued, or another infrastructure fault | Propagates |
+
+## Breaking behavior since 10.0.0-preview.1
+
+The underlying `Http.Antiforgery` service in 10.0.0-preview.1 accepted an invalid `CookieName` at
+creation and failed only when a request stored a cookie token. Since #1416 it rejects that name during
+composition, so `AddAntiforgery` inherits the earlier failure. This Web package did not ship in
+10.0.0-preview.1. Defaults and other valid token names are unchanged; configurations with an invalid
+name must be corrected before the application can register antiforgery.
 
 ## AOT posture
 
@@ -350,7 +361,10 @@ abort, validation with the exchange's service, a custom header, and a missing re
 build. `tests/AntiforgeryRegistrationTests.cs` covers protector selection: restart survival with a
 provider, restart invalidation without one, the pinned purpose chain, rejection of another purpose's
 payloads and of tampered tokens, the explicit protector winning, last-registration-wins, and a malformed
-cookie path failing the registration.
+cookie path failing the registration. `tests/AntiforgeryCookieNameTests.cs` covers names with and without
+a data-protection provider: null, empty, whitespace, separators, control and non-ASCII characters fail
+with no feature added, errors wrap the cookie constructor's exception without disclosing the value, and
+valid token punctuation reaches the issued cookie.
 `tests/AntiforgeryEndToEndTests.cs` and `tests/AntiforgeryRouteConventionTests.cs` run over the in-memory
 `WebApplicationTestFactory` with the real router: the cookie-and-header and form-token flows, a token
 replayed without its cookie, safe methods, a real CORS preflight, fail-closed dispatch with the middleware

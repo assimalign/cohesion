@@ -103,6 +103,10 @@ public sealed class AntiforgeryBuilder
     /// </para>
     /// </remarks>
     /// <returns>The antiforgery feature, an <see cref="IHttpFeature"/> for the application to register.</returns>
+    /// <exception cref="ArgumentException">
+    /// <see cref="HttpAntiforgeryOptions.CookieName"/> is not an RFC 6265 <c>token</c>,
+    /// or <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
+    /// </exception>
     public IHttpAntiforgeryFeature Build()
     {
         HttpAntiforgeryOptions snapshot = Snapshot(_options);

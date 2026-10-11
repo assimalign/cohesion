@@ -20,7 +20,8 @@ public static class HttpAntiforgery
     /// <see cref="HttpAntiforgeryOptions"/> before the service is built.</param>
     /// <returns>A shareable <see cref="IHttpAntiforgery"/> instance.</returns>
     /// <exception cref="ArgumentException">
-    /// The configured <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an
+    /// The configured <see cref="HttpAntiforgeryOptions.CookieName"/> is not an RFC 6265
+    /// <c>token</c>, or <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an
     /// RFC 6265 <c>path-value</c>.
     /// </exception>
     public static IHttpAntiforgery Create(Action<HttpAntiforgeryOptions>? configure = null)
@@ -37,7 +38,8 @@ public static class HttpAntiforgery
     /// <returns>A shareable <see cref="IHttpAntiforgery"/> instance.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an RFC 6265
+    /// <see cref="HttpAntiforgeryOptions.CookieName"/> is not an RFC 6265 <c>token</c>,
+    /// or <see cref="HttpAntiforgeryOptions.CookiePath"/> is not an RFC 6265
     /// <c>path-value</c>.
     /// </exception>
     public static IHttpAntiforgery Create(HttpAntiforgeryOptions options)

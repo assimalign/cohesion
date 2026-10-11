@@ -43,7 +43,8 @@ public static class SessionPipelineExtensions
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
-        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive, or the configured
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive,
+        /// <see cref="HttpSessionOptions.CookieName"/> is not an RFC 6265 <c>token</c>, or
         /// <see cref="HttpSessionOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
         /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(Action<HttpSessionOptions>? configure = null)
@@ -57,7 +58,8 @@ public static class SessionPipelineExtensions
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
-        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive, or the configured
+        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive,
+        /// <see cref="HttpSessionOptions.CookieName"/> is not an RFC 6265 <c>token</c>, or
         /// <see cref="HttpSessionOptions.CookiePath"/> is not an RFC 6265 <c>path-value</c>.
         /// </exception>
         public IWebApplicationPipelineBuilder UseSessions(IHttpSessionStore store, Action<HttpSessionOptions>? configure = null)
@@ -73,6 +75,19 @@ public static class SessionPipelineExtensions
                 throw new ArgumentException(
                     $"HttpSessionOptions.IdleTimeout must be positive; got {options.IdleTimeout}.",
                     nameof(configure));
+            }
+
+            // Reuse the cookie constructor's token check at composition, before any middleware is registered.
+            try
+            {
+                _ = new HttpCookie(options.CookieName);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new ArgumentException(
+                    "HttpSessionOptions.CookieName must be a non-empty RFC 6265 token with no control characters, whitespace, or separators.",
+                    nameof(configure),
+                    exception);
             }
 
             // The session cookie is built each time a session is established, and HttpCookieOptions refuses

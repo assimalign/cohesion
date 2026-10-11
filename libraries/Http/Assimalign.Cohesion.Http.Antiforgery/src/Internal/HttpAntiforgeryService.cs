@@ -24,6 +24,19 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        // Reuse the cookie constructor's token check before a service can issue tokens on requests.
+        try
+        {
+            _ = new HttpCookie(options.CookieName);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ArgumentException(
+                "HttpAntiforgeryOptions.CookieName must be a non-empty RFC 6265 token with no control characters, whitespace, or separators.",
+                nameof(options),
+                exception);
+        }
+
         // The cookie token's options are built each time a token is stored, and HttpCookieOptions refuses
         // a Path outside the RFC 6265 path-value grammar (#1153). Checking the path here fails the
         // application at composition instead of failing every token issue with a 500.

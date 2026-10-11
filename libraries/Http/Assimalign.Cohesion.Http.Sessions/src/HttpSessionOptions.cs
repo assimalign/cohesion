@@ -15,6 +15,11 @@ public sealed class HttpSessionOptions
     /// identifier when session-cookie wiring is enabled. Defaults to
     /// <c>.Cohesion.Session</c>.
     /// </summary>
+    /// <remarks>
+    /// The value must be a non-empty RFC 6265 <c>token</c>, as the cookie model requires.
+    /// <c>UseSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses any other
+    /// value when it registers the middleware, before any session is established.
+    /// </remarks>
     public string CookieName { get; set; } = ".Cohesion.Session";
 
     /// <summary>

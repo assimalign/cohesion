@@ -31,6 +31,11 @@ public sealed class HttpAntiforgeryOptions
     /// Gets or sets the name of the cookie that stores the cookie token.
     /// Defaults to <c>__cohesion-antiforgery</c>.
     /// </summary>
+    /// <remarks>
+    /// The value must be a non-empty RFC 6265 <c>token</c>, as <see cref="HttpCookie"/>
+    /// requires. Both <see cref="HttpAntiforgery"/> <c>Create</c> overloads refuse any
+    /// other value when they create the service, before any token is stored.
+    /// </remarks>
     public string CookieName { get; set; } = "__cohesion-antiforgery";
 
     /// <summary>

@@ -96,11 +96,13 @@ The session-id cookie is built through the hardened `Http.Cookies` model with se
   behind a TLS-terminating proxy.
 - **Session-scoped** — no `Max-Age`/`Expires`; the cookie clears when the browser session ends, and
   server-side idle timeout governs true expiry.
-- **Name / Path** — from `HttpSessionOptions.CookieName` / `CookiePath`. `HttpCookieOptions.Path`
-  refuses a value outside the RFC 6265 `path-value` grammar (#1153), and the cookie is built each time
-  a session is established, so `UseSessions` checks `CookiePath` when it registers the middleware: a
-  path such as `/tenant;x` or `/café` fails the application at composition instead of answering every
-  session establishment with a 500.
+- **Name / Path** — from `HttpSessionOptions.CookieName` / `CookiePath`. `UseSessions` checks both
+  before registering middleware: the name through the `HttpCookie` constructor against the RFC 6265
+  §4.1.1 non-empty `token` grammar (#1416), and the path through the `HttpCookieOptions.Path` setter
+  against `path-value` (#1153). A name such as `a b` or a path such as `/tenant;x` or `/café` fails
+  composition. Token punctuation remains valid in names; whitespace, separators, control characters,
+  non-ASCII characters, null and empty names do not. Reusing the cookie model keeps composition and
+  request-time emission on the same grammar.
 - **Not essential by default** — `HttpSessionOptions.CookieIsEssential` (default `false`) marks the
   cookie for a cookie-consent policy (Web.CookiePolicy). Under a consent requirement a non-essential
   session cookie is dropped until the user consents, because a session usually holds state that needs
@@ -130,8 +132,19 @@ forwarded-headers middleware must have run by then — registering it first sati
 
 The package defines no exception root; it throws framework `InvalidOperationException` /
 `ArgumentException` for misuse (sessions not enabled, regeneration after the head started, non-positive
-idle timeout, a cookie path outside `path-value`). The two option checks run in `UseSessions`, at
-composition. Store I/O surfaces whatever the `IHttpSessionStore` implementation throws.
+idle timeout, a cookie name outside `token`, or a cookie path outside `path-value`). All three option
+checks run in `UseSessions`, at composition. Each cookie-option failure is an `ArgumentException`
+with `ParamName` `configure`: its message names the full option, the cookie constructor's or setter's
+exception is preserved as `InnerException`, and neither message echoes the invalid value. No middleware
+is registered on failure. Store I/O surfaces whatever the `IHttpSessionStore` implementation throws.
+
+## Breaking behavior since 10.0.0-preview.1
+
+In 10.0.0-preview.1, `UseSessions` accepted an invalid `CookieName`; `HttpCookie` rejected it only when
+an application established a session cookie during a request. Since #1416 both `UseSessions` overloads
+reject it during composition, before registering middleware. Applications must configure a non-empty
+RFC 6265 `token` name. Defaults and other valid names are unchanged; applications that supplied an
+invalid name now fail at composition instead of failing cookie-establishing requests.
 
 ## AOT posture
 
@@ -176,5 +189,8 @@ trusted as a local transport, a forwarded `https` yields a `Secure` session cook
 trusted proxy address (the double's connection) and from an untrusted one pin the trust dependency.
 
 `tests/SessionPipelineExtensionsTests.cs` drives `UseSessions` over a capturing pipeline builder: a
-cookie path outside `path-value` (`;`, a non-ASCII character, CR LF) throws at registration and registers
-no middleware, and in-grammar paths, the percent-encoded form included, register it.
+cookie path outside `path-value` throws at registration and registers no middleware; in-grammar paths,
+the percent-encoded form included, register it. `tests/SessionCookieNameTests.cs` covers both overloads'
+cookie-name check: null, empty, whitespace, separators, control and non-ASCII characters fail before
+registration, and names containing all token punctuation pass. The errors name the option, preserve the
+cookie constructor's exception, and do not echo the value.

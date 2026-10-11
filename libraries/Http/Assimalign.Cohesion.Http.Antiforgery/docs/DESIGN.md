@@ -128,14 +128,22 @@ The package reads the cookie token from `request.Cookies` and writes it to
 `request.Headers[header]`. It does not re-implement cookie parsing or form
 parsing.
 
-The cookie token's `Path` is `HttpAntiforgeryOptions.CookiePath`.
-`HttpCookieOptions.Path` refuses a value outside the RFC 6265 `path-value`
-grammar (#1153), and the token's cookie options are built each time a token
-is stored, so the service checks `CookiePath` when `HttpAntiforgery.Create`
-builds it and throws `ArgumentException` there. A path such as `/tenant;x`
-or `/café` fails the application at composition (`AddAntiforgery` in
-`Web.Antiforgery` creates the service when it registers) instead of
-answering every token issue with a 500.
+The cookie token's name and path are `HttpAntiforgeryOptions.CookieName`
+and `CookiePath`. The service constructor checks both before retaining
+options or creating the token engine: the name through `HttpCookie`
+against the RFC 6265 §4.1.1 non-empty `token` grammar (#1416), and the path
+through `HttpCookieOptions.Path` against `path-value` (#1153). Reusing the
+cookie model keeps composition and request-time emission on the same
+grammar. Token punctuation is valid in names; null, empty, whitespace,
+separators, control and non-ASCII characters are rejected.
+
+Both `HttpAntiforgery.Create` overloads reach this constructor, as does
+`builder.Services.AddAntiforgery` in `Web.Antiforgery`. A name such as `a b`
+or a path such as `/tenant;x` fails composition with `ArgumentException`
+(`ParamName` `options`), before a service or feature is returned. The
+exception names the full option and preserves the cookie constructor's or
+setter's exception as `InnerException`; neither message echoes the value.
+The Web verb registers nothing on failure.
 
 The cookie token is marked essential by default
 (`HttpAntiforgeryOptions.CookieIsEssential`), so a cookie-consent policy
@@ -184,6 +192,15 @@ the response cookie feature and apply `Cache-Control: no-cache, no-store`,
 token must not be cached or a shared cache could serve one user's token to
 another; `X-Frame-Options` reduces clickjacking that could drive token
 submission.
+
+## Breaking behavior since 10.0.0-preview.1
+
+In 10.0.0-preview.1, `HttpAntiforgery.Create` accepted an invalid
+`CookieName`; `HttpCookie` rejected it only when a request stored a cookie
+token. Since #1416 both factory overloads reject it at composition.
+Applications must configure a non-empty RFC 6265 `token` name. Defaults
+and other valid names are unchanged; applications that supplied an invalid
+name now fail at composition instead of failing token-storing requests.
 
 ## AOT posture
 

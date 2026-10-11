@@ -134,6 +134,13 @@ one layer up in `Assimalign.Cohesion.Web.Sessions`, which composes this store
 seam with the hardened `Http.Cookies` model — this package still takes no cookie
 dependency.
 
+`UseSessions` validates `CookieName` as a non-empty RFC 6265 §4.1.1 `token`
+and `CookiePath` as `path-value` at composition, through the cookie model.
+Those checks belong to Web.Sessions, where the options become cookie settings;
+the option properties here remain plain configuration values. Web.Sessions'
+DESIGN records the earlier failure for invalid names since 10.0.0-preview.1
+(#1416).
+
 ## AOT posture
 
 No reflection, no runtime code generation, no dynamic serialization. The
