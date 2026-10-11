@@ -214,3 +214,104 @@ $results | ConvertTo-Json | Set-Content -LiteralPath C:/cw/b2/_out/b2/q8-phase-r
 The direct publication logs are `_out/b2/publish-phase-base.log` and `publish-phase-b2.log`;
 the ten per-process logs are `q8-phase-{base,b2}-{1..5}.log` in the same directory. Both direct
 NativeAOT publications also reported zero IL2xxx/IL3xxx warnings.
+
+## Review-fix verification (2026-10-11)
+
+A fresh Release NativeAOT campaign measured review revision
+`da23b378fbaf346ad02234299cf1e2d2fff5d906` against the retained base executables from
+`2bf42d94b3a200662fb7e22c54f55607d9af4b94`. The review revision was archived below
+`_out/b2-review/src`, so its build outputs were isolated from the main worktree's concurrent test
+gates. The archived base and review `Program.cs`, `Q8Schema.cs` and benchmark project file were
+byte-identical. This used .NET SDK 10.0.401, `win-arm64`, workstation GC, Windows 10.0.28000 and
+12 logical processors. Other verification work ran on the same host; the complete-phase and
+complete-Build results therefore include host contention. Historical measurements above are retained.
+
+| Span | Base best median (ms) | Review best median (ms) |
+|---|---:|---:|
+| ApplySchemaAsync reconciliation inside Build | 0.4077 | 0.0085 |
+| After OpenOrCreateAsync through validation and reconciliation | 0.4192 | 0.0103 |
+| Complete ProvisionAsync, including OpenOrCreateAsync | 10.2540 | 10.9840 |
+| Complete Build, uninstrumented Q8 | 13.8179 | 12.0604 |
+| Public apply after Build, uninstrumented Q8P | 0.0727 | 0.0038 |
+
+B2's reconciliation gate remains met. Opening and recovery remain a separate budget. Q8P's
+median per-call allocation, including harness overhead, was 44,376 bytes at the base and 640 bytes
+after the review fixes, compared with 608 bytes in the historical B2 campaign above. The 32-byte
+increase matches the new DDL interlock lease acquired before the hash/generation skip; acquiring
+and disposing that lease adds constant work without a catalog walk or hash. All five alternating
+invocation medians for the direct spans, in milliseconds:
+
+| Round | Base apply | Review apply | Base post-open | Review post-open | Base complete phase | Review complete phase |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 0.6885 | 0.0115 | 0.7090 | 0.0136 | 19.4474 | 11.6845 |
+| 2 | 0.5580 | 0.0107 | 0.5773 | 0.0128 | 12.8206 | 13.8134 |
+| 3 | 0.6399 | 0.0085 | 0.6560 | 0.0103 | 88.1281 | 10.9840 |
+| 4 | 0.4077 | 0.0087 | 0.4192 | 0.0108 | 10.2540 | 19.5885 |
+| 5 | 0.5660 | 0.0102 | 0.5834 | 0.0121 | 21.8429 | 12.3962 |
+
+The separate uninstrumented campaign's five invocation medians, in milliseconds:
+
+| Case | Base | Review |
+|---|---|---|
+| Q8P | 0.1823, 0.0727, 0.0940, 0.1241, 0.1554 | 0.0068, 0.0093, 0.0047, 0.0038, 0.0065 |
+| Q8 | 48.2038, 45.2927, 13.8179, 14.2857, 14.0024 | 16.0448, 14.6620, 12.8571, 14.0046, 12.0604 |
+
+The Release `Sql.AotSample`, normal `Sql.Benchmarks` and instrumented `Sql.Benchmarks`
+publications all reported **zero IL2xxx/IL3xxx diagnostics**. The published NativeAOT sample
+passed **18 of 18 smoke checks** in process and over the wire. Exact publication commands follow;
+the benchmark-only replacement and archived original source timestamps are refreshed after the
+normal publications so incremental compilation cannot reuse the uninstrumented assembly.
+
+```powershell
+Set-Location C:/cw/b2
+$env:MSBUILDDISABLENODEREUSE='1'
+$output='C:/cw/b2/_out/b2-review'
+$source="$output/src"
+$env:NUGET_PACKAGES='C:/cw/b2/_out/b2/nuget-packages'
+$env:NUGET_HTTP_CACHE_PATH="$output/nuget-http-cache"
+$env:NUGET_SCRATCH="$output/nuget-scratch"
+$env:DOTNET_CLI_HOME="$output/dotnet-home"
+$env:TEMP="$output/temp"
+$env:TMP=$env:TEMP
+$env:DOTNET_CLI_TELEMETRY_OPTOUT='1'
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1'
+$env:PATH += ';C:\Program Files (x86)\Microsoft Visual Studio\Installer'
+$benchmark='resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks'
+$project="$benchmark/Assimalign.Cohesion.Database.Sql.Benchmarks.csproj"
+$sample='resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.AotSample/Assimalign.Cohesion.Database.Sql.AotSample.csproj'
+foreach ($directory in @($output, $env:NUGET_HTTP_CACHE_PATH, $env:NUGET_SCRATCH, $env:DOTNET_CLI_HOME, $env:TEMP)) {
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+}
+git archive --format=tar "--output=$output/native-source.tar" da23b378fbaf346ad02234299cf1e2d2fff5d906
+New-Item -ItemType Directory -Path $source | Out-Null
+tar -xf "$output/native-source.tar" -C $source
+Copy-Item -LiteralPath "$benchmark/Q8PhaseInstrumentation.targets" -Destination "$output/Q8PhaseInstrumentation.targets"
+& "$benchmark/Prepare-Q8PhaseInstrumentation.ps1" -TreeRoot $source -Label review -OutputRoot $output
+Push-Location $source
+try {
+    dotnet build build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj -c Release *> "$output/native-bootstrap-release.log"
+    dotnet publish $sample -c Release -r win-arm64 -o "$output/aot-sample" *> "$output/native-publish-aot-sample.log"
+    dotnet publish $project -c Release -r win-arm64 -o "$output/benchmarks" *> "$output/native-publish-benchmarks.log"
+    (Get-Item -LiteralPath "$output/phase-timer/review/SqlDeclaredDatabase.cs").LastWriteTimeUtc=[DateTime]::UtcNow
+    (Get-Item -LiteralPath 'resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/SqlDeclaredDatabase.cs').LastWriteTimeUtc=[DateTime]::UtcNow
+    dotnet publish $project -c Release -r win-arm64 -o "$output/phase-review" "-p:CustomAfterMicrosoftCommonTargets=$output/Q8PhaseInstrumentation.targets" "-p:B2PhaseTimerSource=$output/phase-timer/review/SqlDeclaredDatabase.cs" *> "$output/native-publish-phase-review.log"
+}
+finally { Pop-Location }
+& "$output/aot-sample/Assimalign.Cohesion.Database.Sql.AotSample.exe" *> "$output/native-aot-sample-smoke.log"
+foreach ($round in 1..5) {
+    & C:/cw/b2/_out/b2/phase-base/Assimalign.Cohesion.Database.Sql.Benchmarks.exe --cases Q8 --rows 0 --iterations 5 --label "base-review-phase-$round" *> "$output/q8-phase-base-$round.log"
+    & "$output/phase-review/Assimalign.Cohesion.Database.Sql.Benchmarks.exe" --cases Q8 --rows 0 --iterations 5 --label "review-review-phase-$round" *> "$output/q8-phase-review-$round.log"
+}
+foreach ($round in 1..5) {
+    & C:/cw/b2/_out/b2/baseline/Assimalign.Cohesion.Database.Sql.Benchmarks.exe --cases Q8 --rows 0 --iterations 5 --label "base-review-whole-$round" *> "$output/q8-whole-base-$round.log"
+    & "$output/benchmarks/Assimalign.Cohesion.Database.Sql.Benchmarks.exe" --cases Q8 --rows 0 --iterations 5 --label "review-review-whole-$round" *> "$output/q8-whole-review-$round.log"
+}
+```
+
+The ignored runner additionally checked every exit code, rejected IL2xxx/IL3xxx diagnostics, and
+required six `already_applied=1` records per direct invocation before using the median extraction
+above. Its initial incremental instrumented publication emitted no phase records and was rejected;
+the timestamp refresh above forced the successful recompilation used for every reported result.
+Publication logs, sample smoke output, the twenty final per-process logs,
+`q8-phase-results.json`, `q8-whole-results.json`, executable hashes in `q8-binary-identity.json`,
+and harness hashes in `q8-harness-identity.json` are retained under `_out/b2-review`.
