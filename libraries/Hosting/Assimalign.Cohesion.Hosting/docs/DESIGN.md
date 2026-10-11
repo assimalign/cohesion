@@ -18,6 +18,28 @@ Startup is dependency-sensitive: serial startup stops at the first failure, whil
 concurrent startup collects failures. Either path performs best-effort reverse-order compensation,
 marks the host `Failed`, completes its run signals, and preserves the original startup exception.
 
+After compensation and run-state reset, the coordinator awaits
+`OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)` exactly
+once for each failed startup attempt. This protected virtual hook defaults to a completed task;
+derived hosts may report the failure without reimplementing startup or rollback. The supplied
+token is `CancellationToken.None`, because cancelled startup must still be reported. The hook
+receives the exception that the caller will observe, including the existing `HostStartupException`
+translation when the readiness budget expires. Ordinary failures retain their identity and stack.
+A rejected `OnStartingAsync` also reaches this hook, after the coordinator marks the attempt failed
+without entering service compensation. A successful start, later stop, or disposal does not call it.
+
+A hook failure does not replace the startup exception. It is attached as the exception object in
+`exception.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"]`. Attachment is best-effort:
+if a custom exception's `Data` implementation rejects it, the original startup failure still
+propagates. This avoids introducing a second failure result or coupling the general host to one
+application's diagnostics transport.
+
+Known cleanup gap: `Host<TContext>.RollbackStartAsync` suppresses exceptions from compensating
+service `StopAsync` calls without recording them. Preserving the startup failure is intentional,
+but retaining those cleanup failures requires threading the primary failure through rollback and
+handling several secondary failures; it is not a one-line, behavior-preserving change. This remains
+a follow-up, separate from the startup-failure reporting hook.
+
 Graceful shutdown is best-effort. Every service receives a stop attempt, in reverse registration
 order or concurrently according to `StopServicesConcurrently`, and failures are reported after the
 host reaches `Stopped`. Stopping an `Idle`, already stopping, `Stopped`, or compensated `Failed`

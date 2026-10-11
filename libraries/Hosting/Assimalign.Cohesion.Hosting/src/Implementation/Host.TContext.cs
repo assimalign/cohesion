@@ -194,11 +194,34 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             // partially-started services leaked: compensate, mark Failed, rethrow.
             await RollbackStartAsync(serviceStartupEntered).ConfigureAwait(false);
 
+            Exception startFailure = startupTimedOut
+                ? new HostStartupException(
+                    $"Host '{Id}' exceeded its startup readiness budget of {_options.StartupTimeout}.",
+                    exception)
+                : exception;
+
+            try
+            {
+                // Failure reporting must still run when the startup token has expired.
+                await OnStartFailedAsync(startFailure, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception hookException)
+            {
+                // A reporting failure must never replace the failed start, even if a
+                // custom exception does not allow additional diagnostic data.
+                try
+                {
+                    startFailure.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"] = hookException;
+                }
+                catch (Exception)
+                {
+                    // Preserve the start failure when its custom Data implementation rejects attachment.
+                }
+            }
+
             if (startupTimedOut)
             {
-                throw new HostStartupException(
-                    $"Host '{Id}' exceeded its startup readiness budget of {_options.StartupTimeout}.",
-                    exception);
+                ExceptionDispatchInfo.Capture(startFailure).Throw();
             }
 
             throw;
@@ -497,6 +520,25 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// <param name="cancellationToken">Aborts the startup if signaled.</param>
     /// <returns>A task that completes when the hook has finished.</returns>
     protected virtual Task OnStartedAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A lifecycle hook invoked once after a failed startup has been rolled back and the
+    /// host has entered <see cref="HostState.Failed"/>.
+    /// </summary>
+    /// <param name="exception">The startup failure that will propagate to the caller.</param>
+    /// <param name="cancellationToken">An uncancelled token so startup cancellation does not suppress reporting.</param>
+    /// <returns>A task that completes when failure reporting has finished.</returns>
+    /// <remarks>
+    /// The default implementation does nothing. The coordinator awaits this hook after
+    /// resetting run state. A hook failure never replaces the startup failure; it is attached
+    /// to <see cref="Exception.Data"/> under
+    /// <c>Assimalign.Cohesion.Hosting.StartFailureHookException</c> when that dictionary permits it.
+    /// Existing startup-timeout translation to <see cref="HostStartupException"/> still applies.
+    /// </remarks>
+    protected virtual Task OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }

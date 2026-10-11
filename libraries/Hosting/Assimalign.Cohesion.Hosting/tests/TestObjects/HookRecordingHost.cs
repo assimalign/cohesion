@@ -7,10 +7,15 @@ namespace Assimalign.Cohesion.Hosting.Tests;
 internal sealed class HookRecordingHost : Host<TestHostContext>
 {
     private readonly Action<string> _record;
+    private readonly Func<Exception, CancellationToken, Task>? _startFailed;
 
-    public HookRecordingHost(TestHostOptions options, Action<string> record) : base(options)
+    public HookRecordingHost(
+        TestHostOptions options,
+        Action<string> record,
+        Func<Exception, CancellationToken, Task>? startFailed = null) : base(options)
     {
         _record = record;
+        _startFailed = startFailed;
         Context = new TestHostContext(options.HostedServices);
     }
 
@@ -26,6 +31,12 @@ internal sealed class HookRecordingHost : Host<TestHostContext>
     {
         _record("OnStarted");
         return Task.CompletedTask;
+    }
+
+    protected override Task OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)
+    {
+        _record("OnStartFailed");
+        return _startFailed?.Invoke(exception, cancellationToken) ?? Task.CompletedTask;
     }
 
     protected override Task OnStoppingAsync(CancellationToken cancellationToken = default)
