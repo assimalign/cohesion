@@ -448,7 +448,10 @@ Server startup/shutdown remains root events 18-20; the server host service adds 
 **Event 10 landed (#1441, owner decision 2026-10-11):** the shared
 `Host<TContext>.OnStartFailedAsync(Exception, CancellationToken)` hook runs once after rollback
 for an accepted failed start (successful `OnStartingAsync`), excluding caller cancellation and
-lifecycle rejection. It receives the failure returned to the caller and an independent token.
+lifecycle rejection. Caller cancellation includes non-empty aggregates whose flattened inner
+exceptions are all cancellations when the caller token is cancelled. Mixed aggregates, empty
+aggregates and cancellation without a cancelled caller token still report; the caller receives the
+original aggregate unchanged. It receives the failure returned to the caller and an independent token.
 Its default does nothing. The startup timer and registration are disarmed/drained before rollback.
 Reporting invocation runs on a dedicated background thread with a fixed one-second budget, even
 for synchronous blocking overrides, a one-worker pool or infinite shutdown timeouts. This costs

@@ -397,6 +397,93 @@ public class HostStartFailureTests
         reports.ShouldBe(0);
     }
 
+    [Theory(DisplayName = displayPrefix + "Concurrent caller cancellations skip reporting while genuine aggregate failures report")]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    public async Task StartAsync_WhenConcurrentStartupProducesAggregate_ShouldReportOnlyFailures(
+        bool cancelCaller, bool genuineFailure, bool nested)
+    {
+        // Arrange
+        using var callerCancellation = new CancellationTokenSource();
+        using var serviceCancellation = new CancellationTokenSource();
+        serviceCancellation.Cancel();
+        var options = new TestHostOptions { StartServicesConcurrently = true };
+        int starts = 0;
+        int stops = 0;
+        options.HostedServices.Add(new DelegateHostService(_ =>
+        {
+            starts++;
+            if (cancelCaller) { callerCancellation.Cancel(); }
+            return Task.FromCanceled(serviceCancellation.Token);
+        }, StopAsync));
+        options.HostedServices.Add(new DelegateHostService(_ =>
+        {
+            starts++;
+            Exception failure = genuineFailure
+                ? new InvalidOperationException("genuine startup failure")
+                : new TaskCanceledException();
+            return nested ? Task.FromException(new AggregateException(new AggregateException(failure)))
+                : genuineFailure ? Task.FromException(failure) : Task.FromCanceled(serviceCancellation.Token);
+        }, StopAsync));
+        int reports = 0;
+        Exception? reportedFailure = null;
+        await using IHost host = new HookRecordingHost(options, _ => { }, (failure, _) =>
+        {
+            reports++;
+            reportedFailure = failure;
+            return Task.CompletedTask;
+        });
+
+        // Act
+        var failure = await Should.ThrowAsync<AggregateException>(() => host.StartAsync(callerCancellation.Token));
+
+        // Assert
+        starts.ShouldBe(2);
+        stops.ShouldBe(2);
+        host.Context.State.ShouldBe(HostState.Failed);
+        failure.Flatten().InnerExceptions.Count.ShouldBe(2);
+        failure.Flatten().InnerExceptions[0].ShouldBeAssignableTo<OperationCanceledException>();
+        reports.ShouldBe(cancelCaller && !genuineFailure ? 0 : 1);
+        if (reports == 1) { reportedFailure.ShouldBeSameAs(failure); }
+
+        Task StopAsync(CancellationToken cancellationToken)
+        {
+            stops++;
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact(DisplayName = displayPrefix + "An empty aggregate still reports when the caller cancels")]
+    public async Task StartAsync_WhenCallerCancelsWithEmptyAggregate_ShouldReportFailure()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        var expectedFailure = new AggregateException();
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new DelegateHostService(_ =>
+        {
+            cancellation.Cancel();
+            return Task.FromException(expectedFailure);
+        }));
+        int reports = 0;
+        await using IHost host = new HookRecordingHost(options, _ => { }, (_, _) =>
+        {
+            reports++;
+            return Task.CompletedTask;
+        });
+
+        // Act
+        var failure = await Should.ThrowAsync<AggregateException>(() => host.StartAsync(cancellation.Token));
+
+        // Assert
+        failure.ShouldBeSameAs(expectedFailure);
+        reports.ShouldBe(1);
+    }
+
     [Fact(DisplayName = displayPrefix + "A rejected second lifecycle is not reported or compensated again")]
     public async Task StartAsync_WhenOnStartingRejectsRestart_ShouldSkipFailureReporting()
     {

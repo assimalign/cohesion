@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -196,8 +196,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
                 !callerCancellationToken.IsCancellationRequested &&
                 startupTimeoutSource.IsCancellationRequested &&
                 _options.StartupTimeout != Timeout.InfiniteTimeSpan;
-            bool callerCancelled = exception is OperationCanceledException &&
-                callerCancellationToken.IsCancellationRequested;
+            bool callerCancelled = IsCallerCancellation(exception, callerCancellationToken);
 
             // Stop new timer edges and join any Shutdown callback already in flight before
             // rollback disposes the run source and clears the callback it targets.
@@ -228,6 +227,18 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
 
             throw;
         }
+    }
+
+    private static bool IsCallerCancellation(Exception exception, CancellationToken callerCancellationToken)
+    {
+        if (!callerCancellationToken.IsCancellationRequested) { return false; }
+        if (exception is OperationCanceledException) { return true; }
+        if (exception is not AggregateException aggregate) { return false; }
+
+        // Concurrent services (or a composed service) can wrap cancellation in aggregates.
+        // Flatten first, but never classify an empty aggregate or a mixed failure as cancellation.
+        var failures = aggregate.Flatten().InnerExceptions;
+        return failures.Count > 0 && failures.All(static failure => failure is OperationCanceledException);
     }
 
     private async Task ReportStartFailureAsync(Exception startFailure)
@@ -581,7 +592,9 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// <returns>A task that completes when failure reporting has finished.</returns>
     /// <remarks>
     /// The default implementation does nothing. Acceptance means OnStartingAsync completed.
-    /// Caller cancellation and OnStartingAsync rejection do not invoke this hook. The coordinator
+    /// Caller cancellation (a cancellation exception or a non-empty flattened aggregate containing
+    /// only cancellations, with the caller token cancelled) and OnStartingAsync rejection do not
+    /// invoke this hook. Mixed aggregates still report. The coordinator
     /// invokes it on a dedicated thread after resetting run state and waits at most one second, independent
     /// of startup and shutdown budgets. A hook failure or reporting timeout never replaces the startup failure; it is attached
     /// to <see cref="Exception.Data"/> under

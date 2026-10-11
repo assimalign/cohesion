@@ -143,7 +143,10 @@ report actual start/stop transitions; repeated start/stop no-ops write nothing. 
 after rollback and the host's transition to `Failed`, on direct start and complete-run paths. The
 hook receives the failure the caller receives, including a normalized startup timeout; it preserves
 that failure. Caller cancellation and rejection by `OnStartingAsync` (including a second lifecycle)
-write no event 10. An already-cancelled start writes neither event 8 nor 10 and consumes no lifecycle;
+write no event 10. This includes non-empty aggregates whose flattened inner exceptions are all
+cancellations when the caller token is cancelled; mixed aggregates containing a genuine failure,
+empty aggregates and cancellations without caller cancellation still write event 10.
+An already-cancelled start writes neither event 8 nor 10 and consumes no lifecycle;
 a later uncancelled start is still allowed. Reporting runs on a dedicated background thread with the shared host's fixed
 one-second budget and independent cancellation token. A late hook fault is observed without changing
 the propagated failure or a later start's record. A hook failure or reporting timeout is attached by the shared host to the original exception's

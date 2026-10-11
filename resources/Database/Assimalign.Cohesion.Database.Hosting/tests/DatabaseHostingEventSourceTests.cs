@@ -136,6 +136,59 @@ public sealed class DatabaseHostingEventSourceTests
         recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 10);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationStartFailed: Pure caller cancellation aggregates should be silent and mixed failures should report")]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    public async Task Application_AggregatedStartCancellation_ShouldReportOnlyFailures(
+        bool cancelCaller, bool genuineFailure, bool nested)
+    {
+        // Arrange: Database starts serially, but a composed service can aggregate its own
+        // concurrent startup failures. Keep the real Database lifecycle policy intact.
+        using var cancellation = new CancellationTokenSource();
+        Exception second = genuineFailure ? new IOException("genuine startup failure") : new TaskCanceledException();
+        var expectedFailure = new AggregateException(new OperationCanceledException(),
+            nested ? new AggregateException(new AggregateException(second)) : second);
+        var order = new List<string>();
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
+        builder.AddService(new RecordingService(order));
+        builder.AddService(new DelegateHostService(_ =>
+        {
+            order.Add("failing:start");
+            if (cancelCaller) { cancellation.Cancel(); }
+            return Task.FromException(expectedFailure);
+        }, _ => { order.Add("failing:stop"); return Task.CompletedTask; }));
+        await using var application = builder.Build();
+        using var recorder = new HostingEventRecorder(EventLevel.Informational)
+        {
+            OnWritten = entry => { if (entry.EventId == 10) { order.Add("failure-event"); } },
+        };
+
+        // Act
+        var failure = await Should.ThrowAsync<AggregateException>(
+            () => ((IHost)application).StartAsync(cancellation.Token));
+
+        // Assert
+        failure.ShouldBeSameAs(expectedFailure);
+        application.Context.State.ShouldBe(HostState.Failed);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 9);
+        if (cancelCaller && !genuineFailure)
+        {
+            recorder.Events.ShouldNotContain(entry => entry.EventId == 10);
+            order.ShouldBe(["service:start", "failing:start", "failing:stop", "service:stop"]);
+        }
+        else
+        {
+            var failed = Event(recorder, 10, "ApplicationStartFailed", "hostId", "exceptionType", "exceptionMessage");
+            failed.Level.ShouldBe(EventLevel.Error);
+            failed.Payload.ShouldBe([application.Context.HostId.ToString(), typeof(AggregateException).FullName, expectedFailure.Message]);
+            order.ShouldBe(["service:start", "failing:start", "failing:stop", "service:stop", "failure-event"]);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationStartFailed: A rejected restart should emit no failure")]
     public async Task Application_RejectedSecondLifecycle_ShouldNotReportFailure()
     {

@@ -29,7 +29,11 @@ once for each accepted startup that fails, except caller cancellation. A start i
 startup and is not reported. An already-cancelled caller token is rejected before initialization
 or `OnStartingAsync`, without consuming a derived host's lifecycle. Cancellation during accepted
 startup still rolls back, but an `OperationCanceledException` with the caller token cancelled is
-not reported. A genuine non-cancellation failure is still reported if caller cancellation races it.
+not reported. The same applies to a non-empty `AggregateException` whose flattened inner exceptions
+are all `OperationCanceledException` instances (including `TaskCanceledException`). Empty aggregates,
+mixed aggregates containing a genuine failure, and cancellations without a cancelled caller token
+still report. Cancellation provenance is captured before rollback. A genuine non-cancellation
+failure is still reported if caller cancellation races it; the original aggregate is propagated unchanged.
 This protected virtual hook defaults to a completed task;
 derived hosts may report the failure without reimplementing startup or rollback. The supplied
 token is independent of startup and is signaled on reporting-budget expiry. The hook
