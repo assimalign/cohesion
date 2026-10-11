@@ -277,6 +277,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 ResourceRuntime.HostBuilt(application, _controlPlane);
             }
 
+            DatabaseHostingEventSource.Log.ApplicationBuilt(application.Context, composition.Services.Count);
             return application;
         }
         catch (Exception exception)

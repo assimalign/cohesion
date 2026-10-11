@@ -3697,8 +3697,9 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
 
 - **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
   `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`SqlDatabase`) with `new` members over the
-  base's public members, and the collation overload of `CreateDatabaseAsync` makes the base's
-  checks itself (the name, a null collation, disposal, the token); a database re-exposes its
+  base's public members. The collation overload checks the name and null collation, then passes
+  the collation explicitly through the base's protected creation NVI, which owns disposal,
+  cancellation and lifecycle telemetry; a database re-exposes its
   `Engine` and `CreateSessionAsync` (`SqlDatabaseSession`); a session its `Database`,
   `CurrentTransaction` and both `BeginTransactionAsync` overloads (`SqlDatabaseTransaction`);
   the server its `Engine`; the server session overrides `DatabaseSession` covariantly. Each
@@ -3752,9 +3753,19 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
 
 ## Diagnostics
 
+Both SQL create overloads enter the root NVI, so root events 9 and 13 cover default and explicit
+collations exactly once. The collation overload passes its existing `Collation` reference as the
+root's opaque creation state; `CreateDatabaseCoreAsync` uses it, or `Collation.Binary` for null.
+There is no ambient state, wrapper allocation or model-side event writer. Tests cover
+base/typed/collation calls, reentrant listeners on the same or another thread, and an already
+cancelled collation create whose first-chance exception callback creates a default binary database.
+The callback regression failed with one match for `'a'` after inserting `'A'` under the former
+thread-local handoff, and now finds zero.
+
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;
-database event-sources plan, batch B5). It reports the wire server and its sessions. A
+database event-sources plan, batches B5 and D part 1). It reports the wire server and its sessions,
+statement access paths, complexity refusals, DDL self-commits, extension registration and index-registration persistence. A
 statement's outcome, the engine, its databases and its workers are the root source's
 (`Assimalign.Cohesion.Database`); kernel transactions, locks and storage are the Transactions and
 Storage sources'. The Key-value, Graph and Blob servers write events 1-9 with the same ids, names
@@ -3775,9 +3786,51 @@ bounded peer-sent names) are in the area's
 | 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
+| 10 | `StatementPlanned` | Verbose | `Statements` | `database`, `accessPath` (cut to 256 characters), `recordsExamined` |
+| 11 | `StatementTooComplex` | Warning | — | `database`, `depth` (-1 when an execution stack backstop has no measured depth) |
+| 12 | `DdlSelfCommitted` | Verbose | `Statements` | `database`, `commandType` |
+| 16 | `ExtensionRegistered` | Verbose | — | `kind` (`Scalar`, `Aggregate`, `Type`, `Cast`), `name` (cut to 256 characters per identifier; a cast is `source -> target`) |
+| 17 | `IndexRegistrationsSaved` | Verbose | — | `database`, `count` |
 
-Ids 10-17 are reserved for the statement-planning, DDL and provisioning events that land with
-the model's redesign (plan, section 5).
+Batch D part 1 (#1349) adds statement detail and typed extension registration. Ids **13-15**
+remain reserved for `ProvisioningStart`, `ProvisioningStop` and `ProvisioningFailed` after
+provisioning hardening (decision 49a). `Sessions = 0x1`; `Statements = 0x2`.
+
+`StatementPlanned` is written once when execution leaves a successfully planned statement,
+including execution failure: only then are the existing `SqlStatementMetrics` access path and
+record count final. A parse refusal, transaction-control command or unsupported plan writes none.
+`DdlSelfCommitted` is written once if the statement committed at least one visible catalog change,
+even if a later step failed; merely attempting DDL, or reserving an unreachable identity, is not
+self-commit. These hooks reuse execution's metrics, add no timer or async wrapper, and convert
+payloads only inside the source's keyword guard. Completion reporting uses a private synchronous
+helper and the two complexity cases share one catch local, keeping tracing locals out of the
+Debug async state machine. The review's real-path allocation test caught 24 additional bytes per
+statement before this change. The disabled-hook test still runs 10,000 iterations and requires
+zero bytes. A separate test parses and executes a real indexed SELECT through the public session
+inside a snapshot transaction, requires synchronous completion and result disposal, and compares
+the fewest bytes of three warmed 1,000-statement rounds in each of two arms: the current public
+path with the source disabled, and a test-only request wrapper without the tracing catch/finally
+calls. Both arms parse the same text with the session's current parser options and execute on the
+same session through the current statement executor; static `UnsafeAccessor` bindings keep this
+reference entirely in tests without widening shipped visibility. The reference keeps the existing
+offline/stack error translation and non-diagnostic async locals. Its maintenance obligation is to
+track changes to that non-diagnostic wrapper, not parser/planner/executor allocation counts.
+A binding test invokes all three accessors directly once (parser options, statement execution and
+`SelfCommitted`), outside exception filters, so a renamed private member fails the suite even when
+successful queries never enter the reference wrapper's error path.
+The measured difference must be zero in Debug and Release. Two SELECT projections with different
+total allocations prove that no historical byte count is pinned. It covers
+`ExecuteRequestAsync`, its `finally`, and event argument evaluation as well as the guarded helpers.
+
+`StatementTooComplex` reports the text parser's nesting/stack diagnostic, the typed request's
+nesting refusal, or the execution stack backstop, once, with no SQL text or exception message.
+Depth is the parser's deepest level reached (it stops before entering a forbidden level), or -1
+for an execution stack failure. `ExtensionRegistered` follows a successful registry insertion,
+including built-in scalar and aggregate overloads, types and casts and schema-declared domains.
+A rejected duplicate or a schema domain already present writes nothing. The shared standard
+catalogs register once when first initialized; a builder's collections register their own entries.
+`IndexRegistrationsSaved` follows persistence of a changed set; an unchanged set writes nothing.
+No new counters.
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,

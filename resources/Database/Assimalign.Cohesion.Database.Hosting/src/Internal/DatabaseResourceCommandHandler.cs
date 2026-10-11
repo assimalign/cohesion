@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +24,29 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 
     public string Kind { get; }
 
-    public async ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+    public ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+        => DatabaseHostingEventSource.Log.IsEnabled(EventLevel.Warning, EventKeywords.None)
+            ? ExecuteTracedAsync(command, cancellationToken)
+            : ExecuteCoreAsync(command, cancellationToken);
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ReadOnlyMemory<byte>> ExecuteTracedAsync(ResourceCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await ExecuteCoreAsync(command, cancellationToken).ConfigureAwait(false);
+            DatabaseHostingEventSource.Log.ResourceCommandHandled(command, "Execute");
+            return result;
+        }
+        catch (Exception exception) when (exception is ResourceCommandRejectedException or JsonException)
+        {
+            DatabaseHostingEventSource.Log.ResourceCommandRejected(command, "Execute", exception);
+            throw;
+        }
+    }
+
+    // Internal so the owning tests can measure the untraced dispatch baseline without copying it.
+    internal async ValueTask<ReadOnlyMemory<byte>> ExecuteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using JsonDocument document = JsonDocument.Parse(command.Payload);
@@ -75,7 +99,29 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         return ReadOnlyMemory<byte>.Empty;
     }
 
-    public async ValueTask<ReadOnlyMemory<byte>> DeleteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+    public ValueTask<ReadOnlyMemory<byte>> DeleteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
+        => DatabaseHostingEventSource.Log.IsEnabled(EventLevel.Warning, EventKeywords.None)
+            ? DeleteTracedAsync(command, cancellationToken)
+            : DeleteCoreAsync(command, cancellationToken);
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<ReadOnlyMemory<byte>> DeleteTracedAsync(ResourceCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await DeleteCoreAsync(command, cancellationToken).ConfigureAwait(false);
+            DatabaseHostingEventSource.Log.ResourceCommandHandled(command, "Delete");
+            return result;
+        }
+        catch (Exception exception) when (exception is ResourceCommandRejectedException or JsonException)
+        {
+            DatabaseHostingEventSource.Log.ResourceCommandRejected(command, "Delete", exception);
+            throw;
+        }
+    }
+
+    // Internal for the same allocation baseline as ExecuteCoreAsync.
+    internal async ValueTask<ReadOnlyMemory<byte>> DeleteCoreAsync(ResourceCommand command, CancellationToken cancellationToken)
     {
         using JsonDocument document = JsonDocument.Parse(command.Payload);
         string database = Required(document.RootElement, "database");

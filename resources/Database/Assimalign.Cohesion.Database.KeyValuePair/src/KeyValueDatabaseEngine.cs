@@ -434,7 +434,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
-    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
         ValidateName(name);
         lock (_syncRoot)

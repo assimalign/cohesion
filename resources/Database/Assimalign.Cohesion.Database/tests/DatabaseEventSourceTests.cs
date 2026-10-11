@@ -20,6 +20,7 @@ using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
@@ -43,6 +44,166 @@ public class DatabaseEventSourceCollection
 public sealed class DatabaseEventSourceTests
 {
     private static readonly TimeSpan _wait = TimeSpan.FromSeconds(30);
+
+    [Theory(DisplayName = "Cohesion Test [Database] - DatabaseCreated: Should report every SQL creation path and its failure exactly once")]
+    [InlineData("Base")]
+    [InlineData("Typed")]
+    [InlineData("Collation")]
+    public async Task CreateDatabaseAsync_SqlOverloads_ShouldReportRootEventsOnce(string path)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("create-events", new SqlDatabaseEngineOptions());
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
+
+        // Act
+        await CreateAsync();
+        await Should.ThrowAsync<DatabaseException>(async () => await CreateAsync());
+
+        // Assert
+        var created = recorder.Events.Where(entry => entry.EventId == 9).ShouldHaveSingleItem();
+        created.PayloadNames.ShouldBe(["engineName", "model", "database", "durationMilliseconds"]);
+        created.Payload!.Take(3).ShouldBe(["create-events", "Sql", "app"]);
+        var failed = recorder.Events.Where(entry => entry.EventId == 13).ShouldHaveSingleItem();
+        failed.PayloadNames.ShouldBe(["engineName", "model", "database", "operation", "exceptionType", "exceptionMessage"]);
+        failed.Payload!.Take(5).ShouldBe(["create-events", "Sql", "app", "Create", typeof(DatabaseException).FullName]);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
+
+        async ValueTask CreateAsync()
+        {
+            switch (path)
+            {
+                case "Base":
+                    await ((DatabaseEngine)engine).CreateDatabaseAsync("app", CancellationToken.None);
+                    break;
+                case "Typed":
+                    await engine.CreateDatabaseAsync("app", CancellationToken.None);
+                    break;
+                default:
+                    await engine.CreateDatabaseAsync("app", Collation.CaseInsensitive, CancellationToken.None);
+                    break;
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database] - DatabaseCreated: A collation create listener should run outside the registry lock")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateDatabaseAsync_CollationAndReentrantListener_ShouldPreserveEachCollationAndReleaseTheLock(bool sameThread)
+    {
+        // Arrange: a nested default create must not inherit the outer collation on either thread.
+        // Waiting for another thread in the callback also detects a held registry lock.
+        await using var engine = SqlDatabaseEngine.Create("create-reentry", new SqlDatabaseEngineOptions());
+        SqlDatabase? binary = null;
+        Exception? callbackFailure = null;
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational)
+        {
+            OnWritten = entry =>
+            {
+                if (entry.EventId == 9 && Equals(entry.Payload?[2], "collated"))
+                {
+                    try
+                    {
+                        binary = sameThread
+                            ? engine.CreateDatabaseAsync("binary", CancellationToken.None).GetAwaiter().GetResult()
+                            : Task.Run(async () => await engine.CreateDatabaseAsync("binary", CancellationToken.None))
+                                .WaitAsync(_wait).GetAwaiter().GetResult();
+                    }
+                    catch (Exception exception)
+                    {
+                        callbackFailure = exception;
+                    }
+                }
+            },
+        };
+
+        // Act
+        var collated = await engine.CreateDatabaseAsync("collated", Collation.CaseInsensitive, CancellationToken.None);
+
+        // Assert
+        callbackFailure.ShouldBeNull();
+        binary.ShouldNotBeNull();
+        recorder.Events.Count(entry => entry.EventId == 9).ShouldBe(2);
+        (await MatchesAsync(collated)).ShouldBe(1L);
+        (await MatchesAsync(binary)).ShouldBe(0L);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
+
+        static async Task<long> MatchesAsync(SqlDatabase database)
+        {
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await session.ExecuteAsync("CREATE TABLE items (name TEXT)", cancellationToken: CancellationToken.None);
+            await session.ExecuteAsync("INSERT INTO items VALUES ('A')", cancellationToken: CancellationToken.None);
+            var result = await session.ExecuteAsync("SELECT name FROM items WHERE name = 'a'", cancellationToken: CancellationToken.None);
+            await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
+            long count = 0;
+            await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+            {
+                count++;
+            }
+            return count;
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - CreateDatabaseAsync: Cancelled collation creation must not affect first-chance reentry")]
+    public async Task CreateDatabaseAsync_CancelledCollationAndFirstChanceReentry_ShouldKeepDefaultBinary()
+    {
+        // Arrange: first-chance callbacks run before the cancelled create unwinds its frames.
+        await using var engine = SqlDatabaseEngine.Create("create-cancel-reentry", new SqlDatabaseEngineOptions());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        SqlDatabase? nested = null;
+        Exception? callbackFailure = null;
+        int callbacks = 0;
+        int thread = Environment.CurrentManagedThreadId;
+        void OnFirstChance(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs args)
+        {
+            if (Environment.CurrentManagedThreadId != thread || callbacks != 0
+                || args.Exception is not OperationCanceledException cancelled
+                || cancelled.CancellationToken != cancellation.Token)
+            {
+                return;
+            }
+
+            callbacks++;
+            try
+            {
+                nested = engine.CreateDatabaseAsync("nested", CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                callbackFailure = exception;
+            }
+        }
+
+        // Act
+        AppDomain.CurrentDomain.FirstChanceException += OnFirstChance;
+        try
+        {
+            var failure = await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await engine.CreateDatabaseAsync("cancelled", Collation.CaseInsensitive, cancellation.Token));
+            failure.CancellationToken.ShouldBe(cancellation.Token);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChance;
+        }
+
+        // Assert: the callback actually created a database and its default collation is binary.
+        callbacks.ShouldBe(1);
+        callbackFailure.ShouldBeNull();
+        nested.ShouldNotBeNull();
+        engine.TryGetDatabase("cancelled", out _).ShouldBeFalse();
+        await using var session = await nested.CreateSessionAsync(CancellationToken.None);
+        (await session.ExecuteAsync("CREATE TABLE items (name TEXT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("INSERT INTO items VALUES ('A')", cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+        var result = await session.ExecuteAsync("SELECT name FROM items WHERE name = 'a'", cancellationToken: CancellationToken.None);
+        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
+        int matches = 0;
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+        {
+            matches++;
+        }
+        matches.ShouldBe(0);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should be named for its assembly")]
     public void GetName_DatabaseEventSource_ShouldEqualAssemblyName()
@@ -1084,6 +1245,49 @@ public sealed class DatabaseEventSourceTests
         // Assert
         open.ShouldBe(before + 2);
         DatabaseEventSource.Log.CurrentSessions.ShouldBe(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - CreateDatabaseAsync: Default creation state should add no allocation")]
+    public async Task CreateDatabaseAsync_DefaultState_ShouldAllocateNothingMoreThanTheCore()
+    {
+        // Arrange: a synchronous fixed result isolates the NVI's creation-state handoff.
+        DatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
+        await using var engine = new TestEngine();
+        await using var database = new TestDatabase("allocation", engine);
+        engine.CreateResult = database;
+        DatabaseName name = "allocation";
+        Func<ValueTask<DatabaseInstance>> baseline = () => engine.CreateCoreDirectly(name);
+        Func<ValueTask<DatabaseInstance>> create = () => engine.CreateDatabaseAsync(name, CancellationToken.None);
+        MeasureCreate(baseline, 100);
+        MeasureCreate(create, 100);
+
+        // Act: use the same minimum-of-three rule as the statement measurements below.
+        long baselineBytes = long.MaxValue;
+        long createBytes = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            baselineBytes = Math.Min(baselineBytes, MeasureCreate(baseline, 10_000));
+            createBytes = Math.Min(createBytes, MeasureCreate(create, 10_000));
+        }
+
+        // Assert
+        baselineBytes.ShouldBe(0);
+        createBytes.ShouldBe(baselineBytes);
+
+        static long MeasureCreate(Func<ValueTask<DatabaseInstance>> execute, int iterations)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < iterations; index++)
+            {
+                var pending = execute();
+                if (!pending.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException("The measured create did not complete synchronously.");
+                }
+                _ = pending.Result;
+            }
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: The statement path should allocate nothing more than its core while nobody listens")]

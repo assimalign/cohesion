@@ -461,24 +461,21 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
     /// <remarks>
-    /// The overload without a collation goes through the base's public member, so its checks run in
-    /// the base's order (the name, disposal, the token). The base has no collation parameter, so
-    /// this overload cannot await it: it makes the same checks here, in the same order, with the
-    /// null collation refused after the name.
+    /// Both overloads go through the base's creation lifecycle, including its diagnostics.
+    /// This overload checks the name and null collation first, then disposal and cancellation,
+    /// in the same order as the overload without a collation.
     /// </remarks>
     public async ValueTask<SqlDatabase> CreateDatabaseAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
-        // The check order of DatabaseEngine.CreateDatabaseAsync, which this overload mirrors: a
-        // guard added there is added here too (SqlEngineContractTests pins the order).
+        // Preserve the name/null-collation check order; the base owns the remaining guards
+        // (SqlEngineContractTests pins the order).
         if (name.IsEmpty)
         {
             throw new ArgumentException("A database name is required.", nameof(name));
         }
 
         ArgumentNullException.ThrowIfNull(defaultCollation);
-        ThrowIfDisposed();
-        cancellationToken.ThrowIfCancellationRequested();
-        return (SqlDatabase)await CreateDatabaseWithCollationAsync(name, defaultCollation).ConfigureAwait(false);
+        return (SqlDatabase)await base.CreateDatabaseAsync(name, defaultCollation, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -541,8 +538,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
-    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
-        => CreateDatabaseWithCollationAsync(name, Collation.Binary);
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
+    {
+        Collation collation = (Collation?)creationState ?? Collation.Binary;
+        return CreateDatabaseWithCollationAsync(name, collation);
+    }
 
     private ValueTask<DatabaseInstance> CreateDatabaseWithCollationAsync(DatabaseName name, Collation defaultCollation)
     {

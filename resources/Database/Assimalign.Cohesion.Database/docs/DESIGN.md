@@ -79,6 +79,17 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   optional-capability case is unused: `DatabaseInstance` had one capability, schema provisioning
   (`SupportsSchemaProvisioning` over a virtual `ApplySchemaCoreAsync`), which owner decision 50 of
   2026-10-09 deleted with the root's schema types.
+- **Explicit model creation state** (#1349 review). The public, non-virtual
+  `CreateDatabaseAsync(DatabaseName, CancellationToken)` forwards null to the protected,
+  non-virtual overload `CreateDatabaseAsync(DatabaseName, object?, CancellationToken)`. That
+  overload owns the common name/disposal/cancellation checks and root telemetry, and passes
+  the opaque state unchanged to the protected abstract
+  `CreateDatabaseCoreAsync(DatabaseName, object?, CancellationToken)`. The model validates
+  its state and interprets it; the root never stores transient per-call state. All persistent
+  lifecycle state remains in the base's fields. SQL passes its existing `Collation` reference;
+  other models use null/defaults. Neither path needs an options wrapper or generic virtual
+  dispatch, and the default handoff allocates nothing. First-chance exception callbacks and
+  listeners can re-enter creation without inheriting another call's state.
 - **Engine composition is attached, then frozen** (§6.5 of the plan). A leaf's constructor attaches
   its built-in workers and its build path attaches the composed workers and servers through the
   protected, non-virtual `AttachWorker` and `AttachServer`, then calls `CompleteComposition()`;
@@ -879,7 +890,7 @@ forwards, so keywords scope out-of-process tools only.
 | 6 | `EngineDisposeStart` | Informational | — | `engineName`, `model` | `DatabaseEngine.DisposeAsync`, after the once-only exchange |
 | 7 | `EngineDisposeStop` | Informational | — | `engineName`, `model`, `status` (`Success`; `Error` when a component failed to close, or for an `OutOfMemoryException` no step catches), `failureCount`, `durationMilliseconds` | the same, on every path, from a `finally` |
 | 8 | `WorkerLoopFaulted` | Error | — | `engineName`, `workerName`, `workerKind`, `exceptionType`, `exceptionMessage` | the engine's pump, when a worker's `Run` returned before the engine stopped it or threw (the base's loop allows neither; the frame and its event are kept so the pump never ends silently) |
-| 9 | `DatabaseCreated` | Informational | — | `engineName`, `model`, `database`, `durationMilliseconds` | `CreateDatabaseAsync`; not yet for `SqlDatabaseEngine.CreateDatabaseAsync(name, collation)`, which bypasses the base member (a follow-up for the Sql engine, batch D); the same holds for event 13 |
+| 9 | `DatabaseCreated` | Informational | — | `engineName`, `model`, `database`, `durationMilliseconds` | `CreateDatabaseAsync`, including SQL's collation overload through this same NVI (batch D part 1); event 13 follows the same path, with no model-side duplicate writer |
 | 10 | `DatabaseOpened` | Informational | — | `engineName`, `model`, `database`, `waitedForClose`, `durationMilliseconds` | `OpenDatabaseAsync`, once per instance an open made: an open that returns the instance the leaf already held writes nothing, and concurrent first opens of a closed database, which share one instance, write it once |
 | 11 | `DatabaseDropped` | Informational | — | `engineName`, `model`, `database` | `DropDatabaseAsync` |
 | 12 | `DatabaseClosed` | Informational | — | `engineName`, `model`, `database` | `ForgetClosedDatabase`, which every first close reaches: a holder's, a drop's, a reopen's after the database went offline, the engine's disposal |

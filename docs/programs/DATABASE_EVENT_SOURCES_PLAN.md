@@ -1,6 +1,6 @@
 # Database event sources: plan of record
 
-**Status:** batches B1-B5 and the integration pass implemented 2026-10-08, with the section 9 recommendations applied; Q1-Q4 still await owner confirmation, Q5 and `SessionFaulted`'s message were decided on 2026-10-09; section 5 (batch D, #1349) waits for the owner's redesign ·
+**Status:** batches B1-B5 and the integration pass implemented 2026-10-08, with the section 9 recommendations applied; Q1-Q4 still await owner confirmation, Q5 and `SessionFaulted`'s message were decided on 2026-10-09; section 5 records batch D part 1 (#1349) after the redesign; health and provisioning await decision 49a, and Hosting event 10 landed through the owner-approved shared Host failure hook (#1441) ·
 **Created:** 2026-10-08 · **Owner:** Chase Crawford
 **Request:** the owner's request of 2026-10-08, "Event Source Tracing: add extensive EventSource
 tracing to all the Database projects … follow the EventSource pattern within the repository and
@@ -68,6 +68,7 @@ Every source uses these names, so a log query or a trace filter works across sou
 
 | Name | Type | Source of the value |
 |---|---|---|
+| `hostId` | string | `HostContext.HostId.ToString()` (Hosting application events) |
 | `engineName` | string | `DatabaseEngine.Name` |
 | `model` | string | `EngineModel.ToString()` |
 | `database` | string | `DatabaseName.ToString()`, or `Storage.Name` in the kernel |
@@ -116,7 +117,7 @@ framework producers) compile no code of their own and get none.
 | `Database.Graph` | `…Graph` (new) | B5 | Server and sessions, index recovery on open, wire-path parse failures (§4.9, §4.10). |
 | `Database.Blob` | `…Blob` (new) | B5 | Server and sessions, per-database and engine-wide refusal, transfers (§4.9, §4.10). |
 | `Database.Documents` | `…Documents` (new) | B5 | Index recovery on open; it has no server (§4.10). |
-| `Database.Hosting` | `Assimalign.Cohesion.Database.Hosting` (exists, 6 events) | D | Build, start, stop, commands, admin endpoint, health; lands on the redesigned builder (§5). |
+| `Database.Hosting` | `Assimalign.Cohesion.Database.Hosting` (exists, 6 events) | D | Part 1 adds build/start/stop, disposal, commands and admin failures; event 10 reports failed starts after rollback through #1441 and health 16-17 stays reserved (§5). |
 | `Database.Types` | none | — | Value types and codecs: pure functions whose failures are exceptions to the caller. |
 | `Database.Language` | none | — | Lexer/parser infrastructure; no I/O, no lifecycle. Parse errors are diagnostics returned to the session, which the root reports (`StatementFailed`, §4.1). |
 | `Database.Execution` | none | — | Request and result contracts (232 lines). |
@@ -124,9 +125,9 @@ framework producers) compile no code of their own and get none.
 | `Database.Sql.Catalog`, `Graph.Catalog`, `Documents.Catalog`, `Blob.Catalog`, `KeyValuePair.Catalog` | none | — | Catalog reads and writes go through `Storage`, which reports I/O; DDL refusals are statement failures; the swallowed reads (`GraphCatalog.cs:425-439`, `DocumentCatalog.cs:404-409`, `BlobCatalog.cs:375-380`) skip reclaimed versions, an expected MVCC outcome (D9). Sql.Catalog is also in the extensibility rework. |
 | `Database.Sql.Storage`, `Graph.Storage`, `Documents.Storage`, `Blob.Storage`, `KeyValuePair.Storage` | none | — | Record-format adapters over `Storage`, which reports for them; Graph index recovery is reported by the Graph model at its call site. |
 | `Database.Sql.Tcp` | none | — | One extension method configuring a TCP listener; `Connections.Tcp` reports the listener. |
-| `Database.Sql.Schema` | none expected | D | A schema compiler and validator with no run-time lifecycle. Its runtime provisioning moves into the model in the redesign; re-decide when that lands (§5). |
+| `Database.Sql.Schema` | none (decided in D part 1) | D | Runtime-callable compilation, validation, serialization and migration planning are pure transformations; Database.Sql owns application (§5). |
 | `Database.Embedded` | none | — | Holds engines and disposes them; the root reports each engine's lifecycle. Revisit if it gains behavior. |
-| `Database.Testing` | none | — | Test harness; failures surface to the test. Also rides the Hosting redesign. |
+| `Database.Testing` | none | — | Test harness; primary failures surface to the test. Best-effort and detached cleanup remain silent for the reasons in §10. |
 | `Database.ApplicationModel` | none | — | Declarative planner run while a gateway builds; no run-time work. |
 | `Sdk.Database.Tasks` | none | — | MSBuild tasks log through `TaskLoggingHelper` into the build log and binlog; an `EventSource` would run inside an MSBuild node no application tool attaches to. |
 
@@ -153,7 +154,7 @@ one transition of `_closed` at `:239`).
 | 6 | EngineDisposeStart | Informational | — | engineName, model | `DatabaseEngine.cs:606-611`, after the once-only exchange |
 | 7 | EngineDisposeStop | Informational | — | engineName, model, status, failureCount, durationMilliseconds | `DatabaseEngine.cs:693-697`, on every path from a `finally`; `status` is `Error` when a component failed to close (after event 34) or the disposal escaped |
 | 8 | WorkerLoopFaulted | Error | — | engineName, workerName, workerKind, exceptionType, exceptionMessage | `DatabaseEngine.cs:1120-1121` (`Run` returned early) and `:1127-1130` (`Run` threw); today only `State` shows it |
-| 9 | DatabaseCreated | Informational | — | engineName, model, database, durationMilliseconds | `DatabaseEngine.cs:476-482`; not yet for `SqlDatabaseEngine.CreateDatabaseAsync(name, collation)`, which bypasses the base member (batch D, #1349; the same holds for event 13) |
+| 9 | DatabaseCreated | Informational | — | engineName, model, database, durationMilliseconds | `DatabaseEngine.cs:476-482`; batch D part 1 routes the SQL collation overload through this same NVI, including event 13 on failure, exactly once (`SqlDatabaseEngine.cs:475-497`, `:560-564`) |
 | 10 | DatabaseOpened | Informational | — | engineName, model, database, waitedForClose, durationMilliseconds | `DatabaseEngine.cs:505-511`, `:1139-1158`; written only when `TryGetDatabaseCore` held no open instance before the call, so an open of an open database writes nothing |
 | 11 | DatabaseDropped | Informational | — | engineName, model, database | `DatabaseEngine.cs:522-528` |
 | 12 | DatabaseClosed | Informational | — | engineName, model, database | `DatabaseEngine.cs:907-917` (`ForgetClosedDatabase`, which every first close reaches from `DatabaseInstance.cs:259-269`; `DatabaseInstance.cs` itself is not edited) |
@@ -414,19 +415,127 @@ Graph adds one statement event for its wire path (§4.1, "Re-entry"):
 |---|---|---|---|---|
 | 12 | StatementParseFailed | Error | sessionId, database, code (an offline refusal's model code; empty otherwise), exceptionType | inside the two parse delegates the server passes to `ExecuteStatementAsync` (`GraphDatabaseServerSession.cs:341-344`), which catch `DatabaseException` and `DatabaseTypeException` only, write and rethrow, and for an empty statement, which the root never sees either; the delegate runs at `GraphDatabaseSession.cs:133`, before the root call. Only the wire path passes these delegates, so the in-process text path, which root event 28 reports, is not doubled; never a message (D8) |
 
-## 5. Deferred until the redesign lands
+## 5. Batch D after the redesign — part 1 (#1349)
 
-| Project | What waits | Why | Planned events |
-|---|---|---|---|
-| `Database.Hosting` | Everything new; the 6 reopen events stay, ids 1-6 unchanged | The owner is retyping `DatabaseApplicationBuilder` and its build context, removing `Provision(...)` and reshaping how a database is wired into an engine. `DatabaseApplicationBuilder.cs`, `DatabaseApplication.cs`, `DefaultDatabaseProvisioner.cs` and the registrations will move. | 7 ApplicationBuilt (Info: engines, servers, services); 8 ApplicationStarting (Info); 9 ApplicationStarted (Info: duration); 10 ApplicationStartFailed (Error); 11 ApplicationStopped (Info: duration); 12 ApplicationDisposeFailed (Error, today `DatabaseApplication.cs:101-108`); 13 ResourceCommandHandled (Info: kind, key, operation, today `DatabaseResourceCommandHandler.cs:25`, `:75`); 14 ResourceCommandRejected (Warning, today `:34-94`); 15 AdminEndpointFailed (Error, today `DatabaseAdminEndpointService.cs:99-116`); 16 HealthDegraded (Warning); 17 HealthRestored (Info). Server start/stop is root events 18-20, so the server host service writes nothing. |
-| `Database` (root) provisioning | `DatabaseInstance.ApplySchemaAsync`, `SupportsSchemaProvisioning`, `Provisioning/CompiledSchema.cs` | The owner removes provisioning from the root. B1 does not edit `DatabaseInstance.cs` or `Provisioning/`. | None in the root: provisioning events go with the code into the model. |
-| `Database.Sql` statement and provisioning paths | `SqlDatabaseSession.cs`, `SqlDatabase.cs` (`ApplySchemaCoreAsync` `:527`, `CreateSchemaSession` `:513`), `Internal/SqlSchemaProvisioner.cs`, `SqlQueryExecutor.cs`, the planner and evaluator function paths | Model-owned provisioning on build, and one typed abstraction for built-in and user scalar functions, aggregates and types, rewrite these files. | Ids 10-17 after the server's 1-9: 10 StatementPlanned (Verbose, `Statements`: database, accessPath, recordsExamined from `SqlStatementMetrics`); 11 StatementTooComplex (Warning: database, depth, today `SqlDatabaseSession.cs:216-228`, `:283-287`); 12 DdlSelfCommitted (Verbose: database, commandType, today `:239-260`); 13 ProvisioningStart / 14 ProvisioningStop (Info: database, schema, objects, duration); 15 ProvisioningFailed (Error); 16 ExtensionRegistered (Verbose: kind, name — the typed function/aggregate/type registry, built-ins included); 17 IndexRegistrationsSaved (Verbose: database, count, today `SqlDatabase.cs:308`). |
-| `Database.Sql.Schema` | The decision itself | The compiler stays build-time; whether any run-time path remains in it after provisioning moves into the model is unknown. | None expected. |
-| `Database.Testing` | — | Drives the Hosting runtime. | None. |
+**Implemented 2026-10-11:** the non-provisioning paths below, on base `e2830a17d`.
+B1/B3 composition, E1-E3 typed expressions/functions/domains/casts, and P7 have landed.
+The references in this section replace every former "today" location; they refer to this change.
+Hosting 1-6 and Sql server 1-9 remain unchanged. **Reserved for part 2:** Hosting **16-17**
+(HealthDegraded/HealthRestored) and Sql **13-15** (ProvisioningStart/Stop/Failed), plus whatever
+new IDs decision 49a assigns to deferred migration. No provisioning or health implementation
+is edited here.
 
-**[Likely]** Batch B1 edits `DatabaseEngine.cs`. The redesign may also touch it if engines take
-over the provisioning lifecycle "on build". Whichever lands second rebases; B1 touches only the
-public NVI bodies and the dispose and pump paths, not composition.
+### Database.Hosting
+
+| Id | Event | Level | Payload | Current write site / status |
+|---|---|---|---|---|
+| 7 | ApplicationBuilt | Informational | hostId, engines, servers, services (non-server services) | `DatabaseApplicationBuilder.cs:280`, after successful composition and resource registration |
+| 8 | ApplicationStarting | Informational | hostId | `DatabaseApplication.cs:77`, accepted start lifecycle |
+| 9 | ApplicationStarted | Informational | hostId, durationMilliseconds | `DatabaseApplication.cs:84`, after all services start |
+| 10 | ApplicationStartFailed | Error | hostId, exceptionType, exceptionMessage | `DatabaseApplication.cs:91` (`OnStartFailedAsync`), once after the shared host rolls back the failed start (#1441) |
+| 11 | ApplicationStopped | Informational | hostId, durationMilliseconds | `DatabaseApplication.cs:105`, after service stop; no event for an idempotent no-op |
+| 12 | ApplicationDisposeFailed | Error | hostId, failureCount, exceptionType, exceptionMessage (first collected failure) | `DatabaseApplication.cs:138`, once before its collected failures are thrown |
+| 13 | ResourceCommandHandled | Informational | kind, key, operation (Execute/Delete) | `Internal/DatabaseResourceCommandHandler.cs:38`, `:113`, including handled idempotent deliveries |
+| 14 | ResourceCommandRejected | Warning | kind, key, operation, exceptionType | `Internal/DatabaseResourceCommandHandler.cs:43`, `:118`, domain refusal or malformed JSON; no payload or message (D8) |
+| 15 | AdminEndpointFailed | Error | endpoint, operation (Start/Stop/Dispose), exceptionType, exceptionMessage | `Internal/DatabaseAdminEndpointService.cs:105`, `:118`, `:137`, `:154`; endpoint is scheme/authority only |
+| 16-17 | HealthDegraded / HealthRestored | reserved | — | Part 2 after the concurrent health rewrite; `DatabaseApplicationContext.CheckAsync` remains untouched |
+
+Start/stop timestamps are read only with the Informational source enabled; attaching during an
+operation produces zero duration. No counters were added. Command kind/key identifiers are cut
+to 256 characters plus an ellipsis. Disabled commands return the original core directly.
+Server startup/shutdown remains root events 18-20; the server host service adds no events.
+
+**Event 10 landed (#1441, owner decision 2026-10-11):** the shared
+`Host<TContext>.OnStartFailedAsync(Exception, CancellationToken)` hook runs once after rollback
+for an accepted failed start (successful `OnStartingAsync`), excluding caller cancellation and
+lifecycle rejection. Caller cancellation includes non-empty aggregates whose flattened inner
+exceptions are all cancellations when the caller token is cancelled. Mixed aggregates, empty
+aggregates and cancellation without a cancelled caller token still report; the caller receives the
+original aggregate unchanged. It receives the failure returned to the caller and an independent token.
+Its default does nothing. The startup timer and registration are disarmed/drained before rollback.
+Reporting invocation runs on a dedicated background thread with a fixed one-second budget, even
+for synchronous blocking overrides, a one-worker pool or infinite shutdown timeouts. This costs
+one thread per reported failed start, including the default no-op hook; there is no reflection-based
+override detection or new opt-in surface. Expiry propagates the original failure and requests cancellation;
+late hook/cancellation faults are observed without modifying the returned exception or a newer attempt.
+Database.Hosting overrides it to write event 10. Direct start and complete-run paths share the
+same hook; ordinary failures retain identity and stack, and existing startup-timeout translation
+is unchanged. A hook failure or reporting timeout is attached under
+`Exception.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"]` when writable. The host
+also retains it in a private field for debugger inspection until the next accepted start, so a
+custom exception that rejects attachment neither drops the hook failure nor replaces the start
+failure. An internal read-only accessor lets the host's own tests verify that fallback and reset;
+no additional public or protected member is needed. The shared hook is
+general-purpose and landed separately as `feat(hosting)`. The pre-existing silently dropped
+service-stop failure during rollback remains a shared Hosting follow-up (its DESIGN records it).
+
+### Database.Sql
+
+| Id | Event | Level / keyword | Payload | Current write site / status |
+|---|---|---|---|---|
+| 10 | StatementPlanned | Verbose / Statements (0x2) | database, accessPath, recordsExamined | `SqlDatabaseSession.cs:250`, after a planned request completes (success or failure), so existing metrics carry actual work; `Internal/SqlQueryExecutor.cs` marks successful planning |
+| 11 | StatementTooComplex | Warning | database, depth | `SqlQueryRequest.cs:107` (session text parse), `SqlDatabaseSession.cs:219` (stack exhaustion), `:302` (typed diagnostics), `:316` (typed nesting refusal) |
+| 12 | DdlSelfCommitted | Verbose / Statements | database, commandType | `SqlDatabaseSession.cs:254`, once if the existing metrics record at least one durable catalog self-commit, including a later failure |
+| 13-15 | ProvisioningStart / ProvisioningStop / ProvisioningFailed | reserved | — | Part 2 after 49a; see current paths below |
+| 16 | ExtensionRegistered | Verbose | kind, name | `Functions/SqlFunctionCollection.cs:103` (Scalar/Aggregate); `Functions/SqlTypeCollection.cs:56`, `:92`, `:130`, `:167` (Type/Cast, including declared domains); every accepted registry insertion, built-ins included |
+| 17 | IndexRegistrationsSaved | Verbose | database, count | `SqlDatabase.cs:321`, after changed registrations are persisted; no event for an unchanged set |
+
+Depth is the parser's deepest reached nesting level, or the typed AST's recorded depth; **-1**
+means a runtime stack guard failed without a usable depth. Access paths and extension names are
+bounded identifiers, never SQL, parameters or values. Cast names are source/target type names.
+There is no new per-statement allocation, async wrapper or timer: the existing metrics acquire
+one boolean and are read from a synchronous helper called by execution's finally.
+The real SQL statement check found a 24-byte Debug regression in the part-1 async state machine:
+the extra catch/finally locals were hoisted. Sharing the complexity catch local and extracting
+the reporting locals removed it. The second review replaces the historical byte-count assertion
+with paired measurements: the disabled public text-execution path versus a test-only request
+wrapper without tracing calls, both using the current parser and executor on the same session.
+Each arm takes 100 warmups and the minimum of three 1,000-call rounds; their difference must be
+zero. Two SELECT projections exercise different parser/materialization totals. Static test-only
+accessors avoid any shipped visibility change. The helper checks and existing server counters stay.
+
+Former provisioning references now resolve to `SqlDatabase.CreateSchemaSession` at line 514,
+`ApplySchemaAsync` at line 556 (delegating at 573), `VerifySchemaAsync` at 585,
+`Internal/SqlSchemaProvisioner.ApplyAsync` at line 32, and
+`SqlDatabaseEngineBuilder`'s declaration provisioning at line 351. The old root
+`ApplySchemaAsync`, `SupportsSchemaProvisioning`, `Provisioning/CompiledSchema.cs`,
+Hosting `DefaultDatabaseProvisioner`, and Sql `ApplySchemaCoreAsync` no longer exist.
+These runtime provisioning paths are deliberately untouched in part 1.
+
+**Root gap closed, review correction:** both SQL create overloads enter the root NVI. The
+protected non-virtual `CreateDatabaseAsync(DatabaseName, object?, CancellationToken)` overload
+passes explicit model-owned state to the protected abstract
+`CreateDatabaseCoreAsync(DatabaseName, object?, CancellationToken)`. The public default overload
+passes null and allocates nothing for the handoff; SQL passes its existing `Collation` reference.
+The root owns validation, lifecycle and telemetry; persistent base state remains field-backed.
+This replaces the thread-local slot, which leaked a pending collation when an already-cancelled
+create triggered synchronous first-chance exception reentry. The regression first failed with
+one row for `'a'` after inserting `'A'` into the nested default database, and now returns zero.
+Listener tests retain exactly-once success/failure coverage for default/typed/collation creates
+and same-thread/other-thread reentry outside the registry lock. The root allocation test compares
+the public default path with a synchronous core, taking the minimum of three warmed rounds.
+
+**Escalations — root shape:** an opaque non-generic state parameter is the smallest seam; it adds
+no public type/interface and no default-path allocation. A root-defined extensible options class
+would add a type and wrapper solely for model data; a struct would box model-specific payloads.
+A generic virtual core violates rule 5. Ambient thread/async-local state and a model-side event
+writer were rejected because they retain reentry risk or duplicate the root lifecycle. The root's
+only added member is the protected NVI overload above. The existing protected abstract core gains
+the `object? creationState` parameter (five model overrides and all test doubles updated); the
+public create member's signature is unchanged and its body forwards null. No other public or
+protected root member changed, and no shipped friend grant or project reference was added.
+
+### Database.Sql.Schema and Database.Testing
+
+**Decision retained: no source in Sql.Schema.** Compilation/validation and migration planning
+are pure transformations callable in runtime composition as well as MSBuild. However,
+`SqlCompiledSchemaSerializer.Write`/`WriteAsync` (`:76`, `:100`) create directories and write
+files, while `Read`/`ReadAsync` (`:89`, `:117`) read files, including `File.ReadAllTextAsync`
+at line 123. These helpers propagate I/O/cancellation failures unchanged; malformed JSON retains
+its original inner exception when translated to a validation failure. The caller owns reporting;
+there is no service/background lifecycle or swallowed operational fault to instrument here.
+Database.Sql owns schema application, and MSBuild tasks report through TaskLoggingHelper.
+Database.Testing remains a test harness without a source; its catch audit is recorded in §10.
 
 ## 6. Rollout batches
 
@@ -444,7 +553,8 @@ Diagnostics subsection in `docs/resources/Database/DESIGN.md` listing every Data
 | **B3 — Transactions and indexing** | `Database.Transactions`, `Database.Indexing` | 26 (18 + 8) | `TransactionCoordinator.cs`, `TransactionManager.cs`, `LockManager.cs`, new `Internal/EventSource/TransactionEventSource.cs`; `BTreeIndex.cs`, `BTreeIndexManager.cs`, new `Internal/EventSource/IndexEventSource.cs`; Indexing gets a test-only `InternalsVisibleTo` (it has none); both projects' tests and DESIGN.md; `docs/EVENT_SOURCES.md`. |
 | **B4 — Wire and clients** | `Database.Protocol`, `Database.Security`, `Database.Client`, `Database.Sql.Client`, `Database.KeyValuePair.Client`, `Database.Graph.Client`, `Database.Blob.Client` | 28 (2 + 3 + 8 + 4 + 4 + 3 + 4) | `ProtocolFrameReader.cs`, `ProtocolFrameWriter.cs`; `DatabaseAuthenticator.cs`; `DatabaseConnection.cs`, `DatabaseClient.cs`, `Internal/DatabaseDownloadStream.cs`; `SqlConnection.cs`; `KeyValueConnection.cs`; `GraphConnection.cs`; `BlobConnection.cs`; a new event source and a test-only `InternalsVisibleTo` in each of the seven (none has one today); their tests and DESIGN.md; `docs/EVENT_SOURCES.md`. |
 | **B5 — Model servers and recovery** | `Database.Sql` (server only), `Database.KeyValuePair`, `Database.Graph`, `Database.Blob`, `Database.Documents` | 45 (9 + 9 + 12 + 13 + 2) | `Server/*DatabaseServer.cs` and `Internal/*DatabaseServerSession.cs` of Sql, KeyValuePair, Graph and Blob; `Internal/BlobGuardedStream.cs`; `GraphDatabase.cs`; `DocumentDatabase.cs`; a new event source in each of the five; their tests and DESIGN.md; `docs/EVENT_SOURCES.md`. Not `SqlDatabaseSession.cs`, `SqlDatabase.cs` or any Sql planner, executor or provisioner file (§5). |
-| **D — After the redesign** | `Database.Hosting`, `Database.Sql` (statement and provisioning), `Database.Sql.Schema` (decision) | 19 (11 + 8) | Whatever the redesign leaves; §5. |
+| **D part 1 — Non-provisioning, implemented 2026-10-11** | `Database.Hosting`, `Database.Sql`, root gap and `Database.Sql.Schema` decision | 14 wired (9 + 5), including Hosting 10 through #1441 | §5; existing source tests and Diagnostics docs. No provisioning/health edits. |
+| **D part 2 — After 49a** | `Database.Hosting`, `Database.Sql` | 5 reserved (2 + 3), plus deferred-migration events | Hosting 16-17; Sql 13-15. |
 
 Totals: **147** new events in B1-B5, **19** after the redesign, **166** new; 9 exist. 17 sources,
 of which 15 are new.
@@ -501,6 +611,8 @@ collection:
      per-database refusal with `COHDBB003`; Graph and Documents reopen with aborted writers; a
      GQL syntax error over the Graph wire (event 12 once, root event 28 not at all) and the same
      text in process (root event 28 once, event 12 not at all).
+   - **D part 1:** real application build/start/stop and repeated no-op transitions; failed owned-engine disposal; handled/rejected Execute and Delete commands with bounded identifiers; occupied admin port; SQL indexed SELECT final metrics, real DDL self-commit, text/typed nesting refusals and execution stack failure; accepted built-in and custom typed registry entries and rejected duplicates; changed/unchanged index registration persistence. A failed application start writes Hosting 10 once after rollback, preserving the original failure.
+   - **D root gap:** base, typed and collation SQL create paths each report success and duplicate failure once; a create listener re-enters on the same and another thread without inheriting the collation or holding the registry lock.
    - **B1 re-entry:** a Graph and a Documents text statement in process write exactly one
      `StatementStart`/`StatementStop` pair each.
    - **Integration pass:** every client's failing, cancelled and abandoned work (a Graph path query
@@ -532,6 +644,9 @@ collection:
    B1), `StorageBufferPool.Pin` on a hit (B2), `LockManager.AcquireAsync` on an uncontended lock
    (B3), the frame reader and writer and `DatabaseAuthenticator.AuthenticateAsync` (B4). A
    `GC.GetAllocatedBytesForCurrentThread` delta test, in the same non-parallel collection.
+   **D part 1:** 10,000 disabled writes through the exact statement/DDL/registration hooks,
+   using the existing metrics instance, require zero bytes (best of three warmed rounds, as B5).
+   Hosting checks all new hooks the same way and requires a zero lifecycle timestamp. The review adds real SQL statement execution and Hosting Execute/Delete dispatch measurements against their uninstrumented baselines, using the minimum of three warmed rounds; helper tests remain.
 
 ## 8. Diagrams
 
@@ -570,7 +685,7 @@ the statement's activity id; `DatabaseActivityNestingTests` checks it for an in-
 |---|---|---|
 | Q1 | Rule 7 makes every failed statement an **Error** (root event 28; client `CommandFailed`), including caller-caused ones: a syntax error, a constraint violation, a deadlock victim. PostgreSQL does the same (`log_min_error_statement = ERROR`, `src/backend/utils/misc/guc_tables.c:568`; applied at `src/backend/utils/error/elog.c:3183`). The alternative is Verbose for caller-caused failures, which keeps forwarded logs quiet but hides them at default levels. | Error, as rule 7 and PostgreSQL. |
 | Q2 | The slow-statement and slow-lock-wait thresholds are EventSource arguments with a **1000 ms** default (D7). PostgreSQL disables slow-statement logging by default (`log_min_duration_statement` boot `-1`, `guc_parameters.dat:1768-1775`) but logs lock waits past `deadlock_timeout` (1 s) by default. Keep 1000 ms for both, disable the statement one by default, or add a typed option on the redesigned builder instead? | 1000 ms for both: the source is opt-in already, unlike PostgreSQL's log. |
-| Q3 | No statement text, parameter values, keys, values or blob names in any payload, even under an opt-in keyword, because the in-process forwarder enables all keywords (`EventSourceLogForwarder.cs:169`). PostgreSQL logs statement text with each slow or failed statement. Confirm. | Confirm; the request kind, status, diagnostic code and Sql's access path (deferred event 10) locate the statement without its text. |
+| Q3 | No statement text, parameter values, keys, values or blob names in any payload, even under an opt-in keyword, because the in-process forwarder enables all keywords (`EventSourceLogForwarder.cs:169`). PostgreSQL logs statement text with each slow or failed statement. Confirm. | Confirm; the request kind, status, diagnostic code and Sql's access path (event 10) locate the statement without its text. |
 | Q4 | Principal names appear in `ServerSessionAuthenticated`, `HandshakeRefused` and the Security events. Rule 11 allows identifiers; login names can be personal data in some deployments. Keep them? | Keep: an authentication trail without the principal is of little use, and evidence is never written. |
 | Q5 | NativeAOT applications compile EventSource out unless `<EventSourceSupport>true</EventSourceSupport>` (`docs/EVENT_SOURCES.md`, NativeAOT). Should `Sdk.Database` default it to `true` for Database executables, so an operator can always attach `dotnet-trace`/`dotnet-counters`? | Yes, overridable; a database server without its own diagnostics is hard to operate. **Owner, 2026-10-09:** no; `Sdk.Database` keeps the .NET SDK default. The five Database project templates (`cohesion-database`, `cohesion-app`'s `Acme.Database`, the landing zone's three) set `<EventSourceSupport>true</EventSourceSupport>` in the generated csproj, so a new project opts in and can delete the line. |
 | Q6 | **Defect found while planning** (not tracing): `Database.Sql/src/Internal/SqlPlanExecutor.cs:1165-1172` treats every `StorageException` raised while reading a row found through an index as "reclaimed beneath an invisible entry" and skips the row. `StorageCorruptionException` (a failed page checksum, `PageChecksum.cs:51`, raised on a pool miss at `StorageBufferPool.cs:219`) and `StorageIOException` derive from `StorageException` (`Database.Storage/src/Exceptions/`), so a corrupt or unreadable page silently drops rows from a query result. `GraphCatalog.cs:425-439` narrows the same catch to the reclamation cases (`IsAllocated`). File a separate fix ahead of B5? | File it now as its own work item; B2's `PageChecksumFailed` makes it visible meanwhile, but the result is still wrong. |
@@ -596,7 +711,27 @@ call. Outside Hosting and Testing:
   `GraphStore.cs:322-324`; `DatabaseNotFoundException` in a server's database resolution; the
   `{ data?.Dispose(); …; throw; }` cleanup-and-rethrow blocks; `StreamFileHandle.cs:112`
   (capability probe). `SqlPlanExecutor.cs:1165-1172` belongs here only after Q6's fix.
-- **Hosting and Testing** (deferred, §5): re-scan after the redesign.
+- **Hosting and Testing re-scan, 2026-10-11:** every catch without rethrow or prior recording is classified below. Lines refer to this change. No source is added to Testing.
+
+| File / catch | Classification | Reason / recording |
+|---|---|---|
+| Hosting `DatabaseApplication.cs:131`; `Internal/DatabaseApplicationOwnership.cs:46` | Instrumented, event 12 | Cleanup failures are accumulated and rethrown as the application disposal aggregate; one event reports the aggregate's count and first failure. Builder compensation also collects and rethrows, so is not swallowed. |
+| Hosting `Internal/DatabaseReopenService.cs:307`, `:545` | Already instrumented, event 6 | Unexpected loop faults. |
+| Hosting `Internal/DatabaseReopenService.cs:663`, `:670`, `:676` | Already instrumented, events 5 / 4 | Removed/disposed engine abandons work; failed reopen reports retry. |
+| Hosting `Internal/DatabaseReopenService.cs:173`, `:319`, `:541`; `Internal/DatabaseAdminEndpointService.cs:126` | Left silent | Expected cancellation at shutdown or an interrupted retry delay; not an operational fault. |
+| Hosting `Internal/DatabaseReopenService.cs:407`, `:576`, `:618`, `:783` | Left silent | Registry/state reads race an engine's completed disposal; there is no live database left to recover. |
+| Hosting `Internal/DatabaseReopenService.cs:581`, `:623`, `:652` | Cancellation rethrows; detached completion observed | The first two observe a late registry-check task's exception after stopping; the last records the abandoned reopen outcome through event 5. No new fault is attributed to a stopped loop. |
+| Hosting admin start/stop/disposal | Instrumented, event 15 | New recording catches rethrow unchanged; cancellation remains silent. |
+| Hosting command translation catches | Instrumented, event 14 | The original DatabaseException/ArgumentException translates into a caller-visible rejection; the outer trace reports it without its message. |
+| Testing `DatabaseApplicationTestFactory.cs:347`, `:379`, `:383` | Left silent | Readiness/stop HTTP probes retry inside the caller's bounded startup/shutdown budget; once the program exits, no listener is expected. The program task/timeout reports the final outcome. |
+| Testing `DatabaseApplicationTestFactory.cs:397` | Left silent | Abort-start shutdown budget expired; schedule delayed cleanup after the build completes. |
+| Testing `DatabaseApplicationTestFactory.cs:401` | Left silent | Secondary stop/program failure during abort-start must not replace the primary startup cancellation/timeout already returned to the test. |
+| Testing `DatabaseApplicationTestFactory.cs:439` | Left silent, explicit trade-off | Detached delayed-build cleanup has no awaiting caller. The test already received the startup failure; adding a shipped diagnostics bridge or a source to a test harness solely for this cleanup is outside D. A cleanup fault can therefore remain unreported. |
+| Testing `DatabaseApplicationTestFactory.cs:568`, `:572` | Left silent | Best-effort deletion of the factory-owned temporary data path: IOException/access refusal must not hide the test outcome; files may remain for inspection. |
+
+Testing's catches at lines 207/213 rethrow cancellation or translate to TimeoutException; Hosting
+builder compensation and resource rejection translation also rethrow. They are not swallowed
+exceptions and need no separate event in this audit.
 
 ## 11. References
 

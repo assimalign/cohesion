@@ -13,5 +13,14 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.StartFailureFixture" ReferenceOutputAssembly="false" />
 	</ItemGroup>
+	<Target Name="CopyStartFailureFixture" AfterTargets="Build">
+		<ItemGroup>
+			<StartFailureFixtureOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Hosting.StartFailureFixture\bin\$(Configuration)\$(TargetFramework)\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(StartFailureFixtureOutput)"
+		      DestinationFiles="@(StartFailureFixtureOutput->'$(OutDir)StartFailureFixture\%(RecursiveDir)%(Filename)%(Extension)')"
+		      SkipUnchangedFiles="true" />
+	</Target>
 </Project>

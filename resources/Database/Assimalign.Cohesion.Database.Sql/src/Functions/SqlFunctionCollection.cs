@@ -100,6 +100,7 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
         }
 
         _functions.Add(function);
+        SqlDatabaseEventSource.Log.ExtensionRegistered(function);
         return this;
     }
 

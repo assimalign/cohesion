@@ -30,7 +30,8 @@ Pure composition; no reflection, no discovery. Consumers reference engine packag
 
 The embedded test engine now implements the root's `DatabaseName` operations and
 read-only `Servers` observation; since phase 6 of the concrete-types plan it derives from the
-root `DatabaseEngine` base and implements only its protected cores, its disposal core recording
+root `DatabaseEngine` base and implements only its protected cores (including the explicit,
+non-generic creation-state parameter), its disposal core recording
 the disposal order (`database-area.md`, "Test doubles"). Embedded composition continues to own the engines
 explicitly supplied to `EmbeddedDatabase`; this existing aggregate is separate
 from the hosting builder's instance-borrowed registration contract.

@@ -516,12 +516,12 @@ project's `docs/DESIGN.md`, "Diagnostics", linked), and the batch that added or 
 | `Assimalign.Cohesion.Database.KeyValuePair.Client` | `KeyValueClientEventSource` | [Database.KeyValuePair.Client](../../../resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/DESIGN.md#diagnostics) | B4 | Commands, observer failures |
 | `Assimalign.Cohesion.Database.Graph.Client` | `GraphClientEventSource` | [Database.Graph.Client](../../../resources/Database/Assimalign.Cohesion.Database.Graph.Client/docs/DESIGN.md#diagnostics) | B4 | Queries |
 | `Assimalign.Cohesion.Database.Blob.Client` | `BlobClientEventSource` | [Database.Blob.Client](../../../resources/Database/Assimalign.Cohesion.Database.Blob.Client/docs/DESIGN.md#diagnostics) | B4 | Transfers, list cleanup failures |
-| `Assimalign.Cohesion.Database.Sql` | `SqlDatabaseEventSource` | [Database.Sql](../../../resources/Database/Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#diagnostics) | B5; D | The server and its sessions; statement planning and model-owned provisioning after the redesign |
+| `Assimalign.Cohesion.Database.Sql` | `SqlDatabaseEventSource` | [Database.Sql](../../../resources/Database/Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#diagnostics) | B5; D | The server and its sessions; statement access paths, complexity refusals, DDL self-commits, typed extension registration and index registrations saved (D part 1); provisioning ids 13-15 reserved |
 | `Assimalign.Cohesion.Database.KeyValuePair` | `KeyValueDatabaseEventSource` | [Database.KeyValuePair](../../../resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions |
 | `Assimalign.Cohesion.Database.Graph` | `GraphDatabaseEventSource` | [Database.Graph](../../../resources/Database/Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, index recovery on open, wire-path parse failures |
 | `Assimalign.Cohesion.Database.Blob` | `BlobDatabaseEventSource` | [Database.Blob](../../../resources/Database/Assimalign.Cohesion.Database.Blob/docs/DESIGN.md#diagnostics) | B5 | The server and its sessions, per-database and engine-wide refusals, transfer failures |
 | `Assimalign.Cohesion.Database.Documents` | `DocumentDatabaseEventSource` | [Database.Documents](../../../resources/Database/Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#diagnostics) | B5 | Index recovery on open |
-| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | [Database.Hosting](../../../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) | existed; D | Reopening offline databases; the application's build, start, stop, commands, admin endpoint and health after the hosting redesign |
+| `Assimalign.Cohesion.Database.Hosting` | `DatabaseHostingEventSource` | [Database.Hosting](../../../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) | existed; D | Reopening offline databases; the application's build, start, post-rollback startup failure, stop, disposal failures, commands and admin endpoint (D part 1); health ids 16-17 reserved |
 
 The integration pass after B5 applied the failure and ending rules above to every source, and the
 root's activity-nesting test (`DatabaseActivityNestingTests`) checks the plan's section 8 claim: an
@@ -529,8 +529,10 @@ in-process Sql INSERT under activity tracking writes the kernel's `TransactionBe
 `TransactionCommitted` and its commit's Storage event inside the root's `StatementStart`/`Stop`,
 under the statement's activity id.
 
-`D` is the batch that follows the owner's redesign of the Hosting builder, schema provisioning and
-engine extensibility; nothing in those files is instrumented before it lands. The projects that get
+`D` follows the Hosting and engine-extensibility redesign. Part 1 adds the non-provisioning
+traces; Hosting startup-failure id 10 is written after rollback through the owner-approved
+shared Host failure hook (#1441). Hosting health ids 16-17 and Sql provisioning ids 13-15
+remain reserved for decision 49a's hardening run. The projects that get
 no source, and why, are listed in [`docs/EVENT_SOURCES.md`](../../EVENT_SOURCES.md). A NativeAOT
 application receives these events only with `<EventSourceSupport>true</EventSourceSupport>`.
 

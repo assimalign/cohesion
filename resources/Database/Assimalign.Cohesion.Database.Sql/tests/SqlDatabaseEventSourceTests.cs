@@ -15,8 +15,10 @@ using Xunit;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -41,6 +43,321 @@ public class SqlDatabaseEventSourceCollection
 public sealed class SqlDatabaseEventSourceTests
 {
     private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - StatementPlanned: Should report final metrics once for a real statement")]
+    public async Task StatementPlanned_ExecutedStatement_ShouldReportItsFinalMetricsOnce()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("plans", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO items VALUES (1), (2)", cancellationToken: CancellationToken.None);
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        var result = await session.ExecuteAsync("SELECT id FROM items WHERE id = 2", cancellationToken: CancellationToken.None);
+
+        // Assert
+        result.Status.ShouldBe(QueryResultStatus.Success);
+        var planned = NewEvent(recorder, 10, "StatementPlanned", "database", "accessPath", "recordsExamined");
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+        planned.Payload.ShouldBe(["plans", metrics.AccessPath, metrics.RecordsExamined]);
+        metrics.AccessPath.ShouldStartWith("seek:");
+        metrics.RecordsExamined.ShouldBe(1);
+        planned.Keywords.HasFlag(SqlDatabaseEventSource.Keywords.Statements).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - DdlSelfCommitted: Should report a real catalog publication once")]
+    public async Task DdlSelfCommitted_CreateTable_ShouldReportOnce()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("ddl", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+
+        // Assert
+        NewEvent(recorder, 12, "DdlSelfCommitted", "database", "commandType").Payload.ShouldBe(["ddl", "Create"]);
+        NewEvent(recorder, 10, "StatementPlanned", "database", "accessPath", "recordsExamined");
+        session.LastStatementMetrics.ShouldNotBeNull().SelfCommits.ShouldBeGreaterThan(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - StatementTooComplex: Should report text and typed nesting refusals once")]
+    [InlineData("Text")]
+    [InlineData("Typed")]
+    [InlineData("Diagnostic")]
+    public async Task StatementTooComplex_NestingRefusal_ShouldReportDepthOnce(string path)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions { ExpressionNestingLimit = 32 });
+        var database = await engine.CreateDatabaseAsync("depth", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string text = "SELECT " + new string('(', 64) + "1" + new string(')', 64) + " FROM items";
+        var request = path switch
+        {
+            "Typed" => SqlQueryRequest.FromSql(text, null, new SqlQueryParserOptions { ExpressionNestingLimit = 128 }),
+            "Diagnostic" => new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = 32 }).Parse(text)),
+            _ => null,
+        };
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Warning);
+
+        // Act
+        if (request is not null)
+        {
+            (await session.ExecuteAsync(request, CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Error);
+        }
+        else
+        {
+            await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(text, cancellationToken: CancellationToken.None));
+        }
+
+        // Assert
+        var refused = NewEvent(recorder, 11, "StatementTooComplex", "database", "depth");
+        refused.Payload![0].ShouldBe("depth");
+        // The parser stops before entering the forbidden level and records the deepest level
+        // reached; the typed request retains its caller's complete measure.
+        ((int)refused.Payload[1]!).ShouldBe(path == "Typed" ? 64 : 32);
+        refused.Level.ShouldBe(EventLevel.Warning);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - ExtensionRegistered: Should report accepted built-ins and application registrations once")]
+    public void ExtensionRegistered_RegistryAdd_ShouldReportEveryAcceptedEntry()
+    {
+        // Arrange: initialize the process-wide standard catalogs before observing a new registry.
+        _ = SqlFunctionCatalog.Standard;
+        _ = SqlTypeCatalog.Standard;
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        var builder = SqlDatabaseEngine.CreateBuilder(UniqueEngineName());
+        var scalar = SqlScalarFunction.Create("trace_scalar", static (long value) => value);
+        var domain = SqlType.CreateDomain("trace_domain", SqlType.BigInt);
+        var cast = SqlCast.Create<long, long>(SqlType.BigInt, domain, static value => value, SqlCastContext.Explicit);
+        builder.Functions.Add(scalar);
+        builder.Types.Add(domain).AddCast(cast);
+        Should.Throw<InvalidOperationException>(() => builder.Functions.Add(scalar));
+        Should.Throw<InvalidOperationException>(() => builder.Types.Add(domain));
+        Should.Throw<InvalidOperationException>(() => builder.Types.AddCast(cast));
+
+        // Assert: each overload is a registration, even if several have the same name.
+        var expected = builder.Functions.Select(function => (Kind: function.Kind.ToString(), function.Name))
+            .Concat(builder.Types.Select(type => (Kind: "Type", type.Name)))
+            .Concat(builder.Types.Casts.Select(entry => (Kind: "Cast", Name: entry.Source.Name + " -> " + entry.Target.Name)))
+            .OrderBy(entry => entry.Kind).ThenBy(entry => entry.Name).ToArray();
+        var written = recorder.Events.Where(entry => entry.EventId == 16).ToArray();
+        written.Select(entry => ((string)entry.Payload![0]!, (string)entry.Payload![1]!))
+            .OrderBy(entry => entry.Item1).ThenBy(entry => entry.Item2).ShouldBe(expected);
+        foreach (var entry in written)
+        {
+            entry.EventName.ShouldBe("ExtensionRegistered");
+            entry.PayloadNames.ShouldBe(["kind", "name"]);
+        }
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - IndexRegistrationsSaved: Should report a changed registration set once")]
+    public async Task IndexRegistrationsSaved_ChangedSet_ShouldReportOnceAndSkipUnchanged()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("registrations", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        // Reproduce the mismatch a root-page change leaves until the persistence pass.
+        await database.Catalog.SaveIndexRegistrationsAsync([], CancellationToken.None);
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        database.SaveIndexRegistrationsIfChanged();
+        database.SaveIndexRegistrationsIfChanged();
+
+        // Assert
+        NewEvent(recorder, 17, "IndexRegistrationsSaved", "database", "count").Payload
+            .ShouldBe(["registrations", database.IndexManager.ExportRegistrations().Count]);
+    }
+
+    private static EventWrittenEventArgs NewEvent(EventSourceRecorder recorder, int id, string name, params string[] payloadNames)
+    {
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0);
+        var written = recorder.Events.Where(entry => entry.EventId == id).ShouldHaveSingleItem();
+        written.EventName.ShouldBe(name);
+        written.PayloadNames.ShouldBe(payloadNames);
+        return written;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - StatementTooComplex: Should report an execution stack backstop without statement text")]
+    public async Task StatementTooComplex_ExecutionStackFailure_ShouldReportUnknownDepthOnce()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder(UniqueEngineName());
+        builder.Functions.Add(SqlScalarFunction.Create<long, long>("trace_stack", static value =>
+            throw new InsufficientExecutionStackException("private statement content")));
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("stack", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id BIGINT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO items VALUES (1)", cancellationToken: CancellationToken.None);
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("SELECT trace_stack(id) FROM items", cancellationToken: CancellationToken.None));
+
+        // Assert
+        failure.Message.ShouldStartWith("COHSQLE004");
+        NewEvent(recorder, 11, "StatementTooComplex", "database", "depth").Payload.ShouldBe(["stack", -1]);
+        NewEvent(recorder, 10, "StatementPlanned", "database", "accessPath", "recordsExamined");
+        recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain("private statement content");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Statements keyword: Should exclude statement detail when only sessions are enabled")]
+    public async Task ExecuteAsync_StatementsKeywordExcluded_ShouldWriteNoStatementDetail()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("keyword", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Verbose);
+        recorder.EnableEvents(SqlDatabaseEventSource.Log, EventLevel.Verbose, SqlDatabaseEventSource.Keywords.Sessions);
+
+        // Act
+        await session.ExecuteAsync("CREATE TABLE items (id INT)", cancellationToken: CancellationToken.None);
+
+        // Assert
+        session.LastStatementMetrics.ShouldNotBeNull().SelfCommits.ShouldBeGreaterThan(0);
+        recorder.Events.ShouldNotContain(entry => entry.EventId == 0 || entry.EventId == 10 || entry.EventId == 12);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Statement tracing: Should allocate nothing for disabled statement and registry hooks")]
+    public void StatementTracing_DisabledHotPath_ShouldAllocateNothing()
+    {
+        // Arrange: the same metrics instance execution already owns; all payload conversion is
+        // inside the source's guard, including the DDL enum and cast signature.
+        SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
+        var metrics = new SqlStatementMetrics { AccessPath = "seek:PK_items", RecordsExamined = 1 };
+        var function = SqlScalarFunction.Create("trace_alloc", static (long value) => value);
+        var type = SqlType.CreateDomain("trace_alloc_type", SqlType.BigInt);
+        var cast = SqlCast.Create<long, long>(SqlType.BigInt, type, static value => value, SqlCastContext.Explicit);
+        DatabaseName database = "allocations";
+        Write();
+
+        // Act
+        long allocated = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Write();
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        // Assert
+        allocated.ShouldBe(0);
+
+        void Write()
+        {
+            for (int index = 0; index < 10_000; index++)
+            {
+                SqlDatabaseEventSource.Log.StatementPlanned(database, metrics);
+                SqlDatabaseEventSource.Log.StatementTooComplex(database, 32);
+                SqlDatabaseEventSource.Log.DdlSelfCommitted(database, SqlQueryCommandType.Create);
+                SqlDatabaseEventSource.Log.ExtensionRegistered(function);
+                SqlDatabaseEventSource.Log.ExtensionRegistered(type);
+                SqlDatabaseEventSource.Log.ExtensionRegistered(cast);
+                SqlDatabaseEventSource.Log.IndexRegistrationsSaved(database, 1);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Statement allocation baseline: Every unsafe accessor should resolve")]
+    public async Task InvokeBindingsAsync_CurrentSession_ShouldResolveEveryUnsafeAccessor()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("bindings", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        var baseline = new SqlStatementAllocationBaseline(session);
+
+        // Act: exercise the field, statement executor and SelfCommitted method directly,
+        // including the binding normally reached only through an exception filter.
+        bool selfCommitted = await baseline.InvokeBindingsAsync("SELECT id FROM items", CancellationToken.None);
+
+        // Assert
+        selfCommitted.ShouldBeFalse("A SELECT cannot commit DDL.");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Statement tracing: A real statement should retain its allocation baseline while disabled")]
+    [InlineData("SELECT id FROM items WHERE id = 1")]
+    [InlineData("SELECT id, id FROM items WHERE id = 1")]
+    public async Task ExecuteAsync_NoListener_ShouldRetainStatementAllocationBaseline(string statement)
+    {
+        // Arrange: parsing, binding, planning and materialization all run through the public
+        // session path. One snapshot transaction holds the database state steady across rounds.
+        SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse("A listener left the SQL event source enabled.");
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("allocations", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO items VALUES (1)", cancellationToken: CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        var baseline = new SqlStatementAllocationBaseline(session);
+        const int iterations = 1_000;
+        Measure(100, reference: true);
+        Measure(100, reference: false);
+
+        // Act: take the fewest bytes of three warmed rounds, as DatabaseEventSourceTests does.
+        // Runtime bookkeeping can charge an occasional allocation to this thread; an allocation
+        // in ExecuteRequestAsync, its finally, or an event argument repeats in every round.
+        long allocated = long.MaxValue;
+        long baselineAllocated = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            baselineAllocated = Math.Min(baselineAllocated, Measure(iterations, reference: true));
+            allocated = Math.Min(allocated, Measure(iterations, reference: false));
+        }
+
+        // Assert
+        // The reference omits tracing, but uses the same current parser and executor. The
+        // two projections deliberately allocate different totals; neither pins a byte count.
+        (allocated - baselineAllocated).ShouldBe(0);
+        session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldStartWith("seek:");
+        session.LastStatementMetrics.RecordsExamined.ShouldBe(1);
+        SqlDatabaseEventSource.Log.IsEnabled().ShouldBeFalse();
+
+        long Measure(int count, bool reference)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < count; index++)
+            {
+                var pending = reference
+                    ? baseline.ExecuteAsync(statement, CancellationToken.None)
+                    : session.ExecuteAsync(statement, cancellationToken: CancellationToken.None);
+                if (!pending.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException("The measured statement did not complete synchronously.");
+                }
+
+                var result = pending.Result;
+                if (result is not QueryResultSet rows || result.Status != QueryResultStatus.Success)
+                {
+                    throw new InvalidOperationException("The measured statement did not produce its result set.");
+                }
+
+                var dispose = rows.DisposeAsync();
+                if (!dispose.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException("The measured result did not dispose synchronously.");
+                }
+                dispose.GetAwaiter().GetResult();
+            }
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+    }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - SqlDatabaseEventSource: Should be named for its assembly")]
     public void GetName_SqlDatabaseEventSource_ShouldEqualAssemblyName()
