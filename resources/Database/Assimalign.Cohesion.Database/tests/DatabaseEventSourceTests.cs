@@ -143,6 +143,68 @@ public sealed class DatabaseEventSourceTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - CreateDatabaseAsync: Cancelled collation creation must not affect first-chance reentry")]
+    public async Task CreateDatabaseAsync_CancelledCollationAndFirstChanceReentry_ShouldKeepDefaultBinary()
+    {
+        // Arrange: first-chance callbacks run before the cancelled create unwinds its frames.
+        await using var engine = SqlDatabaseEngine.Create("create-cancel-reentry", new SqlDatabaseEngineOptions());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        SqlDatabase? nested = null;
+        Exception? callbackFailure = null;
+        int callbacks = 0;
+        int thread = Environment.CurrentManagedThreadId;
+        void OnFirstChance(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs args)
+        {
+            if (Environment.CurrentManagedThreadId != thread || callbacks != 0
+                || args.Exception is not OperationCanceledException cancelled
+                || cancelled.CancellationToken != cancellation.Token)
+            {
+                return;
+            }
+
+            callbacks++;
+            try
+            {
+                nested = engine.CreateDatabaseAsync("nested", CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                callbackFailure = exception;
+            }
+        }
+
+        // Act
+        AppDomain.CurrentDomain.FirstChanceException += OnFirstChance;
+        try
+        {
+            var failure = await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await engine.CreateDatabaseAsync("cancelled", Collation.CaseInsensitive, cancellation.Token));
+            failure.CancellationToken.ShouldBe(cancellation.Token);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChance;
+        }
+
+        // Assert: the callback actually created a database and its default collation is binary.
+        callbacks.ShouldBe(1);
+        callbackFailure.ShouldBeNull();
+        nested.ShouldNotBeNull();
+        engine.TryGetDatabase("cancelled", out _).ShouldBeFalse();
+        await using var session = await nested.CreateSessionAsync(CancellationToken.None);
+        (await session.ExecuteAsync("CREATE TABLE items (name TEXT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+        (await session.ExecuteAsync("INSERT INTO items VALUES ('A')", cancellationToken: CancellationToken.None)).Status.ShouldBe(QueryResultStatus.Success);
+        var result = await session.ExecuteAsync("SELECT name FROM items WHERE name = 'a'", cancellationToken: CancellationToken.None);
+        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
+        int matches = 0;
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+        {
+            matches++;
+        }
+        matches.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should be named for its assembly")]
     public void GetName_DatabaseEventSource_ShouldEqualAssemblyName()
     {
