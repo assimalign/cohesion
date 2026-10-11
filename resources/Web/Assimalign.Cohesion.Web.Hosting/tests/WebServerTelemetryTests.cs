@@ -712,6 +712,59 @@ public class WebServerTelemetryTests
         span.Status.ShouldBe(ActivityStatusCode.Unset);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: An HTTP/3 request the client resets mid-body should report request_canceled, not a 500 error")]
+    public async Task ServerSpan_Http3RequestResetMidBody_ShouldReportRequestCanceled()
+    {
+        // Arrange — the pipeline reads the body and lets the read's failure escape. The client resets its
+        // request stream after the first DATA frame (RFC 9114 §4.1.1): a cancellation, as an HTTP/2
+        // RST_STREAM is, so the server resets the exchange rather than staging and sending a 500 (#1378).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        using TelemetryRecorder recorder = new(metrics: false);
+        TaskCompletionSource firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        string path = $"/telemetry/h3-reset-mid-body/{Guid.NewGuid():N}";
+
+        InMemoryMultiplexedConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp3(transport));
+        factory.Application.Use(async (context, next) =>
+        {
+            byte[] buffer = new byte[256];
+
+            if (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+                firstRead.TrySetResult();
+            }
+
+            while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+            {
+            }
+
+            context.Response.StatusCode = CohesionHttpStatusCode.NoContent;
+        });
+
+        await factory.StartAsync(cancellationToken);
+
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act
+        Connection stream = await client.SendRequestAsync(
+            "POST",
+            path,
+            [],
+            [Http3RawClient.Data(Encoding.ASCII.GetBytes("{\"name\":"))],
+            endStream: false,
+            cancellationToken);
+        await firstRead.Task.WaitAsync(cancellationToken);
+        ((IMultiplexedStreamAbort)stream).AbortWrite(0x10c);
+        Activity span = await recorder.WaitForStoppedAsync(a => Equals(a.GetTagItem("url.path"), path), cancellationToken);
+
+        // Assert
+        span.GetTagItem("error.type").ShouldBe("request_canceled");
+        span.GetTagItem("http.response.status_code").ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry: A cancelled exchange should report request_canceled and no status code")]
     public async Task ServerSpan_CanceledExchange_ShouldReportRequestCanceled()
     {

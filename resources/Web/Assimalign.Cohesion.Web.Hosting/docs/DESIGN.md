@@ -379,7 +379,12 @@ reset stream, so the span and the access log read it rather than the `500` the s
 also fires `RequestCancelled`. A body read still throws the fault's `IOException`, but a pipeline that
 was awaiting something else meets the cancellation instead and ends as cancelled; the telemetry then
 reads the feature too and reports `client_fault` rather than `request_canceled`, since the cancellation
-was the transport's answer to the client's fault.
+was the transport's answer to the client's fault. On HTTP/3 a connection error the body read finds (DATA
+after the trailer section, a frame type a request stream may not carry, a truncated frame) closes the
+connection, and the exchange whose read found it reports `400` as well, so it ends like a malformed body.
+A client that resets its own request is not at fault on either version: the read throws the exchange's
+cancellation with `RequestCancelled` already fired, so the pipeline ends as cancelled and the server resets
+the exchange (`request_canceled`) instead of staging a `500`.
 
 Catching bare `Exception` at each of these points is a deliberate, documented
 departure from the "catch specific exceptions" rule. This is a **fault-isolation
@@ -1172,9 +1177,12 @@ body and a body over the cap are reported to the pipeline as the `400` and `413`
 well-formed body reports nothing, and a plain `GET` carries no feature; on HTTP/2 and HTTP/3 a body that
 contradicts its content-length and a malformed trailer section are reported as `400` while the client
 sees the stream reset, a body over the cap as the `413` the transport sends, and a request whose stream
-ended with its head carries no feature. `WebServerTelemetryTests` pins that the same faults end the span
-with the transport's status (the `400` a reset records, on HTTP/2 and HTTP/3), no `error.type` and an
-unset status, and that an HTTP/2 exchange the fault's reset cancels reports `client_fault`.
+ended with its head carries no feature; on HTTP/3, DATA after the trailer section is reported as `400`
+too, and a client's `RESET_STREAM` mid-body reaches the pipeline as the exchange's cancellation, with no
+fault reported, and ends in a reset rather than a `500`. `WebServerTelemetryTests` pins that the same
+faults end the span with the transport's status (the `400` a reset records, on HTTP/2 and HTTP/3), no
+`error.type` and an unset status, that an HTTP/2 exchange the fault's reset cancels reports
+`client_fault`, and that an HTTP/3 request the client resets mid-body reports `request_canceled`.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an

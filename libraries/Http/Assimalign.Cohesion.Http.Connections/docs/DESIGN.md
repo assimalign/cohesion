@@ -2511,6 +2511,7 @@ application's fault observer, and recorded a `500` on the server span for a stre
 | Trailer section over the field-section limit | (a connection error: `ENHANCE_YOUR_CALM`) | `431`, or a reset with `H3_MESSAGE_ERROR` once the head is committed | `431` on HTTP/3 |
 | Content that contradicts its `content-length` | `RST_STREAM(PROTOCOL_ERROR)` | reset with `H3_MESSAGE_ERROR` | `400` |
 | A malformed trailer section | `RST_STREAM(PROTOCOL_ERROR)` | reset with `H3_MESSAGE_ERROR` (`H3_FRAME_ERROR` for a frame over its limit) | `400` |
+| A connection error the body read finds | (found by the frame pump, not the read: see below) | the connection closes with the error's code | `400` on HTTP/3, for the exchange whose read found it |
 
 - **HTTP/2.** `Http2Stream` latches the fault (`LatchClientFault`, status and failure in one
   compare-exchange, the first fault standing) before the body pipe fails and before the stream is
@@ -2518,17 +2519,29 @@ application's fault observer, and recorded a `500` on the server span for a stre
   `Http2ExchangeControl.ClientFaultStatusCode` reads it. Unlike `TransportResponseStatusCode`, it is
   reported whether or not the transport could still claim the stream's response.
 - **HTTP/3.** `Http3RequestBodyStream` latches `ClientFaultStatusCode` where it records a rejection
-  (`RejectedStatusCode`) and where it resets the stream for a stream error the body found. Every stream
-  error the body can find is in the client's octets. `Http3ExchangeControl.ClientFaultStatusCode` reads
-  it.
+  (`RejectedStatusCode`), where it resets the stream for a stream error the body found, and where it
+  aborts the connection for a connection error the body found (`FailConnection`). Every stream or
+  connection error the body can find is in the client's octets. `Http3ExchangeControl.ClientFaultStatusCode`
+  reads it.
 - **A malformed body is reported as `400`.** These versions frame the request themselves, so the
   transport resets the stream rather than answering it (RFC 9113 §8.1.1, RFC 9114 §4.1.2), and no status
   reaches the wire. `400` is what HTTP/1.1 answers a malformed body with, so a host classifies the
   exchange the same on every version.
-- **Not reported:** a connection error found in the body — on HTTP/3 an invalid frame sequence, a
-  truncated frame, or a trailer section that corrupts the QPACK state; on HTTP/2 a trailer block HPACK
-  cannot decode or over `SETTINGS_MAX_HEADER_LIST_SIZE`. It ends every exchange on the connection, and
-  each observes the loss of the connection, as for a peer that resets its own stream.
+- **A connection error the HTTP/3 read finds is reported as `400`.** An invalid frame sequence (DATA
+  after the trailer section, a second trailer section), a frame type a request stream may not carry, a
+  truncated frame, or a trailer section that corrupts the QPACK state closes the connection (RFC 9114
+  §7.1, §4.1, RFC 9204 §2.2), but the exchange whose read found it saw the client's octets: its read
+  latches `400` before the abort, and the stream counts as reset, so `SendAsync` writes nothing on the
+  dead connection and adopts the `400`. Without it, that read's `IOException` reached the host as an
+  application fault: an `Error` log, `OnException`, and a `500` the send could not deliver. Every other
+  exchange on the connection observes the loss of the connection, not a fault.
+- **Not reported on HTTP/2:** a connection error in a request's frames — a trailer block HPACK cannot
+  decode or over `SETTINGS_MAX_HEADER_LIST_SIZE` among them. The frame pump, not a body read, finds it,
+  and the pump's shutdown fires the cancellation of every request still arriving
+  (`AbortPendingRequests`), that one's included, so it ends as cancelled rather than as an application
+  fault.
+- **A client that resets its own request is not at fault.** It cancels the request (RFC 9113 §8.1,
+  RFC 9114 §4.1.1). See the next section.
 
 ### The read reports the fault, not the reset
 
@@ -2540,6 +2553,21 @@ surfaced either way, by timing. The reader now throws the latched fault's `IOExc
 abort fired after a client fault, at a read's start and from a wait, so the exchange always learns the
 client's fault from its read; a peer reset with no fault still surfaces as the cancellation. HTTP/3
 already rethrew its recorded failure from every read.
+
+The other direction matters as much: a client that resets its own request is not at fault, and a host must
+not see an application fault for it. An HTTP/2 `RST_STREAM` fires the stream's abort before it fails the
+body pipe, so the read throws `OperationCanceledException` and the exchange ends as `request_canceled`. An
+HTTP/3 `RESET_STREAM` reached the read as a failed stream instead — `QuicException` (`StreamAborted`) on
+the QUIC driver, `ConnectionResetException` on the in-memory one — which the body wrapped in an
+`IOException`, and the stream's closure fires `RequestCancelled` only later on the QUIC driver, from a
+thread-pool continuation. A Web host then ran `OnException`, logged at `Error`, staged a `500` and sent it
+on the response direction the client had not reset. `Http3RequestBodyStream` now recognizes the peer's
+abort (`IsPeerAbort`: those two reports, on a stream this server has neither reset nor stopped reading,
+with no client fault latched and the connection still up) and, once the exchange exists, trips
+`RequestCancelled` itself (`TransportHttpContext.AbortRequestForPeer`, which, like `AbortSlowResponse`, does
+not record an application cancel) and throws the `OperationCanceledException`, which every later read
+rethrows. A request hook that reads the body before dispatch still sees the stream failure: there is no
+exchange to cancel, and the head path resets the stream as incomplete.
 
 ### The exchange's status after a reset
 
@@ -2584,6 +2612,11 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   `OperationCanceledException` when the reset came first.
 - *Observable by hosts.* After a malformed HTTP/2 or HTTP/3 body reset the stream, `SendAsync` leaves
   the exchange's status at `400` instead of whatever was staged.
+- *Observable by applications.* An HTTP/3 body read that meets the client's `RESET_STREAM` throws an
+  `OperationCanceledException` with `RequestCancelled` already fired; it used to throw an `IOException`.
+  An HTTP/3 body read that finds a connection error now reports a `400` client fault, and `SendAsync`
+  writes nothing for that exchange and adopts the `400`; it used to try to send the staged response on the
+  aborted connection.
 - *Internal.* `Http2RequestBodyStream` takes its `Http2Stream` instead of a stream id, an abort token and
   a trailer-publishing delegate, which also saves the delegate it allocated per request.
 

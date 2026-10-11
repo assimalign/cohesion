@@ -202,22 +202,46 @@ internal abstract class TransportHttpContext : HttpContext
     /// </returns>
     internal OperationCanceledException AbortSlowResponse()
     {
-        CancellationToken token;
+        return new OperationCanceledException(
+            "The peer did not accept the response at the configured minimum data rate, so the exchange was aborted.",
+            TripRequestCancelled());
+    }
 
+    /// <summary>
+    /// Ends the exchange for a peer that abandoned its request, when a body read meets the abort before
+    /// the transport's own signal fires <see cref="RequestCancelled"/> (an HTTP/3 <c>RESET_STREAM</c>, which
+    /// the QUIC driver reports on the stream's closure only later, #1378): trips
+    /// <see cref="RequestCancelled"/> without recording an application cancel
+    /// (<see cref="CancelRequested"/>), as an HTTP/2 <c>RST_STREAM</c> does before the body fails, and
+    /// returns the exception the read throws.
+    /// </summary>
+    /// <param name="reason">The failure the read met: the driver's report of the peer's abort.</param>
+    /// <returns>
+    /// An <see cref="OperationCanceledException"/> carrying <see cref="RequestCancelled"/>, so a host treats
+    /// the exchange as cancelled by its client rather than as an application fault.
+    /// </returns>
+    internal OperationCanceledException AbortRequestForPeer(Exception reason)
+    {
+        return new OperationCanceledException(
+            "The client abandoned the request before its body was read to the end.",
+            reason,
+            TripRequestCancelled());
+    }
+
+    // Trips RequestCancelled for an exchange the transport ends on its peer's account, and returns the token
+    // the exception carries; default once the exchange has completed and nothing is left to cancel.
+    private CancellationToken TripRequestCancelled()
+    {
         try
         {
             _abortedSource.Cancel();
-            token = _abortedSource.Token;
+            return _abortedSource.Token;
         }
         catch (ObjectDisposedException)
         {
             // The exchange already completed; there is nothing left to cancel.
-            token = default;
+            return default;
         }
-
-        return new OperationCanceledException(
-            "The peer did not accept the response at the configured minimum data rate, so the exchange was aborted.",
-            token);
     }
 
     /// <summary>

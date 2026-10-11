@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Quic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -62,11 +63,19 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// a malformed trailer section) is an <c>H3_MESSAGE_ERROR</c> stream error (RFC 9114 §4.1.2); an
 /// oversized trailer section an <c>H3_FRAME_ERROR</c> stream error; either resets the request stream
 /// (<see cref="IsReset"/>). A truncated frame or an invalid frame sequence is a connection error
-/// (RFC 9114 §7.1 / §4.1) signalled to the connection context. The first failure is recorded and
-/// rethrown by every later read. All failures surface as <see cref="IOException"/> subtypes, so an
-/// application observes them as ordinary body-read failures. A rejection and a stream error are the
-/// client's fault, latched as <see cref="ClientFaultStatusCode"/> before the stream is answered or reset,
-/// which the exchange control reports (#1378).
+/// (RFC 9114 §7.1 / §4.1) signalled to the connection context, which aborts the connection and with it
+/// this stream. The first failure is recorded and rethrown by every later read. All failures surface as
+/// <see cref="IOException"/> subtypes, so an application observes them as ordinary body-read failures.
+/// A rejection, a stream error and a connection error found in the body are the client's fault, latched
+/// as <see cref="ClientFaultStatusCode"/> before the stream is answered, reset or aborted, which the
+/// exchange control reports (#1378).
+/// </para>
+/// <para>
+/// <b>A client that abandons its request.</b> A peer <c>RESET_STREAM</c> a read meets is how a client
+/// cancels a request (RFC 9114 §4.1.1), not a body that failed. Once the exchange exists, the read fires its
+/// <see cref="HttpContext.RequestCancelled"/> and throws an <see cref="OperationCanceledException"/>,
+/// as an HTTP/2 <c>RST_STREAM</c> does, so a host classifies the exchange as cancelled rather than as an
+/// application fault (#1378). Before dispatch, a request hook's read reports it as a stream failure.
 /// </para>
 /// <para>
 /// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
@@ -218,17 +227,19 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// after the response started reports <c>431</c>. Set before the stream is reset, and not changed after.
     /// </summary>
     /// <remarks>
-    /// A connection error found in the body (an invalid frame sequence, a truncated frame, a trailer section
-    /// that corrupts the QPACK state) is not reported: it ends every exchange on the connection, and each
-    /// observes the loss of the connection.
+    /// A connection error found in the body — an invalid frame sequence, a prohibited frame type, a
+    /// truncated frame, a trailer section that corrupts the QPACK state — is reported as <c>400</c> too: the
+    /// octets are the client's whatever the error's scope. Only the exchange whose read found it reports it;
+    /// every other exchange on the connection observes the loss of the connection.
     /// </remarks>
     public HttpStatusCode? ClientFaultStatusCode =>
         Volatile.Read(ref _clientFaultStatusCode) is var statusCode and not 0 ? new HttpStatusCode(statusCode) : null;
 
     /// <summary>
     /// Gets a value indicating whether the transport has reset this request stream — a stream error found
-    /// while reading the body, a cancelled exchange, or a request that was never dispatched — so no
-    /// response can be written on it.
+    /// while reading the body, a connection error found there (which aborts every stream of the
+    /// connection), a cancelled exchange, or a request that was never dispatched — so no response can be
+    /// written on it.
     /// </summary>
     public bool IsReset { get; private set; }
 
@@ -563,8 +574,9 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
         catch (Http3ConnectionException exception)
         {
-            Fail(exception);
-            _connection.AbortConnection(exception);
+            // RFC 9114 §7.1 / §4.1 — a truncated frame, an invalid frame sequence, or a frame type a request
+            // stream may not carry: a connection error.
+            FailConnection(exception);
             throw;
         }
         catch (QPackException exception)
@@ -572,8 +584,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // RFC 9204 §2.2 — a trailer section that cannot be decompressed corrupts the shared decoder
             // state: a connection error.
             Http3ConnectionException error = new(exception.ErrorCode, exception.Message, exception);
-            Fail(error);
-            _connection.AbortConnection(error);
+            FailConnection(error);
             throw error;
         }
         catch (Http3LimitExceededException)
@@ -606,9 +617,20 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
             // the stream has already accounted for, so the body stays readable.
             throw;
         }
+        catch (Exception exception) when (IsStreamFailure(exception) && _owner is { } owner && IsPeerAbort(exception))
+        {
+            // RFC 9114 §4.1.1 — the client abandoned its own request with RESET_STREAM. That is a cancellation,
+            // as an HTTP/2 RST_STREAM is (#1378), not a body that failed: the exchange's RequestCancelled fires
+            // before the read throws, so a host's fault boundary sees a cancelled exchange, never an
+            // application fault. The stream's own closure fires it too, but on the QUIC driver only later.
+            OperationCanceledException cancelled = owner.AbortRequestForPeer(exception);
+            Fail(cancelled);
+            throw cancelled;
+        }
         catch (Exception exception) when (IsStreamFailure(exception))
         {
-            // The request stream itself failed — reset by the peer, or torn down with its connection.
+            // The request stream itself failed — reset by the peer before the exchange existed, or torn down
+            // with its connection.
             IOException failure = exception as IOException
                 ?? new IOException("The HTTP/3 request stream failed while the request body was being read.", exception);
             Fail(failure);
@@ -855,6 +877,58 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 
         IsReset = true;
         _connection.ResetRequestStream(_streamConnection, _streamId, error, abandonsReading: !_reader.IsCompleted);
+    }
+
+    /// <summary>
+    /// Raises a connection error the body found (RFC 9114 §8): the octets that caused it are the client's
+    /// whatever the error's scope, so it is latched as the <c>400</c> HTTP/1.1 answers a malformed request
+    /// with (#1378) before the abort fires the exchange's cancellation. The abort tears down every stream of
+    /// the connection, this one included, so the stream counts as reset: the send path writes nothing on it
+    /// and records the client fault's status.
+    /// </summary>
+    private void FailConnection(Http3ConnectionException error)
+    {
+        LatchClientFault(HttpStatusCode.BadRequest);
+        Fail(error);
+
+        lock (_gate)
+        {
+            // The abort completes the input pipe underneath this body.
+            _closed = true;
+            _stopRequested = true;
+            _inputReleased = true;
+        }
+
+        IsReset = true;
+        _connection.AbortConnection(error);
+    }
+
+    /// <summary>
+    /// Whether a failed read is the client abandoning its request with <c>RESET_STREAM</c> (RFC 9114 §4.1.1):
+    /// the QUIC driver reports it as <see cref="QuicError.StreamAborted"/>, the in-memory driver as a
+    /// <see cref="ConnectionResetException"/> that carries the code. A stream this server reset or stopped
+    /// reading, the loss of the whole connection, and a body already rejected for the client's fault are not.
+    /// </summary>
+    private bool IsPeerAbort(Exception exception)
+    {
+        if (IsReset
+            || Volatile.Read(ref _closed)
+            || Volatile.Read(ref _clientFaultStatusCode) != 0
+            || _connection.ConnectionClosed.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return exception is ConnectionResetException
+            || (exception is QuicException quic && IsStreamAborted(quic));
+    }
+
+    // System.Net.Quic runs on Windows, Linux and macOS only: the platform check is what lets the error be read
+    // on a build that targets every platform (CA1416). A QuicException cannot arise anywhere else.
+    private static bool IsStreamAborted(QuicException exception)
+    {
+        return (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            && exception.QuicError == QuicError.StreamAborted;
     }
 
     private void Fail(Exception failure)

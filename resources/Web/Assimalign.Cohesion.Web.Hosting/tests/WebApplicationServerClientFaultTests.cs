@@ -299,6 +299,101 @@ public class WebApplicationServerClientFaultTests
         statuses.ShouldBe([413]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: DATA after an HTTP/3 trailer section should be reported to the pipeline as a 400 client fault")]
+    public async Task ClientFault_OnHttp3DataAfterTrailerSection_ShouldReportBadRequest()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        Observed observed = new();
+
+        InMemoryMultiplexedConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp3(transport));
+        UseObservingPipeline(factory, observed);
+        await factory.StartAsync(cancellationToken);
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+        byte[] json = Encoding.ASCII.GetBytes("{\"name\":\"gizmo\"}");
+
+        // Act — RFC 9114 §4.1: only the stream's end may follow a trailer section, so the DATA frame behind it
+        // is an invalid frame sequence, which closes the connection. The octets were the client's all the same.
+        await client.SendRequestAsync(
+            "POST",
+            "/upload",
+            [],
+            [Http3RawClient.Data(json), Http3RawClient.Trailers(("x-checksum", "abc")), Http3RawClient.Data(json)],
+            endStream: true,
+            cancellationToken);
+        await observed.Recorded.Task.WaitAsync(cancellationToken);
+
+        // Assert
+        observed.FeaturePresent.ShouldBeTrue();
+        observed.BeforeRead.ShouldBeNull();
+        observed.ReadFailure.ShouldBeAssignableTo<IOException>();
+        observed.AfterRead.ShouldBe(CohesionHttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: An HTTP/3 request the client resets mid-body should end as a cancellation, not as an application fault")]
+    public async Task ClientFault_OnHttp3ResetMidBody_ShouldEndTheExchangeAsCancelled()
+    {
+        // Arrange — the pipeline reads the body and lets the read's failure escape to the server, as a handler
+        // that does not catch it does.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        TaskCompletionSource firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<(Exception Failure, bool Cancelled, CohesionHttpStatusCode? Fault)> failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        InMemoryMultiplexedConnectionListener transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Server.UseServer(options => options.UseHttp3(transport));
+        factory.Application.Use(async (context, next) =>
+        {
+            IWebClientFaultFeature? feature = context.Features.Get<IWebClientFaultFeature>();
+            byte[] buffer = new byte[256];
+
+            try
+            {
+                if (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+                {
+                    firstRead.TrySetResult();
+                }
+
+                while (await context.Request.Body.ReadAsync(buffer, context.RequestCancelled) > 0)
+                {
+                }
+            }
+            catch (Exception exception) when (exception is IOException or OperationCanceledException)
+            {
+                failed.TrySetResult((exception, context.RequestCancelled.IsCancellationRequested, feature?.StatusCode));
+                throw;
+            }
+        });
+        await factory.StartAsync(cancellationToken);
+        await using Http3RawClient client = await Http3RawClient.ConnectAsync(transport, cancellationToken);
+
+        // Act — RESET_STREAM(H3_REQUEST_CANCELLED) once the server has read the first DATA frame: the client
+        // cancels its own request (RFC 9114 §4.1.1).
+        Connection stream = await client.SendRequestAsync(
+            "POST",
+            "/upload",
+            [],
+            [Http3RawClient.Data(Encoding.ASCII.GetBytes("{\"name\":"))],
+            endStream: false,
+            cancellationToken);
+        await firstRead.Task.WaitAsync(cancellationToken);
+        ((IMultiplexedStreamAbort)stream).AbortWrite(0x10c);
+        (Exception failure, bool cancelled, CohesionHttpStatusCode? fault) = await failed.Task.WaitAsync(cancellationToken);
+        (IReadOnlyList<int> statuses, long? resetCode) = await Http3RawClient.ReadResponseAsync(stream, cancellationToken);
+
+        // Assert — the read surfaces the cancellation with RequestCancelled already fired, which a fault
+        // boundary passes through as one, and the server resets the stream instead of sending a 500.
+        failure.ShouldBeAssignableTo<OperationCanceledException>();
+        cancelled.ShouldBeTrue();
+        fault.ShouldBeNull();
+        statuses.ShouldBeEmpty();
+        resetCode.ShouldBe(0x10cL);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Client fault: An HTTP/3 request whose stream ended with its head should keep the fast path and carry no client-fault feature")]
     public async Task ClientFault_OnHttp3RequestWithoutBody_ShouldNotInstallTheFeature()
     {

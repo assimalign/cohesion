@@ -82,7 +82,9 @@ public interface IHttpExchangeControl
     /// No status reaches the wire then, and this member reports <c>400</c>, the status HTTP/1.1 answers a
     /// malformed body with. A body over a limit is answered with its status on every version. On these
     /// versions every read of the body after the fault throws the fault's exception, an
-    /// <see cref="IOException"/>, rather than the cancellation the reset also fires.
+    /// <see cref="IOException"/>, rather than the cancellation the reset also fires. A client that resets
+    /// its own request is not at fault: the read throws the exchange's cancellation, and this member
+    /// reports nothing.
     /// </para>
     /// <para>
     /// This member reports that latched status. Code that observes the body read's exception, such as
