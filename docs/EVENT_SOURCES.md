@@ -109,8 +109,10 @@ the catalogs' swallowed reads skip reclaimed MVCC versions, an expected outcome)
 and disposes engines, whose lifecycle the root reports); `Database.Testing` (a test harness);
 `Database.ApplicationModel` (a declarative planner a gateway runs at build, with no run-time work);
 and `Sdk.Database.Tasks` (MSBuild tasks log through `TaskLoggingHelper` into the build log, inside a
-node no application tool attaches to). `Database.Sql.Schema` is expected to need none; that is
-decided after the schema-provisioning redesign lands.
+node no application tool attaches to). `Database.Sql.Schema` also remains uninstrumented after
+the redesign: compilation can run in application composition as well as in MSBuild, and its
+serialization, validation and migration planning are runtime-callable pure transformations,
+with no I/O or lifecycle; failures reach the caller and Database.Sql owns schema application.
 
 ## Not yet conforming
 

@@ -529,8 +529,9 @@ in-process Sql INSERT under activity tracking writes the kernel's `TransactionBe
 `TransactionCommitted` and its commit's Storage event inside the root's `StatementStart`/`Stop`,
 under the statement's activity id.
 
-`D` is the batch that follows the owner's redesign of the Hosting builder, schema provisioning and
-engine extensibility; nothing in those files is instrumented before it lands. The projects that get
+`D` follows the Hosting and engine-extensibility redesign. Part 1 adds the non-provisioning
+traces; Hosting startup-failure id 10 awaits the shared-host boundary decision, and the
+health/provisioning events remain reserved for decision 49a's hardening run. The projects that get
 no source, and why, are listed in [`docs/EVENT_SOURCES.md`](../../EVENT_SOURCES.md). A NativeAOT
 application receives these events only with `<EventSourceSupport>true</EventSourceSupport>`.
 

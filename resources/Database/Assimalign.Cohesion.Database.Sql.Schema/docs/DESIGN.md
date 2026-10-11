@@ -170,3 +170,13 @@ generic arguments and array suffixes without reflective type discovery.
 Co-located Shouldly tests cover the
 retained declarations, canonical documents, ownership, validation, and migration
 planning.
+
+## Diagnostics
+
+No EventSource (batch D part 1, #1349). Compilation also runs in application composition through
+`SqlSchema.Compile`, and canonical serialization, validation and migration planning are callable
+at runtime. They remain deterministic in-memory transformations: no I/O, owned service, background
+work or swallowed operational failure. Validation failures reach the caller. Database.Sql owns
+schema application and its I/O; the schema package does not need a duplicate lifecycle source.
+SDK compilation reports through MSBuild's task log. This decision replaces the pre-redesign
+assumption that compilation was build-time only.

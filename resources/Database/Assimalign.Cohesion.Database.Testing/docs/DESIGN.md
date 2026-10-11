@@ -159,3 +159,13 @@ five emitted Database programs; the Templates workflow runs when Database.Hostin
 Database.Sql, Database.Sql.Schema, Database.Client, Database.Sql.Client or
 libraries/Connections change (`tooling-templates.yml`), so an API change those
 programs compose reaches template CI.
+
+## Diagnostics
+
+This test harness owns no EventSource. Database.Hosting reports application transitions and
+cleanup failures; the root and model sources report the engine work the harness drives.
+Readiness and stop probes retry HTTP failures inside their existing budgets. Abort-start cleanup
+preserves the original cancellation or timeout, and detached delayed-build cleanup cannot deliver
+a secondary failure to the already-completed caller. Temporary-directory deletion is best effort.
+Those catches remain silent; the complete classification and the detached-cleanup observability
+trade-off are recorded in [the tracing plan, section 10](../../../../docs/programs/DATABASE_EVENT_SOURCES_PLAN.md#10-swallowed-exceptions-d9).
