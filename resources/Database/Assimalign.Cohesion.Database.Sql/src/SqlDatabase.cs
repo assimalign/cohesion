@@ -60,6 +60,34 @@ public sealed class SqlDatabase : DatabaseInstance
     // Internal diagnostics/fault-injection seam for this project's own tests.
     internal SqlSchemaProvisioner SchemaProvisioner => _schemaProvisioner;
     internal SqlDdlInterlock DdlInterlock { get; } = new();
+    internal void ReportProvisioning(DatabaseProvisioningProgress? progress) => SetProvisioningProgress(progress);
+
+    internal async ValueTask ResumeProvisioningAsync(CancellationToken cancellationToken)
+    {
+        if (_catalog.PendingMigration is not { } pending)
+        {
+            return;
+        }
+        var schema = SqlCompiledSchemaSerializer.Deserialize(pending.CanonicalDocument);
+        if (!string.Equals(schema.Hash, pending.ContentHash, StringComparison.Ordinal))
+        {
+            throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: pending migration target hash is invalid.");
+        }
+        var declaration = _engine.FindDeclaration(Name);
+        if (declaration?.Mode == SqlProvisioningMode.Verify)
+        {
+            await _schemaProvisioner.VerifyAsync(schema, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            if (declaration?.Schema is { } declared && !string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
+            {
+                throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: database '{Name}' has a different pending schema. " +
+                    "Finish its recorded migration before replacing the declaration.");
+            }
+            await _schemaProvisioner.ApplyAsync(schema, cancellationToken, declaration?.RunMigrationsInline != true).ConfigureAwait(false);
+        }
+    }
     private readonly SqlBoundTableCache _definitions;
     private readonly SqlDatabaseEngine _engine;
 
@@ -78,7 +106,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <see langword="false"/> for a new one, which is born on this engine's format.
     /// </param>
     internal SqlDatabase(DatabaseName name, SqlDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
-        SqlCatalog catalog, bool recover)
+        SqlCatalog catalog, bool recover, CancellationToken cancellationToken = default)
         : base(name, engine)
     {
         _engine = engine;
@@ -177,6 +205,7 @@ public sealed class SqlDatabase : DatabaseInstance
                 $"does not: {exception.Message}", exception);
         }
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
+        engine.BeforeProvisioning?.Invoke(this);
 
         if (recover)
         {
@@ -185,17 +214,27 @@ public sealed class SqlDatabase : DatabaseInstance
             // checkpoint (the open-time checkpoint the storage strategy
             // deferred — it must come last, because truncation destroys the
             // lifecycle records classification reads).
-            var plan = _coordinator.AnalyzeAndScrub();
-
-            if (plan.Aborted.Count > 0)
+            try
             {
-                using var scrub = _storage.BeginTransaction();
-                _indexManager.PurgeWritersAsync(scrub, plan.Aborted)
-                    .AsTask().GetAwaiter().GetResult();
-                scrub.Commit();
+                var plan = _coordinator.AnalyzeAndScrub(cancellationToken);
+                if (plan.Aborted.Count > 0)
+                {
+                    using var scrub = _storage.BeginTransaction();
+                    _indexManager.PurgeWritersAsync(scrub, plan.Aborted, cancellationToken)
+                        .AsTask().GetAwaiter().GetResult();
+                    scrub.Commit();
+                }
+                _coordinator.CompleteRecovery(cancellationToken);
             }
-
-            _coordinator.CompleteRecovery();
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                // Partial scrub brackets may have committed. Closing must preserve the
+                // classification journal, never checkpoint away the unprocessed writers.
+                _storage.TakeOffline(StorageOfflineCause.RecoveryInterrupted,
+                    $"Database '{Name}' closed before transaction recovery completed; its journal is retained for the next open.", failure);
+                _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                throw;
+            }
         }
     }
 
@@ -310,7 +349,10 @@ public sealed class SqlDatabase : DatabaseInstance
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {
-        var current = _indexManager.ExportRegistrations();
+        // DDL alone publishes directory changes. An unfinished worker tree must
+        // never become durable just because the checkpointer ran between batches.
+        var current = _indexManager.ExportRegistrations()
+            .Where(registration => _catalog.TryGetIndex(registration.ObjectId, registration.Definition.Name, out _)).ToArray();
         var stored = _catalog.GetIndexRegistrations();
 
         if (RegistrationsEqual(current, stored))
@@ -598,6 +640,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override void DisposeCore()
     {
+        _schemaProvisioner.StopDeferredAsync().AsTask().GetAwaiter().GetResult();
         // An offline database closes without writing anything (#1243): both file sets are
         // taken offline, so the coordinator's aborts undo nothing, no registration is saved,
         // and neither storage flushes at its close.
@@ -636,6 +679,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
+        await _schemaProvisioner.StopDeferredAsync().ConfigureAwait(false);
         // See DisposeCore: an offline database closes without writing anything (#1243).
         bool offline = OfflineError is not null;
         try

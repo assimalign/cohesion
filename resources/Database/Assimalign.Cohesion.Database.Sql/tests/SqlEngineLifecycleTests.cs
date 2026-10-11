@@ -48,7 +48,7 @@ public sealed class SqlEngineLifecycleTests : IDisposable
 
         // Assert: running from creation, workers spawned, and immediately usable.
         engine.State.ShouldBe(EngineState.Running);
-        engine.Workers.Count.ShouldBe(5);
+        engine.Workers.Count.ShouldBe(6);
 
         var database = await engine.CreateDatabaseAsync("immediate");
         engine.TryGetDatabase("immediate", out var found).ShouldBeTrue();

@@ -1126,10 +1126,72 @@ engine Build's plan must equal the remaining suffix and its final marker must eq
 hash and current generation. A separate compiled-schema test covers unique-index creation and a
 composite primary key, which the retained builder does not declare.
 
-**49a was accepted on 2026-10-11 and lands next on this branch.** Its classification/scheduling point belongs
-between plan rendering and the statement loop in `SqlSchemaProvisioner.ApplyAsync`; the final
-marker must still be withheld until every required step completes. B2 adds no deferred worker,
-pending-step records or Degraded progress.
+### Deferred data-scaling steps (B2, decision 49a)
+
+Build probes each affected table for one stored record. It runs creation, nullable column
+addition, drops, and work on empty tables inline. Populated-table index creation, constraint
+validation, required-column addition, additions of columns whose domains carry checks, and validation-only column tightening run on the engine's
+`SqlProvisioningWorker`. `SqlDatabaseBuilder.RunMigrationsInline = true` keeps all work in Build.
+Imperative `ApplySchemaAsync` remains inline. Nullable additions validate their immutable missing
+value once; existing rows continue to resolve that value from the catalog without a rewrite.
+
+The catalog's format-9 pending intent contains the complete target document/hash, operation kind,
+table, object name, original one-based execution position and total. Its transaction commits
+after the cheap steps and before scheduling. The prior applied marker stays untrusted while an
+intent exists; only the transaction recording the fully reconciled target clears the intent.
+
+```mermaid
+stateDiagram-v2
+    state "Pending: durable target and ordered steps; table locks reserved" as Pending
+    state "Running: DDL with row progress" as Running
+    state "Done: applied marker and pending removal commit together" as Done
+    state "Failed: database offline; COHSQLP004; intent retained" as Failed
+    [*] --> Pending
+    Pending --> Running
+    Running --> Done
+    Running --> Failed
+    Running --> Pending: "Restart or cancellation"
+    Failed --> Pending: "Next open retries"
+    Done --> [*]
+```
+
+Before Build returns, one read-only transaction reserves exclusive lock-manager table locks for
+the pending tables and any FK parent needed by their DDL. The worker keeps that transaction until
+completion or cancellation. Reservations cover the remaining migration as a set: a later table
+cannot accept work ahead of its pending step. Tables outside that set continue to serve reads,
+writes and DDL. The request admission walk uses those same lock-manager locks before planning
+or capturing an automatic transaction snapshot, including joins and subqueries. It introduces
+no second waiting graph. The final marker uses the catalog's generation check and retries a
+concurrent unrelated DDL change; it never waits for the global DDL interlock while holding tables.
+
+Index population commits bounded 64-version brackets, releasing the database's apply gate between
+batches. Counts and scans run on the worker. Unpublished trees never enter a catalog directory,
+including through checkpoints or another table's DDL. Restart discards their in-memory identity
+and rebuilds from scratch; abandoned pages follow ordinary DROP INDEX reclamation (future vacuum),
+as `BTreeIndexManager.DropIndexAsync` does. Completed steps survive a later failure and are omitted
+by B2's complete-catalog reconciliation. A failed step takes only its database offline with
+`COHSQLP004` and keeps the intent for the next open, even without a fresh schema declaration.
+
+`DatabaseInstance.Provisioning` carries immutable model-neutral observations: kind, table,
+position/total, pending/running, counted rows and optional failure code. Hosting reports Degraded
+until completion, then Healthy; offline takes precedence over provisioning. No EventSource
+events were added for this worker (see Diagnostics).
+
+Build and BuildAsync accept cancellation. Hosting passes the caller's application Build token
+through `IDatabaseApplicationContext.BuildCancellationToken`; the host's runtime shutdown lifecycle
+has not begun at Build, so its caller must supply the shutdown token. Recovery observes it in
+journal initialization/replay, page reconstruction and transaction scrub, and between checkpoint
+phases. An interrupted logical scrub fences the unpublished database's storage from shutdown
+writes (`RecoveryInterrupted`), preserving classification records for the next open. Database
+disposal cancels and joins its worker work before closing storage.
+
+Tightening now has an executable DDL path: a full `ALTER COLUMN` definition may change nullability,
+length or precision while retaining storage type, scale, collation, domain and DEFAULT. Existing
+values must already satisfy the new definition; changes that need value conversion remain refused.
+PostgreSQL's table-rewrite validation separates not-null/constraint checks from rewritten tuples
+(`src/backend/commands/tablecmds.c:6186,6511,6594`, `ATRewriteTable`); Neo4j's background population exposes
+`POPULATING` and `FAILED` (`community/kernel-api/src/main/java/org/neo4j/internal/kernel/api/InternalIndexState.java:29,43`).
+These are behavioral precedents, not copied implementations.
 
 ### Declared databases: the engine builder's build phases
 
@@ -2260,13 +2322,13 @@ description + exported registrations), the engine binds them.
 ## Engine-owned background workers
 
 The engine is a **data machine**: `Create(name, options)` returns it operational, with
-the five-worker inventory already pumping — one dedicated background thread per
+the six-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
 engine schedules, claims, or configures these loops (the 2026-07-13 redesign
 deleted the #902 claim handshake — see the root DESIGN.md); the root base's
 `DatabaseEngine.Workers` view of them is observational (name, kind, cadence). Since phase 4 of
 the concrete-types plan the engine is a leaf of the root `DatabaseEngine`: its constructor
-attaches the five built-in workers through the base's `AttachWorker`, which starts each pump on a
+attaches the six built-in workers through the base's `AttachWorker`, which starts each pump on a
 thread named for the worker, and the base stops the pumps and releases the workers on disposal
 (the checkpointer's lanes end in its release hook, `DisposeAsyncCore`).
 Each worker iterates a lock-free snapshot of every open storage file set (data +
@@ -3874,6 +3936,11 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   `ObjectDisposedException`.
 
 ## Diagnostics
+
+Batch D (#1349) should add provisioning start, bounded progress, end and failure events, with
+engine/database identity, operation kind, table/object, original position/total, processed/total
+rows when countable, elapsed time, and the coded failure. Decision 49a adds no events; the root
+health observation is available while D is pending.
 
 The model raises its own events through one internal event source, named for the assembly:
 `Assimalign.Cohesion.Database.Sql` (`src/Internal/EventSource/SqlDatabaseEventSource.cs`;

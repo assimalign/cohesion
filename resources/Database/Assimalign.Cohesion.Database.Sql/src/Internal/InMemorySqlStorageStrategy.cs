@@ -1,3 +1,4 @@
+using System.Threading;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -47,7 +48,7 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
     /// The open-time checkpoint is deferred, as the file-based strategy defers it: the engine runs
     /// transaction-recovery analysis over the recovered journal first.
     /// </remarks>
-    public override SqlStorage OpenStorage(string databaseName, bool catalog)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default)
     {
         if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
@@ -56,7 +57,7 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
 
         try
         {
-            return SqlStorage.Open(data, journal, backup, checkpointOnOpen: false, _durability);
+            return SqlStorage.Open(data, journal, backup, checkpointOnOpen: false, _durability, cancellationToken);
         }
         catch
         {

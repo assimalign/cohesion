@@ -1537,6 +1537,29 @@ Numbering continues the plan of record's table. Each line is the question, then 
     provisioning events (start, progress, end) are catalogued with batch D (#1349), which lands
     after it.
 
+    *Landed in B2 (49a)* (#1355 part 2). Format **9** persists an ordered pending target separately
+    from the applied marker. Build completes cheap steps and reserves pending tables with the
+    existing lock manager; the sixth SQL worker executes populated-table index/constraint work
+    and validation-only tightening, with bounded index batches so other tables can commit.
+    Completion atomically clears intent with the final marker. Failure takes only that database
+    offline with `COHSQLP004`; restart reconciles completed steps and rebuilds unpublished trees.
+    `SqlDatabaseBuilder.RunMigrationsInline` opts out per database. Nullable columns with domain
+    checks are conservatively treated as constraint work, preserving empty-table assignment rules.
+    General root `DatabaseInstance.Provisioning` observations let Hosting report Degraded with
+    kind/table, original step position and counted rows, then Healthy after completion. No new
+    EventSource events were added; batch D owns start/progress/end/failure instrumentation.
+    `Build(CancellationToken)` passes its caller's shutdown token through the root factory context;
+    the host runtime has no shutdown lifecycle yet at Build. Physical recovery and logical scrub
+    observe cancellation and retain the classification journal after interruption.
+
+    **Escalations recorded with the implementation:** the root adds only the model-neutral
+    observation and construction cancellation vocabulary, rather than restoring schema capability
+    APIs or adding a Hosting-to-SQL dependency. Pending targets (and FK parents required by DDL)
+    are reserved as a set until the migration completes. ALTER COLUMN previously had no executable
+    path; this change implements validation-only nullability/bounds changes, retaining the refusal
+    of storage-type/default/domain/collation/scale rewrites. Abandoned index pages use existing
+    DROP INDEX's future-vacuum policy. The caller must supply its process shutdown token at Build.
+
 50. **The `DatabaseInstance` capability.** Delete `SupportsSchemaProvisioning`, `ApplySchemaAsync`,
     `ApplySchemaCoreAsync` and the constructor flag, and change `database-area.md` rule 4's sentence
     to "`DatabaseInstance` has no capability member", recorded in O34a? *Recommend:* yes.

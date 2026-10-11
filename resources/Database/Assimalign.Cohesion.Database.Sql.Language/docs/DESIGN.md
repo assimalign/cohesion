@@ -6,6 +6,12 @@ and structured to be extended without churning what exists (open/closed).
 
 ## Design intent
 
+Decision 49a adds `SqlAlterColumnAction`, a full column-definition action:
+`ALTER TABLE t ALTER COLUMN c INT NOT NULL`. It reuses column parsing, including bounds,
+DEFAULT and collation, and the executor checks which changes preserve storage representation.
+The PostgreSQL `TYPE ... USING`, `SET` and `DROP` variants remain explicitly refused. Lookahead
+copies the token lexer without changing parser bookkeeping. The action changes no clause count.
+
 Parse the declared dialect into a stable, fully-typed AST that planners, catalogs,
 tooling, and the SDK schema compiler can rely on. "Declared" is the operative word:
 [DIALECT.md](DIALECT.md) is a contract, not aspiration — the parser, the matrix,

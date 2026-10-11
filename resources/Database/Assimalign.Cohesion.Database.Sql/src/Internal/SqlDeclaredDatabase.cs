@@ -22,12 +22,13 @@ internal sealed class SqlDeclaredDatabase
 {
     private SqlSchemaMigrationResult? _result;
 
-    private SqlDeclaredDatabase(DatabaseName name, Collation collation, SqlProvisioningMode mode, SqlCompiledSchema? schema)
+    private SqlDeclaredDatabase(DatabaseName name, Collation collation, SqlProvisioningMode mode, SqlCompiledSchema? schema, bool runMigrationsInline)
     {
         Name = name;
         Collation = collation;
         Mode = mode;
         Schema = schema;
+        RunMigrationsInline = runMigrationsInline;
     }
 
     /// <summary>Gets the database name.</summary>
@@ -41,6 +42,8 @@ internal sealed class SqlDeclaredDatabase
 
     /// <summary>Gets the compiled schema, or null when the database is only ensured to exist.</summary>
     internal SqlCompiledSchema? Schema { get; }
+
+    internal bool RunMigrationsInline { get; }
 
     /// <summary>
     /// Gets the outcome of the schema's apply or verification once provisioning ran, or null before
@@ -144,7 +147,8 @@ internal sealed class SqlDeclaredDatabase
             declaration.Name,
             collation,
             declaration.Provisioning,
-            compiled);
+            compiled,
+            declaration.RunMigrationsInline);
     }
 
     /// <summary>
@@ -178,7 +182,7 @@ internal sealed class SqlDeclaredDatabase
         {
             _result = Mode == SqlProvisioningMode.Verify
                 ? await database.VerifySchemaAsync(Schema, cancellationToken).ConfigureAwait(false)
-                : await database.ApplySchemaAsync(Schema, cancellationToken).ConfigureAwait(false);
+                : await database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline).ConfigureAwait(false);
         }
 
         // Step 6 (owner decision 65): every persisted definition binds to the engine's catalog. A

@@ -51,6 +51,9 @@ $apply = @'
                 : await database.ApplySchemaAsync(Schema, cancellationToken).ConfigureAwait(false);
 '@
 $apply = $apply.Replace("`r`n", "`n")
+if ($source.Contains('database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline)')) {
+    $apply = $apply.Replace('database.ApplySchemaAsync(Schema, cancellationToken)', 'database.SchemaProvisioner.ApplyAsync(Schema, cancellationToken, !RunMigrationsInline)')
+}
 $source = Replace-ExactlyOnce $source $apply ("            long b2ApplyStarted = System.Diagnostics.Stopwatch.GetTimestamp();`n" + $apply + "`n            b2ApplyElapsed = System.Diagnostics.Stopwatch.GetTimestamp() - b2ApplyStarted;")
 
 $end = @'

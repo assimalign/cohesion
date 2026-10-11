@@ -160,7 +160,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
     /// <inheritdoc />
-    public override SqlStorage OpenStorage(string databaseName, bool catalog)
+    public override SqlStorage OpenStorage(string databaseName, bool catalog, CancellationToken cancellationToken = default)
     {
         string key = Key(databaseName, catalog);
         Files files;
@@ -182,7 +182,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
             _storages[key] = files;
         }
 
-        return SqlStorage.Open(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), checkpointOnOpen: false);
+        return SqlStorage.Open(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), checkpointOnOpen: false, durability: null, cancellationToken);
     }
 
     /// <inheritdoc />

@@ -72,6 +72,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class SqlDatabaseEngine : DatabaseEngine
 {
+    // Instance-local barrier used by this assembly's real-engine crash/race tests.
+    internal Action<SqlDatabase>? BeforeProvisioning { get; set; }
     private readonly SqlDatabaseEngineOptions _options;
     private readonly Dictionary<string, SqlDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
@@ -82,6 +84,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
     private readonly ManualResetEventSlim _checkpointNeededSignal = new();
     private readonly ManualResetEventSlim _undoDeferredSignal = new();
+    private readonly SqlProvisioningWorker _provisioningWorker;
     private readonly int _bufferPoolPages;
     private readonly SqlStorageStrategy _strategy;
     private readonly SqlQueryParserOptions _parserOptions;
@@ -137,6 +140,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         AttachWorker(new SqlCheckpointWorker(this));
         AttachWorker(new SqlVersionPurgeWorker(this));
         AttachWorker(new SqlIndexMaintenanceWorker(this));
+        _provisioningWorker = new SqlProvisioningWorker(this);
+        AttachWorker(_provisioningWorker);
     }
 
     /// <inheritdoc />
@@ -221,6 +226,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </summary>
     internal ManualResetEventSlim UndoDeferredSignal => _undoDeferredSignal;
 
+    internal void ScheduleProvisioning(SqlDeferredMigration migration) => _provisioningWorker.Enqueue(migration);
+
+    internal void CompleteProvisioningBuild() => _provisioningWorker.CompleteBuild();
+
     /// <summary>
     /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
     /// false once it was dropped, closed for a reopen, the engine closed it, or a holder of the
@@ -282,6 +291,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         // reads the batch size on every pass, so a caller's later change used to reach it.
         var engine = CreateUncomposed(name, options.Snapshot());
         engine.CompleteComposition();
+        engine.CompleteProvisioningBuild();
         return engine;
     }
 
@@ -651,7 +661,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             SqlStorage catalogStorage;
             try
             {
-                catalogStorage = _strategy.OpenStorage(name, catalog: true);
+                catalogStorage = _strategy.OpenStorage(name, catalog: true, cancellationToken);
             }
             catch (StorageFormatException exception)
             {
@@ -688,7 +698,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
                 try
                 {
-                    storage = _strategy.OpenStorage(name, catalog: false);
+                    storage = _strategy.OpenStorage(name, catalog: false, cancellationToken);
                 }
                 catch (StorageFormatException exception)
                 {
@@ -700,7 +710,16 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
-                var database = new SqlDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, catalog, recover: true);
+                var database = new SqlDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, catalog, recover: true, cancellationToken);
+                try
+                {
+                    database.ResumeProvisioningAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    database.Dispose();
+                    throw;
+                }
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }

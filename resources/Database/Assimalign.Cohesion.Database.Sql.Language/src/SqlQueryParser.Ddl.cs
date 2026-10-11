@@ -385,9 +385,15 @@ public sealed partial class SqlQueryParser
             ? MissingTableReference(ref lexer)
             : ParseUnaliasedTableReference(ref lexer);
 
-        // Action: ADD or DROP
+        // Action: ADD, DROP, or a complete ALTER COLUMN definition.
         SqlAlterAction action;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ADD"))
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ALTER") && IsAlterColumnDefinition(lexer))
+        {
+            Advance(ref lexer);
+            ExpectKeyword(ref lexer, "COLUMN", "ALTER COLUMN");
+            action = new SqlAlterColumnAction(ParseColumnDefinition(ref lexer));
+        }
+        else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ADD"))
         {
             Advance(ref lexer);
             if (IsConstraintStart(ref lexer))
@@ -445,6 +451,35 @@ public sealed partial class SqlQueryParser
 
         return new SqlAlterTableExpression(table, action, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
+    }
+
+    private static bool IsAlterColumnDefinition(TokenLexer lexer)
+    {
+        // PostgreSQL's TYPE/USING, SET and DROP forms remain outside this dialect.
+        // This action uses the same full column definition as CREATE and ADD.
+        Next(ref lexer);
+        if (!IsKeyword(ref lexer, "COLUMN"))
+        {
+            return false;
+        }
+        Next(ref lexer);
+        if (!IsIdentifierOrKeyword(ref lexer))
+        {
+            return false;
+        }
+        Next(ref lexer);
+        return CurrentText(ref lexer).ToUpperInvariant() is not ("TYPE" or "SET" or "DROP");
+
+        static void Next(ref TokenLexer tokens)
+        {
+            while (tokens.MoveNext())
+            {
+                if (tokens.Current.Type != TokenType.Comment)
+                {
+                    return;
+                }
+            }
+        }
     }
 
     /// <summary>

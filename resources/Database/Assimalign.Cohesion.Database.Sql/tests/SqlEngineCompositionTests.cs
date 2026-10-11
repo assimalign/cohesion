@@ -47,8 +47,8 @@ public sealed class SqlEngineCompositionTests
         // Assert
         started.ShouldBeTrue();
         secondSawFirst.ShouldBeTrue();
-        engine.Workers.Count.ShouldBe(7);
-        engine.Workers.Skip(5).ShouldBe(new DatabaseEngineWorker[] { first, second.ShouldNotBeNull() });
+        engine.Workers.Count.ShouldBe(8);
+        engine.Workers.Skip(6).ShouldBe(new DatabaseEngineWorker[] { first, second.ShouldNotBeNull() });
         engine.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
         server.ShouldNotBeNull().Engine.ShouldBeSameAs(engine);
         server.Starts.ShouldBe(0);
@@ -147,7 +147,7 @@ public sealed class SqlEngineCompositionTests
 
         // Assert
         refusal.Message.ShouldStartWith("Engine composition is frozen", Case.Sensitive);
-        engine.Workers.Count.ShouldBe(5);
+        engine.Workers.Count.ShouldBe(6);
         engine.Workers.ShouldNotContain(worker);
     }
 

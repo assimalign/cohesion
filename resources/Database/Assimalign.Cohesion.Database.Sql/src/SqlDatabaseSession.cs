@@ -113,6 +113,8 @@ public sealed class SqlDatabaseSession : DatabaseSession
     /// </summary>
     internal SqlStatementMetrics? LastStatementMetrics => _lastStatementMetrics;
 
+    internal Action<long, long?>? ProvisioningProgress { get; set; }
+
     /// <summary>
     /// Begins an explicit transaction at the default isolation level, <see cref="IsolationLevel.Snapshot"/>.
     /// </summary>
@@ -199,12 +201,16 @@ public sealed class SqlDatabaseSession : DatabaseSession
     private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
     {
         _database.ThrowIfOffline();
-
         // The statement's own metrics are the ones set after this point; a statement that fails
         // before it runs leaves the previous statement's, which never classify this one.
         var previousMetrics = _lastStatementMetrics;
         try
         {
+            if (_provisioningSchema is null && _database.SchemaProvisioner.Deferred is not null)
+            {
+                await _database.SchemaProvisioner.WaitForTablesAsync(request, cancellationToken).ConfigureAwait(false);
+                _database.ThrowIfOffline();
+            }
             using var ddl = _provisioningSchema is null && IsSelfCommitting(request)
                 ? _database.DdlInterlock.EnterStatement(_database.Name.ToString()) : null;
             return await ExecuteStatementAsync(request, cancellationToken).ConfigureAwait(false);
@@ -380,7 +386,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner);
+                _database.Name.ToString(), CaptureSystemViewSnapshot(request), _ddlLockOwner, ProvisioningProgress);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);

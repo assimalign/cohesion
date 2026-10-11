@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// the imperative <see cref="SqlDatabase.ApplySchemaAsync"/> path and phase 6 of the engine
 /// builder's build (<see cref="SqlDeclaredDatabase"/>) share it.
 /// </summary>
-internal sealed class SqlSchemaProvisioner
+internal sealed partial class SqlSchemaProvisioner
 {
     private readonly SqlDatabase _database;
     private readonly SqlCatalog _catalog;
@@ -39,12 +39,19 @@ internal sealed class SqlSchemaProvisioner
 
     internal async ValueTask<SqlSchemaMigrationResult> ApplyAsync(
         SqlCompiledSchema schema,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferDataScalingSteps = false)
     {
         ArgumentNullException.ThrowIfNull(schema);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deferDataScalingSteps && TryGetDeferredResult(schema) is { } deferredResult)
+        {
+            return deferredResult;
+        }
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         TransactionContext? locks = null;
         IDisposable? ddl = null;
+        bool transferred = false;
         try
         {
             ddl = _database.DdlInterlock.EnterApply(schema.Name);
@@ -74,6 +81,7 @@ internal sealed class SqlSchemaProvisioner
             LastPlan = plan;
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
+            var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];
 
             // This read-only context owns table locks across self-committing statements.
             // Its rollback only releases locks: no schema/data changes enlist in it.
@@ -83,9 +91,24 @@ internal sealed class SqlSchemaProvisioner
             {
                 foreach (SqlMigrationScriptStep step in script.Steps)
                 {
+                    if (deferred.Contains(step))
+                    {
+                        continue;
+                    }
                     await session.ExecuteAsync(step.Request, cancellationToken).ConfigureAwait(false);
                     applied.Add(step);
                     StepApplied?.Invoke(step);
+                }
+
+                if (deferred.Count > 0)
+                {
+                    // Release the completed inline tables, then reserve every pending table
+                    // before handing the engine to a caller. The worker owns this transaction.
+                    await _database.Coordinator.RollbackAsync(locks, CancellationToken.None).ConfigureAwait(false);
+                    locks = null;
+                    await PrepareDeferredAsync(schema, deferred, script.Steps.Count, cancellationToken).ConfigureAwait(false);
+                    transferred = true;
+                    return new SqlSchemaMigrationResult(plan.SourceHash, targetHash, applied.Count, WasAlreadyApplied: false);
                 }
 
                 // IF NOT EXISTS and concurrent ad-hoc DDL must not turn an unowned or
@@ -155,7 +178,14 @@ internal sealed class SqlSchemaProvisioner
             finally
             {
                 ddl?.Dispose();
-                _applyGate.Release();
+                if (transferred)
+                {
+                    _database.Engine.ScheduleProvisioning(Deferred!);
+                }
+                else
+                {
+                    _applyGate.Release();
+                }
             }
         }
     }
@@ -379,7 +409,7 @@ internal sealed class SqlSchemaProvisioner
     // The identity is cached on the immutable declaration. Generation equality proves that
     // no committed catalog change happened since that identity was recorded.
     private bool IsApplied(SqlCatalogSchemaState? recorded, SqlCompiledSchema schema)
-        => recorded is not null &&
+        => recorded is not null && _catalog.PendingMigration is null &&
             string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) &&
             recorded.Generation == _catalog.DdlGeneration;
 

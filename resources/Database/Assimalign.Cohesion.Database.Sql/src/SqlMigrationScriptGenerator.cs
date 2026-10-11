@@ -111,7 +111,9 @@ public static class SqlMigrationScriptGenerator
                     operation.Constraint is null ? null : SqlSchemaStatementRenderer.AddConstraint(
                         RequireParent(operation), RequireConstraint(operation))),
 
-                SqlSchemaMigrationOperationKind.AlterTable or SqlSchemaMigrationOperationKind.AlterColumn =>
+                SqlSchemaMigrationOperationKind.AlterColumn => RenderAlterColumn(operation),
+
+                SqlSchemaMigrationOperationKind.AlterTable =>
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect"),
 
                 _ => throw Unsupported(operation, "the operation kind is unknown"),
@@ -127,6 +129,24 @@ public static class SqlMigrationScriptGenerator
                 $"Cannot render SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}': {exception.Message}",
                 exception);
         }
+    }
+
+    private static SqlMigrationScriptStep RenderAlterColumn(SqlSchemaMigrationOperation operation)
+    {
+        if (operation.Column is not { } column || operation.PreviousColumn is not { } previous)
+        {
+            throw InvalidPayload(operation, "the previous and desired column definitions");
+        }
+        RequireMatchingName(operation, column.Name, "column");
+        if (column.Type != previous.Type || column.Scale != previous.Scale ||
+            !string.Equals(column.CustomType, previous.CustomType, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(SqlSchemaProvisioner.CanonicalDefault(column.DefaultLiteral),
+                SqlSchemaProvisioner.CanonicalDefault(previous.DefaultLiteral), StringComparison.Ordinal))
+        {
+            throw Unsupported(operation, "ALTER metadata requiring a storage-type, domain, scale or default rewrite is not implemented");
+        }
+        return new SqlMigrationScriptStep(operation, SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), column),
+            SqlSchemaStatementRenderer.AlterColumn(RequireParent(operation), previous));
     }
 
     private static string? PreviousIndexStatement(

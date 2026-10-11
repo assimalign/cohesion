@@ -235,6 +235,8 @@ internal sealed record SqlDropTablePlan(string Schema, string Name, bool IfExist
 
 internal sealed record SqlAddColumnPlan(string Schema, string Name, SqlCatalogColumn Column, IReadOnlyList<SqlConstraintDefinition> Constraints) : SqlPlan;
 
+internal sealed record SqlAlterColumnPlan(SqlCatalogTable Table, SqlCatalogColumn Column) : SqlPlan;
+
 internal sealed record SqlAddConstraintPlan(SqlCatalogTable Table, SqlConstraintDefinition Constraint) : SqlPlan;
 
 internal sealed record SqlDropConstraintPlan(SqlCatalogTable Table, string ConstraintName) : SqlPlan;
