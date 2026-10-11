@@ -1058,8 +1058,9 @@ final-response guard below), so all three engines classify `1xx` identically.
   `:status`, no `Content-Length`, no connection-specific field) and writes an
   additional HEADERS frame on the
   request stream ahead of the final HEADERS frame (RFC 9114 §4.1). The request
-  stream is single-writer for the response direction and QUIC applies its own
-  per-stream flow control, so the interim frame simply precedes the final frames.
+  stream is single-writer for the response direction. Application interims,
+  automatic `100 Continue`, and the final head share the exchange's writer claim
+  so an interim finishes before the final head starts (#1428).
 
 H2/H3 peers may receive several interim HEADERS, all before the final one — the
 capability can be called repeatedly.
@@ -1161,14 +1162,13 @@ invites the body:
   response, and both write the same request stream's `PipeWriter`, which allows one
   writer. HTTP/2 serializes them under the connection write gate and re-checks the claim
   there; HTTP/3 writes each stream directly, so the exchange carries a small claim
-  (`Http3Context.TryBeginContinue` / `EndContinue` / `ClaimFinalResponseHeadAsync`, an
-  interlocked state and, only for a request that solicits, a completion source). The
+  (`Http3Context.TryBeginInterimAsync` / `EndInterim` / `ClaimFinalResponseHeadAsync`, a
+  lock and a completion source owned by the active interim). The
   `100` takes it before it writes and is dropped once the final head has; the final head
   — the buffered send's commit and the streamed sink's `CommitHeadersAsync` — takes it
   before its HEADERS frame and waits for a `100` still being written. The `100` goes out
-  whole and first, and the two never share the writer. An application's own interim
-  responses through `Http.InterimResponses` stay its own to sequence, as on every
-  version.
+  whole and first, and the two never share the writer. Application interim responses
+  through `Http.InterimResponses` share this claim (#1428).
 - **HTTP/3 holds the `100` to the response's minimum data rate (#1384).** Once the
   exchange exists, `Http3ConnectionContext.WriteContinueAsync` hands the frame over and
   runs its flush through `MinDataRateWait.TryRunAsync`, crediting the frame's octets
@@ -1214,6 +1214,30 @@ invites the body:
   cancellation; and so does a first read whose `100` the client grants no stream credit
   for past the response's allowance, after the request stream is reset with
   `H3_REQUEST_CANCELLED`.
+
+### Application interim responses and the final head (#1428)
+
+An application `103 Early Hints` takes the same claim as automatic `100 Continue`.
+An active interim completes before the final head writes; a queued or later
+application interim is refused with `InvalidOperationException` once the final
+head has claimed the writer. An automatic `100` loses that race silently. Multiple
+interims serialize without replacing the active writer's completion signal. The
+buffered send, streamed response and extended CONNECT acceptance all claim the
+final head before writing it.
+
+Each interim flush uses the response minimum data rate, including its per-request
+override, through the same helper as automatic `100` (#1384). Reading that setting
+does not freeze it. Each interim has its own rate gate, so the final head's wait
+does not double-charge the response's gate. Exceeding the allowance resets the
+request stream and throws the exchange's cancellation.
+
+**Breaking behavior from 10.0.0-preview.1 (decision 15):** concurrent application
+interims and final heads now serialize or reject the interim cleanly instead of
+sharing the writer, and stalled application interims are held to the response
+rate. The released tag has the unsynchronized application write. Advisory triage:
+CWE-362, low severity; corrupt response framing or a failed exchange requires
+concurrent application operations. Unauthenticated remote exploitability is not
+established independently of that application behavior.
 
 ### AOT posture
 

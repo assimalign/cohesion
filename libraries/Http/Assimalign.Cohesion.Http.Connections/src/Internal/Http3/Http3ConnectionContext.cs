@@ -2964,7 +2964,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         IHttpHeaderCollection? headers,
         CancellationToken cancellationToken)
     {
-        return WriteInterimResponseAsync(http3Context.StreamConnection, statusCode, headers, cancellationToken);
+        return WriteInterimResponseWithinRateAsync(http3Context, http3Context.StreamConnection, statusCode, headers, cancellationToken);
     }
 
     /// <summary>
@@ -3009,17 +3009,27 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// <param name="cancellationToken">The read's token.</param>
     /// <returns>A task that completes once the request stream accepted the <c>100</c>.</returns>
     /// <exception cref="OperationCanceledException">The peer did not take the <c>100</c> at the rate; the exchange was aborted.</exception>
-    internal async ValueTask WriteContinueAsync(Http3Context? context, IConnection streamConnection, CancellationToken cancellationToken)
+    internal ValueTask WriteContinueAsync(Http3Context? context, IConnection streamConnection, CancellationToken cancellationToken)
+        => new(WriteInterimResponseWithinRateAsync(context, streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken));
+
+    // Application interims and automatic 100 use the same rate rules. Each gets its own allowance so
+    // a final head waiting on its claim does not double-charge the response gate (#1384, #1428).
+    private async Task WriteInterimResponseWithinRateAsync(
+        Http3Context? context,
+        IConnection streamConnection,
+        HttpStatusCode statusCode,
+        IHttpHeaderCollection? headers,
+        CancellationToken cancellationToken)
     {
         if (context?.PeekResponseDataRate(_limits.MinResponseDataRate) is not { } rate)
         {
-            await WriteInterimResponseAsync(streamConnection, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+            await WriteInterimResponseAsync(streamConnection, statusCode, headers, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         MinDataRateGate gate = new(rate, _timeProvider);
         PipeWriter output = streamConnection.Output;
-        gate.Record(ticksWaited: 0, bytesTransferred: WriteInterimResponseFrame(output, HttpStatusCode.Continue, headers: null));
+        gate.Record(ticksWaited: 0, bytesTransferred: WriteInterimResponseFrame(output, statusCode, headers));
 
         bool flushed = await MinDataRateWait.TryRunAsync(
             gate,

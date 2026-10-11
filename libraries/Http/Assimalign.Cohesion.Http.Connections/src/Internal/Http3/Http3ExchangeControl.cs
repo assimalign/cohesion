@@ -63,13 +63,21 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
     {
         HttpInterimResponseRules.ValidateInterimStatusCode(statusCode);
 
-        if (!CanWriteInterimResponse)
+        if (!CanWriteInterimResponse || !await _context.TryBeginInterimAsync(cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidOperationException(
                 "An interim response cannot be sent after the final HTTP/3 response has started.");
         }
 
-        await _connection.WriteInterimResponseAsync(_context, statusCode, headers, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _context.RequestCancelled.ThrowIfCancellationRequested();
+            await _connection.WriteInterimResponseAsync(_context, statusCode, headers, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _context.EndInterim();
+        }
     }
 
     /// <inheritdoc />
@@ -91,9 +99,9 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
 
     /// <inheritdoc />
     /// <remarks>
-    /// The guards run in the order <see cref="HttpExtendedConnectRules"/> records. HTTP/3 keeps no
-    /// separate response claim: marking the final response started and registering the tunnel before
-    /// the head is written is what keeps the exchange's own send path off the request stream.
+    /// The guards run in the order <see cref="HttpExtendedConnectRules"/> records. Marking the final
+    /// response started and registering the tunnel keeps the exchange's send path off the stream;
+    /// the shared final-head claim waits for an active interim before writing the tunnel's head.
     /// </remarks>
     public async ValueTask<Stream> AcceptTunnelAsync(CancellationToken cancellationToken = default)
     {
@@ -150,6 +158,7 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
         Http3ExtendedConnectStream tunnel = new(_connection, _context);
         _context.Tunnel = tunnel;
 
+        await _connection.ClaimFinalResponseHeadAsync(_context, cancellationToken).ConfigureAwait(false);
         await tunnel.WriteHeadAsync(headerBlock, cancellationToken).ConfigureAwait(false);
         tunnel.MarkHeadCommitted();
 

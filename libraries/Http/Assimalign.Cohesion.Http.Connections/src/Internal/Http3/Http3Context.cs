@@ -9,26 +9,17 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http3Context : TransportHttpContext
 {
-    private const int responseHeadOpen = 0;
-    private const int continueInFlight = 1;
-    private const int finalHeadClaimed = 2;
-
     // 0 while the exchange runs, 1 once it has ended (SendAsync returned or threw, or the exchange was
     // disposed). A SendAsync that refused the head or a buffered trailer section (#1183) does not end it:
     // nothing reached the wire, and the exchange runs until the caller finalizes it again or disposes it.
     // Interlocked: the send path and the host's disposal race to end it.
     private int _exchangeEnded;
 
-    // #1385 — who holds the request stream's writer ahead of the final response: responseHeadOpen until the
-    // transport's automatic 100 Continue or the final head takes it, continueInFlight while the 100 is being
-    // written, finalHeadClaimed once the final head has, after which the 100 is dropped. Interlocked: a
-    // full-duplex handler makes the first body read, which writes the 100, on one task while another starts
-    // the streamed response.
-    private int _responseHeadState;
-
-    // Completed once the 100 in flight is written, or failed, so a final head claimed meanwhile waits for it
-    // rather than sharing the writer. Created only for a request that solicits its content.
-    private TaskCompletionSource? _continueWritten;
+    // Automatic 100, application interims and the final head share one writer (#1385, #1428).
+    // Only the active interim owns a completion source; queued writers cannot replace it.
+    private readonly Lock _responseHeadLock = new();
+    private bool _finalHeadClaimed;
+    private TaskCompletionSource? _interimWritten;
 
     /// <summary>
     /// Initializes the exchange for a decoded request head.
@@ -128,41 +119,65 @@ internal sealed class Http3Context : TransportHttpContext
     }
 
     /// <summary>
-    /// Takes the request stream's writer for the transport's automatic <c>100 Continue</c> (RFC 9110
-    /// §10.1.1, #1385), unless the final response head has taken it: an interim response can no longer
-    /// precede the final one then, and the caller drops the <c>100</c>. A caller that gets it releases it
-    /// with <see cref="EndContinue"/> once the write is done or has failed.
+    /// Takes the request stream's writer for an interim response, waiting for any earlier interim.
+    /// Once the final head claims it, application writes are refused and automatic 100 is dropped.
+    /// The successful caller releases it with <see cref="EndInterim"/> after the write ends.
     /// </summary>
-    /// <returns><see langword="true"/> when the caller may write the <c>100</c>.</returns>
-    public bool TryBeginContinue()
+    /// <returns><see langword="true"/> when the caller may write the interim response.</returns>
+    public async ValueTask<bool> TryBeginInterimAsync(CancellationToken cancellationToken)
     {
-        Volatile.Write(ref _continueWritten, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
-        return Interlocked.CompareExchange(ref _responseHeadState, continueInFlight, responseHeadOpen) == responseHeadOpen;
+        while (true)
+        {
+            Task preceding;
+            lock (_responseHeadLock)
+            {
+                if (_finalHeadClaimed)
+                {
+                    return false;
+                }
+
+                if (_interimWritten is null)
+                {
+                    _interimWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    return true;
+                }
+
+                preceding = _interimWritten.Task;
+            }
+
+            await preceding.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
-    /// Releases the request stream's writer after the automatic <c>100 Continue</c>
-    /// (<see cref="TryBeginContinue"/>), letting a final head that claimed it meanwhile proceed.
+    /// Releases the writer after an interim response, letting a claimed final head proceed.
     /// </summary>
-    public void EndContinue()
+    public void EndInterim()
     {
-        Interlocked.CompareExchange(ref _responseHeadState, responseHeadOpen, continueInFlight);
-        Volatile.Read(ref _continueWritten)?.TrySetResult();
+        TaskCompletionSource? written;
+        lock (_responseHeadLock)
+        {
+            written = _interimWritten;
+            _interimWritten = null;
+        }
+
+        written?.TrySetResult();
     }
 
     /// <summary>
     /// Takes the request stream's writer for the final response head, before its HEADERS frame is written —
-    /// on the buffered send path and at the streamed sink's head commit. From then on the automatic
-    /// <c>100 Continue</c> is dropped. A <c>100</c> already being written is waited for, so the two frames
+    /// on the buffered send path, at the streamed sink's head commit and when accepting a tunnel.
+    /// Further interims are refused (automatic <c>100 Continue</c> is dropped). An active interim is waited for, so the two frames
     /// never share the writer and the interim one precedes the final one on the wire (RFC 9114 §4.1).
     /// </summary>
     /// <returns>A task that completes once the final head may be written.</returns>
     public ValueTask ClaimFinalResponseHeadAsync()
     {
-        return Interlocked.Exchange(ref _responseHeadState, finalHeadClaimed) == continueInFlight
-            && Volatile.Read(ref _continueWritten) is { } continueWritten
-            ? new ValueTask(continueWritten.Task)
-            : ValueTask.CompletedTask;
+        lock (_responseHeadLock)
+        {
+            _finalHeadClaimed = true;
+            return _interimWritten is { } written ? new ValueTask(written.Task) : ValueTask.CompletedTask;
+        }
     }
 
     /// <summary>

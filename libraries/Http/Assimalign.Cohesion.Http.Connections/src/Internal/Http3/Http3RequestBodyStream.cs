@@ -57,7 +57,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// cap and the rate are resolved, <c>100 Continue</c> goes out as an interim HEADERS frame on the request
 /// stream, unless the final response has started, so a handler that answers without reading the body never
 /// invites it. The <c>100</c> and the final head take the request stream's writer in turn
-/// (<see cref="Http3Context.TryBeginContinue"/>), and the write runs inside the read's error handling.
+/// (<see cref="Http3Context.TryBeginInterimAsync"/>), and the write runs inside the read's error handling.
 /// Once the exchange exists, the write is held to the response's minimum data rate (#1384): a peer that
 /// grants it no stream credit has the request stream reset with <c>H3_REQUEST_CANCELLED</c>, and the read
 /// throws the exchange's cancellation.
@@ -829,7 +829,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
     /// <remarks>
     /// A full-duplex handler can start its streamed response on one task while another makes this read, so
     /// the <c>100</c> takes the request stream's writer from the exchange first
-    /// (<see cref="Http3Context.TryBeginContinue"/>): it is dropped once the final head has claimed the writer,
+    /// (<see cref="Http3Context.TryBeginInterimAsync"/>): it is dropped once the final head has claimed the writer,
     /// and a final head that claims it while the <c>100</c> is being written waits for it. Without an exchange
     /// — a request hook reading the body before dispatch — no response can be under way.
     /// </remarks>
@@ -840,7 +840,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         if (IsReset
             || Volatile.Read(ref _closed)
             || owner is { HasFinalResponseStarted: true } or { CancelRequested: true }
-            || (owner is not null && !owner.TryBeginContinue()))
+            || (owner is not null && !await owner.TryBeginInterimAsync(cancellationToken).ConfigureAwait(false)))
         {
             return;
         }
@@ -851,7 +851,7 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         }
         finally
         {
-            owner?.EndContinue();
+            owner?.EndInterim();
         }
     }
 
