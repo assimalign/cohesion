@@ -98,7 +98,6 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     // because the control-stream drain runs on a background task.
     private readonly Dictionary<long, HttpPriority> _requestStreamPriorities = new();
     private readonly object _priorityLock = new();
-    private volatile bool _pushPriorityUpdateRejected;
 
     // #1085 — the keep-alive deadline. The connection is idle while no request stream is in flight: none
     // is having its head read, and no exchange built from one is still running. _activeRequestStreams
@@ -166,13 +165,6 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             return _requestStreamPriorities.TryGetValue(streamId, out priority);
         }
     }
-
-    /// <summary>
-    /// Whether a push PRIORITY_UPDATE (frame type 0xF0701) has been received and
-    /// rejected. The server issues no pushes, so such a frame references a push id
-    /// that cannot exist (RFC 9218 §7.2 / H3_ID_ERROR).
-    /// </summary>
-    internal bool PushPriorityUpdateRejected => _pushPriorityUpdateRejected;
 
     private void RecordRequestStreamPriority(long streamId, HttpPriority priority)
     {
@@ -957,12 +949,13 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 return await TryHandleControlStreamAsync(reader, cancellationToken).ConfigureAwait(false);
 
             case Http3StreamType.QPackEncoder:
-                // RFC 9204 §4.2 — at most one encoder stream. With the dynamic
-                // table disabled (QPACK_MAX_TABLE_CAPACITY = 0) it carries no
-                // instructions to process, so accepting it is sufficient. With the
-                // table enabled, drain it in the background so its Set Capacity /
+                // RFC 9204 §4.2 — at most one encoder stream. With the table
+                // enabled, drain it in the background so its Set Capacity /
                 // Insert / Duplicate instructions populate the dynamic table while
-                // requests keep being served.
+                // requests keep being served. With the dynamic table disabled
+                // (QPACK_MAX_TABLE_CAPACITY = 0) it carries no instruction to act
+                // on, but it is still a critical stream, so it is watched for its
+                // closure.
                 if (Interlocked.Exchange(ref _qpackEncoderStreamReceived, 1) == 1)
                 {
                     return new Http3ConnectionException(
@@ -970,12 +963,11 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         "The peer opened a second QPACK encoder stream (RFC 9204 §4.2).");
                 }
 
-                if (_decoderState is not null)
-                {
-                    // Connection-lived: a request body read after the enumeration ends may still wait on
-                    // insertions this drain applies. The drain never faults, so it is not awaited.
-                    _ = DrainQPackEncoderStreamAsync(reader);
-                }
+                // Connection-lived: a request body read after the enumeration ends may still wait on
+                // insertions the drain applies. Neither loop faults, so neither is awaited.
+                _ = _decoderState is not null
+                    ? DrainQPackEncoderStreamAsync(reader)
+                    : WatchQPackStreamAsync(reader, "QPACK encoder");
 
                 return null;
 
@@ -987,6 +979,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                         "The peer opened a second QPACK decoder stream (RFC 9204 §4.2).");
                 }
 
+                // The server's encoder never references the dynamic table, so the peer's decoder stream
+                // carries nothing the server acts on; it is watched for its closure (RFC 9204 §4.2).
+                _ = WatchQPackStreamAsync(reader, "QPACK decoder");
                 return null;
 
             case Http3StreamType.Push:
@@ -1081,6 +1076,14 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             byte[] payload = await ReadExactAsync(reader, (int)frameLength.Value, cancellationToken).ConfigureAwait(false);
             ApplySettings(payload);
         }
+        catch (Exception ex) when (IsStreamReadFailure(ex) && IsCriticalStreamResetByPeer(ex))
+        {
+            // RFC 9114 §6.2.1 — the control stream is critical from its first octet.
+            return new Http3ConnectionException(
+                Http3ErrorCode.ClosedCriticalStream,
+                "The peer reset its control stream before its SETTINGS frame was complete (RFC 9114 §6.2.1).",
+                ex);
+        }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
             // The control stream is critical; a read/parse failure on the
@@ -1092,102 +1095,275 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         }
 
         // RFC 9114 §6.2.1 — the control stream stays open for the connection
-        // lifetime. Drain any post-SETTINGS frames on a background task so they
-        // cannot accumulate unread in the pipe. Connection-lived, and it never
-        // faults, so it is not awaited.
+        // lifetime. Read its post-SETTINGS frames on a background task so they
+        // cannot accumulate unread in the pipe, and so its closure is seen.
+        // Connection-lived, and it never faults, so it is not awaited.
         _ = DrainPeerControlStreamAsync(reader);
         return null;
     }
 
     /// <summary>
-    /// Processes post-SETTINGS frames from the peer's control stream for the
-    /// connection lifetime (RFC 9114 §7.2). RFC 9218 §7.2 PRIORITY_UPDATE frames
-    /// are parsed and applied: a request-stream update (0xF0700) records the
-    /// referenced stream's effective priority; a push update (0xF0701) is rejected
-    /// (the server issues no pushes) and stops the drain. GOAWAY (§7.2.6) and
-    /// MAX_PUSH_ID (§7.2.7) are read but inert in this subset, and every other
-    /// frame is discarded. Processing prevents unread control frames from
-    /// accumulating in the pipe. The loop runs for the connection's lifetime —
-    /// not the receive enumeration's — and stops on end-of-stream, the connection
-    /// closing, or a per-stream parse failure; it never throws.
+    /// Reads the peer's control stream after its SETTINGS frame for the connection's lifetime —
+    /// not the receive enumeration's — and closes the connection on any violation of the control
+    /// stream's rules (RFC 9114 §6.2.1, §7.2; RFC 9218 §7.2). Never throws.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The control stream is critical, so the drain never stops quietly while the connection is
+    /// open: a frame it would leave unread could be one that closes the connection. It ends when
+    /// the connection closes, or with a connection error:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>The peer ends the stream (<c>FIN</c>) or resets it:
+    /// <c>H3_CLOSED_CRITICAL_STREAM</c> (RFC 9114 §6.2.1).</description></item>
+    /// <item><description>The stream ends inside a frame: <c>H3_FRAME_ERROR</c> (RFC 9114 §7.1).</description></item>
+    /// <item><description>A frame that may not appear on a control stream — <c>DATA</c>, <c>HEADERS</c>,
+    /// <c>PUSH_PROMISE</c>, a second <c>SETTINGS</c>, or a reserved HTTP/2 type: <c>H3_FRAME_UNEXPECTED</c>
+    /// (RFC 9114 §7.2).</description></item>
+    /// <item><description>A push <c>PRIORITY_UPDATE</c> or a <c>CANCEL_PUSH</c>: the server promises no
+    /// pushes, so every push ID is one it never sent: <c>H3_ID_ERROR</c> (RFC 9218 §7.2, RFC 9114
+    /// §7.2.3).</description></item>
+    /// <item><description>A request <c>PRIORITY_UPDATE</c> whose Prioritized Element ID is not a
+    /// client-initiated bidirectional stream: <c>H3_ID_ERROR</c> (RFC 9218 §7.2); one whose element ID
+    /// is truncated: <c>H3_FRAME_ERROR</c>.</description></item>
+    /// </list>
+    /// <para>
+    /// A request <c>PRIORITY_UPDATE</c> records the referenced stream's effective priority; one whose
+    /// Priority Field Value cannot be parsed, or whose payload exceeds the 16 KiB this drain buffers,
+    /// has no effect. <c>GOAWAY</c> (§7.2.6), <c>MAX_PUSH_ID</c> (§7.2.7), and frames of unknown or
+    /// reserved type (§9) are read and discarded.
+    /// </para>
+    /// </remarks>
     private async Task DrainPeerControlStreamAsync(PipeReader reader)
     {
+        Http3ConnectionException? violation;
+
+        try
+        {
+            violation = await ReadPeerControlFramesAsync(reader, _connection.ConnectionClosed).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The connection closed — nothing more to read.
+            return;
+        }
+        catch (EndOfStreamException exception)
+        {
+            violation = new Http3ConnectionException(
+                Http3ErrorCode.FrameError,
+                "The peer's control stream ended inside a frame (RFC 9114 §7.1).",
+                exception);
+        }
+        catch (Exception exception) when (IsStreamReadFailure(exception))
+        {
+            violation = IsCriticalStreamResetByPeer(exception)
+                ? new Http3ConnectionException(
+                    Http3ErrorCode.ClosedCriticalStream,
+                    "The peer reset its control stream (RFC 9114 §6.2.1).",
+                    exception)
+                : null;
+        }
+
+        if (violation is not null)
+        {
+            AbortConnection(violation);
+        }
+    }
+
+    /// <summary>
+    /// Reads post-SETTINGS control frames until one ends the connection (see
+    /// <see cref="DrainPeerControlStreamAsync"/>), and returns that connection error.
+    /// </summary>
+    private async Task<Http3ConnectionException> ReadPeerControlFramesAsync(PipeReader reader, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+            if (frameType is null)
+            {
+                return new Http3ConnectionException(
+                    Http3ErrorCode.ClosedCriticalStream,
+                    "The peer closed its control stream (RFC 9114 §6.2.1).");
+            }
+
+            long? frameLength = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+            if (frameLength is null)
+            {
+                return new Http3ConnectionException(
+                    Http3ErrorCode.FrameError,
+                    "The peer's control stream ended inside a frame header (RFC 9114 §7.1).");
+            }
+
+            switch (frameType.Value)
+            {
+                case (long)Http3FrameType.PriorityUpdateRequest:
+                    if (await ApplyPriorityUpdateAsync(reader, frameLength.Value, cancellationToken).ConfigureAwait(false) is { } priorityViolation)
+                    {
+                        return priorityViolation;
+                    }
+
+                    continue;
+
+                case (long)Http3FrameType.PriorityUpdatePush:
+                    return new Http3ConnectionException(
+                        Http3ErrorCode.IdError,
+                        "The peer sent a PRIORITY_UPDATE for a push, and the server promises none (RFC 9218 §7.2).");
+
+                case (long)Http3FrameType.CancelPush:
+                    return new Http3ConnectionException(
+                        Http3ErrorCode.IdError,
+                        "The peer cancelled a push the server never promised (RFC 9114 §7.2.3).");
+
+                case (long)Http3FrameType.Data:
+                case (long)Http3FrameType.Headers:
+                case (long)Http3FrameType.Settings:
+                case (long)Http3FrameType.PushPromise:
+                case (long)Http3FrameType.ReservedHttp2Priority:
+                case (long)Http3FrameType.ReservedHttp2Ping:
+                case (long)Http3FrameType.ReservedHttp2WindowUpdate:
+                case (long)Http3FrameType.ReservedHttp2Continuation:
+                    return new Http3ConnectionException(
+                        Http3ErrorCode.UnexpectedFrame,
+                        $"The peer sent a frame of type 0x{frameType.Value:x} on its control stream, where it is not permitted (RFC 9114 §7.2).");
+
+                default:
+                    // GOAWAY, MAX_PUSH_ID, and frames of unknown or reserved type (RFC 9114 §9).
+                    await SkipAsync(reader, frameLength.Value, cancellationToken).ConfigureAwait(false);
+                    continue;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads a request <c>PRIORITY_UPDATE</c> payload (RFC 9218 §7.2) and records the referenced
+    /// stream's effective priority. Returns the connection error when the Prioritized Element ID is
+    /// truncated (<c>H3_FRAME_ERROR</c>) or names no client-initiated bidirectional stream
+    /// (<c>H3_ID_ERROR</c>); otherwise <see langword="null"/>. A payload beyond the 16 KiB bound is
+    /// skipped unread, and one whose Priority Field Value does not parse is ignored: neither has effect.
+    /// </summary>
+    private async Task<Http3ConnectionException?> ApplyPriorityUpdateAsync(PipeReader reader, long length, CancellationToken cancellationToken)
+    {
+        if (length > maxControlFramePayloadSize)
+        {
+            await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        byte[] payload = await ReadExactAsync(reader, (int)length, cancellationToken).ConfigureAwait(false);
+
+        if (!Http3PriorityUpdate.TryReadPrioritizedElementId(payload, out long prioritizedStreamId, out int consumed))
+        {
+            return new Http3ConnectionException(
+                Http3ErrorCode.FrameError,
+                "The peer's PRIORITY_UPDATE ended inside its Prioritized Element ID (RFC 9114 §7.1).");
+        }
+
+        // RFC 9000 §2.1 — a client-initiated bidirectional stream ID is a multiple of 4.
+        if ((prioritizedStreamId & 0x3) != 0)
+        {
+            return new Http3ConnectionException(
+                Http3ErrorCode.IdError,
+                $"The peer's PRIORITY_UPDATE names stream {prioritizedStreamId}, which is not a request stream (RFC 9218 §7.2).");
+        }
+
+        if (HttpPriorityFieldValue.TryParse(payload.AsSpan(consumed), out HttpPriority priority))
+        {
+            RecordRequestStreamPriority(prioritizedStreamId, priority);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads a peer QPACK stream the server takes no instruction from — the encoder stream while the
+    /// dynamic table is disabled, and the decoder stream, since the server's encoder never references
+    /// the dynamic table — for the connection's lifetime, discarding what arrives, so its closure is
+    /// seen: the peer ending or resetting either stream is a connection error of type
+    /// <c>H3_CLOSED_CRITICAL_STREAM</c> (RFC 9204 §4.2). Never throws.
+    /// </summary>
+    /// <param name="reader">The stream's input, positioned after its stream type.</param>
+    /// <param name="streamName">The stream's name, for the error's message.</param>
+    private async Task WatchQPackStreamAsync(PipeReader reader, string streamName)
+    {
         CancellationToken cancellationToken = _connection.ConnectionClosed;
+        Http3ConnectionException? violation;
 
         try
         {
             while (true)
             {
-                long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
-                if (frameType is null)
+                ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                reader.AdvanceTo(result.Buffer.End);
+
+                if (result.IsCompleted)
                 {
-                    // Clean end of the peer control stream — nothing more to drain.
+                    violation = new Http3ConnectionException(
+                        Http3ErrorCode.ClosedCriticalStream,
+                        $"The peer closed its {streamName} stream (RFC 9204 §4.2).");
                     break;
                 }
-
-                long? frameLength = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
-                if (frameLength is null)
-                {
-                    break;
-                }
-
-                int length = checked((int)frameLength.Value);
-
-                if (frameType.Value == (long)Http3FrameType.PriorityUpdateRequest)
-                {
-                    if (length > maxControlFramePayloadSize)
-                    {
-                        // An oversized PRIORITY_UPDATE is malformed: stop draining, exactly as for any
-                        // other malformed post-SETTINGS frame (below).
-                        break;
-                    }
-
-                    // RFC 9218 §7.2 — read the payload (Prioritized Element ID +
-                    // Priority Field Value) and apply it to the referenced stream.
-                    byte[] priorityPayload = await ReadExactAsync(reader, length, cancellationToken).ConfigureAwait(false);
-                    if (Http3PriorityUpdate.TryParse(priorityPayload, out long prioritizedStreamId, out HttpPriority priority))
-                    {
-                        RecordRequestStreamPriority(prioritizedStreamId, priority);
-                    }
-
-                    continue;
-                }
-
-                if (frameType.Value == (long)Http3FrameType.PriorityUpdatePush)
-                {
-                    // RFC 9218 §7.2 — the server advertises no push capacity, so a
-                    // push PRIORITY_UPDATE references a push id that cannot exist.
-                    // Reject it consistently with the server-push de-scope: record
-                    // the rejection and stop draining so connection teardown closes
-                    // the QUIC connection. (Strict HTTP/3 would signal H3_ID_ERROR;
-                    // this drain keeps its parse-and-discard posture — see docs/DESIGN.md.)
-                    await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
-                    _pushPriorityUpdateRejected = true;
-                    break;
-                }
-
-                await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
-            // The connection closed — stop draining.
+            // The connection closed — nothing more to read.
+            return;
         }
-        catch (Exception ex) when (IsPerStreamFailure(ex))
+        catch (Exception exception) when (IsStreamReadFailure(exception))
         {
-            // A malformed post-SETTINGS control frame. Strict HTTP/3 would treat
-            // this as a connection error; in this parse-and-discard subset the
-            // drain stops and connection teardown closes the QUIC connection.
+            violation = IsCriticalStreamResetByPeer(exception)
+                ? new Http3ConnectionException(
+                    Http3ErrorCode.ClosedCriticalStream,
+                    $"The peer reset its {streamName} stream (RFC 9204 §4.2).",
+                    exception)
+                : null;
         }
-        catch (InvalidOperationException)
+
+        if (violation is not null)
         {
-            // ObjectDisposedException included: the stream was released with its connection.
+            AbortConnection(violation);
         }
-        catch (ConnectionException)
+    }
+
+    /// <summary>
+    /// A read of a peer stream failing underneath its reader: a wire failure (<see cref="IOException"/>,
+    /// which includes the QUIC driver's <see cref="QuicException"/>), the in-memory driver's peer reset
+    /// (<see cref="ConnectionException"/>), or a stream released with its connection
+    /// (<see cref="InvalidOperationException"/>, <see cref="ObjectDisposedException"/> included).
+    /// </summary>
+    private static bool IsStreamReadFailure(Exception exception)
+    {
+        return exception is IOException
+            or ConnectionException
+            or InvalidOperationException;
+    }
+
+    /// <summary>
+    /// Determines whether a critical stream's read failed because the peer reset that stream while the
+    /// connection stays open (RFC 9114 §6.2.1, RFC 9204 §4.2) — rather than because the connection is
+    /// ending: this end closed or aborted it, the peer closed it, or it was lost. Only a peer reset is a
+    /// <c>H3_CLOSED_CRITICAL_STREAM</c>; the other failures end the connection anyway.
+    /// </summary>
+    /// <param name="exception">The read's failure.</param>
+    /// <returns><see langword="true"/> when the peer reset the stream on a connection that is still open.</returns>
+    private bool IsCriticalStreamResetByPeer(Exception exception)
+    {
+        if (_connection.ConnectionClosed.IsCancellationRequested
+            || _connection.State != ConnectionState.Open
+            || Volatile.Read(ref _connectionError) is not null)
         {
-            // The in-memory driver's abort of the stream underneath the drain.
+            return false;
         }
+
+        return exception switch
+        {
+            // RESET_STREAM; a connection close or loss carries another QuicError.
+            QuicException quic => quic.QuicError == QuicError.StreamAborted,
+            // The in-memory driver's reset or abort of the peer's end.
+            ConnectionException => true,
+            // A stream released underneath, or a wire failure no driver attributes to the stream.
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -1245,6 +1421,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                             "The QPACK encoder stream ended in the middle of an instruction.");
                     }
 
+                    // RFC 9204 §4.2 — the encoder stream is critical: the peer must not close it.
+                    AbortConnection(new Http3ConnectionException(
+                        Http3ErrorCode.ClosedCriticalStream,
+                        "The peer closed its QPACK encoder stream (RFC 9204 §4.2)."));
                     break;
                 }
             }
@@ -1259,18 +1439,23 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             // releases any request stream blocked on pending insertions and ends the accept loop.
             AbortConnection(new Http3ConnectionException(ex.ErrorCode, ex.Message, ex));
         }
+        catch (Exception ex) when (IsStreamReadFailure(ex))
+        {
+            // The peer reset its encoder stream, or stopped the server's decoder stream the drain writes
+            // to (RFC 9204 §4.2) — or the connection is ending underneath the drain, which needs nothing
+            // more.
+            if (IsCriticalStreamResetByPeer(ex))
+            {
+                AbortConnection(new Http3ConnectionException(
+                    Http3ErrorCode.ClosedCriticalStream,
+                    "The peer reset its QPACK encoder stream, or stopped the server's decoder stream (RFC 9204 §4.2).",
+                    ex));
+            }
+        }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
-            // A wire failure on the encoder stream; teardown closes the connection.
-        }
-        catch (InvalidOperationException)
-        {
-            // ObjectDisposedException included: the encoder or decoder stream was released with its
-            // connection.
-        }
-        catch (ConnectionException)
-        {
-            // The in-memory driver's abort of a stream underneath the drain.
+            // A malformed instruction the parser did not report as a QPackException is still one.
+            AbortConnection(new Http3ConnectionException(Http3ErrorCode.QPackEncoderStreamError, "The QPACK encoder stream carried a malformed instruction.", ex));
         }
     }
 
@@ -1420,9 +1605,9 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
     /// control frame without allocating a buffer for bytes that are thrown away.
     /// Throws <see cref="EndOfStreamException"/> when the stream ends first.
     /// </summary>
-    private static async Task SkipAsync(PipeReader reader, int length, CancellationToken cancellationToken)
+    private static async Task SkipAsync(PipeReader reader, long length, CancellationToken cancellationToken)
     {
-        int remaining = length;
+        long remaining = length;
 
         while (remaining > 0)
         {
@@ -1441,7 +1626,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
                 throw new EndOfStreamException("An HTTP/3 control frame was truncated.");
             }
 
-            remaining -= (int)buffer.Length;
+            remaining -= buffer.Length;
             reader.AdvanceTo(buffer.End);
         }
     }

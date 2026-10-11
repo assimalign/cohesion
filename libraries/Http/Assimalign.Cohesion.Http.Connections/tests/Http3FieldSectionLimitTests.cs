@@ -204,12 +204,12 @@ public class Http3FieldSectionLimitTests
         // times: 20 * (5 + 1000 + 32) = 20,740 decoded octets, over the 16 KB default.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection encoder = new(
             HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
                 HttpProtocolPayloadFactory.QPackSetCapacity(4096),
                 HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-big", new string('v', 1000))),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
 
         // Encoded RIC 2 → RIC 1; Delta Base 0 → Base 1; each dynamic indexed rel 0 → absolute 0.
         TestConnection oversized = new(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(

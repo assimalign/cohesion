@@ -80,7 +80,7 @@ public class Http3PriorityTests
             HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
                 new (long, long)[] { (0x01, 0) },
                 ((long)Http3FrameType.PriorityUpdateRequest, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1, i"))),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
         TestMultiplexedConnection connection = new(control, request);
         HttpConnectionListenerOptions options = new();
@@ -113,42 +113,32 @@ public class Http3PriorityTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should reject a push PRIORITY_UPDATE on the control stream")]
-    public async Task Http3_OnControlPriorityUpdatePush_ShouldReject()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A push PRIORITY_UPDATE on the control stream should close the connection with H3_ID_ERROR")]
+    public async Task Http3_OnControlPriorityUpdatePush_ShouldAbortConnectionWithIdError()
     {
-        // RFC 9218 §7.2 — the server issues no pushes, so a push PRIORITY_UPDATE
-        // (0xF0701) references a push id that cannot exist; it is rejected.
+        // Arrange — RFC 9218 §7.2: the server promises no pushes, so a push PRIORITY_UPDATE (0xF0701)
+        // references a push ID it never sent. The control stream stays open, so only the frame can end
+        // the connection.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
                 new (long, long)[] { (0x01, 0) },
                 ((long)Http3FrameType.PriorityUpdatePush, HttpProtocolPayloadFactory.CreateHttp3PriorityUpdatePayload(0, "u=1"))),
-            ConnectionDirection.ReadOnly);
-        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
-        TestMultiplexedConnection connection = new(control, request);
+            ConnectionDirection.ReadOnly,
+            completeInput: false);
+        TestMultiplexedConnection connection = new(control);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
-
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
-        (await enumerator.MoveNextAsync()).ShouldBeTrue();
 
-        Http3ConnectionContext context = httpConnectionContext.ShouldBeOfType<Http3ConnectionContext>();
-
-        bool rejected = false;
-        for (int attempt = 0; attempt < 100 && !rejected; attempt++)
-        {
-            rejected = context.PushPriorityUpdateRejected;
-            if (!rejected)
-            {
-                await Task.Delay(10);
-            }
-        }
-
-        rejected.ShouldBeTrue();
-
+        // Act
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        await connection.ConnectionClosed.WhenCancelledAsync();
+
+        // Assert
+        connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.IdError);
     }
 
     private static async Task<IHttpContext> ReadSingleContextAsync(IHttpConnectionContext context)

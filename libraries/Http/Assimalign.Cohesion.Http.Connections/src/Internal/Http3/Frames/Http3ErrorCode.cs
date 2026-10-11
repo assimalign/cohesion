@@ -50,7 +50,7 @@ internal enum Http3ErrorCode : long
     /// </summary>
     ExcessiveLoad = 0x107,
     /// <summary>
-    /// H3_ID_ERROR (0x109):
+    /// H3_ID_ERROR (0x108):
     /// A Stream ID, Push ID, or Placeholder ID was used incorrectly, such as exceeding a limit, reducing a limit, or being reused.
     /// </summary>
     IdError = 0x108,

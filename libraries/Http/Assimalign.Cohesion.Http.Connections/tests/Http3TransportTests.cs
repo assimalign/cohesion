@@ -145,7 +145,7 @@ public class Http3TransportTests
         // is still surfaced.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 0), (0x06, 8192)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(
             HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/c", "https", "a"));
         TestMultiplexedConnection connection = new(control, request);
@@ -165,7 +165,7 @@ public class Http3TransportTests
     {
         TestConnection qpack = new(
             HttpProtocolPayloadFactory.CreateHttp3UnidirectionalStream(0x02 /* QPACK encoder */),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(
             HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/q", "https", "a"));
         TestMultiplexedConnection connection = new(qpack, request);
@@ -185,8 +185,8 @@ public class Http3TransportTests
     {
         // RFC 9114 §6.2.1 — only one control stream per peer; a second is
         // H3_STREAM_CREATION_ERROR, a connection error.
-        TestConnection first = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly);
-        TestConnection second = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly);
+        TestConnection first = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly, completeInput: false);
+        TestConnection second = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), ConnectionDirection.ReadOnly, completeInput: false);
         TestMultiplexedConnection connection = new(first, second);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
@@ -196,6 +196,9 @@ public class Http3TransportTests
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+
+        // Both control streams stay open, so the duplicate, not a closed critical stream, ends the connection.
+        connection.AbortReason.ShouldBeOfType<Http3ConnectionException>().ErrorCode.ShouldBe(Http3ErrorCode.StreamCreationError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate when the control stream's first frame is not SETTINGS")]
@@ -345,7 +348,7 @@ public class Http3TransportTests
                 new (long, long)[] { (0x01, 0), (0x08, 1) },
                 (0x07 /* GOAWAY */, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(0)),
                 (0x0D /* MAX_PUSH_ID */, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(0))),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
         TestMultiplexedConnection connection = new(control, request);
         HttpConnectionListenerOptions options = new();
@@ -362,6 +365,7 @@ public class Http3TransportTests
 
         // ...and the connection then completes cleanly — draining did not error.
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        connection.AbortReason.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should emit GOAWAY on the control stream before the connection is disposed")]
@@ -688,12 +692,12 @@ public class Http3TransportTests
         // it and emits Insert Count Increment on its decoder stream (§4.4.3).
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection encoder = new(
             HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
                 HttpProtocolPayloadFactory.QPackSetCapacity(4096),
                 HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
 
         // Encoded RIC 2 → RIC 1; Delta Base 0 → Base 1; dynamic indexed rel 0 → absolute 0.
         TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
@@ -742,12 +746,12 @@ public class Http3TransportTests
         // may appear for the first (static, nothing to acknowledge) stream 0.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
         TestConnection encoder = new(
             HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
                 HttpProtocolPayloadFactory.QPackSetCapacity(4096),
                 HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
-            ConnectionDirection.ReadOnly);
+            ConnectionDirection.ReadOnly, completeInput: false);
 
         // First request stream (wire ID 0): static-only, owes no acknowledgment.
         TestConnection staticRequest = new(
