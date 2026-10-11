@@ -395,9 +395,13 @@ it trails the storage counter.
 ## The lock manager implementation
 
 A lock table keyed by `LockResource` with the classic five-mode compatibility matrix
-(S/U/X/IS/IX), same-owner upgrades (an owner's own grants never block it), FIFO
-waiter wake-up on `ReleaseAll`, and wait-for-graph deadlock detection: a request that
-would close a cycle aborts *itself* with `TransactionDeadlockException` — the
+(S/U/X/IS/IX), every mode an owner was granted kept beside the others, same-owner
+upgrades (an owner's own grants never block it), a FIFO queue per resource in which a
+request waits behind the conflicting requests ahead of it (a holder's request goes ahead
+of the requests that wait for it), FIFO wake-up whenever a grant or a queued request
+leaves, and wait-for-graph deadlock
+detection: a request that would close a cycle aborts *itself* with
+`TransactionDeadlockException` — the
 newest-waiter-as-victim policy, chosen because it needs no cost model and the victim
 is retryable by construction. Waits are `TaskCompletionSource`-based and honor
 cancellation. `ReleaseAll(owner)` ends the owner's participation in the table: it
@@ -409,15 +413,32 @@ under a running statement"). The lock manager also has an internal
 keeps its grants, for the end of a rollback whose undo is deferred ("Ending a
 transaction"). Until `ReleaseAll` the owner stays abandoned: `AcquireAsync` refuses its new
 requests with `TransactionAbortedException` and `TryAcquire` returns false, except for a
-resource it already holds in a mode at least as strong, which changes nothing for anyone
-else. No public member was added for it.
+request the modes it already holds on the resource cover (every mode the request conflicts
+with already conflicts with one of them), which changes nothing for anyone else. No public
+member was added for it.
+
+**An owner keeps every mode it was granted (#1390 review).** The table keeps a mask of the
+modes each owner holds on a resource, and a request conflicts with an owner when any of its
+modes does; PostgreSQL keeps the same mask per holder (`holdMask`,
+`src/backend/storage/lmgr/lock.c:1702-1709`). Until the #1390 review it kept only the
+strongest mode by a fixed order (IS, S, IX, U, X), which the five modes do not have.
+Intent-exclusive then update kept update, which allows shared, and lost intent-exclusive's
+conflict with it: a shared request queued before the update still waited, since nothing woke
+it, but the detector, which reads its edges from the table, found none, and a cycle through it
+went unseen (the #1390 review's scratch test saw no deadlock within 3 s on `a60f850c`, where
+`19b1a495`, whose edges were recorded at the request, aborted the requester in 74 ms; the
+committed test times out at 5 s on `a60f850c`). Intent-exclusive then shared kept
+intent-exclusive, and another owner's intent-exclusive, which shared conflicts with, was
+granted beside it, on both commits. The shipped engines never combined those modes on one
+resource (objects take IS, IX or X; entries S or X), but `LockManager` is public with all five.
+`LockManagerTests` holds both cases.
 
 **The wait-for graph is read from the table (#1390).** Until #1390 the detector kept a graph
 of its own: a request that queued recorded edges to the owners holding the resource at that
 moment, and the edges stayed until the owner's wait ended. But the holders a waiter waits for
 change while it waits. A release wakes the request queued ahead of it and grants that request
-the resource; a compatible request is granted past it (a grant depends on the modes held, never
-on the queue); the holder it first waited for leaves. The recorded edges then named
+the resource; a compatible request was granted past it (a grant depended on the modes held,
+never on the queue, until the #1390 review); the holder it first waited for leaves. The recorded edges then named
 transactions that had left and missed the ones that came, so two transactions could wait for
 each other with neither edge in the graph, and both waited until something canceled one of
 them. A granted or canceled request also dropped every edge of its owner, those of the owner's
@@ -450,24 +471,42 @@ engine (298,671 commits, 5,294 deadlock victims).
 
 Now the lock manager keeps only each owner's queued requests, and the search reads the edges from
 the table as it stands. The requester waits for every owner that holds, in a conflicting mode,
-a resource one of its queued requests is for; the search follows those owners' queued requests
-the same way and makes the requester the victim if it comes back to it. PostgreSQL's detector
-also reads its graph from the lock table each time it runs (`CheckDeadLock` takes every partition
-lock, `src/backend/storage/lmgr/proc.c:1880-1891`; hard edges, `deadlock.c:561-583`). Its soft
-edges, to requests queued ahead with a conflicting mode (`deadlock.c:624-768`), have no
-counterpart here: PostgreSQL's grants respect the queue (`LockAcquireExtended` joins it behind a
-conflicting queued request, `lock.c:1135-1143`), and this table's do not, so no request waits for
-another request. A cycle through such an edge would abort a transaction that was never stuck.
+a resource one of its queued requests is for, and for the owner of every conflicting request
+queued ahead of it ("Grants respect the queue" below). The search follows those owners' queued requests the
+same way and makes the requester the victim if it comes back to it. PostgreSQL's detector also
+reads its graph from the lock table each time it runs (`CheckDeadLock` takes every partition
+lock, `src/backend/storage/lmgr/proc.c:1880-1891`): hard edges to holders (`deadlock.c:561-583`)
+and soft edges to requests queued ahead with a conflicting mode (`deadlock.c:624-768`). This
+detector follows a soft edge like a hard one. PostgreSQL first tries to rearrange the queue so
+that no cycle is left (`TopoSort`) and aborts only when it cannot; here a cycle through a queued
+request aborts the requester as every cycle does, a retryable failure where PostgreSQL might
+have reordered the queue instead (`LockManagerTests`, "A cycle through a request queued behind
+another owner's request").
 
-A grant adds edges as well, from each request queued on the resource whose mode conflicts with
-the one granted, to the grantee. They can close a cycle only through a request the grantee
-still has queued elsewhere: an owner with no queued request is not waiting, and the search its
-next request runs reads the new edges. An owner may wait for two resources at once (the public
-`AcquireAsync` allows it), so a grant to an owner with a queued request runs the search from
-that request, and a request the search finds on a cycle fails as the victim with
-`TransactionDeadlockException`. Its `LockWaitStop` outcome is `Deadlock`. Together the two
-searches see every cycle: a cycle is made of waiting owners, it exists from the moment its last
-edge appears, and an edge appears only when a request queues or a grant is made.
+A grant can add edges as well, from each request queued on the resource whose mode conflicts
+with the one granted and with nothing the grantee held before, to the grantee. A queued request
+granted by a wake-up adds none: a conflicting request behind it already waited for its owner, and
+none ahead of it conflicts. A holder's new request granted at its place, ahead of the first
+request that waits for it, can add one only from a request behind that place that conflicts
+with neither the grantee's held modes nor that first request. Worked through the matrix for a
+request blocked by another holder, no such request exists: whatever mode blocks it would
+conflict with the grantee's modes or the mode granted. One blocked only by requests ahead of it
+leads back to a holder the same way, or to a request that waits for the grantee, so it already
+waits for the grantee. A scratch model check that drove a standalone lock manager through 80,000
+random requests, releases, cancellations and `TryAcquire` calls over all five modes, two queued
+requests per owner allowed, against an oracle of the queue (200 seeds of 400 steps), checked it:
+of 7,331 grants of a holder's request ahead of a waiter, none gave an edge to a request that did
+not already wait for the grantee, and none of 3,866 deadlock victims was chosen by a grant. It
+also saw no grant at once the oracle refused or the reverse, no request left queued that could
+be granted, no cycle left standing, no victim off a cycle and no two owners holding conflicting
+modes. The
+grant-time search the queue-jumping rule needed stays as a check: an owner may wait for two
+resources at once (the public `AcquireAsync` allows it), so a grant to an owner with a queued
+request that adds an edge searches from that request, and a request it finds on a cycle would
+fail as the victim with `TransactionDeadlockException`, its `LockWaitStop` outcome `Deadlock`.
+The search at the request sees every cycle the queue makes: every edge a request adds when it
+queues starts or ends at its owner (its own blockers, and the requests behind its place that it
+now blocks), and taking a request off a queue only removes edges.
 
 **Every wait a lock holder makes is a lock of this table, or bounded.** The detector sees the
 lock table only, so a transaction that holds locks must never wait, unbounded, for anything
@@ -476,7 +515,10 @@ else. The kernel's other waits keep to that:
 - **The apply gate** of the coordinator (one statement applies at a time) is held while a
   statement applies its writes, and every writer, undo and prune of the database waits for it.
   A statement acquires every lock its apply needs before it takes the gate, and the locks its
-  index maintenance requests inside the gate are re-grants that complete at once. The rule was
+  index maintenance requests inside the gate are re-grants that complete at once: a holder's
+  request goes ahead of the queued requests that wait for it ("Grants respect the queue" below),
+  and every request a re-grant conflicts with waits for it, so a queue cannot make a re-grant
+  wait. The rule was
   documented and unchecked; the coordinator's lock manager now enforces it. A request that
   would wait while its flow holds the gate fails at once with `InvalidOperationException`, and
   the statement's bracket rolls back, instead of stalling every writer of the database behind a
@@ -494,29 +536,89 @@ else. The kernel's other waits keep to that:
 - An end's drain of its own statement apply, the journal flush of a commit and a rollback's wait
   for the apply gate are bounded, because nothing they wait for waits for a lock.
 
-**Grants do not respect the queue.** A compatible request is granted past a request waiting for
-a stronger mode, so a stream of shared grants can keep an exclusive request waiting for as long
-as the stream lasts. PostgreSQL queues a request behind a conflicting one and pays for it with
-soft edges and the queue rearrangement its detector does to resolve them (`deadlock.c`,
-`TopoSort`). A 60-second Release run of the probe's workload concentrated on one parent row, with
-two cascading deleters and eight child writers (`COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE=1,2,8`),
-saw no wait reach 1 s (122,459 commits, 27,751 lock waits, 1,400 deadlock victims), so the grant
-rule stays as it is. The probe is what would show a starved request: a wait that passes 10 s
-while its holders change.
+**Grants respect the queue (#1390 review).** A request is granted when no other owner holds a
+mode it conflicts with and no request of another owner queued ahead of its place conflicts with
+it; otherwise it waits at that place. The place is the end of the queue, except for a request
+of an owner that already holds the resource: it goes ahead of the first queued request that
+waits for the owner (one whose mode conflicts with a mode the owner holds), which cannot be
+granted before the owner ends anyway. A re-grant is therefore granted at once, since every
+request it conflicts with waits for the owner. The queue is woken in order whenever a grant
+leaves it or a queued request leaves without one (canceled, failed as a deadlock victim, or its
+owner ended). That is PostgreSQL's lock manager: `LockAcquireExtended` queues a request that
+conflicts with a queued one (`src/backend/storage/lmgr/lock.c:1136-1143`), `JoinWaitQueue`
+places a holder's request ahead of the first waiter that waits for it and grants it there when
+nothing ahead conflicts (`proc.c:1264-1314`), and `ProcLockWakeup` wakes the queue in order
+after a release or a waiter's removal (`proc.c:1828-1863`). A holder that could pass the whole
+queue would let owner after owner join in a mode a waiting request allows (intent-shared beside
+a waiting intent-exclusive) and then upgrade past it (`LockManagerTests`, "A holder's request
+queues behind a queued request that does not wait for it").
+
+Until the review a grant depended on the modes held only, so a stream of compatible grants kept
+a conflicting request waiting for as long as the stream lasted. The probe concentrated on one
+parent row with one cascading deleter and fourteen child writers, every transaction explicit
+and pausing up to 5 ms after each statement (`COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE=1,1,14,1`,
+the review's starvation workload), showed it: on `a60f850c` two 60-second Release runs saw
+twelve and twenty waits of 1 s or more, every one the deleter's exclusive request on the parent
+row while the writers' shared grants passed it, the longest 11.3 s and 6.3 s; the deleter
+committed one delete in the two. The review's own probe of that shape saw seven consecutive
+waits of the deleter canceled at 12 s. With the queue no wait reached 1 s. The rule also lets a
+DDL statement's exclusive table lock through a stream of writers' intent locks, which could keep
+it waiting the same way.
+
+**The queue does not make a hot row's cascade succeed, and it costs a hot row throughput.** The
+same probe, run for 60 s in Release without tiered compilation, twice on `a60f850c` and twice
+with the queue, alternating, on one machine (shape: parents, deleters, child writers, and
+whether every transaction is explicit; each cell gives the two runs):
+
+| Shape | Commits | Deadlock victims | Parent deletes committed | Waits of 1 s or more (longest) |
+| --- | --- | --- | --- | --- |
+| 6,3,5 (the default) | 74,630, 81,824 → 82,201, 80,961 | 1,360, 1,508 → 2,090, 1,962 | 10,805, 11,758 → 12,372, 12,269 | none → none |
+| 1,2,8 | 133,714, 145,117 → 59,087, 58,763 | 1,918, 2,047 → 8,735, 9,344 | 458, 602 → 932, 587 | none → none |
+| 1,1,14 | 148,034, 219,201 → 76,530, 78,566 | 586, 881 → 5,790, 6,033 | 6, 7 → 3, 0 | 14 (3.5 s), none → none |
+| 1,1,14,1 | 25,650, 35,990 → 20,771, 23,089 | 139, 218 → 2,256, 2,526 | 1, 0 → 10, 0 | 12 (11.3 s), 20 (6.3 s) → none |
+
+The #1390 review's four scratch workloads (unique and plain secondary indexes with two-level
+cascades and checkpoints; the one-hot-row starvation shape; several rows per transaction with
+index range updates; KeyValuePair writers on six hot keys), 90 s each with the queue, saw no
+wait reach 1 s (the longest 523 ms) and no error but the conflicts each workload provokes; the
+coordinator's refusal of a wait inside a statement apply never fired.
+
+With one hot parent row the cascade starved on `a60f850c` by waiting, and starves with the queue
+as the deadlock victim, with no long wait. The cascade's queued exclusive request now holds back
+the child writers' shared requests on the parent row, and the writers queued behind it hold
+child rows from their earlier statements. When the cascade is granted the parent row and asks
+for those child rows, each request closes a cycle, and the cascade, the requester, is the
+victim; the writers queued behind it waited for a statement that then rolled back. The Sql
+engine's lock order makes the cycle (its DESIGN.md, "Referential enforcement locks parent
+rows"), and the victim rule decides who loses it: PostgreSQL's victim is the waiter whose
+`deadlock_timeout` fires first after the cycle forms (`CheckDeadLock`, `proc.c:1915-1932`), which
+here would often be the child writer that queued first. PostgreSQL also takes a different rule
+for this very lock: a foreign-key check's `FOR KEY SHARE` row lock does not sleep while no key
+update or delete has reached the row, so it passes a deleter that is still waiting
+(`src/backend/access/heap/heapam.c:4914-4950`), as this table's grants did before. The queue is
+kept because it bounds every wait (the #1390 gate) and is the rule of PostgreSQL's,
+SQL Server's and InnoDB's lock managers; letting a parent row's shared requests pass a queued
+exclusive one again, a victim rule that spares the cascade, or a cascade lock order without the
+cycle is an owner decision, and the shapes above are how to measure it.
 
 **A wait still queued at the threshold is reported (#1390).** `SlowLockWait` is written as a wait
 ends, so a wait that never ended was never reported. A request that queues while a listener takes
 the source's warnings arms a one-shot timer for the slow-lock-wait threshold. If the request is
 still queued then, it writes `LockWaitBlocked` once (event 19, "Diagnostics" below), naming the
-transactions it waits for and what each of those has queued in turn. That report is
-PostgreSQL's `log_lock_waits` "still waiting for" message (`proc.c:1688-1704`). With no listener
-the request arms nothing.
+transactions it waits for (holders, and the owners of the requests queued ahead of it that it
+waits behind) and what each of those has queued in turn. That report is PostgreSQL's
+`log_lock_waits` "still waiting for" message (`proc.c:1688-1704`). With no listener the request
+arms nothing. The description is built under the lock table's lock and ETW drops an event
+larger than 64 KB, so it is bounded (#1390 review): at most 16 blockers of the waiting request,
+4 queued requests of each, and 4 blockers of each of those, the rest counted (`... (+N more)`,
+`and N more requests`).
 
 **Release visits only the owner's resources (#1363 review).** Beside the table, the lock
 manager lists every resource each owner was granted or queued for, and `ReleaseAll` and
 `AbandonPending` walk that list instead of the whole table. Waking waiters only there loses
-nothing: a grant depends on the modes held, never on the queue, so no waiter elsewhere becomes
-grantable when an owner leaves. Before, every transaction end enumerated the table under the
+nothing: a request waits only for the grants and the queued requests of its own resource, and
+every grant and queued request of the owner is on a resource the list names, so no waiter
+elsewhere becomes grantable when an owner leaves. Before, every transaction end enumerated the table under the
 lock manager's lock, so its cost grew with every other transaction's locks and with the
 table's high-water mark (a dictionary enumerates every slot it ever used): after one
 transaction deleted 200,000 keys or rows, every later end paid for 200,000 slots with the table
@@ -1028,7 +1130,7 @@ events check `EventKeywords.None`.
 | 3 | `TransactionRolledBack` | Verbose | Transactions | `database`, `transactionSequence` | `TransactionCoordinator.RollbackAsync`, after the manager's rollback, also when its undo was deferred |
 | 4 | `CommitRecordWriteFailed` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager.CommitAsync`: the commit record could not be written, so the kernel rolled the transaction back (the caller's failed commit is the root's Error). It pairs with 13; named apart from the root's event 32 `TransactionAborted`, which is an explicit transaction an operation aborted |
 | 5 | `CommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `exceptionMessage` (the flush failure's: the inner exception's message) | `TransactionCoordinator.CommitAsync`, on `TransactionCommitUnconfirmedException` |
-| 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle, or when a grant closed one through a request the grantee still had queued, which is then the victim (#1390) |
+| 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle, or when a grant closed one through a request the grantee still had queued, which is then the victim (#1390; the queue's places leave that second case no way to happen with the five modes, and the search stays as a check: "The wait-for graph is read from the table") |
 | 7 | `LockWaitStart` | Verbose | Locks | `database`, `transactionSequence`, `resource`, `mode` | `LockManager`, when a request is queued |
 | 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow, only for a wait whose `LockWaitStart` was written (`System.Net.Http`'s `RequestStop` shape); `SlowLockWait` is written either way, so a listener that attached during a long wait still learns how long it lasted |
 | 9 | `SlowLockWait` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `thresholdMilliseconds` | with 8, written before it, when the wait lasted at least the threshold |
@@ -1041,7 +1143,7 @@ events check `EventKeywords.None`.
 | 16 | `DeferredCheckpointSkipped` | Verbose | Checkpoints | `database`, `reason` (`BracketOpen`: the request stays; `StorageOffline`: it is dropped) | the deferred checkpoint a statement runs as it ends |
 | 17 | `DeferredCheckpointFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the same, when it failed; the next `TryCheckpoint` throws the failure and its worker reports it (root event 1) |
 | 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |
-| 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for as `<sequence>:<mode held>`, followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step |
+| 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
@@ -1049,7 +1151,8 @@ refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on o
 ended it, and names how in `outcome`, the one `Stop` of the area whose ending is a domain outcome
 rather than the area's `status` (the area `DESIGN.md`): `Granted`; `Cancelled` by the caller's
 token; `Ended`, because the owner's transaction ended while it waited; `Deadlock`, because a grant
-closed a cycle through it (#1390); or `Abandoned`, because the storage went offline (the same
+closed a cycle through it (#1390; since the #1390 review's queue no grant can, and the outcome
+stays for the check that would report one); or `Abandoned`, because the storage went offline (the same
 decision `WaitAbandonableAsync` makes). The cancellation
 registration is disposed inside that `try`, as soon as the await ends and before the stop is
 written, the order the wait had before it was traced. The wait is timed whether or not anyone

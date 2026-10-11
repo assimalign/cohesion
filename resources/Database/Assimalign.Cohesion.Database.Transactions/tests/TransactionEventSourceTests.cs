@@ -491,48 +491,59 @@ public sealed class TransactionEventSourceTests
     }
 
     /// <summary>
-    /// A queued request a grant left on a cycle (#1390) fails as a deadlock victim: the deadlock is
-    /// counted and reported for it, and its wait stops with the <c>Deadlock</c> outcome.
+    /// <c>LockWaitBlocked</c> names a request queued ahead that the wait queues behind, and the
+    /// report is bounded (#1390 review): it is built under the lock table's lock, and ETW drops an
+    /// event larger than 64 KB, so it names at most 16 blockers of the waiting request and 4 of
+    /// each request a blocker has queued itself, and counts the rest.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report the victim of a cycle a grant closed once, and end its wait as a deadlock (#1390)")]
-    public async Task AcquireAsync_GrantClosesACycle_ShouldReportTheVictimAndEndItsWaitAsADeadlock()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should name a request queued ahead among a wait's blockers, and bound the report (#1390)")]
+    public async Task AcquireAsync_WaitBehindManyHoldersAndAQueuedRequest_ShouldReportABoundedListOfBlockers()
     {
-        // Arrange: the waiter waits for the holder's row; the holder waits for a row held shared.
+        // Arrange: twenty readers hold a row shared.
         string name = UniqueName();
-        var source = TransactionEventSource.Log;
         using var storage = EventStorage.Create(name);
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var locks = coordinator.LockManager;
-        var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var holderRow = LockResource.Entry(6, 1);
-        var sharedRow = LockResource.Entry(6, 2);
-        await locks.AcquireAsync(holder.Sequence, holderRow, LockMode.Exclusive);
-        await locks.AcquireAsync(reader.Sequence, sharedRow, LockMode.Shared);
-        long deadlocks = source.TotalDeadlocks;
-        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
-        var waiting = locks.AcquireAsync(waiter.Sequence, holderRow, LockMode.Exclusive).AsTask();
-        var holderWaits = locks.AcquireAsync(holder.Sequence, sharedRow, LockMode.Exclusive).AsTask();
+        var row = LockResource.Entry(7, 1);
+        var readers = new List<TransactionContext>();
+        for (int i = 0; i < 20; i++)
+        {
+            var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+            await locks.AcquireAsync(reader.Sequence, row, LockMode.Shared);
+            readers.Add(reader);
+        }
 
-        // Act: the waiter is granted the shared row beside the reader, so the holder now waits for
-        // the waiter while the waiter waits for the holder.
-        await locks.AcquireAsync(waiter.Sequence, sharedRow, LockMode.Shared);
-        await Should.ThrowAsync<TransactionDeadlockException>(async () => await waiting.WaitAsync(Timeout));
-        await coordinator.RollbackAsync(waiter);
-        await coordinator.CommitAsync(reader);
-        await holderWaits.WaitAsync(Timeout);
-        await coordinator.CommitAsync(holder);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var late = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        using var recorder = new TransactionEventRecorder(
+            EventLevel.Warning,
+            new Dictionary<string, string?> { [TransactionEventSource.SlowLockWaitThresholdArgument] = "0" });
 
-        // Assert
+        // Act: the writer waits for the readers, and a late reader queues behind the writer.
+        var writerWaits = locks.AcquireAsync(writer.Sequence, row, LockMode.Exclusive).AsTask();
+        var lateWaits = locks.AcquireAsync(late.Sequence, row, LockMode.Shared).AsTask();
+        await recorder.WaitForAsync(events => events.Count(e => e.EventName == "LockWaitBlocked" && Equals(e.Payload?[0], name)) == 2, Timeout);
+        foreach (var reader in readers)
+        {
+            await coordinator.CommitAsync(reader);
+        }
+
+        await writerWaits.WaitAsync(Timeout);
+        bool lateWaitedForTheWriter = !lateWaits.IsCompleted;
+        await coordinator.CommitAsync(writer);
+        await lateWaits.WaitAsync(Timeout);
+        await coordinator.CommitAsync(late);
+
+        // Assert: sixteen of the writer's twenty blockers, and four of them below the late reader's
+        // one blocker, the writer's queued request.
         recorder.ShouldHaveNoInstrumentationError();
-        var events = recorder.For(name);
-        events.Where(e => e.EventName == "DeadlockDetected").ShouldHaveSingleItem().Payload
-            .ShouldBe([name, Sequence(waiter), "Entry:6", nameof(LockMode.Exclusive)]);
-        var stops = events.Where(e => e.EventName == "LockWaitStop").ToArray();
-        stops.Single(e => (long)e.Payload![1]! == Sequence(waiter)).Payload![2].ShouldBe("Deadlock");
-        stops.Single(e => (long)e.Payload![1]! == Sequence(holder)).Payload![2].ShouldBe("Granted");
-        source.TotalDeadlocks.ShouldBe(deadlocks + 1);
+        lateWaitedForTheWriter.ShouldBeTrue();
+        var reports = recorder.For(name).Where(e => e.EventName == "LockWaitBlocked").ToArray();
+        string sixteen = string.Join(", ", readers.Take(16).Select(reader => $"{Sequence(reader)}:Shared"));
+        string four = string.Join(", ", readers.Take(4).Select(reader => $"{Sequence(reader)}:Shared"));
+        reports.Single(e => (long)e.Payload![1]! == Sequence(writer)).Payload![5].ShouldBe($"{sixteen}, ... (+4 more)");
+        reports.Single(e => (long)e.Payload![1]! == Sequence(late)).Payload![5]
+            .ShouldBe($"{Sequence(writer)}:queued Exclusive waiting for Exclusive on Entry:7 ({four}, ... (+16 more))");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report a commit whose record could not be made durable once, with the flush failure")]

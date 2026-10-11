@@ -7,9 +7,9 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
-/// Tests for the lock manager: the compatibility matrix, blocking waits with FIFO
-/// wake-up, upgrades, cancellation, deadlock victim resolution (#850, #1390), and an ended
-/// owner's queued requests (#1225 review).
+/// Tests for the lock manager: the compatibility matrix and the modes an owner holds, blocking
+/// waits with FIFO wake-up and the queue a request waits in, upgrades, cancellation, deadlock
+/// victim resolution (#850, #1390), and an ended owner's queued requests (#1225 review).
 /// </summary>
 public class LockManagerTests
 {
@@ -264,44 +264,58 @@ public class LockManagerTests
     }
 
     /// <summary>
-    /// A waiter a compatible request was granted past (#1390): a grant depends on the modes held,
-    /// never on the queue, so a shared request is granted beside a shared holder while an exclusive
-    /// request waits. Once the first holder leaves, the waiter waits only for the one granted past
-    /// it, an edge that did not exist when it queued.
+    /// A waiter a holder's grant passed (#1390): an owner that already holds a resource requests
+    /// it ahead of the first queued request that waits for it, so a holder of intent-shared is
+    /// granted shared past an exclusive request that waits for it and past an intent-exclusive
+    /// request behind that, which its intent-shared grant did not block. Once the first holder
+    /// leaves, the intent-exclusive request waits for the holder granted past it, an edge that did
+    /// not exist when it queued.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a waiter a compatible request was granted past aborts the requester (#1390)")]
-    public async Task AcquireAsync_CycleThroughAWaiterACompatibleRequestWasGrantedPast_ShouldAbortTheRequester()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a waiter a holder's grant passed aborts the requester (#1390)")]
+    public async Task AcquireAsync_CycleThroughAWaiterAHoldersGrantPassed_ShouldAbortTheRequester()
     {
-        // Arrange: T1 holds R shared; T3, which holds S, waits for R exclusively; T2 is granted R
-        // shared past T3's request.
+        // Arrange: T1 holds R shared and T2 holds it intent-shared; T4 waits for R exclusively,
+        // which T2's grant blocks; T3, which holds S, queues behind it for R intent-exclusively,
+        // which T1's grant blocks and T2's does not. T2 is granted R shared past both.
         var locks = LockManager.Create();
+        var t4 = new TransactionSequence(4);
         var resourceR = LockResource.Entry(9, 1);
         var resourceS = LockResource.Entry(9, 2);
         await locks.AcquireAsync(_t1, resourceR, LockMode.Shared);
+        await locks.AcquireAsync(_t2, resourceR, LockMode.IntentShared);
         await locks.AcquireAsync(_t3, resourceS, LockMode.Exclusive);
-        var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.Exclusive).AsTask();
-        await locks.AcquireAsync(_t2, resourceR, LockMode.Shared);
+        var fourthWaits = locks.AcquireAsync(t4, resourceR, LockMode.Exclusive).AsTask();
+        var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.IntentExclusive).AsTask();
+        var grantedPast = locks.AcquireAsync(_t2, resourceR, LockMode.Shared);
+        bool grantedAtOnce = grantedPast.IsCompletedSuccessfully;
+        await grantedPast.AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Act: T1 leaves, so T3 waits for T2 alone; T2 requesting S closes the cycle.
+        // Act: T1 leaves, so T3 waits for T2 and the request ahead of it; T2 requesting S closes
+        // T2 -> T3 -> T2.
         locks.ReleaseAll(_t1);
         bool thirdStillWaiting = !thirdWaits.IsCompleted;
         var closing = locks.AcquireAsync(_t2, resourceS, LockMode.Exclusive).AsTask();
         await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
         locks.ReleaseAll(_t2);
+        await fourthWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(t4);
         await thirdWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t3);
 
         // Assert
+        grantedAtOnce.ShouldBeTrue();
         thirdStillWaiting.ShouldBeTrue();
     }
 
     /// <summary>
-    /// A grant that closes a cycle (#1390): an owner with a request queued is granted another
-    /// resource that a request of the transaction it waits for is queued on. No request queued at
-    /// that moment, so the detector at the request never sees the cycle; the grant must, and the
-    /// owner's queued request on the cycle fails as the victim while the grant stands.
+    /// A request the old grant rule passed a queued request with, closing a cycle, now queues
+    /// behind it and closes none (#1390 review). T1 was granted R shared beside T3 and past T2's
+    /// exclusive request, so T2 waited for T1 as T1 waited for T2, and the grant had to fail T1's
+    /// queued request as the deadlock victim. Behind T2's request, T1 waits for T2 on R too, which
+    /// is no cycle: T2 waits only for T3, and everyone is granted once T3 and T2 end.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A grant that closes a cycle fails the grantee's queued request on it (#1390)")]
-    public async Task AcquireAsync_GrantClosingACycle_ShouldFailTheGranteesQueuedRequest()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A request queued behind a conflicting request closes no cycle a grant past it would have (#1390)")]
+    public async Task AcquireAsync_RequestAGrantPastAQueuedRequestWouldHaveDeadlocked_ShouldQueueWithoutADeadlock()
     {
         // Arrange: T1 waits for P, which T2 holds; T2 waits for R exclusively, which T3 holds shared.
         var locks = LockManager.Create();
@@ -312,20 +326,22 @@ public class LockManagerTests
         var firstWaits = locks.AcquireAsync(_t1, resourceP, LockMode.Exclusive).AsTask();
         var secondWaits = locks.AcquireAsync(_t2, resourceR, LockMode.Exclusive).AsTask();
 
-        // Act: T1 is granted R shared beside T3, so T2 now waits for T1 as T1 waits for T2.
-        var granted = locks.AcquireAsync(_t1, resourceR, LockMode.Shared);
-        bool grantedAtOnce = granted.IsCompletedSuccessfully;
-        await granted;
-        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await firstWaits.WaitAsync(TimeSpan.FromSeconds(5)));
-
-        // T1 aborts; T2's wait ends once T3 releases too.
-        locks.ReleaseAll(_t1);
+        // Act: T1 requests R shared, which T3's grant allows and T2's queued request does not.
+        var shared = locks.AcquireAsync(_t1, resourceR, LockMode.Shared).AsTask();
+        bool sharedQueued = !shared.IsCompleted;
+        bool firstStillWaiting = !firstWaits.IsCompleted;
         locks.ReleaseAll(_t3);
         await secondWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        bool sharedWaitsForTheExclusiveGrant = !shared.IsCompleted;
+        locks.ReleaseAll(_t2);
+        await firstWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        await shared.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t1);
 
-        // Assert
-        grantedAtOnce.ShouldBeTrue();
-        victim.Message.ShouldStartWith($"Transaction {_t1} was chosen as the deadlock victim requesting {LockMode.Exclusive} on {resourceP}", Case.Sensitive);
+        // Assert: no request failed, and each was granted in turn.
+        sharedQueued.ShouldBeTrue();
+        firstStillWaiting.ShouldBeTrue();
+        sharedWaitsForTheExclusiveGrant.ShouldBeTrue();
     }
 
     /// <summary>
@@ -363,5 +379,265 @@ public class LockManagerTests
         locks.TryAcquire(_t2, resourceA, LockMode.Exclusive).ShouldBeTrue();
         locks.TryAcquire(_t2, resourceB, LockMode.Exclusive).ShouldBeTrue();
         locks.TryAcquire(_t2, resourceC, LockMode.Exclusive).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A request queues behind a conflicting request of another owner queued ahead of it (#1390
+    /// review). A grant used to depend on the modes held only, so a stream of shared grants passed
+    /// an exclusive request for as long as the stream lasted: under a stress workload concentrated
+    /// on one parent row, a cascading delete's exclusive request on that row waited seven times in
+    /// a row for 12 s, until the watchdog canceled it, while the child writers' shared requests
+    /// were granted past it. PostgreSQL's lock manager queues such a request
+    /// (<c>src/backend/storage/lmgr/lock.c:1136-1143</c>).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A request queues behind a conflicting request queued ahead of it (#1390)")]
+    public async Task AcquireAsync_SharedRequestBehindAQueuedExclusiveRequest_ShouldQueueBehindIt()
+    {
+        // Arrange: T1 holds R shared; T2 waits for R exclusively.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(12, 1);
+        await locks.AcquireAsync(_t1, resource, LockMode.Shared);
+        var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
+
+        // Act: T3 requests R shared, which T1's grant allows and T2's queued request does not.
+        var shared = locks.AcquireAsync(_t3, resource, LockMode.Shared).AsTask();
+        bool sharedQueued = !shared.IsCompleted;
+        bool tryRefused = !locks.TryAcquire(new TransactionSequence(4), resource, LockMode.Shared);
+        locks.ReleaseAll(_t1);
+        await exclusive.WaitAsync(TimeSpan.FromSeconds(5));
+        bool sharedWaitsForTheExclusiveGrant = !shared.IsCompleted;
+        locks.ReleaseAll(_t2);
+        await shared.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t3);
+
+        // Assert: the shared request waited for the exclusive one, which the first release granted.
+        sharedQueued.ShouldBeTrue();
+        tryRefused.ShouldBeTrue();
+        sharedWaitsForTheExclusiveGrant.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// An owner that already holds a resource requests it ahead of the queued requests that wait
+    /// for it (#1390 review): they cannot be granted before it ends anyway, and a statement apply
+    /// re-requests, inside the coordinator's gate, locks its statement already holds, which must be
+    /// granted at once.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A holder's request goes ahead of a queued request that waits for it (#1390)")]
+    public async Task AcquireAsync_HoldersRequestBehindAQueuedRequestThatWaitsForIt_ShouldBeGrantedAtOnce()
+    {
+        // Arrange: T1 holds R shared; T2 waits for R exclusively.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(13, 1);
+        await locks.AcquireAsync(_t1, resource, LockMode.Shared);
+        var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
+
+        // Act: T1 re-requests its mode, then upgrades.
+        var regrant = locks.AcquireAsync(_t1, resource, LockMode.Shared);
+        bool regrantedAtOnce = regrant.IsCompletedSuccessfully;
+        await regrant;
+        var upgrade = locks.AcquireAsync(_t1, resource, LockMode.Exclusive);
+        bool upgradedAtOnce = upgrade.IsCompletedSuccessfully;
+        await upgrade;
+        bool exclusiveStillWaiting = !exclusive.IsCompleted;
+        locks.ReleaseAll(_t1);
+        await exclusive.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t2);
+
+        // Assert
+        regrantedAtOnce.ShouldBeTrue();
+        upgradedAtOnce.ShouldBeTrue();
+        exclusiveStillWaiting.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A holder's request queues behind a conflicting queued request that does not wait for it
+    /// (#1390 review). Otherwise owner after owner could join the holders in a mode the queued
+    /// request allows, intent-shared beside a waiting intent-exclusive, then upgrade past it to
+    /// one it does not, and keep it waiting for as long as they came.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A holder's request queues behind a queued request that does not wait for it (#1390)")]
+    public async Task AcquireAsync_HoldersUpgradeBehindAQueuedRequestThatDoesNotWaitForIt_ShouldQueueBehindIt()
+    {
+        // Arrange: T1 holds R shared; T2 waits for R intent-exclusively; T3 is granted R
+        // intent-shared, which both allow.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(19, 1);
+        await locks.AcquireAsync(_t1, resource, LockMode.Shared);
+        var intentExclusive = locks.AcquireAsync(_t2, resource, LockMode.IntentExclusive).AsTask();
+        var intentShared = locks.AcquireAsync(_t3, resource, LockMode.IntentShared);
+        bool intentSharedAtOnce = intentShared.IsCompletedSuccessfully;
+        await intentShared.AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act: T3 requests shared, which T1's grant allows and T2's queued request does not.
+        bool tryRefused = !locks.TryAcquire(_t3, resource, LockMode.Shared);
+        var upgrade = locks.AcquireAsync(_t3, resource, LockMode.Shared).AsTask();
+        bool upgradeQueued = !upgrade.IsCompleted;
+        locks.ReleaseAll(_t1);
+        await intentExclusive.WaitAsync(TimeSpan.FromSeconds(5));
+        bool upgradeWaitsForTheIntentExclusiveGrant = !upgrade.IsCompleted;
+        locks.ReleaseAll(_t2);
+        await upgrade.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t3);
+
+        // Assert
+        intentSharedAtOnce.ShouldBeTrue();
+        tryRefused.ShouldBeTrue();
+        upgradeQueued.ShouldBeTrue();
+        upgradeWaitsForTheIntentExclusiveGrant.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A cycle through a request queued behind another owner's request (#1390 review): the request
+    /// waits for the owner of the one ahead, which is a wait-for edge like a conflicting grant, so
+    /// the detector follows it. PostgreSQL calls it a soft edge and first tries to rearrange the
+    /// queue to break the cycle (<c>src/backend/storage/lmgr/deadlock.c:624-768</c>, <c>TopoSort</c>);
+    /// this lock manager aborts the requester, as for every other cycle.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a request queued behind another owner's request aborts the requester (#1390)")]
+    public async Task AcquireAsync_CycleThroughARequestQueuedBehindAnother_ShouldAbortTheRequester()
+    {
+        // Arrange: T1 holds R shared; T2 holds P and waits for R exclusively; T3 holds Q and queues
+        // for R shared behind T2's request.
+        var locks = LockManager.Create();
+        var resourceR = LockResource.Entry(14, 1);
+        var resourceP = LockResource.Entry(14, 2);
+        var resourceQ = LockResource.Entry(14, 3);
+        await locks.AcquireAsync(_t1, resourceR, LockMode.Shared);
+        await locks.AcquireAsync(_t2, resourceP, LockMode.Exclusive);
+        await locks.AcquireAsync(_t3, resourceQ, LockMode.Exclusive);
+        var secondWaits = locks.AcquireAsync(_t2, resourceR, LockMode.Exclusive).AsTask();
+        var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.Shared).AsTask();
+        bool thirdQueued = !thirdWaits.IsCompleted;
+
+        // Act: T1 requesting Q closes T1 -> T3 -> T2 -> T1, whose edge from T3 is the queue's.
+        var closing = locks.AcquireAsync(_t1, resourceQ, LockMode.Exclusive).AsTask();
+        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
+        locks.ReleaseAll(_t1);
+        await secondWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        bool thirdStillWaiting = !thirdWaits.IsCompleted;
+        locks.ReleaseAll(_t2);
+        await thirdWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t3);
+
+        // Assert
+        thirdQueued.ShouldBeTrue();
+        victim.Message.ShouldStartWith($"Transaction {_t1} was chosen as the deadlock victim requesting {LockMode.Exclusive} on {resourceQ}", Case.Sensitive);
+        thirdStillWaiting.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A request that leaves the queue without a grant lets the requests behind it be granted
+    /// (#1390 review): once a request waits for the requests queued ahead of it, a canceled one
+    /// is a wake-up like a release, or the request behind it waits for a grant that never comes.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A canceled request grants the request queued behind it (#1390)")]
+    public async Task AcquireAsync_QueuedRequestAheadCanceled_ShouldGrantTheRequestBehindIt()
+    {
+        // Arrange: T1 holds R shared; T2 waits for R exclusively; T3 queues for R shared behind it.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(15, 1);
+        await locks.AcquireAsync(_t1, resource, LockMode.Shared);
+        using var cancellation = new CancellationTokenSource();
+        var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive, cancellation.Token).AsTask();
+        var shared = locks.AcquireAsync(_t3, resource, LockMode.Shared).AsTask();
+        bool sharedQueued = !shared.IsCompleted;
+
+        // Act: T2's wait is canceled; nothing is released.
+        await cancellation.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await exclusive.WaitAsync(TimeSpan.FromSeconds(5)));
+        await shared.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t1);
+        locks.ReleaseAll(_t3);
+
+        // Assert
+        sharedQueued.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Ending an owner while its request waits lets the requests queued behind that request be
+    /// granted (#1390 review), as a canceled request does.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: Ending an owner grants the request queued behind its request (#1390)")]
+    public async Task ReleaseAll_OwnerWithARequestQueuedAheadOfAnother_ShouldGrantTheRequestBehindIt()
+    {
+        // Arrange: T1 holds R shared; T2 waits for R exclusively; T3 queues for R shared behind it.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(16, 1);
+        await locks.AcquireAsync(_t1, resource, LockMode.Shared);
+        var exclusive = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
+        var shared = locks.AcquireAsync(_t3, resource, LockMode.Shared).AsTask();
+        bool sharedQueued = !shared.IsCompleted;
+
+        // Act: T2 ends while it waits.
+        locks.ReleaseAll(_t2);
+        await Should.ThrowAsync<TransactionAbortedException>(async () => await exclusive.WaitAsync(TimeSpan.FromSeconds(5)));
+        await shared.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t1);
+        locks.ReleaseAll(_t3);
+
+        // Assert
+        sharedQueued.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// An owner keeps every mode it was granted (#1390 review). The table kept only the strongest by
+    /// a fixed order (IS, S, IX, U, X), which the five modes do not have: intent-exclusive then
+    /// update kept update, which allows shared, and lost intent-exclusive's conflict with it. A
+    /// request queued for shared before the update grant still waited, since nothing woke it, but
+    /// the detector, which reads its edges from the table, found none, and a cycle through it went
+    /// unseen. PostgreSQL keeps a mask of the modes each holder holds
+    /// (<c>src/backend/storage/lmgr/lock.c:1702-1709</c>, <c>holdMask</c>).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a waiter whose holder was granted update after intent-exclusive aborts the requester (#1390)")]
+    public async Task AcquireAsync_CycleThroughAHolderOfIntentExclusiveAndUpdate_ShouldAbortTheRequester()
+    {
+        // Arrange: T3 holds R intent-exclusive; T1 holds Q shared and queues for R shared; T3 is
+        // granted R update as well.
+        var locks = LockManager.Create();
+        var resourceR = LockResource.Entry(17, 1);
+        var resourceQ = LockResource.Entry(17, 2);
+        await locks.AcquireAsync(_t3, resourceR, LockMode.IntentExclusive);
+        await locks.AcquireAsync(_t1, resourceQ, LockMode.Shared);
+        var firstWaits = locks.AcquireAsync(_t1, resourceR, LockMode.Shared).AsTask();
+        bool firstQueued = !firstWaits.IsCompleted;
+        await locks.AcquireAsync(_t3, resourceR, LockMode.Update).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act: T3 requesting Q closes T3 -> T1 -> T3.
+        var closing = locks.AcquireAsync(_t3, resourceQ, LockMode.Exclusive).AsTask();
+        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
+        locks.ReleaseAll(_t3);
+        await firstWaits.WaitAsync(TimeSpan.FromSeconds(5));
+        locks.ReleaseAll(_t1);
+
+        // Assert
+        firstQueued.ShouldBeTrue();
+        victim.Message.ShouldStartWith($"Transaction {_t3} was chosen as the deadlock victim requesting {LockMode.Exclusive} on {resourceQ}", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Two owners never hold conflicting modes (#1390 review): an owner granted intent-exclusive
+    /// and then shared kept only intent-exclusive, the stronger by the old order, so another
+    /// owner's intent-exclusive, which shared conflicts with, was granted beside it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A holder of intent-exclusive and shared blocks another owner's intent-exclusive (#1390)")]
+    public async Task TryAcquire_HolderOfIntentExclusiveAndShared_ShouldRefuseAnotherOwnersIntentExclusive()
+    {
+        // Arrange: T3 holds R intent-exclusive and shared.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(18, 1);
+        await locks.AcquireAsync(_t3, resource, LockMode.IntentExclusive);
+        await locks.AcquireAsync(_t3, resource, LockMode.Shared);
+
+        // Act
+        bool intentExclusive = locks.TryAcquire(_t1, resource, LockMode.IntentExclusive);
+        bool shared = locks.TryAcquire(_t1, resource, LockMode.Shared);
+        bool intentShared = locks.TryAcquire(_t1, resource, LockMode.IntentShared);
+        locks.ReleaseAll(_t1);
+        locks.ReleaseAll(_t3);
+
+        // Assert: intent-shared is the one mode compatible with both.
+        intentExclusive.ShouldBeFalse();
+        shared.ShouldBeFalse();
+        intentShared.ShouldBeTrue();
     }
 }

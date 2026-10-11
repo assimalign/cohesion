@@ -41,6 +41,15 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 /// behind them (#1390). With the fix, five 60-second runs saw no wait reach 1 s (72,674 to 81,287
 /// commits and 1,256 to 1,447 deadlock victims a run).
 /// </para>
+/// <para>
+/// A shared request used to be granted past a queued exclusive one, so on one hot parent row the
+/// child writers kept a cascade's exclusive request waiting: with "1,1,14,1" a 60-second run of
+/// <c>a60f850c</c> saw twelve of the cascade's waits pass 1 s, one of them 11.3 s. Since the #1390
+/// review grants respect the queue, and the same run saw none reach 1 s; the cascade then loses
+/// the deadlocks its lock order makes instead (the Transactions DESIGN.md, "The queue does not
+/// make a hot row's cascade succeed"). <see cref="SqlLockWaitProbeResult.ParentDeletes"/> shows
+/// whether the deleters made progress.
+/// </para>
 /// </remarks>
 internal sealed class SqlLockWaitProbe
 {
@@ -78,6 +87,7 @@ internal sealed class SqlLockWaitProbe
     private readonly SqlDatabase _database;
     private readonly string _name;
     private readonly int _parents;
+    private readonly bool _explicitOnly;
     private readonly Worker[] _workers;
     private readonly ConcurrentDictionary<long, int> _sequenceWorkers = new();
     private readonly ConcurrentDictionary<long, Wait> _waiting = new();
@@ -91,12 +101,14 @@ internal sealed class SqlLockWaitProbe
     private long _conflicts;
     private long _violations;
     private long _waits;
+    private long _parentDeletes;
 
-    private SqlLockWaitProbe(SqlDatabase database, string name, int parents, int workers)
+    private SqlLockWaitProbe(SqlDatabase database, string name, int parents, bool explicitOnly, int workers)
     {
         _database = database;
         _name = name;
         _parents = parents;
+        _explicitOnly = explicitOnly;
         _workers = Enumerable.Range(0, workers).Select(id => new Worker(id, this)).ToArray();
     }
 
@@ -105,8 +117,14 @@ internal sealed class SqlLockWaitProbe
     /// <param name="parents">The parent rows: fewer concentrate the cascades and the foreign-key checks on fewer rows.</param>
     /// <param name="deleters">The workers that delete and re-insert parents, which cascade.</param>
     /// <param name="childWriters">The workers that write children and grandchildren.</param>
+    /// <param name="explicitOnly">
+    /// Whether every transaction is explicit and pauses up to 5 ms after each statement, so the
+    /// child writers hold their parent rows' shared locks longer: with one parent row, the
+    /// workload that starved a cascade's exclusive request while shared requests were granted
+    /// past it (#1390 review).
+    /// </param>
     /// <returns>The result.</returns>
-    internal static async Task<SqlLockWaitProbeResult> RunAsync(TimeSpan duration, int parents = DefaultParents, int deleters = 3, int childWriters = 5)
+    internal static async Task<SqlLockWaitProbeResult> RunAsync(TimeSpan duration, int parents = DefaultParents, int deleters = 3, int childWriters = 5, bool explicitOnly = false)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(parents, 1);
         string name = "lock-wait-probe-" + Guid.NewGuid().ToString("N");
@@ -122,7 +140,7 @@ internal sealed class SqlLockWaitProbe
             await setup.ExecuteAsync("INSERT INTO g (id, cid) VALUES " + string.Join(", ", Enumerable.Range(1, Grandchildren).Select(id => $"({id}, {id})")));
         }
 
-        var probe = new SqlLockWaitProbe(database, name, parents, deleters + childWriters);
+        var probe = new SqlLockWaitProbe(database, name, parents, explicitOnly, deleters + childWriters);
         using var listener = new Listener(probe);
         using var stop = new CancellationTokenSource();
         var workers = probe._workers.Select(worker => Task.Run(() => probe.RunWorkerAsync(worker, deleter: worker.Id < deleters, stop.Token))).ToArray();
@@ -158,6 +176,7 @@ internal sealed class SqlLockWaitProbe
             Interlocked.Read(ref probe._conflicts),
             Interlocked.Read(ref probe._violations),
             Interlocked.Read(ref probe._waits),
+            Interlocked.Read(ref probe._parentDeletes),
             probe._slow.OrderBy(wait => wait.Started).ToArray(),
             probe._unexpected.ToDictionary(pair => pair.Key, pair => pair.Value));
     }
@@ -174,7 +193,7 @@ internal sealed class SqlLockWaitProbe
         while (!stop.IsCancellationRequested)
         {
             // An explicit snapshot or read-committed transaction, or auto-commit.
-            int mode = random.Next(3);
+            int mode = _explicitOnly ? 1 + random.Next(2) : random.Next(3);
             SqlDatabaseTransaction? transaction = null;
             try
             {
@@ -186,7 +205,9 @@ internal sealed class SqlLockWaitProbe
                 }
 
                 bool usable = true;
-                foreach (string sql in deleter ? DeleterStatements(random) : ChildStatements(random))
+                bool deletedParent = false;
+                var statements = deleter ? DeleterStatements(random) : ChildStatements(random);
+                foreach (string sql in statements)
                 {
                     if (stop.IsCancellationRequested)
                     {
@@ -200,10 +221,23 @@ internal sealed class SqlLockWaitProbe
                         break;
                     }
 
-                    if (transaction is not null && random.Next(3) == 0)
+                    // A deleter's first statement is its cascading parent delete.
+                    if (deleter && ReferenceEquals(sql, statements[0]))
+                    {
+                        if (transaction is null)
+                        {
+                            Interlocked.Increment(ref _parentDeletes);
+                        }
+                        else
+                        {
+                            deletedParent = true;
+                        }
+                    }
+
+                    if (transaction is not null && (_explicitOnly || random.Next(3) == 0))
                     {
                         worker.Enter("between statements");
-                        await Task.Delay(random.Next(0, 3));
+                        await Task.Delay(random.Next(0, _explicitOnly ? 6 : 3));
                     }
                 }
 
@@ -212,6 +246,10 @@ internal sealed class SqlLockWaitProbe
                     worker.Enter("commit");
                     await transaction.CommitAsync();
                     Interlocked.Increment(ref _commits);
+                    if (deletedParent)
+                    {
+                        Interlocked.Increment(ref _parentDeletes);
+                    }
                 }
             }
             catch (DatabaseTransactionAbortedException)
@@ -578,6 +616,7 @@ internal sealed record SqlLockWait(TimeSpan Started, long Sequence, string Resou
 /// <param name="Conflicts">The statements and commits that failed a write conflict.</param>
 /// <param name="Violations">The statements a constraint refused.</param>
 /// <param name="Waits">The lock requests that waited.</param>
+/// <param name="ParentDeletes">The cascading parent deletes that committed: whether the deleters made progress.</param>
 /// <param name="SlowWaits">The waits that lasted at least <see cref="SqlLockWaitProbe.SlowWait"/>.</param>
 /// <param name="Unexpected">Every other failure, by type and message.</param>
 internal sealed record SqlLockWaitProbeResult(
@@ -588,6 +627,7 @@ internal sealed record SqlLockWaitProbeResult(
     long Conflicts,
     long Violations,
     long Waits,
+    long ParentDeletes,
     IReadOnlyList<SqlLockWait> SlowWaits,
     IReadOnlyDictionary<string, int> Unexpected)
 {
@@ -598,7 +638,8 @@ internal sealed record SqlLockWaitProbeResult(
     {
         var text = new StringBuilder();
         text.Append(CultureInfo.InvariantCulture, $"ran {Ran.TotalSeconds:F1} s: {Statements} statements, {Commits} commits, {Deadlocks} deadlock victims, ")
-            .Append(CultureInfo.InvariantCulture, $"{Conflicts} conflicts, {Violations} constraint violations, {Waits} lock waits; ")
+            .Append(CultureInfo.InvariantCulture, $"{Conflicts} conflicts, {Violations} constraint violations, {Waits} lock waits, ")
+            .Append(CultureInfo.InvariantCulture, $"{ParentDeletes} parent deletes committed; ")
             .Append(CultureInfo.InvariantCulture, $"waits of {SqlLockWaitProbe.SlowWait.TotalSeconds} s or more: {SlowWaits.Count}, ")
             .Append(CultureInfo.InvariantCulture, $"of {SqlLockWaitProbe.LongWait.TotalSeconds} s or more: {WaitsOf(SqlLockWaitProbe.LongWait).Count}");
         foreach (var wait in SlowWaits)

@@ -175,10 +175,10 @@ public sealed class SqlLockWaitTests
     /// lock manager has broken enough of its deadlocks, then drained. No wait may last 10 s; before
     /// the fix each 60-second run on the base saw 40 that did. Set
     /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_SECONDS</c> to run it longer,
-    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE</c> to "parents,deleters,childWriters" for
-    /// another workload ("1,2,8" concentrates it on one parent row, the starvation measurement in
-    /// the Transactions DESIGN.md), and <c>COHESION_DATABASE_LOCK_WAIT_PROBE_REPORT</c> to append
-    /// its report to a file.
+    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_SHAPE</c> to "parents,deleters,childWriters[,explicit]"
+    /// for another workload ("1,1,14,1" concentrates it on one parent row in explicit transactions
+    /// only, the starvation measurement in the Transactions DESIGN.md, "Grants respect the queue"), and
+    /// <c>COHESION_DATABASE_LOCK_WAIT_PROBE_REPORT</c> to append its report to a file.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lock waits: Cascading deletes, child writers and the purge never leave a lock wait 10 s long (#1390)")]
     public async Task Workload_CascadesChildWritersAndThePurge_ShouldNeverWaitTenSeconds()
@@ -191,9 +191,12 @@ public sealed class SqlLockWaitTests
             ? configuredShape.Split(',').Select(value => int.Parse(value, CultureInfo.InvariantCulture)).ToArray()
             : [SqlLockWaitProbe.DefaultParents, 3, 5];
 
+        bool explicitOnly = shape.Length > 3 && shape[3] != 0;
+
         // Act
-        var result = await SqlLockWaitProbe.RunAsync(TimeSpan.FromSeconds(seconds), shape[0], shape[1], shape[2]);
-        string report = $"SQL lock-wait probe, {seconds} s, {shape[0]} parents, {shape[1]} deleters, {shape[2]} child writers:{Environment.NewLine}{result}";
+        var result = await SqlLockWaitProbe.RunAsync(TimeSpan.FromSeconds(seconds), shape[0], shape[1], shape[2], explicitOnly);
+        string report = $"SQL lock-wait probe, {seconds} s, {shape[0]} parents, {shape[1]} deleters, {shape[2]} child writers" +
+            $"{(explicitOnly ? ", explicit transactions only" : "")}:{Environment.NewLine}{result}";
         _output.WriteLine(report);
         if (Environment.GetEnvironmentVariable("COHESION_DATABASE_LOCK_WAIT_PROBE_REPORT") is { Length: > 0 } path)
         {

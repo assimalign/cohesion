@@ -2640,6 +2640,19 @@ lock order is unchanged. `SqlLockWaitTests` builds the cycle step
 by step (an `UPDATE` of the child row stands in for the cascade's lock on it), and runs the
 review's workload as a stress probe that fails on any wait of 10 s.
 
+**A child writer's shared lock on a parent row queues behind a cascade's (#1390 review).** The
+lock manager used to grant a shared request beside the shared holders of a parent row while a
+cascade's exclusive request on it waited, so on one hot parent row a stream of child writers
+kept the cascade waiting past 10 s. Its grants now respect the queue (`Database.Transactions`
+DESIGN.md, "Grants respect the queue"): the waits are bounded, but the hot row's cascade still
+makes no progress. The child writers queued behind it hold child rows, the cycle above forms
+as soon as the cascade is granted the parent row, and the cascade is its victim; on one hot
+parent row the probe's workers commit between about a third and nine tenths of what they
+committed before. The measurements and
+the owner decision they feed (the victim rule, or a cascade lock order without the cycle, such
+as an update-mode parent lock taken before the child rows) are in that section. The lock order
+is unchanged.
+
 DDL constraint backfills are the exception that stays table-grain: `ADD
 CONSTRAINT` / `ADD COLUMN` validate *every* existing row against latest state,
 so they hold the `Exclusive` table lock on their own table plus the `Exclusive`
