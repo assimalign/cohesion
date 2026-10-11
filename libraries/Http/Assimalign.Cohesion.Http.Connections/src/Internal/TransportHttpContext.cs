@@ -328,6 +328,9 @@ internal abstract class TransportHttpContext : HttpContext
 
         foreach (IHttpExchangeInterceptor interceptor in interceptors)
         {
+            // An earlier hook can clear the head. Restore the listener's default before a
+            // feature captures it for a response that bypasses the transport writer (CONNECT).
+            _ = Response.GetDateHeader();
             interceptor.BeforeResponse(_responseInterception);
         }
     }

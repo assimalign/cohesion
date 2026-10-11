@@ -114,6 +114,36 @@ public class HttpResponseDateTransportTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Date: CONNECT should retain the listener Date after an earlier response interceptor clears headers")]
+    public async Task AcceptAsync_OnEarlierHeaderClearingInterceptor_ShouldRestoreConnectDate()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new() { AddDateHeader = true, DateTimeProvider = new ManualTimeProvider() };
+        options.Interceptors.Add(new HeaderClearingInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
+        TestConnection transport = new(HttpProtocolPayloadFactory.CreateHttp1Request(
+            "CONNECT api.test:443 HTTP/1.1\r\nHost: api.test:443\r\n\r\n"));
+        options.UseHttp1(new TestConnectionListener(transport));
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
+        await using HttpConnectionListener listener = new(options);
+        await using IHttpConnection connection = await listener.AcceptOrListenAsync(timeout.Token);
+        IHttpConnectionContext connectionContext = await connection.OpenAsync(timeout.Token);
+        await using IAsyncEnumerator<IHttpContext> requests = connectionContext.ReceiveAsync(timeout.Token).GetAsyncEnumerator();
+        (await requests.MoveNextAsync()).ShouldBeTrue();
+        await using IHttpContext context = requests.Current;
+        IHttpProtocolUpgrade upgrade = context.Upgrade.ShouldNotBeNull();
+        // The upgrade must also retain the policy's Date when the application clears the head.
+        context.Response.Headers.Clear();
+
+        // Act
+        await using Stream tunnel = await upgrade.AcceptAsync(timeout.Token);
+        string head = Encoding.ASCII.GetString(await transport.ReadOutputAsync().WaitAsync(timeout.Token));
+
+        // Assert
+        head.ShouldBe("HTTP/1.1 200 OK\r\nDate: " + initialDate + "\r\n\r\n");
+        context.Response.Headers[HttpHeaderKey.Date].Value.ShouldBe(initialDate);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Date cache: One provider should share one formatted and encoded value per second without hot-path allocations")]
     public void GetCurrent_WithinSecond_ShouldReuseSnapshotWithoutAllocations()
     {
@@ -261,6 +291,16 @@ public class HttpResponseDateTransportTests
         if (enabled)
         {
             headers["date"].ShouldBe(initialDate);
+        }
+    }
+
+    private sealed class HeaderClearingInterceptor : HttpExchangeInterceptor
+    {
+        public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
+
+        public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
+        {
+            context.Headers.Clear();
         }
     }
 

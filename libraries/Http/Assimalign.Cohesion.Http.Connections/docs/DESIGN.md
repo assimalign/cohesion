@@ -786,8 +786,12 @@ a dictionary or consuming its capacity for this default field. Cache hits, heade
 insertion and copying cached field bytes need no per-request scratch allocation;
 response output buffers still contain the additional wire bytes.
 
-The transport seeds response headers before response interceptors and application
-dispatch. This is the response's origination time (the RFC permits generation at
+The transport seeds response headers before application dispatch and re-seeds a
+missing Date before each `BeforeResponse` interceptor, respecting the listener's
+opt-out and preserving explicit values. An earlier hook may clear headers; the
+upgrade interceptor still captures the default for a successful CONNECT, whose
+head bypasses the transport writer, even if the application clears headers again.
+This is the response's origination time (the RFC permits generation at
 any time during message origination); it stays stable while a slow handler runs.
 StaticFiles can therefore clamp Last-Modified and evaluate If-Range against the
 same timestamp that the head sends. Head writers regenerate the default if the
