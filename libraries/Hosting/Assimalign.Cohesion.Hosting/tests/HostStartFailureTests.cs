@@ -146,20 +146,30 @@ public class HostStartFailureTests
     {
         // Arrange
         var expectedFailure = new UnwritableDataException();
+        var hookFailure = new InvalidOperationException("reporting failed");
         var options = new TestHostOptions();
-        options.HostedServices.Add(new DelegateHostService(_ => throw expectedFailure));
-        await using IHost host = new HookRecordingHost(
+        bool fail = true;
+        options.HostedServices.Add(new DelegateHostService(_ => fail ? throw expectedFailure : Task.CompletedTask));
+        var host = new HookRecordingHost(
             options,
             _ => { },
-            (_, _) => throw new InvalidOperationException("reporting failed"));
+            (_, _) => throw hookFailure);
+        await using IHost lifetime = host;
 
         // Act
         UnwritableDataException failure = await Should.ThrowAsync<UnwritableDataException>(
-            () => host.StartAsync(CancellationToken.None));
+            () => lifetime.StartAsync(CancellationToken.None));
 
         // Assert
         failure.ShouldBeSameAs(expectedFailure);
         host.Context.State.ShouldBe(HostState.Failed);
+        host.StartFailureHookException.ShouldBeSameAs(hookFailure);
+
+        // A fresh accepted start resets the prior attempt's diagnostic record.
+        fail = false;
+        await lifetime.StartAsync(CancellationToken.None);
+        host.StartFailureHookException.ShouldBeNull();
+        await lifetime.StopAsync(CancellationToken.None);
     }
 
     [Fact(DisplayName = displayPrefix + "Timeout reporting receives the same translated failure as the caller")]

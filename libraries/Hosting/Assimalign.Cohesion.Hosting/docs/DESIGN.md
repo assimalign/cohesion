@@ -31,8 +31,10 @@ without entering service compensation. A successful start, later stop, or dispos
 A hook failure does not replace the startup exception. It is attached as the exception object in
 `exception.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"]`. Attachment is best-effort:
 if a custom exception's `Data` implementation rejects it, the original startup failure still
-propagates. This avoids introducing a second failure result or coupling the general host to one
-application's diagnostics transport.
+propagates. The host always retains the hook failure in its private `_startFailureHookException`
+field for debugger inspection, including when attachment is unavailable, and clears that record
+when the next start is accepted. This avoids introducing a second public failure result or coupling
+the general host to one application's diagnostics transport.
 
 Known cleanup gap: `Host<TContext>.RollbackStartAsync` suppresses exceptions from compensating
 service `StopAsync` calls without recording them. Preserving the startup failure is intentional,

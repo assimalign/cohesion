@@ -30,6 +30,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     private CancellationTokenSource? _cancellationTokenSource;
     private TaskCompletionSource<Host<TContext>>? _taskCompletionSource;
     private HostRun<TContext>? _hostRun;
+    private Exception? _startFailureHookException;
 
     // State Flags
     private bool _isDisposed;
@@ -45,6 +46,8 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     public HostId Id => Context.HostId;
     public abstract TContext Context { get; }
     IHostContext IHost.Context => Context;
+
+    internal Exception? StartFailureHookException => _startFailureHookException;
 
 
     Task IHost.StartAsync(CancellationToken cancellationToken)
@@ -81,6 +84,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         // observe Starting, Shutdown must be accepted for this run and must not be erased by
         // a later state transition.
         Context.BeginStart(shutdownCallback);
+        _startFailureHookException = null;
 
         using var startupTimeoutSource = new CancellationTokenSource();
 
@@ -207,15 +211,17 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             }
             catch (Exception hookException)
             {
+                _startFailureHookException = hookException;
+
                 // A reporting failure must never replace the failed start, even if a
                 // custom exception does not allow additional diagnostic data.
                 try
                 {
-                    startFailure.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"] = hookException;
+                    startFailure.Data["Assimalign.Cohesion.Hosting.StartFailureHookException"] = _startFailureHookException;
                 }
                 catch (Exception)
                 {
-                    // Preserve the start failure when its custom Data implementation rejects attachment.
+                    // The host field retains the reporting failure for debugger inspection.
                 }
             }
 
@@ -536,6 +542,8 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// resetting run state. A hook failure never replaces the startup failure; it is attached
     /// to <see cref="Exception.Data"/> under
     /// <c>Assimalign.Cohesion.Hosting.StartFailureHookException</c> when that dictionary permits it.
+    /// The host also retains the hook failure privately for debugger inspection until the
+    /// next accepted start, including when diagnostic attachment is unavailable.
     /// Existing startup-timeout translation to <see cref="HostStartupException"/> still applies.
     /// </remarks>
     protected virtual Task OnStartFailedAsync(Exception exception, CancellationToken cancellationToken = default)
