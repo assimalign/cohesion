@@ -121,7 +121,15 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        // Miss: buffer the response while the endpoint runs, then store a cacheable outcome.
+        // A custom server may omit successful-completion notification. Without it a miss cannot
+        // safely be stored: starting callbacks and final response transmission have not happened yet.
+        if (context.Features.Get<IWebResponseCompletionFeature>() is not { } completion)
+        {
+            await next.Invoke(context).ConfigureAwait(false);
+            return;
+        }
+
+        // Miss: capture the body now; decide and store only after successful response completion.
         long perEntryCap = policy.MaximumBodySize ?? _options.MaximumBodySize;
         Stream originalBody = context.Response.Body;
         OutputCacheBufferStream buffer = new(originalBody, perEntryCap);
@@ -143,7 +151,10 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        await TryStoreAsync(context, policy, primaryKey, buffer).ConfigureAwait(false);
+        // Starting callbacks can still change cache policy, status and Vary after this middleware
+        // returns. Successful completion observes their final head and excludes failed callbacks,
+        // cancellations and transport failures. Register only after downstream returns normally.
+        completion.Register(() => TryStoreAsync(context, policy, primaryKey, buffer));
     }
 
     private static bool PublishedEndpointCarriesMetadata(IHttpContext context)

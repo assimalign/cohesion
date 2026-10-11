@@ -31,6 +31,7 @@ flowchart LR
     Hosting["Web.Hosting — publishes all six"] --> Server
     WebSockets["Web.WebSockets — reads the drain"] --> Server
     Resources["Web.Hosting.Resources — reads completion"] --> Server
+    Caching["Web.Caching — stores after completion"] --> Server
     Logging["Web.Diagnostics — reads correlation and client fault"] --> Server
     Faults["Web.ErrorHandling, Web.Compression — read the client fault"] --> Server
     Headers["Web.SecurityHeaders and Web.Cors — stage headers"] --> Server
@@ -43,6 +44,7 @@ flowchart LR
 | `Assimalign.Cohesion.Web.Hosting` | runtime module: implements and installs all six (the client fault on a request that can have a body, on every version) | project reference (COHRES002, relaxed by decision 32) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | defers a control-plane stop until its `202` is written | project reference |
+| `Assimalign.Cohesion.Web.Caching` | stores the final response only after successful completion | project reference |
 | `Assimalign.Cohesion.Web.Diagnostics` | reads the request id and server activity for correlation; logs a client fault at the configured level with the status sent | project reference |
 | `Assimalign.Cohesion.Web.ErrorHandling` | skips `OnException` and the `500` problem for a client fault | project reference |
 | `Assimalign.Cohesion.Web.SecurityHeaders` and `Assimalign.Cohesion.Web.Cors` | stage policy headers immediately before commit | project reference |
@@ -122,6 +124,8 @@ and the default server retains and reports each failure (#1410). This changes th
 behavior, which skipped later callbacks after the first failure. Registration after completion throws `InvalidOperationException`. This lets a terminal
 defer lifecycle signals until its acknowledgement has been sent: the resource control plane's stop
 route answers `202` and stops the application only once the `202` is on the wire.
+Output caching also uses this seam so starting-callback policy changes and transmission failure govern
+storage. A custom server without completion notification can serve existing hits but stores no misses.
 
 **`IWebServerDrainFeature`** is the drain seam (decision 16, Http ADR 1). Its `Draining` token is
 cancelled when the server begins its lame-duck drain: the server stops accepting and lets the

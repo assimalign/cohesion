@@ -34,7 +34,10 @@ public class OutputCacheMiddlewareTests
 
     private static async Task<string> RunAsync(OutputCacheMiddleware middleware, OutputCacheTestContext context, WebApplicationMiddleware downstream)
     {
+        OutputCacheCompletionFeature completion = new();
+        context.Features.Set<IWebResponseCompletionFeature>(completion);
         await middleware.InvokeAsync(context, downstream);
+        await completion.CompleteAsync();
         context.Response.Body.Position = 0;
         using System.IO.StreamReader reader = new(context.Response.Body, Encoding.UTF8, leaveOpen: true);
         return await reader.ReadToEndAsync();
@@ -53,6 +56,46 @@ public class OutputCacheMiddlewareTests
     private sealed class Counter
     {
         public int Count;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: A cache entry is invisible until successful response completion")]
+    public async Task Invoke_BeforeSuccessfulCompletion_ShouldNotPublishEntry()
+    {
+        // Arrange
+        OutputCacheMiddleware middleware = CreateMiddleware(out InMemoryOutputCacheStore store);
+        using InMemoryOutputCacheStore ownedStore = store;
+        OutputCacheTestContext context = new();
+        OutputCacheCompletionFeature completion = new();
+        context.Features.Set<IWebResponseCompletionFeature>(completion);
+        Counter counter = new();
+
+        // Act
+        await middleware.InvokeAsync(context, Handler(counter, "first"));
+        string pending = await RunAsync(middleware, new OutputCacheTestContext(), Handler(counter, "pending"));
+        await completion.CompleteAsync();
+        string completed = await RunAsync(middleware, new OutputCacheTestContext(), Handler(counter, "unexpected"));
+
+        // Assert
+        pending.ShouldBe("pending");
+        completed.ShouldBe("first");
+        counter.Count.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: A server without completion notification never stores a miss")]
+    public async Task Invoke_NoCompletionFeature_ShouldNotStore()
+    {
+        // Arrange
+        OutputCacheMiddleware middleware = CreateMiddleware(out InMemoryOutputCacheStore store);
+        using InMemoryOutputCacheStore ownedStore = store;
+        Counter counter = new();
+
+        // Act
+        await middleware.InvokeAsync(new OutputCacheTestContext(), Handler(counter, "unconfirmed"));
+        string confirmed = await RunAsync(middleware, new OutputCacheTestContext(), Handler(counter, "confirmed"));
+
+        // Assert
+        confirmed.ShouldBe("confirmed");
+        counter.Count.ShouldBe(2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: A second request is served from cache without invoking downstream")]

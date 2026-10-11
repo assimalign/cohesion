@@ -26,7 +26,8 @@ Per-endpoint policy lives in a sealed `OutputCacheMetadata` carrier on the route
 pipeline's terminal runs it (#1054). Registered after `UseRouting`, the middleware reads the published
 match (`context.GetRouteMatch()`) for the endpoint's metadata and route values, decides, and on a hit
 answers without calling `next`, so the endpoint never runs. On a miss it tees the response body and calls
-`next`, the terminal runs the endpoint, and a cacheable result is stored. It never runs the matcher
+`next`, the terminal runs the endpoint, and a cacheable result is stored after successful response
+completion. It never runs the matcher
 itself; with no published endpoint (no route matched, or routing not registered) the base policy alone
 governs. A CORS preflight's candidate endpoint is ignored, though a preflight is an `OPTIONS` request,
 which the method gate passes through before the endpoint is read.
@@ -37,7 +38,8 @@ flowchart TD
     Decide -->|"hit"| Serve["Serve the stored response; the endpoint does not run"]
     Decide -->|"miss"| Tee["Tee the response body; call next"]
     Tee --> Terminal["Pipeline terminal runs the endpoint"]
-    Terminal --> Store["Store a cacheable response"]
+    Terminal --> Complete["Starting callbacks succeed; response transmission completes"]
+    Complete --> Store["Evaluate the final head; store a cacheable response"]
 ```
 
 Before #1054 the router matched **and** dispatched in one step, so there was no pipeline slot between
@@ -197,7 +199,8 @@ their own encoding (precompressed static assets) or move behind compression too.
 | Request `Cache-Control: no-store` or `no-cache` | passthrough (conservative) |
 | `Authorization` header present, policy `CacheAuthenticated == false` | passthrough |
 
-**Response-side** (decided after the endpoint runs — the response is not stored):
+**Response-side** (decided after successful response completion, including starting callbacks — the
+response is not stored):
 
 | Condition | Behavior |
 | --- | --- |
@@ -208,6 +211,8 @@ their own encoding (precompressed static assets) or move behind compression too.
 | Body exceeds the per-entry cap | not stored (streamed through untouched) |
 | Effective time-to-live ≤ 0 | not stored |
 | Entry larger than the store's whole `SizeLimit` | declined by the store |
+| Starting callback or transmission fails, or the exchange is cancelled | not stored |
+| Custom server omits `IWebResponseCompletionFeature` | misses pass through without storage |
 
 **Protocol switches are never cached.** A WebSocket handshake is a `GET` on HTTP/1.1 (an upgrade,
 RFC 6455) and a `CONNECT` on HTTP/2 and HTTP/3 (an extended CONNECT, RFC 8441 and RFC 9220), and it
@@ -283,7 +288,23 @@ served) while capturing a copy up to the per-entry cap. Crossing the cap **aband
 buffer is released and writes continue to flow through untouched, so an over-large response streams normally
 and is simply not cached. This mirrors the `Web.Compression` `CompressionBodyStream` discipline: caching is
 a strictly additive side effect that can never corrupt or withhold the response. The original body is always
-restored in a `finally`, and storage runs only after the endpoint returns normally (an exception skips it).
+restored in a `finally`. Only after downstream returns normally does the middleware register storage
+with `IWebResponseCompletionFeature` from `Web.Server`. Eligibility, final status and headers, freshness
+and `Vary` are read in that callback, after all starting callbacks succeed and transmission completes.
+A callback-added `no-store`, `private`, `Set-Cookie`, non-200 status or `Vary` therefore governs storage
+just as an endpoint-written value does. Starting failure, cancellation or transport failure never runs
+storage; a refused head replaced with a server 500 never runs storage. Store failures
+are reported through the server's isolated completion-callback error path after the response is sent.
+
+Custom servers may omit the completion feature. A cache miss then passes through without a tee or new
+storage, since normal middleware return alone cannot establish a successful final response. Existing
+stored responses can still be served. This uses the existing feature-owned seam without adding a public
+contract or referencing `Web.Hosting`.
+
+**Behavioral breaking change from 10.0.0-preview.1 (decision 15, #1156 review):** storage moves from
+middleware unwind to successful response completion, and custom servers without completion notification
+no longer populate the cache. The released preview stored before transmission and had no response-starting
+hook; callback-added policy violations arise with the new hook. The policy and store contracts are unchanged.
 
 ## QUERY posture (RFC 10008 §2.7) — GET/HEAD only, QUERY a documented follow-up
 
@@ -360,6 +381,12 @@ misses (including a later repeated value under either query policy), the respons
 from a foreign variant, an authenticated request bypasses, tag
 eviction forces a re-fetch, per-endpoint opt-in through the real router caches only the marked endpoint,
 and, registered ahead of `UseRouting`, a `Disabled` endpoint is never stored while a plain one still is.
+
+`OutputCacheStartingTests` exercises starting-callback `no-store`, `private`, `no-cache`, zero freshness,
+`Set-Cookie`, non-200 status and `Vary: *` bypasses, final header capture and response-`Vary` partitioning.
+Callback failure over HTTP/1.1 and HTTP/2 cannot publish the captured response. Unit tests prove an entry
+is invisible before successful completion and a custom server without completion notification stores
+nothing. Each new regression fails when immediate storage is restored.
 
 `tests/OutputCacheForwardedTests.cs` covers the effective key with the real forwarded-headers middleware
 (the test project references `Web.ForwardedHeaders`): end to end, behind the factory's trusted local

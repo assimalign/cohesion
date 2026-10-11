@@ -26,6 +26,7 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
 
 - `Assimalign.Cohesion.Web` — the root pipeline-builder seam the `UseOutputCache` verb composes against.
 - `Assimalign.Cohesion.Web.Routing` — the published route match (endpoint, route values) and the endpoint-metadata seam.
+- `Assimalign.Cohesion.Web.Server` — successful response completion, after starting callbacks, gates storage.
 - `Assimalign.Cohesion.Http` — the `IHttpContext` surface and the #755 `HttpCacheControl` / `HttpFreshness`
   primitives.
 - `Assimalign.Cohesion.Http.Forwarded` — the effective scheme and host the primary key is built from
@@ -71,6 +72,11 @@ Register `UseOutputCache` **after** `UseRouting`, and **before** `UseResponseCom
 content-negotiated write (see `DESIGN.md` for why the ordering is load-bearing). Registered ahead of
 `UseRouting`, only the base policy applies: endpoint metadata cannot opt an endpoint in, and a response
 from an endpoint that carries it is never stored, so an opt-out still holds.
+
+Storage happens after successful response completion, using the final status and headers left by
+response-starting callbacks. Failed callbacks and cancelled or failed sends never populate the cache.
+A custom server must publish `IWebResponseCompletionFeature` to store misses; without it, misses pass
+through and existing cache hits can still be served.
 
 ## Documentation
 
