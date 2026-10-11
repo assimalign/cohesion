@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -54,7 +55,7 @@ internal sealed class RecordingEngine : DatabaseEngine
         => throw new NotSupportedException();
 
     protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
-        => throw new NotSupportedException();
+        => AsyncEnumerable.Empty<DatabaseInstance>();
 
     protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
