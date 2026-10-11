@@ -238,6 +238,29 @@ public class StaticFilesEndToEndTests
         response.RequestMessage!.RequestUri!.AbsolutePath.ShouldBe("/docs/");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - E2E: a directory URL with escaped octets should redirect to the same directory")]
+    [InlineData("café", "/caf%C3%A9", "/caf%C3%A9/")]
+    [InlineData("100%", "/100%25", "/100%25/")]
+    public async Task E2E_DirectoryWithEscapedPath_ShouldRedirectToSameDirectory(string directory, string requestPath, string expectedPath)
+    {
+        // Arrange — the transport decodes the path, so the redirect must encode it again. Written
+        // decoded, "é" leaves the HTTP/1.1 writer as '?' and the client follows "/caf?/" elsewhere. A
+        // stray "%" is not a valid URI reference either; HttpClient repairs it to "%25", but a client
+        // need not, so the round trip is pinned here too.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using InMemoryFileSystem site = StaticSite.Create(($"{directory}/index.html", "escaped home"));
+        await using WebApplicationTestFactory factory = CreateFactory(site);
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync(requestPath, cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("escaped home");
+        response.RequestMessage!.RequestUri!.AbsolutePath.ShouldBe(expectedPath);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - E2E: unmatched requests should flow to downstream middleware")]
     public async Task E2E_UnmatchedRequest_ShouldFlowDownstream()
     {

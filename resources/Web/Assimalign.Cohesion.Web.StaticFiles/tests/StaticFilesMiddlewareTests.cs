@@ -326,6 +326,65 @@ public class StaticFilesMiddlewareTests
         Header(context, HttpHeaderKey.Location).ShouldBe("/static/");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the add-a-slash redirect should percent-encode each segment of the decoded path")]
+    [InlineData("café", "/café", "/caf%C3%A9/")]
+    [InlineData("docs/日本", "/docs/日本", "/docs/%E6%97%A5%E6%9C%AC/")]
+    [InlineData("100%", "/100%", "/100%25/")]
+    [InlineData("a%2Fb", "/a%2Fb", "/a%2Fb/")]
+    public async Task Invoke_DirectoryPathNeedingEncoding_ShouldRedirectWithEncodedPath(string directory, string decodedPath, string expected)
+    {
+        // Arrange — the transports hand the middleware the percent-decoded path, so "/caf%C3%A9" on the
+        // wire arrives as "/café" and "/100%25" as "/100%". An encoded slash stays encoded ("/a%2Fb"), and
+        // must not be encoded again into "%252F".
+        using InMemoryFileSystem site = StaticSite.Create(($"{directory}/index.html", "home"));
+
+        // Act
+        TestHttpContext context = await RunAsync(site, decodedPath, HttpMethod.Get);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.MovedPermanently);
+        Header(context, HttpHeaderKey.Location).ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the add-a-slash redirect should rebuild the query as UseHttpsRedirection does")]
+    public async Task Invoke_DirectoryWithQuery_ShouldRedirectWithRebuiltQuery()
+    {
+        // Arrange — an empty value is written as the bare name, and every other character but the
+        // unreserved ones is percent-encoded (HttpQuery.Create).
+        using InMemoryFileSystem site = StaticSite.Create(("docs/index.html", "docs home"));
+
+        // Act
+        TestHttpContext context = await RunAsync(
+            site, "/docs", HttpMethod.Get,
+            prepare: context => ((HttpQueryCollection)context.Request.Query)["flag"] = string.Empty);
+        TestHttpContext encoded = await RunAsync(
+            site, "/docs", HttpMethod.Get,
+            prepare: context => ((HttpQueryCollection)context.Request.Query)["q"] = "a b&c");
+
+        // Assert
+        Header(context, HttpHeaderKey.Location).ShouldBe("/docs/?flag");
+        Header(encoded, HttpHeaderKey.Location).ShouldBe("/docs/?q=a%20b%26c");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the add-a-slash redirect should stay on this origin when the path begins with two separators")]
+    [InlineData("//docs", "/docs/")]
+    [InlineData("///docs", "/docs/")]
+    [InlineData("/\\docs", "/%5Cdocs/")]
+    public async Task Invoke_DirectoryPathWithLeadingSeparators_ShouldRedirectToPathOnThisOrigin(string decodedPath, string expected)
+    {
+        // Arrange — the file lookup reads "//docs" and "/\docs" as the directory "docs". Written as is,
+        // "//docs/" is a network-path reference to the host "docs", and a browser reads "/\docs/" the
+        // same way.
+        using InMemoryFileSystem site = StaticSite.Create(("docs/index.html", "docs home"));
+
+        // Act
+        TestHttpContext context = await RunAsync(site, decodedPath, HttpMethod.Get);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.MovedPermanently);
+        Header(context, HttpHeaderKey.Location).ShouldBe(expected);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: a directory with no default document should pass through")]
     public async Task Invoke_DirectoryWithoutDefaultDocument_ShouldPassThrough()
     {

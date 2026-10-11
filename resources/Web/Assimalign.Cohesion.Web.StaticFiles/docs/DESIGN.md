@@ -88,6 +88,18 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   canonicalizing to `/docs/` first is the correctness move. The query string is preserved by
   re-encoding the parsed pairs (semantic, not byte-for-byte, fidelity — an accepted trade
   since the raw query text is not surfaced by `IHttpRequest`).
+- **The redirect's `Location` is percent-encoded (#1324).** The transports decode the request
+  path, so `Location` encodes it back per segment with `HttpPath.ToUriComponent()` and rebuilds
+  the query with `HttpQuery.Create`, the two calls `UseHttpsRedirection` makes. Written decoded,
+  a request for `/caf%C3%A9` was redirected to `/café/`, which the HTTP/1.1 writer sends as
+  `/caf?/`, and `/100%25` to `/100%/`, which is not a URI reference. `ToUriComponent` writes an
+  encoded slash the request carried (`%2F`, which the decoder keeps) as it is, rather than as
+  `%252F`. The query is now rebuilt the way HttpsPolicy rebuilds it: an empty value is the bare
+  key (`?flag`, where this middleware used to write `?flag=`), and every character but the
+  unreserved ones is encoded. A path that begins with two separators (`//docs`, which the file
+  lookup resolves to the directory `docs`) has its leading slashes collapsed to one: written as
+  is, `//docs/` is a network-path reference that sends the client to the host `docs`. A
+  backslash is encoded (`/%5Cdocs/`), so a browser cannot read `/\docs/` that way either.
 - **Unknown extensions blocked by default.** Serving unmapped types as `octet-stream` invites
   accidental exposure (config files, dotfiles); the default passes them through so the
   application decides. `ServeUnknownContentTypes` + `FallbackContentType` opt in explicitly.

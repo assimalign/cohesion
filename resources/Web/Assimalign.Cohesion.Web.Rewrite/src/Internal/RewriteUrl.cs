@@ -21,9 +21,11 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// <see cref="HttpQuery.Parse"/> for the query. Every value is decoded exactly once.
 /// </para>
 /// <para>
-/// A redirect <c>Location</c> is written percent-encoded, which the Web.HttpsPolicy and Web.StaticFiles
-/// redirects do not do for the path. A shared redirect helper is an open item in the Web area decisions
-/// (ADR 1, "To revisit").
+/// A redirect <c>Location</c> is written percent-encoded. The Web.HttpsPolicy and Web.StaticFiles redirects
+/// encode theirs with the core <see cref="HttpPath.ToUriComponent"/> and <see cref="HttpQuery.Create"/>
+/// (#1324), which write an encoded slash the transports keep (<c>%2F</c>) as it is; <see cref="AppendEscaped"/>
+/// escapes its <c>%</c>, so a decoded path holding one is written here as <c>%252F</c>. Moving this type onto
+/// the core helpers is the open item in the Web area decisions (ADR 1, "To revisit").
 /// </para>
 /// </remarks>
 internal static class RewriteUrl

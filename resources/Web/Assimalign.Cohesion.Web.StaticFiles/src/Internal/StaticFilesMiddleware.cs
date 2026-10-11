@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Frozen;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Text;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.FileSystem;
@@ -298,23 +296,27 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 
     private static void RedirectAppendingSlash(IHttpContext context)
     {
-        // Reconstructing the query from the parsed collection re-encodes each part; a redirect
-        // target needs semantic, not byte-for-byte, fidelity.
-        string location = context.Request.Path.Value + "/";
+        // The transports hand the path over percent-decoded, so it is encoded back per segment: a
+        // decoded "é", "%" or "\" written as is would make a Location that is not a URI reference
+        // (RFC 9110 §10.2.2), and the HTTP/1.1 writer would turn the "é" into '?'. Reconstructing the
+        // query from the parsed collection re-encodes each part the way UseHttpsRedirection does; a
+        // redirect target needs semantic, not byte-for-byte, fidelity.
+        string path = context.Request.Path.ToUriComponent();
+
+        // A Location that starts with "//" is a network-path reference whose first segment a client
+        // reads as a host (RFC 3986 §4.2): "//docs" would send it to https://docs/. The redirect only
+        // runs for a path without a trailing slash, so collapsing the leading slashes to one leaves a
+        // segment, which the file lookup resolves to the same directory, and the client stays on this
+        // origin. Web.Rewrite collapses a relative Location the same way.
+        if (path.StartsWith("//", StringComparison.Ordinal))
+        {
+            path = string.Concat("/", path.AsSpan().TrimStart('/'));
+        }
+
+        string location = path + "/";
         if (context.Request.Query.Count > 0)
         {
-            var builder = new StringBuilder(location).Append('?');
-            bool first = true;
-            foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> pair in context.Request.Query)
-            {
-                if (!first)
-                {
-                    builder.Append('&');
-                }
-                first = false;
-                builder.Append(Uri.EscapeDataString(pair.Key.ToString())).Append('=').Append(Uri.EscapeDataString(pair.Value.ToString()));
-            }
-            location = builder.ToString();
+            location = string.Concat(location, "?", HttpQuery.Create(context.Request.Query).Value);
         }
 
         context.Response.StatusCode = HttpStatusCode.MovedPermanently;

@@ -15,7 +15,9 @@ Web TLS surface (#763) resolves onto every request.
   bodyless, method-preserving redirect (`307` by default, `308` when configured)
   whose `Location` is the same request re-addressed to `https`, the request host
   with its port replaced by the configured HTTPS port, and the path and query
-  preserved. An already-secure request passes straight through. **Register it
+  preserved, percent-encoded. A request whose host the redirect cannot name (empty,
+  malformed, or carrying a character such as `/` or `@`) is answered with `400`
+  instead. An already-secure request passes straight through. **Register it
   early** so an insecure request is discarded before downstream middleware works
   on a response that is about to be thrown away.
 - `UseHsts(Action<HstsOptions>?)` — a pipeline verb that emits the

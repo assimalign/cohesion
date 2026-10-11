@@ -109,11 +109,25 @@ trust walk accepted the hop and shape-checked the value):
   `HttpHost.TryGetComponents` and replaced by the configured HTTPS port. An IPv6
   literal is re-bracketed for URL use, since the component split strips brackets
   (`[::1]:80` and the unbracketed `::1` both compose to `https://[::1]...`). A
-  host that is not well-formed falls back to its raw value rather than
-  manufacturing an authority.
-- **Path** — preserved verbatim from `HttpPath.Value`.
-- **Query** — reconstructed from the parsed `IHttpQueryCollection`, re-encoding
-  each key and value with `Uri.EscapeDataString`. **This is not byte-verbatim**,
+  host the redirect cannot name is answered with `400` instead (see "A host the
+  redirect cannot name", below).
+- **Path** — the decoded `HttpPath` percent-encoded back per segment by
+  `HttpPath.ToUriComponent()` (#1324). Every transport decodes the request path
+  before middleware sees it, so writing `HttpPath.Value` as is put decoded text in
+  `Location`: `/caf%C3%A9` became `/café`, which the HTTP/1.1 writer sends as
+  `/caf?` (a different path plus a query), and `/100%25` became `/100%`, which is
+  not a URI reference (RFC 9110 §10.2.2). `ToUriComponent` keeps `pchar` and `/`
+  as they are, encodes everything else as UTF-8, and writes a `%` as `%25` except
+  where it begins `%2F`: the decoder never decodes an encoded slash, so one in the
+  path is the slash the request carried, and encoding it again would name the
+  different URI `%252F`. `HttpPath.FromUriComponent` reads the result back as the
+  request's path. A space, `?` or `#` never reaches this point: `HttpPath` rejects
+  them, and the transports fail a request-target that decodes to one.
+- **Query** — rebuilt from the parsed `IHttpQueryCollection` by
+  `HttpQuery.Create`, which percent-encodes each key and value except for the
+  unreserved characters and writes an empty value as the bare key.
+  `Web.StaticFiles`' add-a-slash redirect uses the same call, so the two
+  rebuild a query the same way. **This is not byte-verbatim**,
   and deliberately so: `IHttpRequest` exposes only the *parsed* query (the raw
   query string is discarded at the transport boundary — see
   `TransportHttpRequest`), so the reconstruction (a) follows the parsed
@@ -128,6 +142,34 @@ The response is **status + `Location` only** — bodyless. Being a `3xx`, it sit
 below the `4xx`/`5xx` range the status-code-pages middleware acts on, so that
 middleware never adds a body to it; no coordination is needed beyond choosing a
 redirect status.
+
+### A host the redirect cannot name
+
+An insecure request whose effective host the redirect cannot name is answered
+with `400 Bad Request` (RFC 9112 §3.2), without a `Location` and without calling
+`next` (#1324). Three shapes qualify:
+
+- **Empty** — no `Host` and no authority; there is nothing to address.
+- **Not a well-formed `host[:port]`** — `HttpHost.TryGetComponents` fails: an
+  unterminated or empty bracket, junk after `]`, a trailing `:`, or a port outside
+  1–65535.
+- **A character outside the unreserved set and `:`** — the component split is
+  structural, and the transport requires only visible ASCII in `Host`, so
+  `evil.example/x`, `user@evil.example`, `host\x`, `host?x` and `host#x` all split
+  cleanly. Echoed, each moves part of the URL into or out of the authority. The
+  set is the one Web.Rewrite's canonicalization rules echo (`RewriteUrl.IsSafeHostName`):
+  DNS names, IPv4 literals and IPv6 literals without their brackets.
+
+Before #1324 the first two fell back to the raw `host.Value`, so unparsed request
+text reached `Location`, and the third was echoed as split. Since #1183 the
+transport refuses CR, LF and NUL in a response field, which turned a reflected
+control character into a `500` rather than a split response; the middleware now
+refuses the host itself.
+
+`400` rather than skipping the redirect: a skipped redirect would hand the request
+to the application over the insecure connection, which is the one thing this
+middleware exists to prevent. Web.Rewrite's `AddRedirectToHttps` rule skips
+instead, because it is one canonicalization rule among others, not a policy gate.
 
 ### Method-preserving status only
 
@@ -319,8 +361,9 @@ middleware behavior are exercised through the public surface only — no
 cannot express an `https` request (the same reason `Web.Compression` uses a
 context double), which is exactly the state these tests must set. Coverage:
 redirect status (`307`/`308`), `Location` composition (default/custom port,
-inbound-port swap, IPv6 re-bracketing, path verbatim, query preservation and
-encoding), secure pass-through, HSTS value composition for every directive
+inbound-port swap, IPv6 re-bracketing, the per-segment path encoding with an
+encoded slash kept as written, query preservation and encoding), the `400` for
+a host the redirect cannot name, secure pass-through, HSTS value composition for every directive
 combination, the loopback exclusions and a custom wildcard exclusion, the
 post-`next` emission point and its survival across a simulated `#881` reset, the
 committed-head skip, and builder-time validation failures. The RFC 6797 key fix
