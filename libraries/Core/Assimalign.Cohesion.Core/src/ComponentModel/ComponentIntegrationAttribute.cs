@@ -23,9 +23,10 @@ namespace Assimalign.Cohesion;
 /// <para>
 /// When <see cref="FactoryMethodName"/> identifies a public instance method on a publicly
 /// constructible builder type, the generator projects it as
-/// <c>Verb(Action&lt;FactoryType&gt;)</c>. The emitted adapter constructs the builder, invokes the
-/// configuration action, calls the instance method, and registers the resulting component through
-/// a producer.
+/// <c>Verb(Action&lt;FactoryType&gt;? configure = null)</c>. The emitted adapter constructs the
+/// builder, invokes the configuration action when one is given (a bare call, or
+/// <see langword="null"/>, builds the builder's defaults), calls the instance method at
+/// registration time, and registers the resulting component through a producer.
 /// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]
@@ -38,7 +39,7 @@ public sealed class ComponentIntegrationAttribute : Attribute
     /// <param name="targetTypeName">Fully qualified metadata name of the composition surface.</param>
     /// <param name="targetMethodName">The member invoked on the surface, e.g. <c>AddSingleton</c>. May be an instance member or an extension member in the surface's own namespace.</param>
     /// <param name="factoryType">The public static factory type or publicly constructible builder type in the declaring assembly.</param>
-    /// <param name="factoryMethodName">The name of either a public static factory method, whose supported overloads are copied, or a public zero-parameter instance method on a builder, which is projected as <c>Verb(Action&lt;FactoryType&gt;)</c> using the construct-configure-build template.</param>
+    /// <param name="factoryMethodName">The name of either a public static factory method, whose supported overloads are copied, or a public zero-parameter instance method on a builder, which is projected as <c>Verb(Action&lt;FactoryType&gt;? configure = null)</c> using the construct-configure-build template; the configuration action runs only when one is given.</param>
     /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
     public ComponentIntegrationAttribute(
         string targetTypeName,
