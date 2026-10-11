@@ -3815,6 +3815,9 @@ same session through the current statement executor; static `UnsafeAccessor` bin
 reference entirely in tests without widening shipped visibility. The reference keeps the existing
 offline/stack error translation and non-diagnostic async locals. Its maintenance obligation is to
 track changes to that non-diagnostic wrapper, not parser/planner/executor allocation counts.
+A binding test invokes all three accessors directly once (parser options, statement execution and
+`SelfCommitted`), outside exception filters, so a renamed private member fails the suite even when
+successful queries never enter the reference wrapper's error path.
 The measured difference must be zero in Debug and Release. Two SELECT projections with different
 total allocations prove that no historical byte count is pinned. It covers
 `ExecuteRequestAsync`, its `finally`, and event argument evaluation as well as the guarded helpers.

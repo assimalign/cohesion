@@ -27,6 +27,16 @@ internal sealed class SqlStatementAllocationBaseline
     public ValueTask<QueryResult> ExecuteAsync(string statement, CancellationToken cancellationToken = default)
         => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, null, ParserOptions(_session), _session.Database.Name), cancellationToken);
 
+    // Invoke every binding outside an exception filter. The CLR ignores a filter's
+    // exception, so a renamed SelfCommitted member can otherwise silently stop translating.
+    public async ValueTask<bool> InvokeBindingsAsync(string statement, CancellationToken cancellationToken = default)
+    {
+        var request = SqlQueryRequest.FromSql(statement, null, ParserOptions(_session), _session.Database.Name);
+        var previousMetrics = _session.LastStatementMetrics;
+        await using var result = (QueryResultSet)await ExecuteStatementAsync(_session, request, cancellationToken).ConfigureAwait(false);
+        return SelfCommitted(_session, request, previousMetrics);
+    }
+
     private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
     {
         _session.Database.ThrowIfOffline();

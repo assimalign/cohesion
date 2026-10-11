@@ -272,6 +272,25 @@ public sealed class SqlDatabaseEventSourceTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Statement allocation baseline: Every unsafe accessor should resolve")]
+    public async Task InvokeBindingsAsync_CurrentSession_ShouldResolveEveryUnsafeAccessor()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(UniqueEngineName(), new SqlDatabaseEngineOptions());
+        var database = await engine.CreateDatabaseAsync("bindings", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        var baseline = new SqlStatementAllocationBaseline(session);
+
+        // Act: exercise the field, statement executor and SelfCommitted method directly,
+        // including the binding normally reached only through an exception filter.
+        bool selfCommitted = await baseline.InvokeBindingsAsync("SELECT id FROM items", CancellationToken.None);
+
+        // Assert
+        selfCommitted.ShouldBeFalse("A SELECT cannot commit DDL.");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Statement tracing: A real statement should retain its allocation baseline while disabled")]
     [InlineData("SELECT id FROM items WHERE id = 1")]
     [InlineData("SELECT id, id FROM items WHERE id = 1")]
