@@ -53,8 +53,165 @@ internal static class CorsOrigin
     /// the opaque origin <c>null</c>.
     /// </summary>
     internal static bool IsSerialized(string value)
-        => value == Opaque
-            || (TryNormalize(value, out string serialized, out _) && string.Equals(serialized, value, StringComparison.Ordinal));
+    {
+        if (value == Opaque)
+        {
+            return true;
+        }
+
+        // Request validation must not construct the normalized copy used for configuration. In
+        // particular, a successful origin predicate is part of allocation-free preflight evaluation.
+        int schemeEnd = value.IndexOf("://", StringComparison.Ordinal);
+        if (schemeEnd <= 0)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> scheme = value.AsSpan(0, schemeEnd);
+        if (scheme[0] is < 'a' or > 'z' || scheme.ContainsAnyExcept(_schemeCharacters)
+            || ContainsUppercase(scheme))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> authority = value.AsSpan(schemeEnd + 3);
+        if (authority.IsEmpty)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> suffix;
+        if (authority[0] == '[')
+        {
+            int close = authority.IndexOf(']');
+            if (close < 0 || !IsSerializedIPv6(authority[1..close]))
+            {
+                return false;
+            }
+
+            suffix = authority[(close + 1)..];
+        }
+        else
+        {
+            int colon = authority.IndexOf(':');
+            ReadOnlySpan<char> host = colon < 0 ? authority : authority[..colon];
+            if (host.IsEmpty || host.ContainsAnyExcept(_hostCharacters) || ContainsUppercase(host))
+            {
+                return false;
+            }
+
+            suffix = colon < 0 ? default : authority[colon..];
+        }
+
+        if (suffix.IsEmpty)
+        {
+            return true;
+        }
+
+        if (suffix[0] != ':')
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> port = suffix[1..];
+        return !port.IsEmpty && port.Length <= 5 && (port.Length == 1 || port[0] != '0')
+            && int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+            && number <= ushort.MaxValue && number != GetDefaultPort(scheme);
+    }
+
+    // A serialized IPv6 host has eight hexadecimal pieces, with the first longest run of at least
+    // two zero pieces compressed. IPv4 suffixes, uppercase and leading zeros are not serialized form.
+    private static bool IsSerializedIPv6(ReadOnlySpan<char> host)
+    {
+        Span<ushort> pieces = stackalloc ushort[8];
+        int compression = host.IndexOf("::", StringComparison.Ordinal);
+        int count = 0;
+        int leftCount = 0;
+        if (compression >= 0)
+        {
+            if (!TryReadIPv6Pieces(host[..compression], pieces, ref count))
+            {
+                return false;
+            }
+
+            leftCount = count;
+            if (!TryReadIPv6Pieces(host[(compression + 2)..], pieces, ref count) || count > 6)
+            {
+                return false;
+            }
+
+            int omitted = 8 - count;
+            pieces[leftCount..count].CopyTo(pieces[(leftCount + omitted)..]);
+            pieces.Slice(leftCount, omitted).Clear();
+        }
+        else if (!TryReadIPv6Pieces(host, pieces, ref count) || count != 8)
+        {
+            return false;
+        }
+
+        int longestStart = -1;
+        int longestLength = 1;
+        for (int index = 0; index < pieces.Length;)
+        {
+            if (pieces[index] != 0)
+            {
+                index++;
+                continue;
+            }
+
+            int start = index;
+            while (index < pieces.Length && pieces[index] == 0)
+            {
+                index++;
+            }
+
+            if (index - start > longestLength)
+            {
+                longestStart = start;
+                longestLength = index - start;
+            }
+        }
+
+        return compression < 0 ? longestStart < 0 : longestStart == leftCount && longestLength == 8 - count;
+    }
+
+    private static bool TryReadIPv6Pieces(ReadOnlySpan<char> text, Span<ushort> pieces, ref int count)
+    {
+        if (text.IsEmpty)
+        {
+            return true;
+        }
+
+        foreach (Range range in text.Split(':'))
+        {
+            ReadOnlySpan<char> piece = text[range];
+            if (count == pieces.Length || piece.IsEmpty || piece.Length > 4
+                || (piece.Length > 1 && piece[0] == '0')
+                || ContainsUppercase(piece)
+                || !ushort.TryParse(piece, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out ushort number))
+            {
+                return false;
+            }
+
+            pieces[count++] = number;
+        }
+
+        return true;
+    }
+
+    private static bool ContainsUppercase(ReadOnlySpan<char> text)
+    {
+        // Explicit character comparisons keep this check allocation-free in Debug builds too.
+        foreach (char character in text)
+        {
+            if (character is >= 'A' and <= 'Z')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Parses <paramref name="value"/> as an origin and returns its serialized form, or the reason it is
@@ -237,7 +394,7 @@ internal static class CorsOrigin
     }
 
     // The URL standard's default ports; an origin's serialization omits them.
-    private static int GetDefaultPort(string scheme) => scheme switch
+    private static int GetDefaultPort(ReadOnlySpan<char> scheme) => scheme switch
     {
         "http" or "ws" => 80,
         "https" or "wss" => 443,

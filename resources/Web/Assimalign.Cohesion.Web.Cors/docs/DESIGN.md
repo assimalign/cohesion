@@ -371,6 +371,49 @@ span-based alternate lookup, so a requested header name is matched without alloc
 is a plain delegate. IPv6 normalization uses `IPAddress` parsing, which is AOT-safe. The library builds with
 the trim and AOT analyzers enabled (`IsAotCompatible`) and no warnings.
 
+## Diagnostics
+
+The internal `CorsEventSource` provider is named `Assimalign.Cohesion.Web.Cors`. It records refused
+preflights and explains why a preflight was left to the pipeline. Actual requests, including origin
+refusals, and successful preflights raise no event: CORS is not access control, and a same-origin
+request can carry an Origin field without needing a CORS grant.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `PreflightRejected` | Verbose | `reason`, `origin`, `requestedMethod`, `rejectedHeader`, `routeTemplate`, `requestId` |
+| 2 | `PreflightPassedThrough` | Verbose | `cause`, `requestedMethod`, `routeTemplate`, `requestId` |
+
+`reason` is the first failed policy check: `OriginNotAllowed`, `MethodNotAllowed`, or
+`HeaderNotAllowed`. The evaluator preserves that ordering and returns the rejected header as a span.
+Evaluation allocates nothing on success, including a predicate with serialized IPv6 origins and an
+any-header policy receiving repeated request-header fields. Request-origin validation checks the
+serialized form directly with spans; configuration still normalizes strings once at startup. Rendering
+joins repeated header fields only after evaluation succeeds. An application-supplied predicate owns any
+allocations inside its delegate.
+
+`cause` is `OptionsRouteOwnsPreflight`, `CorsDisabled`, or `NoPolicy`. These events are raised at the
+current preflight decision sites in `CorsMiddleware.InvokePreflight` and the reject branch of
+`CorsResponseHeaders.WritePreflight`; actual-response starting callbacks raise neither event.
+
+The lazy `rejected-preflights` polling counter counts every refused preflight exactly once, including
+when no listener is enabled. Pass-through requests are not counted. There is no `OriginRefused` event
+or counter, and neither Verbose event is throttled.
+
+Every event reads the request id from `IWebRequestIdFeature` and the route template from
+`IWebEndpointFeature` inside `IsEnabled`. It never reads `Activity.Current` or a request path. The
+origin is a single serialized Origin value, empty when missing, repeated or malformed, truncated to
+256 characters inside `IsEnabled`; the first rejected header name is truncated there to 64 characters.
+The requested method has already passed the preflight token check and its 32-character limit. Other
+header values, query strings, bodies and credentials are never written.
+
+### Compatibility against 10.0.0-preview.1 (#1402)
+
+The released package is a scaffold with no CORS implementation. This adds an internal diagnostics
+provider and no public API or released behavior break. Against the development implementation, the
+preflight response and policy decisions remain unchanged; diagnostics are opt-in through EventSource.
+Web.Server was already referenced for response-starting callbacks, so request correlation adds no
+dependency or framework member.
+
 ## Non-goals
 
 - **Private Network Access** (`Access-Control-Request-Private-Network` and

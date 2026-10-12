@@ -94,6 +94,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
                 // serve the requested method: the application owns OPTIONS on this path, preflights
                 // included. Answering with this route's policy (or the default) could approve an actual
                 // request whose own endpoint declares a stricter policy.
+                CorsEventSource.Log.PreflightPassedThrough(context, "OptionsRouteOwnsPreflight", requestedMethod);
                 return next.Invoke(context);
             }
 
@@ -104,6 +105,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         {
             // CORS is disabled for the endpoint, or no policy applies: the pipeline answers the preflight as
             // the plain OPTIONS request it is, and the browser fails it.
+            CorsEventSource.Log.PreflightPassedThrough(context, metadata is { IsDisabled: true } ? "CorsDisabled" : "NoPolicy", requestedMethod);
             return next.Invoke(context);
         }
 

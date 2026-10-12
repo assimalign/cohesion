@@ -125,9 +125,9 @@ internal static class CorsResponseHeaders
         headers.Remove(HttpHeaderKey.AccessControlMaxAge);
         headers.Remove(HttpHeaderKey.AccessControlExposeHeaders);
 
-        if (ResolveAllowedOrigin(policy, context.Request) is { } allowedOrigin
-            && policy.AllowsMethod(requestedMethod)
-            && TryResolveAllowedHeaders(policy, context.Request.Headers, out string? allowedHeaders))
+        CorsPreflightRejection rejection = EvaluatePreflight(policy, context.Request, requestedMethod,
+            out string? allowedOrigin, out HttpHeaderValue allowedHeaders, out ReadOnlySpan<char> rejectedHeader);
+        if (rejection == CorsPreflightRejection.None)
         {
             headers[HttpHeaderKey.AccessControlAllowOrigin] = allowedOrigin;
             Set(headers, HttpHeaderKey.AccessControlAllowCredentials, policy.SupportsCredentials ? credentialsAllowed : null);
@@ -136,8 +136,13 @@ internal static class CorsResponseHeaders
             // would read as a method literally named '*'. A list is sent whole, so the browser caches every
             // listed method from one preflight.
             Set(headers, HttpHeaderKey.AccessControlAllowMethods, policy.AllowsAnyMethod ? requestedMethod : policy.AllowMethodsValue);
-            Set(headers, HttpHeaderKey.AccessControlAllowHeaders, allowedHeaders);
+            // Joining repeated request-header lines belongs to rendering, never to policy evaluation.
+            Set(headers, HttpHeaderKey.AccessControlAllowHeaders, allowedHeaders.IsEmpty ? null : allowedHeaders.Value);
             Set(headers, HttpHeaderKey.AccessControlMaxAge, policy.MaxAgeValue);
+        }
+        else
+        {
+            CorsEventSource.Log.PreflightRejected(context, rejection, requestedMethod, rejectedHeader);
         }
 
         if (policy.VariesByOrigin)
@@ -159,12 +164,38 @@ internal static class CorsResponseHeaders
         }
     }
 
+    // Returns the first refusal without allocating diagnostic strings or rendering header values.
+    internal static CorsPreflightRejection EvaluatePreflight(
+        CorsPolicy policy, IHttpRequest request, string requestedMethod,
+        out string? allowedOrigin, out HttpHeaderValue allowedHeaders, out ReadOnlySpan<char> rejectedHeader)
+    {
+        allowedOrigin = ResolveAllowedOrigin(policy, request);
+        allowedHeaders = default;
+        rejectedHeader = default;
+
+        if (allowedOrigin is null)
+        {
+            return CorsPreflightRejection.OriginNotAllowed;
+        }
+
+        if (!policy.AllowsMethod(requestedMethod))
+        {
+            return CorsPreflightRejection.MethodNotAllowed;
+        }
+
+        return TryResolveAllowedHeaders(policy, request.Headers, out allowedHeaders, out rejectedHeader)
+            ? CorsPreflightRejection.None
+            : CorsPreflightRejection.HeaderNotAllowed;
+    }
+
     // Every name in Access-Control-Request-Headers needs approval: a browser lists only the headers that
     // are not CORS-safelisted. "Any header" echoes the requested names, so Authorization, which a '*' answer
     // never covers, is approved too; a list is sent whole.
-    private static bool TryResolveAllowedHeaders(CorsPolicy policy, IHttpHeaderCollection requestHeaders, out string? allowedHeaders)
+    private static bool TryResolveAllowedHeaders(CorsPolicy policy, IHttpHeaderCollection requestHeaders,
+        out HttpHeaderValue allowedHeaders, out ReadOnlySpan<char> rejectedHeader)
     {
-        allowedHeaders = policy.AllowsAnyHeader ? null : policy.AllowHeadersValue;
+        allowedHeaders = new HttpHeaderValue(policy.AllowsAnyHeader ? null : policy.AllowHeadersValue);
+        rejectedHeader = default;
 
         if (!requestHeaders.TryGetValue(HttpHeaderKey.AccessControlRequestHeaders, out HttpHeaderValue requested)
             || requested.IsEmpty)
@@ -196,7 +227,8 @@ internal static class CorsResponseHeaders
 
                 if (!CorsSyntax.IsToken(name) || !policy.AllowsHeader(name))
                 {
-                    allowedHeaders = null;
+                    allowedHeaders = default;
+                    rejectedHeader = name;
                     return false;
                 }
 
@@ -207,7 +239,7 @@ internal static class CorsResponseHeaders
         // The validated value holds only token characters, commas and whitespace, so it is safe to echo.
         if (policy.AllowsAnyHeader && anyRequested)
         {
-            allowedHeaders = requested.Value;
+            allowedHeaders = requested;
         }
 
         return true;
