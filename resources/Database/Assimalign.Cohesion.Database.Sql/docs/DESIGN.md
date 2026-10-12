@@ -1140,6 +1140,13 @@ validation, required-column addition, additions of columns whose domains carry c
 Imperative `ApplySchemaAsync` remains inline. Nullable additions validate their immutable missing
 value once; existing rows continue to resolve that value from the catalog without a rewrite.
 
+An existing implementation contradicts 49a's catalog-only premise for every drop: `DROP TABLE`
+calls `Storage.FreeOwnerPages`, which clears and WAL-logs each owned data page
+(`Database.Storage/src/Storage.cs:2093`). Drops remain inline as the accepted classification
+requires. Moving that physical reclamation out of Build needs a separate decision: deferring the
+drop would contradict that classification, while silently removing reclamation would change its
+existing storage contract.
+
 The catalog's format-9 pending intent contains the complete target document/hash, operation kind,
 table, object name, original one-based execution position and total. Its transaction commits
 after the cheap steps and before scheduling. The prior applied marker stays untrusted while an
