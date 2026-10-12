@@ -38,14 +38,17 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http3RequestStreamReader
 {
     private readonly PipeReader _input;
+    private readonly IConnectionInputCompletion? _inputCompletion;
 
     /// <summary>
     /// Initializes a reader over a request stream's input.
     /// </summary>
     /// <param name="input">The request stream's inbound pipe.</param>
-    public Http3RequestStreamReader(PipeReader input)
+    /// <param name="inputCompletion">Optional transport knowledge of a clean input end.</param>
+    public Http3RequestStreamReader(PipeReader input, IConnectionInputCompletion? inputCompletion = null)
     {
         _input = input;
+        _inputCompletion = inputCompletion;
     }
 
     /// <summary>
@@ -182,10 +185,9 @@ internal sealed class Http3RequestStreamReader
     /// </summary>
     /// <remarks>
     /// <see langword="false"/> means only that the end is not known yet: octets follow, the FIN has not
-    /// arrived, or the input learns of it only when it reads again. A <see cref="PipeReader"/> over a
-    /// <see cref="System.IO.Stream"/> — the QUIC driver's — reports the end only after a read returns no
-    /// octets, so over it a request whose HEADERS frame was the last thing read reports
-    /// <see langword="false"/> even when its FIN came with it.
+    /// arrived, or the input learns of it only when it reads again. The optional connection facet
+    /// exposes a transport end already observed even when a stream-backed pipe has not read zero
+    /// bytes yet. It never overrides unread pipe bytes, cancellation, or a failed read.
     /// </remarks>
     /// <returns><see langword="true"/> when the stream is known to end at the current position.</returns>
     public bool IsEndBuffered()
@@ -196,7 +198,9 @@ internal sealed class Http3RequestStreamReader
         {
             if (!_input.TryRead(out result))
             {
-                return false;
+                // Every read advances examined only to consumed. Therefore a false TryRead here
+                // means the pipe has no unconsumed bytes, rather than examined-but-unread data.
+                return _inputCompletion?.IsInputCompleted == true;
             }
         }
         catch (Exception exception) when (exception is IOException or ConnectionException or InvalidOperationException or OperationCanceledException)
@@ -206,7 +210,8 @@ internal sealed class Http3RequestStreamReader
             return false;
         }
 
-        bool ended = result.IsCompleted && !result.IsCanceled && result.Buffer.IsEmpty;
+        bool ended = !result.IsCanceled && result.Buffer.IsEmpty
+            && (result.IsCompleted || _inputCompletion?.IsInputCompleted == true);
         _input.AdvanceTo(result.Buffer.Start);
         return ended;
     }

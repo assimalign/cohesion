@@ -230,6 +230,18 @@ The cost is the usual one for decorators. A layer composed above TLS that return
 connection hides the facet unless it implements the facet too and forwards it. A pass-through
 layer, which returns the connection it was given, keeps it visible.
 
+### Observed input completion: `IConnectionInputCompletion` (#1427)
+
+This optional facet reports a clean transport end after every received byte has been delivered to
+`Input`. It neither reads nor waits. The pipe may still buffer bytes, so a consumer combines the
+facet with its empty-buffer check; completion alone cannot declare a message body absent. Aborts
+and failed reads never count as a clean end. Drivers without the facet retain conservative probing.
+
+The QUIC driver implements it using the runtime's existing completion task. A separate interface
+keeps `IConnection` unchanged and lets decorators preserve the fact explicitly. No HTTP contracts
+or protocol interpretation enter Connections. The public addition is optional and source compatible
+with 10.0.0-preview.1.
+
 ### Application error codes: `IMultiplexedStreamAbort` and `IMultiplexedConnectionAbort` (#1080)
 
 `Abort(Exception?)` ends a whole stream or connection and says nothing on the wire about why. A

@@ -1764,11 +1764,16 @@ where the host's four round up to seven slots and the feature takes a free one, 
 with three (37,512 B against 36,351 B), where the count is seven and the feature grows the collection
 to 17 slots. A plain `GET` stayed within the run-to-run noise in both. On HTTP/2 a `GET` ends its
 stream with its head, so it keeps the fast path as on HTTP/1.1. On HTTP/3 it does only when the
-transport has already seen the request stream's FIN: the in-memory driver reports it, but the QUIC
-driver's input sees the end only on a read that returns nothing, so over QUIC most HTTP/3 requests
-report that they can have a body, and the interceptor takes the response phase for them. That costs an
-HTTP/3 `GET` the sink, the control, the response context and the feature until the driver reports a FIN
-it already holds (core Http DESIGN, "The body signal").
+transport has already seen the request stream's FIN: the in-memory pipe reports it directly, and
+the QUIC driver's generic input-completion facet exposes it without a further read (#1427). The
+transport also checks for unread pipe bytes, so DATA followed by FIN still gets the fault gate.
+Allocation coverage compares the actual defaults over stream-backed requests with the FIN visible
+and hidden: a bodiless request saves the client-fault registration and feature. On Windows x64
+.NET 10.0.12 Debug, the warmed 16-request comparison saved 3,840 B (240 B per request);
+the test asserts a conservative minimum instead of pinning runtime object sizes. Since #1156, the
+default response-starting interceptor independently requires a response sink, control and context;
+FIN detection does not remove that response phase. Relative to 10.0.0-preview.1 this changes no
+public contract; the body gate was added after that release (core Http DESIGN, "The body signal").
 
 **Clearing the defaults removes WebSockets.** A `UseServer` callback that clears
 `HttpConnectionListenerOptions.Interceptors` removes both transition interceptors: HTTP/1.1

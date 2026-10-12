@@ -1053,11 +1053,11 @@ the request context carries it as a generic fact, as it carries `Protocol` for a
 - **HTTP/2** — the HEADERS frame did not carry `END_STREAM`, whatever `content-length` it declares:
   DATA or a trailer section may still follow, and either can make the request malformed.
 - **HTTP/3** — the request stream had not visibly ended with its HEADERS frame. The transport looks
-  for a FIN already buffered behind the frame, without reading or waiting. Over the QUIC driver, whose
-  input is a `PipeReader` over the `QuicStream`, the end is seen only when a read returns no octets,
-  so a request whose FIN came with its HEADERS frame still reports `true` there: a host gate on it
-  takes the response phase for most HTTP/3 exchanges until the driver reports a FIN it has already
-  received. The in-memory driver reports it.
+  for a FIN already buffered behind the frame, without reading or waiting. The QUIC driver publishes
+  a clean transport end through Connections' optional `IConnectionInputCompletion` facet (#1427).
+  The transport combines it with an empty pipe buffer, so a head followed directly by FIN reports
+  `false` even before the stream-backed pipe reads zero bytes. Buffered DATA, open streams, and
+  drivers without observed completion remain conservative. The in-memory pipe reports FIN directly.
 - **CONNECT** never has one: the octets after its head are tunnel traffic, not content.
 
 The alternative #1378 weighed — a host that joins every HTTP/2 and HTTP/3 exchange — gives up the fast

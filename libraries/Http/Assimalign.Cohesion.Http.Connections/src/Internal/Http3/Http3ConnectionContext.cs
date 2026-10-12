@@ -2137,7 +2137,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         using CancellationTokenSource headCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
         CancellationToken cancellationToken = headCancellation.Token;
-        Http3RequestStreamReader reader = new(streamConnection.Input);
+        Http3RequestStreamReader reader = new(streamConnection.Input, streamConnection as IConnectionInputCompletion);
 
         // #1085 — the request head must arrive, and decode, within RequestHeadersTimeout of the stream's
         // acceptance — which QUIC makes the arrival of its first octets. The deadline is disarmed once the

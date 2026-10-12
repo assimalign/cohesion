@@ -2937,15 +2937,19 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   it declares, since DATA or a trailer section may still follow. A CONNECT never has one.
 - **HTTP/3** sets it unless the request stream's FIN is already buffered behind its HEADERS frame
   (`Http3RequestStreamReader.IsEndBuffered`, a `TryRead` that consumes nothing), and only when a
-  request hook is registered. Over the QUIC driver the end is seen only by a read that returns no
-  octets, so there a request without a body usually reports `true`; see the core DESIGN. The driver's
-  input is `PipeReader.Create` over the `QuicStream`, which learns of a FIN only when a `ReadAsync` of
-  the stream returns no octets, and `TryRead` never reads the stream. The in-memory driver
-  completes its pipe with the FIN, so the in-memory tests see it; `HttpRequestCanHaveBodyTests` pins the
-  QUIC behavior over a stream-backed input (`StreamInputMultiplexedConnection`): the probe misses the end
-  until a read, and a `GET` whose FIN came with its head reports a body. Closing the gap is the driver's
-  work: it holds the FIN already, and can report it through a connection facet the probe consults
-  (tracked as a follow-up, not in #1378).
+  request hook is registered (or an `Expect: 100-continue` needs the signal). The QUIC driver's
+  `IConnectionInputCompletion` facet exposes a clean FIN already observed by the runtime (#1427),
+  even before its stream-backed pipe reads zero bytes. The probe requires an empty, uncancelled
+  pipe as well; buffered DATA followed by FIN still reports a body. It never waits for a late FIN
+  or overrides a reset. Drivers without the facet keep the conservative pipe-only probe.
+
+  A bodiless GET or POST whose head ends the QUIC stream now skips body-gated response interceptors
+  and does not arm automatic `100 Continue`. Real-QUIC tests pin both empty and DATA-bearing
+  requests. Web.Hosting allocation coverage measures the saved client-fault registration and
+  feature; its always-registered response-starting interceptor still needs the response phase.
+  There is no source break from 10.0.0-preview.1: this body signal and incremental reader were
+  introduced after that release. Compared with intervening builds, hooks now observe `false`
+  when the driver already knows there are no bytes after the head.
 
 ### Behavior changes
 

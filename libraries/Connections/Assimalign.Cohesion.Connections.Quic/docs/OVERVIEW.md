@@ -31,6 +31,9 @@ they belong to the protocol layer above. See `DESIGN.md` for the
 teardown-ordering guarantee the driver makes to protocols with critical
 unidirectional streams.
 
+Streams optionally expose `IConnectionInputCompletion`: a clean transport end already observed,
+without another read. Check the input pipe for buffered bytes as well before treating it as empty.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver

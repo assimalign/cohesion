@@ -82,6 +82,21 @@ it, then immediately fall back to the `IMultiplexedConnection` /
   one disposed the `QuicStream` synchronously, which ended both directions
   and blocked the completing thread until the peer acknowledged the FIN.
 
+### A FIN already observed (#1427)
+
+Each stream publishes `IConnectionInputCompletion`. `IsInputCompleted` checks the existing
+`QuicStream.ReadsClosed` task for successful completion and excludes a locally aborted read.
+.NET 10 completes that task when its final buffered bytes are copied to the caller, before
+returning that final nonzero read. Thus a stream-backed `PipeReader` can expose the fact without
+waiting for another read to return zero. The consumer must still check for unread pipe bytes:
+a FIN after data is not an empty input until those bytes are consumed.
+
+The implementation uses [the runtime's completion behavior](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Quic/src/System/Net/Quic/QuicStream.cs#L284-L301),
+with real-QUIC tests pinning it. There is no prefetch task, extra read buffer, or speculative read;
+late FINs remain conservative until the runtime observes them. This optional generic facet adds
+no HTTP dependency and no change to existing connection interfaces. Relative to 10.0.0-preview.1,
+the API is additive; the incremental HTTP/3 body signal it improves was introduced afterward.
+
 ## Handshake facts
 
 QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating

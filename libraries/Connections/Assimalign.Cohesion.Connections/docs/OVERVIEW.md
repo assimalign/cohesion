@@ -29,6 +29,8 @@ transformations (such as TLS) compose over it.
 - `ITlsConnectionInfo` — what a TLS handshake negotiated (ALPN application protocol, TLS version,
   cipher suite, the peer's certificate), implemented by connections that terminate TLS and found
   with a type test.
+- `IConnectionInputCompletion` — optional clean transport input completion; combine it with an empty
+  input buffer before concluding that no bytes remain. The QUIC driver publishes this facet.
 - `IMultiplexedStreamAbort` — abandons one direction of a multiplexed stream with an application error
   code (`AbortRead` sends QUIC `STOP_SENDING`, `AbortWrite` sends `RESET_STREAM`), implemented by the
   QUIC and in-memory drivers' streams and found with a type test.

@@ -22,9 +22,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// tells the request-parse hooks whether content may follow the head, from the framing only it sees. On
 /// HTTP/1.1 that is a <c>Transfer-Encoding</c> or a non-zero <c>Content-Length</c>; on HTTP/2 a HEADERS
 /// frame without <c>END_STREAM</c>, whatever <c>content-length</c> it declares; on HTTP/3 a request stream
-/// whose end had not arrived with its HEADERS frame. A CONNECT never has one. Over a stream-backed input,
-/// which the QUIC driver's is, an HTTP/3 FIN that arrived with the head is not seen until a read, so such a
-/// request still reports a body; the tests pin that production behavior.
+/// whose end had not arrived with its HEADERS frame. A CONNECT never has one. A generic transport facet
+/// exposes a FIN already received by a stream-backed input, even before its pipe reports completion.
 /// </summary>
 public class HttpRequestCanHaveBodyTests
 {
@@ -149,54 +148,117 @@ public class HttpRequestCanHaveBodyTests
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A stream-backed HTTP/3 request stream should not see a FIN that came with its HEADERS frame until a read returns nothing")]
-    public async Task IsEndBuffered_OnStreamBackedInputAfterTheHead_ShouldNotSeeTheEnd()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A stream-backed input should expose the FIN already known to its transport")]
+    public async Task IsEndBuffered_OnStreamBackedInputAfterTheHead_ShouldSeeTheEnd()
     {
-        // Arrange — the QUIC driver reads a request stream through PipeReader.Create over the QuicStream, which
-        // learns of the FIN only from a read that returns no octets. A stream that holds the head and then ends
-        // is the same: its end is in hand, but nothing has read it yet.
+        // Arrange — the transport has delivered all octets and knows the FIN, while PipeReader.Create
+        // does not report completion until its next read returns zero.
         using MemoryStream requestStream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a"));
         PipeReader input = PipeReader.Create(requestStream);
-        Http3RequestStreamReader reader = new(input);
+        TestConnectionInputCompletion completion = new() { IsInputCompleted = true };
+        Http3RequestStreamReader reader = new(input, completion);
         byte[]? head = await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
 
         // Act
         bool endBuffered = reader.IsEndBuffered();
         Http3FrameHeader? next = await reader.ReadFrameHeaderAsync(CancellationToken.None);
 
-        // Assert — the probe the transport answers CanHaveBody and the automatic 100 Continue with misses the
-        // end (production behavior over the QUIC driver, pinned until the driver reports a FIN it already
-        // holds); the next read finds it.
+        // Assert — the non-reading probe and the subsequent read agree, without consuming any octets.
         head.ShouldNotBeNull();
-        endBuffered.ShouldBeFalse();
+        endBuffered.ShouldBeTrue();
         next.ShouldBeNull();
         reader.IsCompleted.ShouldBeTrue();
 
         await input.CompleteAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: An HTTP/3 request read through a stream-backed input should report a body even when its FIN came with its HEADERS frame")]
-    public async Task CanHaveBody_OnHttp3RequestEndedWithItsHeadOverStreamBackedInput_ShouldBeTrue()
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A stream-backed HTTP/3 head and FIN should retain the bodiless fast path")]
+    [InlineData("GET")]
+    [InlineData("POST")]
+    public async Task CanHaveBody_OnHttp3RequestEndedWithItsHeadOverStreamBackedInput_ShouldBeFalse(string method)
     {
-        // Arrange — the server reads its request streams the way it reads the QUIC driver's: through a
-        // PipeReader over a stream.
+        // Arrange — the stream-backed fixture publishes the same completion fact as the QUIC driver.
         CanHaveBodyRecorder recorder = new();
         await using Http3InMemoryPeer peer = await Http3InMemoryPeer.StartAsync(
             configureListener: options => options.Interceptors.Add(recorder),
             decorate: static server => new StreamInputMultiplexedConnection(server));
         Connection request = await peer.OpenRequestStreamAsync();
 
-        // Act — as in CanHaveBody_OnHttp3RequestEndedWithItsHead_ShouldBeFalse, the FIN arrives with the head.
-        request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "a"));
+        // Act — the FIN arrives with the head, including for a POST without content.
+        request.Output.Write(HttpProtocolPayloadFactory.CreateHttp3Request(method, "/", "https", "a"));
         await request.Output.CompleteAsync();
         IHttpContext context = await peer.NextContextAsync();
 
-        // Assert — production behavior over the QUIC driver, pinned: the transport cannot see the FIN without
-        // a read, so even a GET reports that it can have a body, and a host gate on it takes the response
-        // phase. A driver that reports a FIN it already holds turns this to false.
-        recorder.CanHaveBody.ShouldBe(true);
+        // Assert
+        recorder.CanHaveBody.ShouldBe(false);
 
         await peer.ConnectionContext.SendAsync(context).AsTask().WaitAsync(_timeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A received FIN must not hide DATA still buffered after the head")]
+    public async Task IsEndBuffered_WithCompletedTransportAndBufferedData_ShouldKeepDataReadable()
+    {
+        // Arrange — the transport delivered both frames and FIN in one read, but the pipe still holds DATA.
+        byte[] payload = Encoding.ASCII.GetBytes("hello");
+        using MemoryStream requestStream = new(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/", "https", "a", body: payload));
+        PipeReader input = PipeReader.Create(requestStream);
+        Http3RequestStreamReader reader = new(input, new TestConnectionInputCompletion { IsInputCompleted = true });
+        await reader.ReadHeaderSectionAsync(maxHeadersFrameSize: 16 * 1024, CancellationToken.None);
+
+        // Act
+        bool endBuffered = reader.IsEndBuffered();
+        Http3FrameHeader? frame = await reader.ReadFrameHeaderAsync(CancellationToken.None);
+        byte[] received = new byte[payload.Length];
+        int count = await reader.ReadDataAsync(received, CancellationToken.None);
+
+        // Assert — the probe neither consumes nor mistakes the buffered body for an empty request.
+        endBuffered.ShouldBeFalse();
+        frame.ShouldNotBeNull();
+        frame.Value.Type.ShouldBe(0L);
+        frame.Value.Length.ShouldBe(payload.Length);
+        count.ShouldBe(payload.Length);
+        received.ShouldBe(payload);
+        reader.IsEndBuffered().ShouldBeTrue();
+
+        await input.CompleteAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: A transport without a received FIN should remain open")]
+    public async Task IsEndBuffered_WithOpenTransport_ShouldNotReportTheEnd()
+    {
+        // Arrange
+        Pipe pipe = new();
+        Http3RequestStreamReader reader = new(pipe.Reader, new TestConnectionInputCompletion());
+
+        // Act / Assert — a completion facet does not imply that completion has happened.
+        reader.IsEndBuffered().ShouldBeFalse();
+
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Can have body: Cancelled or failed input should never be mistaken for a clean FIN")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IsEndBuffered_WithCancelledOrFailedInput_ShouldNotReportTheEnd(bool fail)
+    {
+        // Arrange — even a previously completed transport cannot override failure of the input itself.
+        Pipe pipe = new();
+        Http3RequestStreamReader reader = new(pipe.Reader, new TestConnectionInputCompletion { IsInputCompleted = true });
+        if (fail)
+        {
+            await pipe.Writer.CompleteAsync(new IOException("The peer reset its sending direction."));
+        }
+        else
+        {
+            pipe.Reader.CancelPendingRead();
+        }
+
+        // Act / Assert
+        reader.IsEndBuffered().ShouldBeFalse();
+
+        await pipe.Writer.CompleteAsync();
+        await pipe.Reader.CompleteAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Can have body: An HTTP/3 CONNECT should report no body")]

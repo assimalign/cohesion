@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.IO.Pipelines;
 using System.Net;
 using System.Threading;
@@ -13,10 +14,11 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// <see cref="PipeReader.Create(System.IO.Stream, StreamPipeReaderOptions?)"/> over the inner input, as the QUIC
 /// driver's request streams read through a <see cref="PipeReader"/> over the <c>QuicStream</c>. Such a reader
 /// learns of the peer's FIN only from a read that returns no octets, so a FIN that arrived with the last
-/// octets read stays unseen until the next read. Everything else is the inner connection's, including the
+/// octets read stays unseen until the next read. Its completion facet probes the inner pipe, exposing the
+/// transport completion independently from the stream-backed pipe. Everything else is the inner connection's, including the
 /// coded stream aborts of a multiplexed stream end.
 /// </summary>
-internal sealed class StreamInputConnection : Connection, IMultiplexedStreamAbort
+internal sealed class StreamInputConnection : Connection, IMultiplexedStreamAbort, IConnectionInputCompletion
 {
     private readonly Connection _inner;
 
@@ -37,6 +39,34 @@ internal sealed class StreamInputConnection : Connection, IMultiplexedStreamAbor
 
     /// <inheritdoc />
     public override PipeReader Input { get; }
+
+    /// <inheritdoc />
+    public bool IsInputCompleted
+    {
+        get
+        {
+            if (_inner.ConnectionClosed.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!_inner.Input.TryRead(out ReadResult result))
+                {
+                    return false;
+                }
+
+                bool completed = result.IsCompleted && !result.IsCanceled && result.Buffer.IsEmpty;
+                _inner.Input.AdvanceTo(result.Buffer.Start);
+                return completed;
+            }
+            catch (Exception exception) when (exception is IOException or ConnectionException or InvalidOperationException or OperationCanceledException)
+            {
+                return false;
+            }
+        }
+    }
 
     /// <inheritdoc />
     public override PipeWriter Output => _inner.Output;

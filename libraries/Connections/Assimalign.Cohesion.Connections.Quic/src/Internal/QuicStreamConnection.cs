@@ -59,12 +59,13 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
+internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort, IConnectionInputCompletion
 {
     // RFC 9000 §16 — an application error code is a variable-length integer.
     private const long maxApplicationErrorCode = (1L << 62) - 1;
 
     private readonly QuicStream _stream;
+    private readonly Task _readsClosed;
     private readonly long _defaultStreamErrorCode;
     private readonly Action<QuicStreamConnection> _onDisposed;
     private readonly CancellationTokenSource _connectionClosedSource = new();
@@ -124,6 +125,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
         };
 
         _stream = stream;
+        _readsClosed = stream.CanRead ? stream.ReadsClosed : Task.CompletedTask;
         _defaultStreamErrorCode = defaultStreamErrorCode;
         _onDisposed = onDisposed;
         LocalEndPoint = localEndPoint;
@@ -139,7 +141,7 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
 
         if (stream.CanRead)
         {
-            ObservePeerClosure(stream.ReadsClosed);
+            ObservePeerClosure(_readsClosed);
         }
 
         if (stream.CanWrite)
@@ -149,6 +151,9 @@ internal sealed class QuicStreamConnection : Connection, IMultiplexedStreamAbort
 
         QuicConnectionEventSource.Log.StreamOpened(Id, connectionId, Direction);
     }
+
+    /// <inheritdoc />
+    public bool IsInputCompleted => !_readAborted && _readsClosed.IsCompletedSuccessfully;
 
     /// <inheritdoc />
     public override ConnectionId Id { get; } = ConnectionId.New();
