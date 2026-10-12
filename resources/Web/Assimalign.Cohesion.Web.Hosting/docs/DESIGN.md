@@ -1767,6 +1767,8 @@ stream with its head, so it keeps the fast path as on HTTP/1.1. On HTTP/3 it doe
 transport has already seen the request stream's FIN: the in-memory pipe reports it directly, and
 the QUIC driver's generic input-completion facet exposes it without a further read (#1427). The
 transport also checks for unread pipe bytes, so DATA followed by FIN still gets the fault gate.
+A positive declared content length retains the gate even with an empty, ended stream, so the
+pipeline can observe the truncation fault raised by a body read.
 Allocation coverage compares the actual defaults over stream-backed requests with the FIN visible
 and hidden: a bodiless request saves the client-fault registration and feature. On Windows x64
 .NET 10.0.12 Debug, the warmed 16-request comparison saved 3,840 B (240 B per request);

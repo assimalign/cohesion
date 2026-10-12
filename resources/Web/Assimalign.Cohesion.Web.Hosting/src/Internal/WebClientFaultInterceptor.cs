@@ -18,9 +18,9 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// HTTP/2 a head that did not end the stream, on HTTP/3 a request stream that had not ended with its
 /// head, and never for a <c>CONNECT</c>. An HTTP/2 or HTTP/3 request need not declare its body, so the
 /// framing fields of the head cannot answer it there. Every other exchange, a plain <c>GET</c> among them,
-/// keeps the transport's fast path and carries no feature — except over the QUIC driver, which the HTTP/3
-/// transport sees end a request stream only on a read, so nearly every HTTP/3 request reports a body and
-/// takes the response phase there until the driver reports a FIN it already holds.
+/// carries no client-fault feature. The QUIC driver's input-completion facet exposes a FIN it already
+/// holds. HTTP/3 still retains the gate for buffered bytes or a positive declared content length, whose
+/// missing body must report a truncation fault. Other interceptors can independently require a response phase.
 /// </para>
 /// <para>
 /// Both hooks are CPU-only, as the interceptor contract requires, and the instance holds no

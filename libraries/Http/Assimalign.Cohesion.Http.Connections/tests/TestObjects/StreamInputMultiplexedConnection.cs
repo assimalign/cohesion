@@ -11,8 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// The server end of a multiplexed connection whose accepted request streams (the bidirectional streams the
 /// client opens) are <see cref="StreamInputConnection"/>s, so the HTTP/3 layer reads them the way it reads
 /// the QUIC driver's: through a <see cref="System.IO.Pipelines.PipeReader"/> over a stream, which sees the
-/// peer's FIN only on a read that returns nothing. Unidirectional streams and the streams the server opens
-/// pass through.
+/// peer's FIN only on a read that returns nothing, with a completion facet exposing an end the transport
+/// already knows. Unidirectional streams and the streams the server opens pass through.
 /// </summary>
 internal sealed class StreamInputMultiplexedConnection : MultiplexedConnection
 {

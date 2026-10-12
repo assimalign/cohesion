@@ -2278,8 +2278,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // a request that declared Expect: 100-continue, whose content the body solicits at its first read
         // unless there is none (RFC 9110 §10.1.1, #1385).
         bool expectsContinue = !isConnect && HttpInterimResponseRules.ExpectsContinue(requestHead.Headers);
-        bool canHaveBody = !isConnect
-            && ((_requestInterceptors.Length == 0 && !expectsContinue) || !reader.IsEndBuffered());
+        bool endBuffered = !isConnect && (_requestInterceptors.Length > 0 || expectsContinue) && reader.IsEndBuffered();
+        // A declared body that is missing at FIN still needs late content-length validation and the
+        // host's client-fault gate. Its known end does not warrant soliciting more content with 100.
+        bool canHaveBody = !isConnect && (contentLength > 0 || !endBuffered);
 
         Http3RequestBodyStream body = new(
             this,
@@ -2294,7 +2296,7 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             headToken,
             _limits.MinRequestBodyDataRate,
             _timeProvider,
-            solicitContinue: expectsContinue && canHaveBody);
+            solicitContinue: expectsContinue && !endBuffered);
         requestHead = requestHead with { Body = body };
 
         HttpConnectionInfo connectionInfo = HttpTlsConnectionInfo.Create(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint, _tls);

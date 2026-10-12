@@ -1254,11 +1254,10 @@ invites the body:
   is a request stream whose FIN was not already buffered behind its HEADERS frame
   (`Http3RequestStreamReader.IsEndBuffered`, the probe `CanHaveBody` uses); a stream
   whose end the transport has not seen yet is solicited, which costs nothing if the
-  content turns out to be empty. Over the QUIC driver the probe sees a FIN only on a
-  read, so every request there that carries the expectation is solicited, one whose
-  FIN came with its head included. RFC 9110 §10.1.1 forbids a client to send the
-  expectation without content and lets a server send the `100` anyway, so such a
-  client gets an interim response it does not need, and nothing else changes.
+  content turns out to be empty. The QUIC driver's generic input-completion facet
+  also exposes an already-observed FIN before the pipe reads zero (#1427). A known
+  end suppresses solicitation even if a positive declared content length still
+  requires the client-fault gate for a truncated body.
 - **HTTP/2.** `Http2RequestBodyStream` sends it after resolving the rate at its first
   read, through `Http2ConnectionContext.WriteInterimResponseAsync` on the exchange
   `Http2Stream.CreateContextAsync` attaches (`AttachExchange`): a HEADERS block
@@ -1981,9 +1980,10 @@ catches `InvalidDataException` or `IOException` keeps working.
   from the framing it decides before the head hooks run) and publishes the report
   as `IWebClientFaultFeature` (`Web.Server`). Every other HTTP/1.1 exchange keeps
   this transport's fast path, and so does an HTTP/2 one whose head ended its stream.
-  HTTP/3 over the QUIC driver does not: its probe sees a FIN only on a read, so
-  nearly every request reports a body and takes the response phase (see "The body
-  signal for a host's gate"). Web.Hosting's DESIGN carries the consumers.
+  HTTP/3 also omits this feature when its pipe or the QUIC driver's completion
+  facet reports an empty, ended request (see "The body signal for a host's gate").
+  A positive declared length retains the gate for truncation validation.
+  Web.Hosting's DESIGN carries the consumers.
 
 ### Keep-alive realignment (draining)
 
@@ -2940,8 +2940,9 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   request hook is registered (or an `Expect: 100-continue` needs the signal). The QUIC driver's
   `IConnectionInputCompletion` facet exposes a clean FIN already observed by the runtime (#1427),
   even before its stream-backed pipe reads zero bytes. The probe requires an empty, uncancelled
-  pipe as well; buffered DATA followed by FIN still reports a body. It never waits for a late FIN
-  or overrides a reset. Drivers without the facet keep the conservative pipe-only probe.
+  pipe as well; buffered DATA followed by FIN still reports a body. A positive declared content
+  length also retains the gate: an empty stream then faults when its body is validated. It never
+  waits for a late FIN or overrides a reset. Drivers without the facet keep the conservative pipe-only probe.
 
   A bodiless GET or POST whose head ends the QUIC stream now skips body-gated response interceptors
   and does not arm automatic `100 Continue`. Real-QUIC tests pin both empty and DATA-bearing
@@ -2963,12 +2964,11 @@ body can fault, which an HTTP/2 or HTTP/3 request need not declare:
   An HTTP/3 body read that finds a connection error now reports a `400` client fault, and `SendAsync`
   writes nothing for that exchange and adopts the `400`; it used to try to send the staged response on the
   aborted connection.
-- *Performance (HTTP/3 over the QUIC driver).* The default Web server's client-fault gate joins the
-  response phase of every request that reports a body, and over the QUIC driver nearly every request does,
-  a `GET` whose FIN came with its head included (see "The body signal for a host's gate"). Each such
-  exchange now pays for a response sink, an exchange control, a response context and the feature; before
-  #1378 no HTTP/3 exchange did. HTTP/1.1, HTTP/2 and the in-memory HTTP/3 driver keep the fast path for a
-  request without a body.
+- *Performance (HTTP/3 over the QUIC driver).* Since #1427 the default Web server's client-fault gate
+  omits its response registration and feature for a bodiless request whose FIN the driver already
+  observed. Like the in-memory driver, it retains the gate for buffered body bytes or a positive
+  declared length. Independent response interceptors can still require a response sink, exchange
+  control and response context (see "The body signal for a host's gate").
 - *Observable by clients.* An HTTP/1.1 request whose framing cannot be read (both `Content-Length` and
   `Transfer-Encoding`, a malformed `Content-Length`, a `Transfer-Encoding` that does not end in `chunked`)
   is refused before any head hook runs, so a hook can no longer answer it first with its own rejection, a
