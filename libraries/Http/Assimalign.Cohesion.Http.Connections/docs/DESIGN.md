@@ -2835,7 +2835,10 @@ its queued closure signal, so FIN and reset cannot be distinguished reliably her
 the exchange token to its body reader and normalizes both cancelled waits and DATA-channel failures
 racing cancellation. Previously latched malformed-body and limit faults retain their precedence.
 `ClientFaultStatusCode` stays null on connection loss. Pending, later, rate-gated and ungated reads
-are covered, including tokenless application reads. Web.Hosting records `request_canceled` through
+are covered, including tokenless application reads. The first read's lazy `100 Continue` solicitation
+also observes exchange cancellation on both protocols. A failed interim flush cancels with the exact
+exchange token, including failures preceding the driver's closure signal. A latched body rejection
+keeps precedence; cancellation by only the caller retains that caller's token. Web.Hosting records `request_canceled` through
 `UseErrorHandling()`, with no Error log, `OnException`, or replacement `500`.
 
 **Breaking behavior and advisory triage (#1439).** Against 10.0.0-preview.1, dispatched HTTP/1.1 body
@@ -2845,7 +2848,8 @@ stream token. Malformed framing bytes and pre-dispatch head truncation retain th
 released code has both cancellation gaps, reachable by unauthenticated peers on body-reading
 endpoints (CWE-755, low severity: incorrect cancellation and application fault handling). Preview.1
 had no current server Error telemetry; its exception boundary could nevertheless invoke `OnException`
-and attempt a `500`. No new public signature or dependency is introduced.
+and attempt a `500`. The HTTP/1.1 lazy-interim bypass was present in preview.1; HTTP/2 lazy solicitation
+arrived later in #1385. No new public signature or dependency is introduced.
 
 ### The read reports the fault, not the reset
 

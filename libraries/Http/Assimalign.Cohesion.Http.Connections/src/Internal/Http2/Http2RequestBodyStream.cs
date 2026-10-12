@@ -1,8 +1,11 @@
 using System;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -310,7 +313,34 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
             return;
         }
 
-        await connection.WriteInterimResponseAsync(exchange, HttpStatusCode.Continue, headers: null, cancellationToken).ConfigureAwait(false);
+        using CancellationTokenSource? linkedAbort = cancellationToken.CanBeCanceled && cancellationToken != _requestAborted
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _requestAborted)
+            : null;
+        CancellationToken writeToken = linkedAbort?.Token ?? _requestAborted;
+        try
+        {
+            await connection.WriteInterimResponseAsync(exchange, HttpStatusCode.Continue, headers: null, writeToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_requestAborted.IsCancellationRequested)
+        {
+            throw CreateAbortFailure();
+        }
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested
+            && exception.CancellationToken != cancellationToken)
+        {
+            throw new OperationCanceledException(exception.Message, exception, cancellationToken);
+        }
+        catch (Exception exception) when (exception is ConnectionException or SocketException or IOException)
+        {
+            // A body rejection can race the interim flush. Keep its failure ahead of cancellation,
+            // otherwise normalize a transport failure even before the closure token fires (#1439).
+            if (_owner.ClientFaultFailure is { } bodyFailure)
+            {
+                throw bodyFailure;
+            }
+
+            throw exchange.AbortRequestForPeer(exception);
+        }
     }
 
     /// <summary>

@@ -351,11 +351,41 @@ internal sealed class Http1RequestBodyStream : Stream
         // anyway is drained normally, one that does not is reclaimed by the data-rate gate).
         if (_solicitContinue && _owner?.HasFinalResponseStarted != true)
         {
+            await SolicitContinueAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask SolicitContinueAsync(CancellationToken cancellationToken)
+    {
+        (CancellationToken writeToken, CancellationTokenSource? linkedAbort) = LinkAbort(cancellationToken);
+        try
+        {
+            _connectionToken.ThrowIfCancellationRequested();
             await Http1MessageWriter.WriteInterimResponseAsync(
                 _connection,
                 HttpStatusCode.Continue,
                 headers: null,
-                cancellationToken).ConfigureAwait(false);
+                writeToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (_owner is not null && _connectionToken.IsCancellationRequested)
+        {
+            throw _owner.AbortRequestForPeer(exception);
+        }
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested
+            && exception.CancellationToken != cancellationToken)
+        {
+            throw new OperationCanceledException(exception.Message, exception, cancellationToken);
+        }
+        catch (Exception exception) when (_owner is not null
+            && exception is ConnectionException or SocketException or IOException)
+        {
+            // Solicitation is part of the first body read. A failed interim flush can precede the
+            // driver's closure signal just as a failed body read can (#1439).
+            throw _owner.AbortRequestForPeer(exception);
+        }
+        finally
+        {
+            linkedAbort?.Dispose();
         }
     }
 
