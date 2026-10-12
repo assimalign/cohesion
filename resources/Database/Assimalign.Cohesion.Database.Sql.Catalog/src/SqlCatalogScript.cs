@@ -53,8 +53,3 @@ public sealed record SqlCatalogScript
     /// <summary>Gets the typed schema hash before script execution.</summary>
     public string? SchemaHash { get; }
 }
-
-/// <summary>The constant-time reconciliation marker for an ordered declared-script set.</summary>
-/// <param name="ContentHash">The SHA-256 of the ordered names and body digests.</param>
-/// <param name="Generation">The catalog generation at successful reconciliation.</param>
-public sealed record SqlCatalogScriptState(string ContentHash, ulong Generation);
