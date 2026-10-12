@@ -295,6 +295,13 @@ internal abstract class TransportHttpContext : HttpContext
             return registered;
         }
 
+        // The parse context already holds one added interceptor in its final array. With no listener
+        // response interceptors to merge, retain it without intermediate lists or another array (#1389).
+        if (registered.Length == 0 && added is IHttpExchangeInterceptor[] { Length: 1 } single)
+        {
+            return single;
+        }
+
         List<IHttpExchangeInterceptor> effective = new(registered.Length + added.Count);
         effective.AddRange(registered);
 

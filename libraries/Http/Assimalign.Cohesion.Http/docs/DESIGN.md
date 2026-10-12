@@ -1111,6 +1111,12 @@ Three contract mechanics carry the design:
   every other exchange keeps the fast path. `Http.ProtocolUpgrade`, which
   Web.Hosting installs by default and which needs the exchange control only for
   an HTTP/1.1 upgrade or `CONNECT`, is the case it exists for.
+  The first added interceptor is held in one singleton array (#1389). With no
+  listener response interceptors, the transport retains that same array; a
+  second distinct addition promotes the parse-side storage to a list. Equality
+  deduplication and listener-first order remain unchanged. This changes neither
+  public contracts nor preview.1 behavior: per-exchange response joining was
+  introduced after preview.1.
 - **The sync/async split encodes pump safety.** The four parse-path hooks are
   `void` and must be CPU-only — on HTTP/2 they run on the connection's single
   frame pump, where a stalled hook stalls every multiplexed stream; the two

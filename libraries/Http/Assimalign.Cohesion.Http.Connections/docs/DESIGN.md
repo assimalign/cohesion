@@ -530,6 +530,57 @@ dictionary probe to every `Get` on the hot path. A `null` collection (the
 fast path) gets a fresh empty one; a foreign `IHttpFeatureCollection`
 implementation is wrapped as a read-through defaults source for safety.
 
+### One added response interceptor (#1389)
+
+A request-parse hook that adds one response interceptor now stores it in a singleton array.
+When no listener response interceptors are registered, `ResolveResponseInterceptors` retains
+that array directly. The path creates no intermediate list, backing array, enumeration object,
+or final copy. A second distinct addition promotes parse-side storage to a list; listener-first
+ordering and equality-based deduplication still use the existing merge path. An exchange with
+no added interceptor still reuses the listener's array.
+
+This is shared setup for HTTP/1.1, HTTP/2 and HTTP/3. It changes no public contract, hook order,
+or feature behavior. The per-exchange response-joining API did not exist in 10.0.0-preview.1,
+so this optimization introduces no behavior break against that release. Protocol upgrade,
+extended CONNECT and Web.Hosting's body-specific client-fault interceptor use this seam.
+The current Web host also registers response lifecycle interceptors, so its ordinary body
+request uses the mixed merge path and benefits from the smaller first-add storage; it does
+not have the no-listener-response configuration required for direct array reuse.
+
+`HttpResponseInterceptorAllocationTests.ResolveResponseInterceptors_WithOneAddedAndNoneRegistered_ShouldAllocateOnlyOneArray`
+pins the combined add-and-resolve allocation against a separately allocated singleton array,
+with context construction, assertions and disposal outside the sample. Reverting both production
+changes to `d47169452` made this regression fail: add allocated 64 B and resolution 136 B, or
+200 B per exchange. With the fix, add allocates 32 B and resolution 0 B: 168 B (84%) less.
+The test calibrates the expected array size so it does not assume a particular object header.
+The equality guard in core Http pins existing behavior and passes with the fix reverted too.
+
+The body measurement uses
+`ReceiveAndSend_WithBodyAndOneAddedInterceptor_ShouldReportBytesPerRequest`: one preloaded
+HTTP/1.1 keep-alive connection, `POST /` with `Content-Length: 3`, the consumed body `abc`,
+a 204 response, and one request-scoped interceptor adding one response interceptor only when
+`CanHaveBody` is true. Every receive, body read, send and exchange disposal must complete
+synchronously, keeping `GC.GetAllocatedBytesForCurrentThread` valid. Listener/payload setup,
+the reused body buffer and reporting are excluded. Request/response rates, header/keep-alive
+timeouts and automatic Date are disabled. These are transport measurements, not full Web host
+or network throughput measurements.
+
+Measured on Windows ARM64, .NET SDK 10.0.401, Debug builds, with
+`DOTNET_TieredCompilation=0` for both runs (to keep changing tiered optimizations out of the
+comparison). After 1,000 warmup requests, each result is the median of five rounds of 5,000:
+
+| Listener response interceptors | Before (`d47169452`), B/request | After, B/request | Saved, B/request |
+|---|---:|---:|---:|
+| None: singleton fast path | 32,112.63 | 31,944.63 | 168.00 |
+| One: mixed merge path | 32,128.63 | 32,088.63 | 40.00 |
+
+Run the Connections tests with the filter
+`FullyQualifiedName~HttpResponseInterceptorAllocationTests` to print all samples. The complete
+request cost is reported rather than pinned: unrelated transport changes may alter it. Only the
+single-interceptor storage/resolution cost is an allocation regression assertion. The mixed-path
+saving includes the smaller first-add storage and the array enumerator replacing the boxed list
+enumerator; its registered-before-added merge still builds the existing effective list and array.
+
 ### Sizing the collection: `ExchangeFeatureCapacity` (#1381)
 
 Every exchange's collection is created at one of three sites: the HTTP/1.1

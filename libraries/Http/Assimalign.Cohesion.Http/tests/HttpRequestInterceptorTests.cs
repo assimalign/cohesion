@@ -169,6 +169,33 @@ public class HttpRequestInterceptorTests
         Should.Throw<ArgumentNullException>(() => context.AddResponseInterceptor(null!));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Equal distinct response interceptors preserve the original instances before and after promotion")]
+    public void AddResponseInterceptor_OnEqualDistinctInstances_ShouldKeepOriginalsBeforeAndAfterPromotion()
+    {
+        // Arrange
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        IHttpExchangeInterceptor first = new EqualInterceptor(1);
+        IHttpExchangeInterceptor second = new EqualInterceptor(2);
+
+        // Act - singleton deduplication uses the interceptor's equality, not its identity.
+        context.AddResponseInterceptor(first);
+        context.AddResponseInterceptor(new EqualInterceptor(1));
+
+        // Assert
+        context.ResponseInterceptors.Count.ShouldBe(1);
+        context.ResponseInterceptors[0].ShouldBeSameAs(first);
+
+        // Act - a distinct interceptor promotes storage while preserving the same equality rule.
+        context.AddResponseInterceptor(second);
+        context.AddResponseInterceptor(new EqualInterceptor(1));
+        context.AddResponseInterceptor(new EqualInterceptor(2));
+
+        // Assert
+        context.ResponseInterceptors.Count.ShouldBe(2);
+        context.ResponseInterceptors[0].ShouldBeSameAs(first);
+        context.ResponseInterceptors[1].ShouldBeSameAs(second);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - Interceptor: The base class virtual defaults should no-op and pass the body stream through")]
     public void Interceptor_Defaults_ShouldPassThrough()
     {
@@ -271,5 +298,19 @@ public class HttpRequestInterceptorTests
 
     private sealed class NoOverrideInterceptor : HttpExchangeInterceptor
     {
+    }
+
+    private sealed class EqualInterceptor : HttpExchangeInterceptor
+    {
+        private readonly int _key;
+
+        public EqualInterceptor(int key)
+        {
+            _key = key;
+        }
+
+        public override bool Equals(object? obj) => obj is EqualInterceptor other && _key == other._key;
+
+        public override int GetHashCode() => _key;
     }
 }

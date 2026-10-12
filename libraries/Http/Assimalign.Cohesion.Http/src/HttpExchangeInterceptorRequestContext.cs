@@ -36,7 +36,9 @@ public sealed class HttpExchangeInterceptorRequestContext
     private long? _maxRequestBodySize;
     private HttpMinDataRate? _minRequestBodyDataRate;
     private HttpMinDataRate? _minResponseDataRate;
-    private List<IHttpExchangeInterceptor>? _responseInterceptors;
+    // A singleton array is also the transport's final response list on the common one-added path.
+    // Promote to a list only when another distinct interceptor joins the exchange (#1389).
+    private IReadOnlyList<IHttpExchangeInterceptor>? _responseInterceptors;
 
     /// <summary>
     /// Gets the HTTP version of the exchange.
@@ -306,7 +308,7 @@ public sealed class HttpExchangeInterceptorRequestContext
     /// have run.
     /// </remarks>
     public IReadOnlyList<IHttpExchangeInterceptor> ResponseInterceptors
-        => (IReadOnlyList<IHttpExchangeInterceptor>?)_responseInterceptors ?? Array.Empty<IHttpExchangeInterceptor>();
+        => _responseInterceptors ?? Array.Empty<IHttpExchangeInterceptor>();
 
     /// <summary>
     /// Adds <paramref name="interceptor"/> to this exchange's response phase only: its
@@ -339,11 +341,25 @@ public sealed class HttpExchangeInterceptorRequestContext
     {
         ArgumentNullException.ThrowIfNull(interceptor);
 
-        _responseInterceptors ??= new List<IHttpExchangeInterceptor>(1);
-
-        if (!_responseInterceptors.Contains(interceptor))
+        if (_responseInterceptors is null)
         {
-            _responseInterceptors.Add(interceptor);
+            _responseInterceptors = new[] { interceptor };
+            return;
+        }
+
+        if (_responseInterceptors is List<IHttpExchangeInterceptor> interceptors)
+        {
+            if (!interceptors.Contains(interceptor))
+            {
+                interceptors.Add(interceptor);
+            }
+            return;
+        }
+
+        IHttpExchangeInterceptor first = _responseInterceptors[0];
+        if (!EqualityComparer<IHttpExchangeInterceptor>.Default.Equals(first, interceptor))
+        {
+            _responseInterceptors = new List<IHttpExchangeInterceptor>(2) { first, interceptor };
         }
     }
 }
