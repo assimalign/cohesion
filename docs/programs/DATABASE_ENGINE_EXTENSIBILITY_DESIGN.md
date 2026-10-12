@@ -1368,7 +1368,9 @@ and skips in every final run). Database.Testing follows the final-source Release
 with -SkipLibraries. The installer succeeds with single-node builds after an MSB4166 child-node
 failure in its first targeting-pack attempt. Build tasks in both configurations and release
 inventory validation pass. One existing fresh-thread depth calibration case failed once; five
-unchanged focused Release reruns and the full unchanged Release rerun pass.
+unchanged focused Release reruns and the full unchanged Release rerun pass. The E4 review
+fix calibrates and checks on one dedicated 1 MB thread through the same dispatch path,
+including the persisted-CHECK depth test; every original assertion remains in place.
 
 SQL NativeAOT AotSample and Benchmarks publish in Release for win-arm64 without
 IL2xxx/IL3xxx warnings; the sample passes 19/19 checks, including a SQL function and domain.

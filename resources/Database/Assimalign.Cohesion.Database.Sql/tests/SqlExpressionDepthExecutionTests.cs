@@ -908,16 +908,22 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     {
         // Arrange
         const int stack = 1024;
+        using var stackThread = new SqlDepthTestThread(stack);
         await using var engine = CreateEngine(limit: SqlQueryParserOptions.MaximumExpressionNestingLimit);
         var database = await engine.CreateDatabaseAsync("depth");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (id INT, a INT, b INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES (1, 1, 1), (2, 2, 2)");
+        var probeThreads = new HashSet<int>();
         string Nested(int depth) => string.Format(CultureInfo.InvariantCulture, statement, Repeat(open, depth) + core + Repeat(close, depth));
-        Exception? Run(int depth) => RunOnThread(stack, () => RowsAsync(session, Nested(depth)).GetAwaiter().GetResult()).Failure;
+        Exception? Run(int depth) => stackThread.Run(() =>
+        {
+            probeThreads.Add(Environment.CurrentManagedThreadId);
+            return RowsAsync(session, Nested(depth)).GetAwaiter().GetResult();
+        }).Failure;
 
-        // Act: tiered compilation shrinks the walks' frames as they warm up, so the deepest depth can
-        // grow between one search and the next check; search again until the next depth fails.
+        // Act: every probe takes the same dispatch path on the same thread. If tiering is enabled
+        // outside the suite's required configuration, retain the warm-up retries too.
         int deepest = 0;
         Exception? failure = null;
         for (int attempt = 0; attempt < 5 && failure is null; attempt++)
@@ -927,6 +933,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         }
 
         // Assert
+        probeThreads.Count.ShouldBe(1, "calibration and the checked depth must run on one thread with the same stack");
         deepest.ShouldBeLessThan(SqlQueryParserOptions.MaximumExpressionNestingLimit - 2);
         var tooComplex = failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
         AssertStatementTooComplex(tooComplex);
@@ -947,9 +954,10 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     {
         // Arrange
         const int stack = 1024;
+        using var stackThread = new SqlDepthTestThread(stack);
         static string Predicate(int depth) => Repeat("ABS(", depth) + "qty" + Close(depth) + " < 100";
         bool Loads(int depth)
-            => RunOnThread(stack, () => SqlPersistedExpression.Load(Predicate(depth), "CHECK constraint 'ck' on table 'dbo.c'")).Failure is null;
+            => stackThread.Run(() => SqlPersistedExpression.Load(Predicate(depth), "CHECK constraint 'ck' on table 'dbo.c'")).Failure is null;
         int readable = DeepestOnThread(Loads);
         for (int attempt = 0; attempt < 5 && Loads(readable + 1); attempt++)
         {
@@ -964,7 +972,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         string? canonical = Table(database, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression;
 
         // Act
-        var open = RunOnThread(stack, () => { new SqlBoundTableCache(database.Catalog).BindCatalog(); return true; });
+        var open = stackThread.Run(() => { new SqlBoundTableCache(database.Catalog).BindCatalog(); return true; });
 
         // Assert
         canonical.ShouldBe(Predicate(depth));

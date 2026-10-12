@@ -2067,7 +2067,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   parse is what refuses a statement too deep for it and a definition the open can read
   back it can also bind: `Statement_DeepestOnThread_ShouldBeLimitedByTheParser` finds
   the deepest statement of six shapes a 1 MB thread runs and requires the next depth
-  to fail in the parser (`SQL0007`). The debug build's parser frames are large enough
+  to fail in the parser (`SQL0007`). Calibration and verification dispatch through the
+  same worker frame on one dedicated thread; a thread-identity assertion guards that
+  invariant. The persisted-CHECK calibration uses the same dedicated-thread helper.
+  The debug build's parser frames are large enough
   that only an optimized build, which CI runs, can expose a walk costlier than the
   parser.
 - **Signs require numbers; unary plus is the identity (#1068 follow-up).** The
