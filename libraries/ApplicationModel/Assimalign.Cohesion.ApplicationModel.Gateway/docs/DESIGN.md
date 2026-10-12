@@ -96,6 +96,15 @@ state comparison. Deployment, StatefulSet, and DaemonSet plans terminate on
 `{Stopped, Failed}` and satisfy only on `Stopped`. This is the cohesion-side contract referenced
 by the `cohesion-platforms` rule 2 amendment; that sibling repository is not edited here.
 
+A rejected readiness gate throws an `InvalidOperationException` naming the observed state and
+the last state detail of the gated resource and every currently Failed resource, qualified by
+application and resource name. This includes startup exceptions and readiness-budget expiry,
+so a caller does not need access to the in-memory state to learn why reconciliation failed.
+Details are tracked through the existing `StateChanged` contract for custom state managers;
+the built-in store and its application-scoped views expose internal locked reads, because a
+readiness waiter can finish before the corresponding event is delivered. No public state or
+gateway contract is widened for diagnostics.
+
 `LocalPlanController` keeps compilation pure:
 `Compile(plan, artifact, inputs, observedDependencies, options)` only produces the local desired
 process/environment description. Port allocation, claim-directory creation, mount-file writes,
@@ -121,6 +130,25 @@ the registration under the same lock.
   gateway never falls back to the managed assembly DLL. A plain or orchestration-disabled
   executable can launch only through `AddExecutable(name, path, options)`, with an explicit
   readiness probe or per-resource stdout marker.
+- **Windows long paths**: before launch, a fully resolved executable path of 260 characters or
+  more is converted with `GetShortPathNameW`. Only a result shorter than 260 characters is used;
+  success with the original long name (possible when 8.3 names are disabled) is a refusal too.
+  The native lookup accepts an extended-length path, but `ProcessStartInfo.FileName` receives an
+  ordinary drive or UNC path, never the `\\?\` prefix. The child working directory comes from
+  that launch path. Exec probes apply the same rule to explicit executable paths and use the
+  resolved host's directory, while bare command names retain their PATH lookup.
+  `COHLOCAL001` refuses a launch without a usable short name before `Process.Start`, naming the
+  original path, its character count, and the remedies: move to a shorter location, or enable
+  8.3 names on the volume and recreate the affected directories/files. `LongPathsEnabled` alone
+  does not remove the `CreateProcess` restriction. The supervisor records the coded refusal as
+  Failed and the readiness-gate exception includes it.
+  Content-root and mount environment values keep their original resolved paths. A child's
+  `AppContext.BaseDirectory` may use 8.3 components; `FileSystemPath` accepts both forms and both
+  resolve the same content. Recovery comparisons normalize existing files to the same short
+  spelling when available, so PID/start-time/executable verification can adopt or stop a child
+  regardless of which spelling the registration or process reports. The lookup is a
+  source-generated `LibraryImport` with UTF-16 input and a bounded native output buffer; no
+  reflection, runtime marshalling generation, or shell launcher is introduced.
 - **Render**: `--mode render` compiles the declaration-ordered models into
   `cohesion/local-plan-set/v1` process units. The document resolves artifact paths syntactically,
   folds plan services, exposures, and volumes into deferred loopback endpoint and mount requests,
@@ -647,6 +675,15 @@ cover persisted ports and contract environment, default and explicit HTTP readin
 injection and startup gating, optional absence, Composite re-export names, mount materialization,
 prefixed stdout/stderr, `AddExecutable` marker readiness, the full exponential-backoff sequence,
 graceful and forced stop classification, PID-file re-attachment, and explicit orphan restart.
+Windows long-path tests copy the real test apphost below a temporary directory past MAX_PATH,
+exercise a long working directory and exec probe, read content through both base-directory and
+resource-content-root paths, write a resource mount, and adopt an 8.3-launched orphan whose
+registration uses its long name. Discovery skips these tests outside Windows or when the temporary
+file system cannot create the fixture; successful-launch tests also skip when that volume has no
+usable short name. A per-gateway internal resolver seam forces the no-short-name result without
+changing the volume, and portable unit tests cover absent/unchanged/too-long results and the
+259/260-character boundary. Reconcile tests cover multiple failures, latest details, and equal
+resource names in separate applications.
 Item #968 tests additionally cover literal/parameter/store resolution, typed certificate
 unavailability, fresh audience-bound ES256 credentials, per-application persisted trust keys,
 bounded developer tokens, digest enforcement for `AddContainer`, and parameter CLI precedence.

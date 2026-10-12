@@ -16,6 +16,7 @@ internal sealed class LocalGatewayProcessSupervisor
     private readonly LocalGatewayOptions _options;
     private readonly LocalProcessStateStore _processState;
     private readonly LocalProbeRunner _probes;
+    private readonly Func<string, string?> _shortPathResolver;
     private readonly ConcurrentDictionary<LocalResourceKey, SupervisedResource> _resources = new();
     private LocalFileLease[] _applicationLeases = Array.Empty<LocalFileLease>();
     private IReadOnlyDictionary<ApplicationName, bool> _restartOrphansByApplication =
@@ -23,11 +24,13 @@ internal sealed class LocalGatewayProcessSupervisor
 
     public LocalGatewayProcessSupervisor(
         LocalGatewayOptions options,
-        LocalProcessStateStore processState)
+        LocalProcessStateStore processState,
+        Func<string, string?>? shortPathResolver = null)
     {
         _options = options;
         _processState = processState;
         _probes = new LocalProbeRunner(options);
+        _shortPathResolver = shortPathResolver ?? LocalProcessPath.TryGetShortPath;
     }
 
     public async Task InitializeAsync(
@@ -666,7 +669,9 @@ internal sealed class LocalGatewayProcessSupervisor
     private async Task<ProcessAttempt> StartProcessAsync(SupervisedResource supervised)
     {
         LocalResourceConfiguration configuration = supervised.Configuration;
-        string executablePath = Path.GetFullPath(configuration.Artifact.ExecutablePath);
+        string executablePath = LocalProcessPath.ResolveExecutable(
+            configuration.Artifact.ExecutablePath,
+            _shortPathResolver);
         string? setSessionPath = FindSetSessionExecutable();
         var startInfo = new ProcessStartInfo
         {
@@ -1220,7 +1225,10 @@ internal sealed class LocalGatewayProcessSupervisor
     {
         string fullPath = Path.GetFullPath(path);
         FileSystemInfo? target = File.ResolveLinkTarget(fullPath, returnFinalTarget: true);
-        return target?.FullName ?? fullPath;
+        fullPath = target?.FullName ?? fullPath;
+        // Process.MainModule may report either spelling after an 8.3 launch. Compare and
+        // persist the same file identity for adoption, explicit restart, and orphan cleanup.
+        return LocalProcessPath.TryGetShortPath(fullPath) ?? fullPath;
     }
 
     private static async Task ObserveCancellationAsync(

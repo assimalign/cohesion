@@ -1157,12 +1157,37 @@ public abstract partial class ApplicationGateway :
                     $"'{budget}' while observed as '{reached}'.");
             }
 
+            string failureDetails = DescribeFailedResources(item);
             MarkDependentsBlocked(item);
             throw new InvalidOperationException(
                 $"Resource '{descriptor.Resource.Name}' did not reach Running or another state " +
                 $"satisfying the {plan.Workload.Kind} " +
-                $"readiness gate (observed '{reached}') in gateway '{Name}'. Reconcile aborted.");
+                $"readiness gate (observed '{reached}') in gateway '{Name}'. Reconcile aborted." +
+                failureDetails);
         }
+    }
+
+    private string DescribeFailedResources(ModelResource gatedResource)
+    {
+        var details = new StringBuilder();
+        foreach (ApplicationStateView view in _applicationStates)
+        {
+            foreach (IApplicationResource resource in view.Model.Resources)
+            {
+                if (view.State.GetState(resource.Id) != ResourceLifecycle.Failed
+                    && (view.Model.Name != gatedResource.Model.Name
+                        || resource.Id != gatedResource.Descriptor.Resource.Id))
+                {
+                    continue;
+                }
+
+                string? detail = view.Details.GetDetail(resource.Id);
+                details.Append($" Resource '{view.Model.Name}/{resource.Name}' last state detail: ");
+                details.Append(string.IsNullOrWhiteSpace(detail) ? "(none reported)." : detail);
+            }
+        }
+
+        return details.ToString();
     }
 
     private async Task PublishApplicationExportsAsync(CancellationToken cancellationToken)
@@ -2336,6 +2361,7 @@ public abstract partial class ApplicationGateway :
 
         for (int index = 0; index < _applicationStates.Count; index++)
         {
+            _applicationStates[index].Details.Dispose();
             _applicationStates[index].OwnedState?.Dispose();
         }
 
@@ -2377,12 +2403,12 @@ public abstract partial class ApplicationGateway :
                         model.Name,
                         model.Resources);
                     applicationStates[modelIndex] =
-                        new ApplicationStateView(model, scopedState, scopedState);
+                        new ApplicationStateView(model, scopedState, scopedState, new ResourceStateDetailTracker(scopedState));
                 }
                 else
                 {
                     applicationStates[modelIndex] =
-                        new ApplicationStateView(model, State, null);
+                        new ApplicationStateView(model, State, null, new ResourceStateDetailTracker(State));
                 }
 
                 IReadOnlyList<IApplicationResourceDescriptor> modelOrder =
@@ -2397,6 +2423,7 @@ public abstract partial class ApplicationGateway :
         {
             for (int index = 0; index < applicationStates.Length; index++)
             {
+                applicationStates[index].Details?.Dispose();
                 applicationStates[index].OwnedState?.Dispose();
             }
 
@@ -2625,7 +2652,8 @@ public abstract partial class ApplicationGateway :
     private readonly record struct ApplicationStateView(
         IApplicationModel Model,
         IApplicationResourceStateManager State,
-        IDisposable? OwnedState);
+        IDisposable? OwnedState,
+        ResourceStateDetailTracker Details);
 
     private readonly record struct RealizedResource(
         ModelResource Item,

@@ -81,6 +81,14 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
         }
     }
 
+    internal string? GetDetail(ResourceId id)
+    {
+        lock (_gate)
+        {
+            return _entries.TryGetValue(id, out Entry? entry) ? entry.Detail : null;
+        }
+    }
+
     /// <inheritdoc/>
     public IReadOnlyList<ResourceEndpoint> GetObservedEndpoints(ResourceId id)
     {

@@ -42,6 +42,11 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
     /// A duration, threshold, or retry count in <paramref name="options"/> is outside its supported range.
     /// </exception>
     public LocalGateway(LocalGatewayOptions options)
+        : this(options, LocalProcessPath.TryGetShortPath)
+    {
+    }
+
+    internal LocalGateway(LocalGatewayOptions options, Func<string, string?> shortPathResolver)
         : base(options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -54,7 +59,7 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
         var mounts = new LocalMountMaterializer(stateDirectory);
         var processState = new LocalProcessStateStore(stateDirectory);
         var preparer = new LocalResourcePreparer(_ports, mounts, _options);
-        _supervisor = new LocalGatewayProcessSupervisor(_options, processState);
+        _supervisor = new LocalGatewayProcessSupervisor(_options, processState, shortPathResolver);
         _controllers = new IApplicationResourceController[]
         {
             new LocalPlanController(_options, preparer, _supervisor),
