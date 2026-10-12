@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Types;
 
@@ -17,6 +18,105 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
 
 public sealed class SqlCatalogScriptTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Table receipt targets distinguish quoted separator components")]
+    [InlineData("a", "b.c", "a.b", "c")]
+    [InlineData("a\"", "b.c", "a\".b", "c")]
+    public async Task CreateTableAsync_QuotedDotReceiptTarget_ShouldRefuseDifferentTuple(
+        string expectedSchema,
+        string expectedTable,
+        string actualSchema,
+        string actualTable)
+    {
+        // Arrange
+        using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-table-separators");
+        var catalog = SqlCatalog.Open(storage);
+        ulong generation = catalog.DdlGeneration;
+        var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null,
+            $"T:{expectedSchema}.{expectedTable}");
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CreateTableAsync(actualSchema, actualTable,
+            [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, publication, CancellationToken.None));
+
+        // Assert
+        failure.Message.ShouldContain("COHSQLS001");
+        catalog.Tables.ShouldBeEmpty();
+        catalog.Scripts.ShouldBeEmpty();
+        catalog.DdlGeneration.ShouldBe(generation);
+        var reopened = SqlCatalog.Open(storage);
+        reopened.Tables.ShouldBeEmpty();
+        reopened.Scripts.ShouldBeEmpty();
+        reopened.DdlGeneration.ShouldBe(generation);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Index receipt targets distinguish quoted separator components")]
+    [InlineData("a", "b.c", "ix", "a.b", "c", "ix")]
+    [InlineData("a", "b", "c.d", "a", "b.c", "d")]
+    [InlineData("a", "b\"", "c.d", "a", "b\".c", "d")]
+    public async Task CreateIndexAsync_QuotedDotReceiptTarget_ShouldRefuseDifferentTuple(
+        string expectedSchema,
+        string expectedTable,
+        string expectedIndex,
+        string actualSchema,
+        string actualTable,
+        string actualIndex)
+    {
+        // Arrange
+        using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-index-separators");
+        var catalog = SqlCatalog.Open(storage);
+        var table = await catalog.CreateTableAsync(actualSchema, actualTable,
+            [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], cancellationToken: CancellationToken.None);
+        ulong generation = catalog.DdlGeneration;
+        var publication = new SqlCatalogScriptPublication("001", new string('A', 64), 1, null, generation, null,
+            $"I:{expectedSchema}.{expectedTable}.{expectedIndex}");
+        var index = new SqlCatalogIndex(table.ObjectId, actualIndex, ["id"], false);
+        var registration = new BTreeIndexRegistration(table.ObjectId, new IndexDefinition(actualIndex), 42);
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlCatalogException>(async () =>
+            await catalog.CreateIndexAsync(index, [registration], publication, CancellationToken.None));
+
+        // Assert
+        failure.Message.ShouldContain("COHSQLS001");
+        catalog.GetIndexes(table.ObjectId).ShouldBeEmpty();
+        catalog.GetIndexRegistrations().ShouldBeEmpty();
+        catalog.Scripts.ShouldBeEmpty();
+        catalog.DdlGeneration.ShouldBe(generation);
+        var reopened = SqlCatalog.Open(storage);
+        reopened.GetIndexes(table.ObjectId).ShouldBeEmpty();
+        reopened.GetIndexRegistrations().ShouldBeEmpty();
+        reopened.Scripts.ShouldBeEmpty();
+        reopened.DdlGeneration.ShouldBe(generation);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Receipt targets use catalog case-insensitive name rules")]
+    public async Task PublicationMethods_CaseVariantNames_ShouldCompleteMatchingTargets()
+    {
+        // Arrange
+        using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "script-target-case");
+        var catalog = SqlCatalog.Open(storage);
+        string hash = new('A', 64);
+        var tablePublication = new SqlCatalogScriptPublication("001", hash, 2, null, catalog.DdlGeneration, null, "T:A.B.C");
+
+        // Act
+        var table = await catalog.CreateTableAsync("a", "b.c", [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)],
+            null, tablePublication, CancellationToken.None);
+        var indexPublication = new SqlCatalogScriptPublication("001", hash, 2, catalog.Scripts.ShouldHaveSingleItem(),
+            catalog.DdlGeneration, null, "I:A.B.C.D:E.F");
+        var index = new SqlCatalogIndex(table.ObjectId, "d:e.f", ["id"], false);
+        await catalog.CreateIndexAsync(index, [new BTreeIndexRegistration(table.ObjectId, new IndexDefinition(index.Name), 42)],
+            indexPublication, CancellationToken.None);
+
+        // Assert
+        var reopened = SqlCatalog.Open(storage);
+        reopened.TryGetTable("A", "B.C", out _).ShouldBeTrue();
+        reopened.TryGetIndex(table.ObjectId, "D:E.F", out _).ShouldBeTrue();
+        var receipt = reopened.Scripts.ShouldHaveSingleItem();
+        receipt.CompletedStatements.ShouldBe(2);
+        receipt.StatementObjects.ShouldBe(["T:a.b.c", "I:a.b.c.d:e.f"]);
+        receipt.Objects.ShouldBe(receipt.StatementObjects);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Function drops retain the requested equivalent-domain spelling")]
     public async Task DropFunctionAsync_EquivalentDomainAlias_ShouldPersistRequestedSpelling()
     {
