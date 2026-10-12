@@ -165,16 +165,37 @@ feature) cannot rewrite the status, so the exchange is aborted at the protocol l
 defensive path `Web.RequestTimeouts` takes. In normal use this never trips, because both gates run before
 `next`; only a middleware registered ahead of rate limiting could have committed the head.
 
-## Telemetry — the observation hook, not OpenTelemetry
+## Diagnostics
 
-The issue asked for lease acquired/rejected/queued counters wired through Cohesion OpenTelemetry/Logging at
-composition time. That is **re-scoped**: a feature package cannot reach a hosting-layer OTel/Logging seam
-without referencing `Web.Hosting`, which `COHRES001` forbids. Instead the package offers a **lightweight,
-dependency-free observation hook** — `RateLimitingOptions.OnDecision`, invoked with an immutable
-`RateLimitingDecision` (policy name, admitted/rejected, retry-after) for each limiter decision. Wiring that
-hook to a Cohesion OTel/metrics seam at hosting-composition time is a recorded follow-up candidate. "Queued"
-is not surfaced separately: the BCL does not expose a per-lease queued signal cleanly, and the
-admitted/rejected decision is what the hook reports.
+The internal `RateLimitingEventSource` uses the assembly name
+`Assimalign.Cohesion.Web.RateLimiting`. It closes the operator-diagnostics follow-up from #783 without a
+logging or hosting dependency. Enable it by name with `dotnet-trace` or `dotnet-counters`.
+
+| Id | Event | Level | Payload |
+|---|---|---|---|
+| 1 | `RequestRejected` | Verbose | `gate`, `policyName`, `retryAfterSeconds:double`, `routeTemplate`, `requestId` |
+| 2 | `RejectionAborted` | Warning | `gate`, `policyName`, `requestId`, `suppressedCount:int` |
+
+`gate` is `global` or `endpoint`, including for an inline endpoint policy with no name. An unnamed policy
+has an empty `policyName`; an absent retry hint is `-1`. The request id comes from
+`IWebRequestIdFeature`, never ambient activity. The configured route template and request id are read only
+inside `IsEnabled`. No partition key, request path, header value, identity, or response body is written.
+`RejectionAborted` includes `requestId` in addition to the scope's original event table, satisfying
+#1404's per-request correlation requirement; it fires before cancelling an already-committed response.
+It is throttled to one event per second across the provider, and the next report carries the number
+suppressed since the previous report (saturating at `int.MaxValue`).
+
+The lazily published `rejected-requests` `PollingCounter` is an exact total. The single failed-acquisition
+branch increments it once, before the application's observation or rejection hooks, even when no listener
+is attached or the abort warning is suppressed. There is no admission counter or per-request success
+event. Diagnostics are additive against `10.0.0-preview.1`. Under program decision 15, the new
+entries are a diagnostic behavior break for applications forwarding the Web provider prefix into
+configured sinks; no public API or rejection status/body behavior changes.
+
+`RateLimitingOptions.OnDecision` remains the dependency-free application hook, invoked with an immutable
+`RateLimitingDecision` (policy name, admitted/rejected, retry-after) for each limiter decision.
+OpenTelemetry instruments remain #317's follow-up. "Queued" is not surfaced separately: the BCL does not
+expose a per-lease queued signal cleanly.
 
 ## AOT posture
 
@@ -182,6 +203,8 @@ Options resolve to prebuilt limiters and captured delegates at registration; req
 `AcquireAsync` per gate, a metadata read, and a header set. No reflection, no configuration
 binding, no service location, no runtime code generation. The partition-key selectors are plain delegates.
 The BCL engine is AOT-safe.
+The source uses primitive event payloads without reflection; a NativeAOT consumer enables event delivery
+with `EventSourceSupport=true`. Limiter behavior and exact rejection accounting do not depend on delivery.
 
 ## Non-goals
 
@@ -224,3 +247,9 @@ inline / disabled / unknown per-endpoint policies, the global-then-endpoint deci
 cancellation while queued on the endpoint gate, the CORS-preflight skip (unit and through the real router),
 the committed-head abort, the concurrency permit hold, and registration ahead of `UseRouting` (the global
 limiter still gates; an endpoint with a policy fails at dispatch).
+
+`RateLimitingEventSourceTests` runs in a nonparallel collection and links the canonical test-only
+`EventSourceRecorder`. It checks the provider name, strict manifest, real global/named/inline rejections,
+request-feature correlation despite an unrelated ambient activity, payload privacy, both retry-hint
+shapes, throttled committed-head aborts with exact counts, disabled-listener lazy payload reads, and
+counter publication. Event assertions use request ids and counters use deltas.

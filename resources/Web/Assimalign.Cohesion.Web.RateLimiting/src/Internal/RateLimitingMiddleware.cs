@@ -59,7 +59,7 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
             context.Features.Set<IRateLimitingFeature>(feature);
 
             if (_options.GlobalPolicy is { } global
-                && !await TryAcquireAsync(context, global, policyName: null, feature).ConfigureAwait(false))
+                && !await TryAcquireAsync(context, global, "global", policyName: null, feature).ConfigureAwait(false))
             {
                 // The global limiter rejected the request; the response has been written.
                 return;
@@ -68,7 +68,7 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
             if (context.GetRouteMatch() is { IsPreflight: false } endpoint)
             {
                 if (endpoint.Metadata.GetMetadata<RateLimitingMetadata>() is { IsDisabled: false } metadata
-                    && !await TryAcquireAsync(context, ResolvePolicy(metadata), metadata.PolicyName, feature).ConfigureAwait(false))
+                    && !await TryAcquireAsync(context, ResolvePolicy(metadata), "endpoint", metadata.PolicyName, feature).ConfigureAwait(false))
                 {
                     // The endpoint policy rejected the request; the response has been written and the
                     // endpoint does not run.
@@ -94,7 +94,7 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
 
     // Acquires a lease from the policy, waiting in the limiter's queue when it has one. An admitted
     // lease is held on the feature until the request completes; a rejection is answered here.
-    private async Task<bool> TryAcquireAsync(IHttpContext context, RateLimitingPolicy policy, string? policyName, RateLimitingFeature feature)
+    private async Task<bool> TryAcquireAsync(IHttpContext context, RateLimitingPolicy policy, string gate, string? policyName, RateLimitingFeature feature)
     {
         RateLimitLease lease = await policy.Limiter
             .AcquireAsync(context, policy.PermitCount, context.RequestCancelled)
@@ -111,9 +111,10 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
         using (lease)
         {
             TimeSpan? retryAfter = RateLimitingLeaseReader.GetRetryAfter(lease);
+            RateLimitingEventSource.Log.RequestRejected(context, gate, policyName, retryAfter);
             feature.RecordRejected(policyName, retryAfter);
             _options.OnDecision?.Invoke(new RateLimitingDecision(policyName, false, retryAfter));
-            await RejectAsync(context, lease, policyName, retryAfter).ConfigureAwait(false);
+            await RejectAsync(context, lease, gate, policyName, retryAfter).ConfigureAwait(false);
         }
 
         return false;
@@ -136,13 +137,14 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
             "Register it with options.AddPolicy(name, policy) in UseRateLimiting.");
     }
 
-    private async Task RejectAsync(IHttpContext context, RateLimitLease lease, string? policyName, TimeSpan? retryAfter)
+    private async Task RejectAsync(IHttpContext context, RateLimitLease lease, string gate, string? policyName, TimeSpan? retryAfter)
     {
         // Both gates run before next, so the head is normally still writable here. A middleware ahead of
         // this one may already have committed it, though, and then the status can no longer be set:
         // abort the exchange at the protocol layer instead.
         if (context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true })
         {
+            RateLimitingEventSource.Log.RejectionAborted(context, gate, policyName);
             await context.CancelAsync().ConfigureAwait(false);
             return;
         }

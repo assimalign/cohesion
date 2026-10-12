@@ -26,6 +26,7 @@ partitioning and queueing, are available through the policy model.
 
 - `Assimalign.Cohesion.Web` — the pipeline builder and middleware abstractions the verb and middleware build on.
 - `Assimalign.Cohesion.Web.Routing` — the published route match and endpoint-metadata bag the per-endpoint gate reads, and the acknowledgement routing checks before it dispatches.
+- `Assimalign.Cohesion.Web.Server` — the contracts-only request-id feature used to correlate rejection diagnostics.
 - `Assimalign.Cohesion.Http` — the HTTP context, status codes, and header keys.
 - `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveRemoteIp` read the client-address partition key composes with.
 - `Assimalign.Cohesion.Http.Streaming` — the response-streaming feature the rejection writer checks before answering.
@@ -89,4 +90,13 @@ it runs). Registered ahead of `UseRouting`, the global limiter still applies, bu
 policy fails with `InvalidOperationException` when it is dispatched instead of running without its limit.
 
 See `docs/DESIGN.md` for the policy model, the partition-key trust posture, the per-endpoint metadata
-mechanics, the queueing and disposal posture, the telemetry follow-up, and the non-goals.
+mechanics, the queueing and disposal posture, diagnostics, and the non-goals.
+
+## Diagnostics
+
+Enable `Assimalign.Cohesion.Web.RateLimiting` with `dotnet-trace` for Verbose rejection details and
+throttled Warning events when a committed response has to be aborted. `dotnet-counters` publishes the
+exact `rejected-requests` total, maintained even before a listener attaches. Events identify the gate,
+configured policy, and request id; partition keys and request input are never written. The existing
+`OnDecision` hook remains available for application observations; OpenTelemetry instruments are deferred
+to #317.
