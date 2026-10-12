@@ -829,10 +829,11 @@ evaluated function.
   than the body's calls is refused, and so is recursion.
 - **Storage.** `Sql.Language` gains `SqlCreateFunctionExpression` and `SqlDropFunctionExpression`.
   The body is stored as canonical SQL through `SqlPersistedExpression`, under the persisted-definition
-  rule (`Sql/docs/DESIGN.md:1826-1882`), in a new catalog record kind 9 (`SqlCatalogFunction`).
-  `CREATE DOMAIN` (`DefineDomain`, `src/backend/commands/typecmds.c:700`) gets kind 10. Kinds 1 to 8
-  are taken (`Sql.Catalog/src/SqlCatalog.cs:56-69`), so this is a format bump from 6
-  (`Sql/src/Internal/SqlRowCodec.cs:69`); nothing has shipped, and the format gate refuses older
+  rule (`Sql/docs/DESIGN.md:3351`), in catalog record kind 10 (`SqlCatalogFunction`).
+  `CREATE DOMAIN` (`DefineDomain`, `src/backend/commands/typecmds.c:700`) gets kind 11; script
+  receipts and the script-set marker use 12 and 13. Kinds 1 to 9 are taken after B2/49a
+  (`Sql.Catalog/src/SqlCatalog.cs:63`), so E4 bumps format 9 to 10
+  (`Sql/src/Internal/SqlRowCodec.cs:73`); nothing has shipped, and the format gate refuses older
   databases.
 - **Execution.** An internal sealed `SqlExpressionFunction : SqlScalarFunction` evaluates the bound
   body with the arguments as a parameter frame, PostgreSQL's `fmgr_sql` path
@@ -1325,6 +1326,62 @@ shape dependence is documented), and whether `COHSQLE010` splits as E2 split `CO
 **E4: SQL-defined functions, domains and scripts.** §4.9 and the scripts of §5.5. *Gates:* reopening
 a persisted function and domain; DROP refused while a definition depends on the object; ownership;
 script checksum refusal; the catalog format tests.
+
+*Landed in E4* (#1360). SQL functions execute as the internal sealed SqlExpressionFunction over
+E1's bound tree and E2's scalar ABI; SQL domains use E3's shared resolution, bounds and CHECK path.
+Function parameter/result domain names persist and their constraints run inside the SQL scalar leaf.
+Defaults are volatile/called-on-NULL for SQL functions, and CHECK remains Immutable-only. Native
+collisions, native DROP, recursion, volatility violations and dependent DROP are refused. Format
+**10** persists canonical definitions, dependency identities and Adhoc/Schema ownership; the format
+gate refuses 9 and older without a reader or upgrade path. Missing native calls remain unresolved
+on open and fail use/declared Build. CREATE TABLE accepts function-call defaults, evaluated once
+per omitted INSERT value; ADD COLUMN remains literal-only because missing historical row tails
+are not materialized. The FUNCTIONS view adds IS_SQL_DEFINED; TYPES and DOMAINS expose the merged
+registry with the same provenance and SQL definition rows respect catalog transaction snapshots.
+
+SqlDatabaseBuilder.Script(name, sql) records exact UTF-8 SHA-256 and runs forward-only in declaration
+order after the typed schema. Recovery is **statement-granular**: DDL publication atomically enlists
+its catalog receipt, object-id reservation records only the earlier prefix, and data effects share
+a logical transaction with a receipt in a reserved internal row chain. A crash after data commit
+but before catalog progress resumes without replaying data. Removed declarations undo nothing;
+Verify requires complete matching receipts. Recorded table/index identities keep typed reconciliation
+from treating script-created objects as typed-schema removals. A precomputed ordered script-set
+hash plus the catalog generation gives an O(1) reconciliation skip, alongside B2's typed marker.
+
+*E4 owner-review choices.* Scripts force their preceding typed migration and their own raw SQL to
+run inline; a populated-table CREATE INDEX therefore increases Build latency instead of using 49a's
+worker. The SDK v4 artifact stays typed-only and COHDBSDK110 refuses an extracted Script call rather
+than emitting an incomplete migration; deploy runtime declarations in Apply mode before Verify
+startup. A future script artifact needs a receipt-aware migration runner, not only generated SQL.
+The catalog exposes concrete definition/receipt operations and BeginScriptStatement for atomic
+catalog enlistment; there is no new public interface, assembly-access grant or project reference.
+A script cannot adopt an existing table/index, even via IF NOT EXISTS. Event 22 ScriptApplied emits
+engine/database/script/hash, never SQL. New refusals are COHSQLD001-003 and COHSQLS001-004.
+
+Validation: Debug and Release each pass SQL 2,014; Language 1,020; Catalog 68; Schema 104;
+Client 350; Hosting 115; root Database 186; SDK Database 100; Database.Testing 5 (zero failures
+and skips in every final run). Database.Testing follows the final-source Release local installer
+with -SkipLibraries. The installer succeeds with single-node builds after an MSB4166 child-node
+failure in its first targeting-pack attempt. Build tasks in both configurations and release
+inventory validation pass. One existing fresh-thread depth calibration case failed once; five
+unchanged focused Release reruns and the full unchanged Release rerun pass.
+
+SQL NativeAOT AotSample and Benchmarks publish in Release for win-arm64 without
+IL2xxx/IL3xxx warnings; the sample passes 19/19 checks, including a SQL function and domain.
+Q8 measures reconciliation on an already-open database with the existing 50-table fixture and
+declared scripts: five NativeAOT rounds of 1,000 calls each have median **0.000494 ms/call**,
+with zero validation walks. This excludes opening and declaration compilation (decision 75).
+The local timing executable source-links unchanged production sources to reach the internal
+provisioning phase without widening its API; the committed regression test uses the same fixture.
+A separate-process file-backed probe kills its writer during a script INSERT, then verifies
+recovery in two fresh reader processes: no repeated earlier INSERT, callable SQL function, and
+enforced SQL domain. The committed crash-image test also covers every durable write boundary.
+
+Re-derived entry points: Sql/src/SqlDatabaseBuilder.cs:172; Sql.Language/src/SqlQueryParser.Definitions.cs;
+Sql/src/Internal/SqlDefinitionBinder.cs:30; Sql/src/Internal/Functions/SqlExpressionFunction.cs;
+Sql/src/Internal/SqlPlanExecutor.Definitions.cs; Sql/src/Internal/SqlDeclaredDatabase.Scripts.cs:19;
+Sql.Catalog/src/SqlCatalog.Definitions.cs; Sql.Catalog/src/SqlCatalog.Scripts.cs. PostgreSQL references
+were checked against the local clone: functioncmds.c:1095/1098, typecmds.c:700, fmgr.c:238/253.
 
 **P7, re-scoped (decision 72).** The template, SampleHost and cohesion-examples casts leave in B1.
 P7 keeps the ApplicationModel verification and Studio's typed fields, after B3.

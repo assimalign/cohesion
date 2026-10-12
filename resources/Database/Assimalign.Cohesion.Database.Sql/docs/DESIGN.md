@@ -3352,9 +3352,9 @@ children the transaction inserted itself included, at all three levels.
 
 **The rule (owner decision, 2026-10-01: production-ready regardless of the
 pre-release).** Every SQL expression the catalog persists is stored as canonical
-SQL rendered from its parsed tree, never as the user's text: CHECK predicates and
-literal column DEFAULTs today. Expression DEFAULTs (#1121) and view queries
-(#1124) must take the same path when they land; a new persisted expression may
+SQL rendered from its parsed tree, never as the user's text: table/domain CHECKs,
+column DEFAULTs and SQL function bodies. General expression DEFAULTs (#1121) and
+view queries (#1124) must take the same path when they land; a new persisted expression may
 not store source text, parse it on a per-row or per-statement path, or grow a
 second renderer or parser entry. The motivation is #1068: tightening the parser
 made text that an older, more lenient parser had accepted unparseable, and because
@@ -3371,9 +3371,9 @@ and add it again" as the only remedy.
   trailing clause or a second statement is damage, not a definition.
   `LoadDefaultValue` additionally requires one non-NULL literal. `Bind` resolves a
   loaded expression against the row shape it is evaluated over (below).
-  BindConstraints canonicalizes CHECK; the planner canonicalizes literal DEFAULTs,
-  so `DEFAULT 'it''s'` stores `'it''s'` and `DEFAULT +5` stores `5`. The DEFAULT's
-  runtime meaning is unchanged: the literal's value text is coerced to the column
+  BindConstraints canonicalizes CHECK; the planner canonicalizes DEFAULT expressions,
+  so `DEFAULT 'it''s'` stores `'it''s'` and `DEFAULT +5` stores `5`. A literal DEFAULT's
+  runtime meaning is unchanged: its value text is coerced to the column
   type exactly as before, and CREATE TABLE now proves that coercion succeeds for
   every column before it reserves the table, as ADD COLUMN already did, so a
   DEFAULT the column cannot store fails its DDL rather than every later INSERT
@@ -3386,15 +3386,18 @@ and add it again" as the only remedy.
   is collected with it — invalidation is structural, with no hook to forget. A
   `SqlBoundTable` holds each CHECK predicate parsed, and compiled once to its bound
   expression tree (`SqlBoundCheck.Bound`, [Bound expressions](#bound-expressions-e1)),
-  with the column ordinals a violation reports, and each column's DEFAULT converted to
-  the column's type. `SqlPlanExecutor.ValidateRows` evaluates the cached trees, so a
-  write resolves no column, function or collation of a predicate; `DecodeRow` and the
-  INSERT path read defaults from the cached values, and `EnsureCanDropColumn` re-binds
-  the cached predicates against the remaining columns. A DEFAULT is a literal, so its
-  bound form is its value, converted once (`SqlPlanExecutor.BindDefault`) by exactly
+  with the column ordinals a violation reports, and each literal DEFAULT converted to
+  the column's type. A CREATE TABLE scalar-call DEFAULT binds a column-free tree whose
+  result is evaluated and coerced for each omitted INSERT value (E4).
+  `SqlPlanExecutor.ValidateRows` evaluates the cached trees, so a write resolves no column,
+  function or collation of a predicate. `DecodeRow` reads historical literal defaults from
+  cached values; INSERT evaluates a cached scalar-call tree or reads its cached literal.
+  `EnsureCanDropColumn` re-binds
+  the cached predicates against the remaining columns. A literal DEFAULT
+  binds as its value, converted once (`SqlPlanExecutor.BindDefault`) by exactly
   the conversion each use applied to its text before; one that does not convert binds
   as a failure that each use raises, as before. No write, read or DML statement parses
-  catalog text or converts a DEFAULT; `BindCount` lets tests prove it.
+  catalog text or reconverts a literal DEFAULT; `BindCount` lets tests prove it.
 - **Binding is not re-validation.** DDL accepts a CHECK through
   `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
   no sign over an operand the plan types as non-numeric). Loading binds it through
@@ -3496,7 +3499,7 @@ and add it again" as the only remedy.
   statement unbound (a table a test created through the catalog directly) binds on
   first use.
 - **Fail fast at open.** Canonical text always reloads, so a definition that does
-  not parse, is more than one expression, is not a literal (DEFAULT), or no longer
+  not parse, is more than one expression, has an unsupported DEFAULT shape, or no longer
   binds to its table means the catalog is damaged or came from an incompatible
   engine build. The open fails with `Database '<name>' cannot be opened.`, naming
   the table and the constraint or column and telling the operator to restore from
