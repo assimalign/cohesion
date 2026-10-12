@@ -33,16 +33,27 @@ internal sealed class SqlStatementAllocationBaseline
     {
         var request = SqlQueryRequest.FromSql(statement, null, ParserOptions(_session), _session.Database.Name);
         var previousMetrics = _session.LastStatementMetrics;
+        _ = ProvisioningSchema(_session);
+        _ = IsSelfCommitting(null, request);
         await using var result = (QueryResultSet)await ExecuteStatementAsync(_session, request, cancellationToken).ConfigureAwait(false);
         return SelfCommitted(_session, request, previousMetrics);
     }
 
+    // Mirrors SqlDatabaseSession.ExecuteRequestAsync without its tracing: the same checks and the
+    // same async locals (previousMetrics, ddl), so Debug's hoisted state machine is the same size.
     private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
     {
         _session.Database.ThrowIfOffline();
         var previousMetrics = _session.LastStatementMetrics;
         try
         {
+            if (ProvisioningSchema(_session) is null && _session.Database.SchemaProvisioner.Deferred is not null)
+            {
+                await _session.Database.SchemaProvisioner.WaitForTablesAsync(request, cancellationToken).ConfigureAwait(false);
+                _session.Database.ThrowIfOffline();
+            }
+            using var ddl = ProvisioningSchema(_session) is null && IsSelfCommitting(null, request)
+                ? _session.Database.DdlInterlock.EnterStatement(_session.Database.Name.ToString()) : null;
             return await ExecuteStatementAsync(_session, request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (_session.Database.TranslateOffline(exception,
@@ -70,4 +81,10 @@ internal sealed class SqlStatementAllocationBaseline
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "SelfCommitted")]
     private static extern bool SelfCommitted(SqlDatabaseSession session, QueryRequest request, SqlStatementMetrics? previousMetrics);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_provisioningSchema")]
+    private static extern ref string? ProvisioningSchema(SqlDatabaseSession session);
+
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "IsSelfCommitting")]
+    private static extern bool IsSelfCommitting(SqlDatabaseSession? session, QueryRequest request);
 }
