@@ -25,6 +25,145 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 [Collection(nameof(TelemetryCollection))]
 public class ResponseClientFaultTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - OnStarting: A streamed callback failure remains an application fault after cancelling its exchange")]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task Boundary_ThrowingStreamedStartingCallback_ShouldReportOriginalApplicationFault(int protocol, bool asynchronous)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
+        CancellationToken cancellationToken = cancellation.Token;
+        using EventSourceRecorder events = await CreateErrorHandlingRecorderAsync(cancellationToken);
+        EventSourceRecorder.CounterSample totalBefore = await events.WaitForCounterAsync("total-faults", 0, cancellationToken);
+        EventSourceRecorder.CounterSample abortedBefore = await events.WaitForCounterAsync("aborted-responses", 0, cancellationToken);
+        InvalidOperationException callbackFailure = new("Deliberate streamed response-starting failure.");
+        TaskCompletionSource<(Exception Exception, bool Cancelled, bool PeerAbort, bool Started)> observed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource boundaryCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        string path = $"/response-starting-fault/{Guid.NewGuid():N}";
+        string requestId = string.Empty;
+        int callbackCalls = 0;
+
+        await using ResponseBackpressureTransport transport = new();
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddErrorHandling(errors => errors.OnError((_, _, _) => ValueTask.FromResult(true)));
+        factory.Builder.Server.UseServer(options =>
+        {
+            options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+            if (protocol == 1)
+            {
+                options.UseHttp1(transport.StreamListener);
+            }
+            else if (protocol == 2)
+            {
+                options.UseHttp2(transport.StreamListener);
+            }
+            else
+            {
+                options.UseHttp3(transport.MultiplexedListener);
+            }
+        });
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await next(context);
+            }
+            finally
+            {
+                boundaryCompleted.TrySetResult();
+            }
+        });
+        factory.Application.UseErrorHandling(options => options.OnException = (context, exception) =>
+        {
+            observed.TrySetResult((exception, context.RequestCancelled.IsCancellationRequested,
+                context.Features.Get<IWebResponseClientFaultFeature>()?.ResponseAbortedByClient == true,
+                context.Response.Streaming.HasStarted));
+            return ValueTask.CompletedTask;
+        });
+        factory.Application.Use(async (context, _) =>
+        {
+            requestId = context.Features.Get<IWebRequestIdFeature>()!.RequestId.ToHexString();
+            IWebResponseStartingFeature starting = context.Features.Get<IWebResponseStartingFeature>()!;
+            if (asynchronous)
+            {
+                starting.OnStarting(async _ =>
+                {
+                    await Task.Yield();
+                    Interlocked.Increment(ref callbackCalls);
+                    throw callbackFailure;
+                }, null);
+            }
+            else
+            {
+                starting.OnStarting(_ =>
+                {
+                    Interlocked.Increment(ref callbackCalls);
+                    throw callbackFailure;
+                }, null);
+            }
+
+            await context.Response.Streaming.StartAsync(cancellationToken);
+        });
+        await factory.StartAsync(cancellationToken);
+        await using Connection? http1 = protocol == 1
+            ? await transport.Connections.CreateFactory().ConnectAsync(transport.Connections.EndPoint, cancellationToken)
+            : null;
+        await using Http2RawClient? http2 = protocol == 2
+            ? await Http2RawClient.ConnectAsync(transport.Connections, cancellationToken)
+            : null;
+        await using Http3RawClient? http3 = protocol == 3
+            ? await Http3RawClient.ConnectAsync(transport.MultiplexedConnections, cancellationToken)
+            : null;
+
+        // Act — the real response-starting feature cancels before rethrowing the callback exception.
+        await using Connection? requestStream = http3 is not null
+            ? await http3.SendRequestAsync("GET", path, [], [], endStream: true, cancellationToken)
+            : null;
+        if (http1 is not null)
+        {
+            Stream stream = http1.AsStream();
+            await stream.WriteAsync(Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n"), cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+        }
+        else if (http2 is not null)
+        {
+            await http2.SendGetAsync(1, path, cancellationToken);
+        }
+
+        var fault = await observed.Task.WaitAsync(cancellationToken);
+        await boundaryCompleted.Task.WaitAsync(cancellationToken);
+        await factory.StopAsync(cancellationToken);
+        long completedSequence = events.CounterSequence;
+        EventSourceRecorder.CounterSample totalAfter = await events.WaitForCounterAsync("total-faults", completedSequence, cancellationToken);
+        EventSourceRecorder.CounterSample abortedAfter = await events.WaitForCounterAsync("aborted-responses", completedSequence, cancellationToken);
+
+        // Assert — cancellation caused by an application callback does not turn it into a peer fault.
+        Volatile.Read(ref callbackCalls).ShouldBe(1);
+        fault.Exception.ShouldBeSameAs(callbackFailure);
+        fault.Cancelled.ShouldBeTrue();
+        fault.PeerAbort.ShouldBeFalse();
+        fault.Started.ShouldBeFalse();
+        EventWrittenEventArgs[] requestEvents = events.Events.Where(entry =>
+            entry.PayloadNames?.IndexOf("requestId") is int index && index >= 0 &&
+            Equals(entry.Payload![index], requestId)).ToArray();
+        EventWrittenEventArgs applicationFault = requestEvents.ShouldHaveSingleItem();
+        applicationFault.EventId.ShouldBe(1);
+        applicationFault.EventName.ShouldBe("PipelineFault");
+        applicationFault.Level.ShouldBe(EventLevel.Error);
+        applicationFault.PayloadNames!.ShouldBe(["exceptionType", "exceptionMessage", "responseStarted", "requestId"]);
+        applicationFault.Payload!.ToArray().ShouldBe(new object?[]
+        {
+            typeof(InvalidOperationException).FullName, callbackFailure.Message, false, requestId,
+        });
+        totalAfter.Value.ShouldBe(totalBefore.Value + 1);
+        abortedAfter.Value.ShouldBe(abortedBefore.Value);
+        events.Events.ShouldNotContain(entry => entry.EventId == 0);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Response client fault: A slow reader or peer reset should report Verbose only and leave fault counters unchanged")]
     [InlineData(1, false)]
     [InlineData(2, false)]

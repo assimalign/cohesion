@@ -279,17 +279,21 @@ or public diagnostics surface is added. NativeAOT applications must enable `Even
 | 4 | `DiagnosticsCallbackFailed` | Warning | `callback` (`OnException` or `SuppressDiagnosticsCallback`), `exceptionType`, `exceptionMessage`, `requestId` |
 | 5 | `ResponseAbortedByPeer` | Verbose | `exceptionType`, `exceptionMessage`, `requestId` |
 
-The boundary emits event 1 or 2 once for an application fault, including after headers commit.
-For a started response, it reports the fault with `responseStarted=true` before cancelling the
-exchange. For an unstarted response, publication
-waits until callbacks and handlers finish so an exchange they cancel, or a client fault they
-encounter, is not reported as an application fault. Request-body client statuses and cancelled
-exchanges emit neither event. An `OperationCanceledException` whose exchange token is not
-cancelled remains an application fault. Handler failures in both the boundary and standalone
-`IErrorHandlingFeature.HandleAsync` raise event 3 through a false exception filter; the original
+The boundary classifies the original fault when caught and emits event 1 or 2 once, including
+after headers commit. It snapshots `responseStarted` before diagnostics run, evaluates suppression
+once, then reports before invoking `OnException` or the error handlers. Cancellation or a client
+fault encountered in those callbacks or handlers cannot retroactively hide the original fault.
+An application failure in a streamed `OnStarting` callback is still reported when the response
+starting feature cancels the exchange before rethrowing it. Request-body client statuses,
+response-client latches and the actual request-cancelled `OperationCanceledException` path are
+excluded; a cancelled token alone is not evidence of client causation. An
+`OperationCanceledException` whose exchange token is not cancelled remains an application fault.
+Handler failures in both the boundary and standalone `IErrorHandlingFeature.HandleAsync`
+raise event 3 through a false exception filter; the original
 exception propagates unchanged. A local async invocation captures synchronous throws first, so
-the handler's `finally` blocks finish before the filter checks cancellation. Cancelled and
-client-caused handler failures are excluded.
+the handler's `finally` blocks finish before the filter checks transport state. Only cancellation
+exceptions with a cancelled request token and explicitly latched client failures are excluded;
+ordinary application exceptions remain reportable even if a handler cancels during unwind.
 
 Event 5 is raised directly from the boundary's existing response-client-fault catch (#1432).
 It uses `IWebResponseClientFaultFeature.ResponseAbortedByClient`, with no exception-type test,
@@ -307,8 +311,8 @@ exchange, while its originating application fault remains reportable. It increme
 `total-faults` and emits `PipelineFault` or `ExpectedPipelineFault` with `responseStarted=true`
 before cancellation; `aborted-responses` independently counts the boundary's abort. Its original
 exception also reaches the existing `OnException` hook and `IHttpExceptionFeature`. Exchange
-completion classification does not change application-fault attribution. A response abandoned by its peer increments neither
-counter. Counter fields are maintained with Interlocked whether listeners are present or absent;
+completion classification does not change application-fault attribution. A response abandoned
+by its peer increments neither counter. Counter fields are maintained with Interlocked whether listeners are present or absent;
 the counters themselves are created on first enable. No request count or Meter duplicates are added.
 
 Application exceptions, including handler and diagnostic-callback failures, are written as their

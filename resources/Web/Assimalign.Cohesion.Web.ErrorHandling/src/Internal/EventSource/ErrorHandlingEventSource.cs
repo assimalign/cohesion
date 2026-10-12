@@ -29,11 +29,7 @@ internal sealed class ErrorHandlingEventSource : EventSource
     [NonEvent]
     public void PipelineFault(IHttpContext context, Exception exception, bool responseStarted, bool suppressed)
     {
-        if (!CanReportFault(context))
-        {
-            return;
-        }
-
+        // The boundary classified this fault before invoking application callbacks or handlers.
         Interlocked.Increment(ref _totalFaults);
 
         if (suppressed)
@@ -61,7 +57,7 @@ internal sealed class ErrorHandlingEventSource : EventSource
     [NonEvent]
     public bool ErrorHandlerFailed(IHttpContext context, int handlerIndex, IErrorHandler handler, Exception exception)
     {
-        if (CanReportFault(context) && IsEnabled(EventLevel.Error, EventKeywords.None))
+        if (CanReportFault(context, exception) && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
             ErrorHandlerFailed(handlerIndex, handler.GetType().FullName ?? handler.GetType().Name,
                 exception.GetType().FullName ?? exception.GetType().Name, exception.Message, GetRequestId(context));
@@ -73,7 +69,7 @@ internal sealed class ErrorHandlingEventSource : EventSource
     [NonEvent]
     public void DiagnosticsCallbackFailed(IHttpContext context, string callback, Exception exception)
     {
-        if (CanReportFault(context) && IsEnabled(EventLevel.Warning, EventKeywords.None))
+        if (CanReportFault(context, exception) && IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
             DiagnosticsCallbackFailed(callback, exception.GetType().FullName ?? exception.GetType().Name,
                 exception.Message, GetRequestId(context));
@@ -91,8 +87,8 @@ internal sealed class ErrorHandlingEventSource : EventSource
     }
 
     [NonEvent]
-    private static bool CanReportFault(IHttpContext context)
-        => !context.RequestCancelled.IsCancellationRequested &&
+    private static bool CanReportFault(IHttpContext context, Exception exception)
+        => !(exception is OperationCanceledException && context.RequestCancelled.IsCancellationRequested) &&
             context.Features.Get<IWebClientFaultFeature>()?.StatusCode is null &&
             context.Features.Get<IWebResponseClientFaultFeature>() is not { ResponseAbortedByClient: true };
 

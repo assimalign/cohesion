@@ -187,21 +187,23 @@ public sealed class ErrorHandlingEventSourceTests
         (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(useBoundary ? 1 : 0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Handler client outcome: Should preserve the exception without reporting an application fault")]
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Handler client outcome: Should exclude the handler outcome and retain the original fault")]
     [InlineData(false, "Cancelled")]
     [InlineData(false, "RequestClientFault")]
     [InlineData(false, "ResponseClientFault")]
     [InlineData(true, "Cancelled")]
     [InlineData(true, "RequestClientFault")]
     [InlineData(true, "ResponseClientFault")]
-    public async Task HandleAsync_HandlerObservesClientOutcome_ShouldExcludeEventsAndCounters(bool useBoundary, string outcome)
+    public async Task HandleAsync_HandlerObservesClientOutcome_ShouldRetainOriginalFault(bool useBoundary, string outcome)
     {
         // Arrange
         using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
         using CancellationTokenSource request = new();
         TestHttpContext context = CreateContext();
         context.RequestCancelled = request.Token;
-        InvalidOperationException handlerFault = new("Handler wrapped a client-caused failure.");
+        Exception handlerFault = outcome == "Cancelled"
+            ? new OperationCanceledException(request.Token)
+            : new InvalidOperationException("Handler wrapped a client-caused failure.");
         InvalidDataException originalFault = new("Original application failure.");
         IErrorHandlingFeature feature = new ErrorHandlingBuilder().OnError((_, _, _) =>
         {
@@ -226,7 +228,7 @@ public sealed class ErrorHandlingEventSourceTests
         long aborted = ErrorHandlingEventSource.Log.AbortedResponses;
 
         // Act
-        InvalidOperationException caught = await Should.ThrowAsync<InvalidOperationException>(async () =>
+        async Task ActAsync()
         {
             if (useBoundary)
             {
@@ -236,19 +238,35 @@ public sealed class ErrorHandlingEventSourceTests
             {
                 await feature.HandleAsync(context, originalFault, CancellationToken.None);
             }
-        });
+        }
+        // Capture directly: the assertion helper normalizes cancelled tasks to TaskCanceledException.
+        Exception? caught = null;
+        try
+        {
+            await ActAsync();
+        }
+        catch (Exception failure)
+        {
+            caught = failure;
+        }
 
         // Assert
         caught.ShouldBeSameAs(handlerFault);
-        RequireNoEvents(recorder, context);
-        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(0);
+        if (useBoundary)
+        {
+            EventWrittenEventArgs recorded = RequireEvent(recorder, context, 1, "PipelineFault", EventLevel.Error,
+                "exceptionType", "exceptionMessage", "responseStarted", "requestId");
+            recorded.Payload![1].ShouldBe(originalFault.Message);
+        }
+        EventsFor(recorder, context).Length.ShouldBe(useBoundary ? 1 : 0);
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(useBoundary ? 1 : 0);
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Handler unwind cancellation: Should classify after the handler finally runs")]
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Handler unwind cancellation: Should retain application-fault classification")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task HandleAsync_HandlerCancelsInFinally_ShouldPropagateWithoutReportingFault(bool useBoundary)
+    public async Task HandleAsync_HandlerCancelsInFinally_ShouldReportAndPropagateFault(bool useBoundary)
     {
         // Arrange
         using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
@@ -289,19 +307,31 @@ public sealed class ErrorHandlingEventSourceTests
         // Assert
         caught.ShouldBeSameAs(handlerFault);
         request.IsCancellationRequested.ShouldBeTrue();
-        RequireNoEvents(recorder, context);
-        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(0);
+        RequireEvent(recorder, context, 3, "ErrorHandlerFailed", EventLevel.Error,
+            "handlerIndex", "handlerType", "exceptionType", "exceptionMessage", "requestId").Payload![3].ShouldBe(handlerFault.Message);
+        if (useBoundary)
+        {
+            RequireEvent(recorder, context, 1, "PipelineFault", EventLevel.Error,
+                "exceptionType", "exceptionMessage", "responseStarted", "requestId").Payload![1].ShouldBe(originalFault.Message);
+        }
+        EventsFor(recorder, context).Length.ShouldBe(useBoundary ? 2 : 1);
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(useBoundary ? 1 : 0);
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Diagnostic callback fault: Should report once and keep handling the original fault")]
-    [InlineData("OnException")]
-    [InlineData("SuppressDiagnosticsCallback")]
-    public async Task InvokeAsync_DiagnosticCallbackThrows_ShouldReportAndKeepRendering(string callback)
+    [InlineData("OnException", false)]
+    [InlineData("SuppressDiagnosticsCallback", false)]
+    [InlineData("OnException", true)]
+    [InlineData("SuppressDiagnosticsCallback", true)]
+    public async Task InvokeAsync_DiagnosticCallbackThrows_ShouldReportAndKeepRendering(string callback, bool cancelRequest)
     {
         // Arrange
         using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
+        using CancellationTokenSource request = new();
         TestHttpContext context = CreateContext();
+        context.RequestCancelled = request.Token;
+        context.Features.Set(new ErrorHandlingBuilder().OnError((_, _, _) => ValueTask.FromResult(true)).Build());
         InvalidOperationException callbackFault = new("Diagnostic callback failed.");
         InvalidDataException originalFault = new("Original application failure.");
         int suppressionCalls = 0;
@@ -311,11 +341,19 @@ public sealed class ErrorHandlingEventSourceTests
             SuppressDiagnosticsCallback = (_, _) =>
             {
                 suppressionCalls++;
+                if (cancelRequest && callback == "SuppressDiagnosticsCallback")
+                {
+                    request.Cancel();
+                }
                 return callback == "SuppressDiagnosticsCallback" ? throw callbackFault : false;
             },
             OnException = (_, _) =>
             {
                 observationCalls++;
+                if (cancelRequest && callback == "OnException")
+                {
+                    request.Cancel();
+                }
                 return callback == "OnException" ? throw callbackFault : ValueTask.CompletedTask;
             }
         });
@@ -337,6 +375,78 @@ public sealed class ErrorHandlingEventSourceTests
         context.Features.Get<IHttpExceptionFeature>()!.Error.ShouldBeSameAs(originalFault);
         context.Response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
         (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Diagnostic callback outcome: Should retain the original application fault")]
+    [InlineData("OnException", "Cancelled")]
+    [InlineData("OnException", "RequestClientFault")]
+    [InlineData("OnException", "ResponseClientFault")]
+    [InlineData("OnException", "ResponseStarted")]
+    [InlineData("SuppressDiagnosticsCallback", "Cancelled")]
+    [InlineData("SuppressDiagnosticsCallback", "RequestClientFault")]
+    [InlineData("SuppressDiagnosticsCallback", "ResponseClientFault")]
+    [InlineData("SuppressDiagnosticsCallback", "ResponseStarted")]
+    public async Task InvokeAsync_DiagnosticCallbackChangesExchange_ShouldRetainOriginalFault(string callback, string outcome)
+    {
+        // Arrange
+        using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
+        using CancellationTokenSource request = new();
+        TestHttpContext context = CreateContext();
+        context.RequestCancelled = request.Token;
+        InvalidOperationException originalFault = new("Application failure before diagnostics.");
+        context.Features.Set(new ErrorHandlingBuilder().OnError((_, _, _) => ValueTask.FromResult(true)).Build());
+        void ChangeExchange()
+        {
+            if (outcome == "Cancelled")
+            {
+                request.Cancel();
+            }
+            else if (outcome == "RequestClientFault")
+            {
+                context.Features.Set<IWebClientFaultFeature>(new FakeClientFaultFeature(HttpStatusCode.BadRequest));
+            }
+            else if (outcome == "ResponseStarted")
+            {
+                context.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(true));
+            }
+            else
+            {
+                context.Features.Set<IWebResponseClientFaultFeature>(new EventSourceResponseClientFaultFeature { ResponseAbortedByClient = true });
+            }
+        }
+        ExceptionBoundaryMiddleware boundary = new(new ExceptionBoundaryOptions
+        {
+            SuppressDiagnosticsCallback = (_, _) =>
+            {
+                if (callback == "SuppressDiagnosticsCallback")
+                {
+                    ChangeExchange();
+                }
+                return false;
+            },
+            OnException = (_, _) =>
+            {
+                if (callback == "OnException")
+                {
+                    ChangeExchange();
+                }
+                return ValueTask.CompletedTask;
+            }
+        });
+        long total = ErrorHandlingEventSource.Log.TotalFaults;
+        long aborted = ErrorHandlingEventSource.Log.AbortedResponses;
+
+        // Act
+        await boundary.InvokeAsync(context, _ => throw originalFault);
+
+        // Assert
+        RequireEvent(recorder, context, 1, "PipelineFault", EventLevel.Error,
+            "exceptionType", "exceptionMessage", "responseStarted", "requestId").Payload!.ToArray().ShouldBe(
+                new object?[] { typeof(InvalidOperationException).FullName, originalFault.Message, false, RequestId(context) });
+        EventsFor(recorder, context).Length.ShouldBe(1);
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(1);
+        (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(outcome == "ResponseStarted" ? 1 : 0);
+        context.CancelRequested.ShouldBe(outcome == "ResponseStarted");
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Peer abort: Should follow the latch and exclude both fault counters")]
@@ -412,10 +522,10 @@ public sealed class ErrorHandlingEventSourceTests
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Request cancellation: Should emit no application fault even for a wrapped exception")]
+    [Theory(DisplayName = "Cohesion Test [Web.ErrorHandling] - Request cancellation: Should exclude only the cancellation exception")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task InvokeAsync_RequestCancelled_ShouldExcludeEventsAndCounters(bool wrapped)
+    public async Task InvokeAsync_RequestCancelled_ShouldExcludeOnlyCancellationException(bool wrapped)
     {
         // Arrange
         using EventSourceRecorder recorder = new(ErrorHandlingEventSource.Log, EventLevel.Verbose);
@@ -432,8 +542,16 @@ public sealed class ErrorHandlingEventSourceTests
         await Should.ThrowAsync<OperationCanceledException>(() => boundary.InvokeAsync(context, _ => throw fault));
 
         // Assert
-        RequireNoEvents(recorder, context);
-        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(0);
+        if (wrapped)
+        {
+            RequireEvent(recorder, context, 1, "PipelineFault", EventLevel.Error,
+                "exceptionType", "exceptionMessage", "responseStarted", "requestId").Payload![1].ShouldBe(fault.Message);
+        }
+        else
+        {
+            RequireNoEvents(recorder, context);
+        }
+        (ErrorHandlingEventSource.Log.TotalFaults - total).ShouldBe(wrapped ? 1 : 0);
         (ErrorHandlingEventSource.Log.AbortedResponses - aborted).ShouldBe(0);
     }
 
